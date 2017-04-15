@@ -1,5 +1,5 @@
 Nonterminals prg decl varlist expr exprlist.
-Terminals var int bool if then else '=' '(' ')' ',' '+'.
+Terminals if then else '=' '(' ')' ',' '+' int bool var.
 Rootsymbol prg.
 
 prg -> decl : ['$1'].
