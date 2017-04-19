@@ -7,14 +7,22 @@ WHITESPACE = [\s\t\n\r]
 
 Rules.
 
+\= : {token, {'=', TokenLine}}.
+\( : {token, {'(', TokenLine}}.
+\) : {token, {')', TokenLine}}.
+\, : {token, {',', TokenLine}}.
+\=\= : {token, {'==', TokenLine}}.
+\!= : {token, {'!=', TokenLine}}.
+\+ : {token, {'+', TokenLine}}.
+\- : {token, {'-', TokenLine}}.
+\| : {token, {'|', TokenLine}}.
+\|\| : {token, {'||', TokenLine}}.
+\&\& : {token, {'&&', TokenLine}}.
 if : {token, {'if', TokenLine}}.
 then : {token, {'then', TokenLine}}.
 else : {token, {'else', TokenLine}}.
-= : {token, {'=', TokenLine}}.
-\( : {token, {'(', TokenLine}}.
-\) : {token, {')', TokenLine}}.
-, : {token, {',', TokenLine}}.
-\+ : {token, {'+', TokenLine}}.
+let : {token, {'let', TokenLine}}.
+in : {token, {'in', TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, TokenChars}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
