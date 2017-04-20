@@ -1,7 +1,5 @@
 -module(par).
--import(lexer, [string/1]).
--import(parser, [parse/1]).
--export([main/1]).
+-export([leex/0, yecc/0, infer_prg/1]).
 
 -record(ctx, {csts, env, pid, deps}).
 -record(solver, {subs, errs, pid}).
@@ -21,17 +19,12 @@
 %   env - dict mapping variable name to Scheme
 %   count - a monotonically increasing count used to generate fresh TVs
 %
-% Test:
-% - Recursive / Mutually recursive functions
-%
 % TODO:
 % - TODOs in code
 % - Type annotations
-% - ETS for fresh variables?
 % - Tests
+% - Int vs. float type
 % - Error messages
-% - Arithmetic ops
-% - Boolean ops
 % - Basic types: strings, lists, tuples
 % - Maybe else types (unit type?)
 % - Complex types: ADTs
@@ -41,23 +34,24 @@
 % - Extra type variables for return value of operators like == and +?
 % - Better / Efficient EnvList
 % - Codegen / Interpreter
+% - ETS for fresh variables?
 
-main(["lex"]) ->
+leex() ->
   {ok, Path} = leex:file("lexer.xrl"),
   compile:file(Path),
-  io:format("~p~n", [Path]);
+  io:format("~p~n", [Path]).
 
-main(["parse"]) ->
+yecc() ->
   {ok, Path} = yecc:file("parser.yrl"),
   compile:file(Path),
-  io:format("~p~n", [Path]);
+  io:format("~p~n", [Path]).
 
-main([]) ->
-  {ok, Tokens, _} = lexer:string("fib(n) = if n == 1 || n == 0 then 1 else fib(n - 1) + fib(n - 2)"),
+  %% {ok, Tokens, _} = lexer:string("fib(n) = if n == 1 || n == 0 then 1 else fib(n - 1) + fib(n - 2)  g(x) = x(x)"),
+infer_prg(Prg) ->
+  {ok, Tokens, _} = lexer:string(Prg),
   {ok, Ast} = parser:parse(Tokens),
-  io:format("AST: ~p~n", [Ast]),
-
   {ok, Pid} = tv_server:start_link(),
+
   C = lists:foldl(fun({fn, {var, _, Name}, _, _}, C) ->
     % TODO: what if name already exists?
     TV = tv_server:fresh(C#ctx.pid),
@@ -71,11 +65,8 @@ main([]) ->
 
   case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
     {ok, Subs} ->
-      io:format("soln: ~p~n", [dict:to_list(Subs)]),
-      lists:foreach(fun({Name, {_, T}}) ->
-        io:format("type ~p = ~s~n", [Name, pretty(subs(T, Subs))])
-      end, dict:to_list(C1#ctx.env));
-    {errors, Errs} -> io:format("type errors: ~p~n", [Errs])
+      {ok, dict:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env)};
+    {errors, Errs} -> {errors, Errs}
   end.
 
 pretty({lam, ArgsT, ReturnT}) ->
@@ -87,22 +78,33 @@ pretty({lam, ArgsT, ReturnT}) ->
 pretty({tv, TV}) -> io_lib:format("~p", [TV]);
 pretty({con, T}) -> io_lib:format("~p", [T]).
 
-infer({fn, {var, _, Name}, Args, Expr}, C) ->
-  {_, FnTV} = dict:fetch(Name, C#ctx.env),
-  {T, C1} = infer_fn(Args, Expr, C),
+infer({fn, Var, Args, Expr}, C) ->
+  {ArgsT, C1} = lists:foldr(fun({var, _, ArgName}, {Ts, FoldC}) ->
+    TV = tv_server:fresh(FoldC#ctx.pid),
+    {[TV|Ts], FoldC#ctx{
+      env=dict:store(ArgName, {arg, TV}, FoldC#ctx.env)
+    }}
+  end, {[], C}, Args),
 
-  io:format("deps ~p (~p) = ~p~n", [Name, FnTV, C1#ctx.deps]),
-  {FnTV, C1#ctx{
-    csts=[{FnTV, T}|C1#ctx.csts],
-    % restore original env
-    env=C#ctx.env
-  }};
+  {ReturnT, C2} = infer(Expr, C1),
+  T = if length(Args) == 0 -> {lam, none, ReturnT};
+         true -> lists:foldr(fun(ArgT, LastT) ->
+           {lam, ArgT, LastT}
+         end, ReturnT, ArgsT)
+      end,
 
-infer({fn, Args, Expr}, C) ->
-  {T, C1} = infer_fn(Args, Expr, C),
-  io:format("got lam ~p~n", [T]),
-  % restore original env
-  {T, C1#ctx{env=C#ctx.env}};
+  case Var of
+    {var, _, Name} ->
+      {_, FnTV} = dict:fetch(Name, C#ctx.env),
+      {FnTV, C2#ctx{
+        csts=[{FnTV, T}|C2#ctx.csts],
+        % restore original env
+        env=C#ctx.env
+      }};
+    none ->
+      % restore original env
+      {T, C2#ctx{env=C#ctx.env}}
+  end;
 
 infer({int, _, _}, C) -> {{con, int}, C};
 infer({bool, _, _}, C) -> {{con, bool}, C};
@@ -145,48 +147,45 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
     csts=[{{con, bool}, ExprT}, {TV, ThenT}, {TV, ElseT}|C3#ctx.csts]}
   };
 
-infer({{Op, _}, Left, Right}, C) when Op == '+'; Op == '-' ->
+infer({{Op, _}, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
   {RightT, C2} = infer(Right, C1),
+
   TV = tv_server:fresh(C2#ctx.pid),
-  Cst = {
-    {lam, LeftT, {lam, RightT, TV}},
-    {lam, {con, int}, {lam, {con, int}, {con, int}}}
-  },
+
+  Cst = if
+    Op == '=='; Op == '!=' ->
+      OperandTV = tv_server:fresh(C2#ctx.pid),
+      {
+        {lam, LeftT, {lam, RightT, TV}},
+        {lam, OperandTV, {lam, OperandTV, {con, bool}}}
+      };
+    Op == '||'; Op == '&&' -> {
+      {lam, LeftT, {lam, RightT, TV}},
+      {lam, {con, bool}, {lam, {con, bool}, {con, bool}}}
+    };
+    Op == '>'; Op == '<'; Op == '>='; Op == '<=' -> {
+      {lam, LeftT, {lam, RightT, TV}},
+      {lam, {con, int}, {lam, {con, int}, {con, bool}}}
+    };
+    Op == '+'; Op == '-'; Op == '*'; Op == '/' -> {
+      {lam, LeftT, {lam, RightT, TV}},
+      {lam, {con, int}, {lam, {con, int}, {con, int}}}
+    }
+  end,
+
   {TV, C2#ctx{csts=[Cst|C2#ctx.csts]}};
 
-infer({{Op, _}, Left, Right}, C) when Op == '||'; Op == '&&' ->
-  {LeftT, C1} = infer(Left, C),
-  {RightT, C2} = infer(Right, C1),
-  TV = tv_server:fresh(C2#ctx.pid),
-  Cst = {
-    {lam, LeftT, {lam, RightT, TV}},
-    {lam, {con, bool}, {lam, {con, bool}, {con, bool}}}
-  },
-  {TV, C2#ctx{csts=[Cst|C2#ctx.csts]}};
+infer({{Op, _}, Expr}, C) ->
+  {ExprT, C1} = infer(Expr, C),
+  TV = tv_server:fresh(C1#ctx.pid),
 
-infer({{Op, _}, Left, Right}, C) when Op == '=='; Op == '!=' ->
-  {LeftT, C1} = infer(Left, C),
-  {RightT, C2} = infer(Right, C1),
-  OperandTV = tv_server:fresh(C2#ctx.pid),
-  TV = tv_server:fresh(C2#ctx.pid),
-  Cst = {
-    {lam, LeftT, {lam, RightT, TV}},
-    {lam, OperandTV, {lam, OperandTV, {con, bool}}}
-  },
-  {TV, C2#ctx{csts=[Cst|C2#ctx.csts]}}.
+  Cst = if
+    Op == '!' -> {{lam, ExprT, TV}, {lam, {con, bool}, {con, bool}}};
+    Op == '-' -> {{lam, ExprT, TV}, {lam, {con, int}, {con, int}}}
+  end,
 
-infer_fn(Args, Expr, C) ->
-  {ArgsT, C1} = lists:foldr(fun({var, _, ArgName}, {Ts, FoldC}) ->
-    TV = tv_server:fresh(FoldC#ctx.pid),
-    {[TV|Ts], FoldC#ctx{
-      env=dict:store(ArgName, {arg, TV}, FoldC#ctx.env)
-    }}
-  end, {[], C}, Args),
-
-  {ReturnT, C2} = infer(Expr, C1),
-  T = lists:foldr(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, ReturnT, ArgsT),
-  {T, C2}.
+  {TV, C1#ctx{csts=[Cst|C1#ctx.csts]}}.
 
 solve([], #solver{errs=Errs}) when length(Errs) > 0 -> {errors, Errs};
 solve([], #solver{subs=Subs}) -> {ok, Subs};
@@ -195,7 +194,11 @@ solve(FCs, S) ->
     length(C#ctx.deps) == 0
   end, FCs),
 
-  % solve recursive / mututally recursive constraints simultaneously
+  % If all function contexts left have dependencies, that means the functions
+  % are either recursive or mutually recursive. We solve all constraints
+  % simultaneously to resolve these. Note that any {inst, ...} of these
+  % recursive functions won't be generalized because the corresponding type
+  % variables are already in the env.
   ToSolve = if length(Solvable) == 0 -> Unsolved; true -> Solvable end,
 
   {Solved, S1} = lists:foldl(fun({TV, C}, {Solved, FoldS}) ->
@@ -204,14 +207,15 @@ solve(FCs, S) ->
     {gb_sets:add(TV, Solved), unify_group(C#ctx.csts, FoldS)}
   end, {gb_sets:new(), S}, ToSolve),
 
-  Rest = if length(Solvable) == 0 -> [];
-            true -> lists:map(fun({TV, C}) ->
-              Deps = lists:filter(fun(Dep) ->
-                not gb_sets:is_element(Dep, Solved)
-              end, C#ctx.deps),
-              {TV, C#ctx{deps=Deps}}
-            end, Unsolved)
-         end,
+  Rest = if
+    length(Solvable) == 0 -> [];
+    true -> lists:map(fun({TV, C}) ->
+      Deps = lists:filter(fun(Dep) ->
+        not gb_sets:is_element(Dep, Solved)
+      end, C#ctx.deps),
+      {TV, C#ctx{deps=Deps}}
+    end, Unsolved)
+  end,
 
   solve(Rest, S1).
 
@@ -226,7 +230,8 @@ resolve({lam, ArgsT, ReturnT}, S) ->
   {lam, resolve(ArgsT, S), resolve(ReturnT, S)};
 resolve({tv, TV}, _) -> {tv, TV};
 resolve({con, T}, _) -> {con, T};
-resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S).
+resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
+resolve(none, _) -> none.
 
 inst({GTVs, T}, S) ->
   Subs = gb_sets:fold(fun(GTV, Subs) ->
@@ -269,7 +274,8 @@ subs({tv, TV}, Subs) ->
     error -> {tv, TV}
   end;
 subs({con, T}, _) -> {con, T};
-subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList}.
+subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList};
+subs(none, _) -> none.
 
 merge_subs(Subs1, Subs2) ->
   dict:merge(fun(K, V1, V2) ->
@@ -278,7 +284,9 @@ merge_subs(Subs1, Subs2) ->
 
 ftvs({lam, ArgsT, ReturnT}) -> gb_sets:union(ftvs(ArgsT), ftvs(ReturnT));
 ftvs({tv, TV}) -> gb_sets:from_list([TV]);
-ftvs({con, _}) -> gb_sets:new().
+ftvs({con, _}) -> gb_sets:new();
+% ftvs({inst, ...}) ommitted because all instances should be resolved by now
+ftvs(none) -> gb_sets:new().
 
 occurs(TV1, {tv, TV2}) when TV1 == TV2 -> true;
 occurs(TV, {lam, ArgsT, ReturnT}) ->
