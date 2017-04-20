@@ -1,13 +1,22 @@
 -module(par_test).
--import(par, [infer_prg/1]).
+-export([run/0]).
 -include_lib("eunit/include/eunit.hrl").
 
+run() ->
+  par:reload(false),
+
+  code:soft_purge(?MODULE),
+  {ok, _} = compile:file(?MODULE),
+  code:load_file(?MODULE),
+
+  ?MODULE:test().
+
 ok_prg(Prg, Name) ->
-  {ok, Env} = infer_prg(Prg),
+  {ok, Env} = par:infer_prg(Prg),
   dict:fetch(Name, Env).
 
 bad_prg(Prg, {T1, T2}) ->
-  {errors, Errs} = infer_prg(Prg),
+  {errors, Errs} = par:infer_prg(Prg),
   case Errs of
     [{T1, T2}] -> true;
     [{T2, T1}] -> true
@@ -24,6 +33,8 @@ expr_test_() ->
   [ ?_test({con, int} = ok_expr("1"))
   , ?_test({con, bool} = ok_expr("true"))
   , ?_test({con, bool} = ok_expr("false"))
+  , ?_test({con, str} = ok_expr("\"\""))
+  , ?_test({con, str} = ok_expr("\"some string\n\""))
 
   , ?_test({con, bool} = ok_expr("1 == 2"))
   , ?_test({con, bool} = ok_expr("1 != 2"))

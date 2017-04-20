@@ -1,5 +1,5 @@
 -module(par).
--export([leex/0, yecc/0, infer_prg/1]).
+-export([reload/1, infer_prg/1]).
 
 -record(ctx, {csts, env, pid, deps}).
 -record(solver, {subs, errs, pid}).
@@ -22,7 +22,6 @@
 % TODO:
 % - TODOs in code
 % - Type annotations
-% - Tests
 % - Int vs. float type
 % - Error messages
 % - Basic types: strings, lists, tuples
@@ -36,17 +35,28 @@
 % - Codegen / Interpreter
 % - ETS for fresh variables?
 
-leex() ->
-  {ok, Path} = leex:file("lexer.xrl"),
-  compile:file(Path),
-  io:format("~p~n", [Path]).
+reload(true) ->
+  code:purge(lexer),
+  {ok, _} = leex:file(lexer),
+  {ok, _} = compile:file(lexer),
+  code:load_file(lexer),
 
-yecc() ->
-  {ok, Path} = yecc:file("parser.yrl"),
-  compile:file(Path),
-  io:format("~p~n", [Path]).
+  code:purge(parser),
+  {ok, _} = yecc:file(parser),
+  {ok, _} = compile:file(parser),
+  code:load_file(parser),
 
-  %% {ok, Tokens, _} = lexer:string("fib(n) = if n == 1 || n == 0 then 1 else fib(n - 1) + fib(n - 2)  g(x) = x(x)"),
+  reload(false);
+
+reload(false) ->
+  code:purge(tv_server),
+  {ok, _} = compile:file(tv_server),
+  code:load_file(tv_server),
+
+  code:purge(?MODULE),
+  {ok, _} = compile:file(?MODULE),
+  code:load_file(?MODULE).
+
 infer_prg(Prg) ->
   {ok, Tokens, _} = lexer:string(Prg),
   {ok, Ast} = parser:parse(Tokens),
@@ -60,7 +70,7 @@ infer_prg(Prg) ->
 
   {FCs, C1} = lists:foldl(fun(Node, {FCs, FoldC}) ->
     {TV, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
-    {[{TV, FoldC1}|FCs], FoldC1}
+    {[{TV, FoldC1} | FCs], FoldC1}
   end, {[], C}, Ast),
 
   case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
@@ -81,7 +91,7 @@ pretty({con, T}) -> io_lib:format("~p", [T]).
 infer({fn, Var, Args, Expr}, C) ->
   {ArgsT, C1} = lists:foldr(fun({var, _, ArgName}, {Ts, FoldC}) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
-    {[TV|Ts], FoldC#ctx{
+    {[TV | Ts], FoldC#ctx{
       env=dict:store(ArgName, {arg, TV}, FoldC#ctx.env)
     }}
   end, {[], C}, Args),
@@ -97,7 +107,7 @@ infer({fn, Var, Args, Expr}, C) ->
     {var, _, Name} ->
       {_, FnTV} = dict:fetch(Name, C#ctx.env),
       {FnTV, C2#ctx{
-        csts=[{FnTV, T}|C2#ctx.csts],
+        csts=[{FnTV, T} | C2#ctx.csts],
         % restore original env
         env=C#ctx.env
       }};
@@ -108,11 +118,12 @@ infer({fn, Var, Args, Expr}, C) ->
 
 infer({int, _, _}, C) -> {{con, int}, C};
 infer({bool, _, _}, C) -> {{con, bool}, C};
+infer({str, _, _}, C) -> {{con, str}, C};
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
   {ok, {Type, T}} = dict:find(Name, C#ctx.env),
   Deps = case Type of
-           fn -> [T|C#ctx.deps];
+           fn -> [T | C#ctx.deps];
            _ -> C#ctx.deps
          end,
   {{inst, T, dict:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
@@ -120,13 +131,13 @@ infer({var, _, Name}, C) ->
 infer({app, Var, Args}, C) ->
   {ArgsT, C1} = lists:foldr(fun(Arg, {Ts, FoldC}) ->
     {T, FoldC1} = infer(Arg, FoldC),
-    {[T|Ts], FoldC1}
+    {[T | Ts], FoldC1}
   end, {[], C}, Args),
 
   {VarT, C2} = infer(Var, C1),
   TV = tv_server:fresh(C2#ctx.pid),
   T = lists:foldr(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsT),
-  {TV, C2#ctx{csts=[{T, VarT}|C2#ctx.csts]}};
+  {TV, C2#ctx{csts=[{T, VarT} | C2#ctx.csts]}};
 
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
@@ -144,7 +155,7 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
 
   TV = tv_server:fresh(C#ctx.pid),
   {TV, C3#ctx{
-    csts=[{{con, bool}, ExprT}, {TV, ThenT}, {TV, ElseT}|C3#ctx.csts]}
+    csts=[{{con, bool}, ExprT}, {TV, ThenT}, {TV, ElseT} | C3#ctx.csts]}
   };
 
 infer({{Op, _}, Left, Right}, C) ->
@@ -174,7 +185,7 @@ infer({{Op, _}, Left, Right}, C) ->
     }
   end,
 
-  {TV, C2#ctx{csts=[Cst|C2#ctx.csts]}};
+  {TV, C2#ctx{csts=[Cst | C2#ctx.csts]}};
 
 infer({{Op, _}, Expr}, C) ->
   {ExprT, C1} = infer(Expr, C),
@@ -185,7 +196,7 @@ infer({{Op, _}, Expr}, C) ->
     Op == '-' -> {{lam, ExprT, TV}, {lam, {con, int}, {con, int}}}
   end,
 
-  {TV, C1#ctx{csts=[Cst|C1#ctx.csts]}}.
+  {TV, C1#ctx{csts=[Cst | C1#ctx.csts]}}.
 
 solve([], #solver{errs=Errs}) when length(Errs) > 0 -> {errors, Errs};
 solve([], #solver{subs=Subs}) -> {ok, Subs};
@@ -220,7 +231,7 @@ solve(FCs, S) ->
   solve(Rest, S1).
 
 unify_group([], S) -> S;
-unify_group([{L, R}|Rest], S) ->
+unify_group([{L, R} | Rest], S) ->
   L1 = resolve(subs(L, S#solver.subs), S),
   R1 = resolve(subs(R, S#solver.subs), S),
   S1 = unify({L1, R1}, S),
@@ -254,17 +265,17 @@ unify({{lam, ArgsT1, ReturnT1}, {lam, ArgsT2, ReturnT2}}, S) ->
   unify(ToUnify, S1);
 unify({{tv, TV}, T}, S) ->
   Occurs = occurs(TV, T),
-  if Occurs -> S#solver{errs=[{{tv, TV}, T}|S#solver.errs]};
+  if Occurs -> S#solver{errs=[{{tv, TV}, T} | S#solver.errs]};
      true ->
        S#solver{subs=merge_subs(dict:from_list([{TV, T}]), S#solver.subs)}
   end;
 unify({T, {tv, TV}}, S) ->
   Occurs = occurs(TV, T),
-  if Occurs -> S#solver{errs=[{{tv, TV}, T}|S#solver.errs]};
+  if Occurs -> S#solver{errs=[{{tv, TV}, T} | S#solver.errs]};
      true ->
        S#solver{subs=merge_subs(dict:from_list([{TV, T}]), S#solver.subs)}
   end;
-unify({T1, T2}, S) -> S#solver{errs=[{T1, T2}|S#solver.errs]}.
+unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
 subs({lam, ArgsT, ReturnT}, Subs) ->
   {lam, subs(ArgsT, Subs), subs(ReturnT, Subs)};

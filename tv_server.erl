@@ -32,4 +32,4 @@ terminate(normal, Count) ->
 code_change(_, State, _) -> {ok, State}.
 
 gen_name(Count) when Count < 26 -> [$A + Count];
-gen_name(Count) -> [$A + (Count rem 26)|gen_name(Count - 26)].
+gen_name(Count) -> [$A + (Count rem 26) | gen_name(Count - 26)].

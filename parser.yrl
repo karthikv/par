@@ -1,7 +1,7 @@
 Nonterminals prg decl expr neg var_list expr_list init_list maybe_else.
 Terminals
   '=' '(' ')' ',' '==' '!=' '||' '&&' '!' '>' '<' '>=' '<=' '+' '-' '*' '/' '|'
-  if then else let in int bool var.
+  if then else let in int bool str var.
 Rootsymbol prg.
 
 prg -> decl : ['$1'].
@@ -13,6 +13,7 @@ decl -> var '(' var_list ')' '=' expr : {fn, '$1', '$3', '$6'}.
 
 expr -> int : '$1'.
 expr -> bool : '$1'.
+expr -> str : '$1'.
 expr -> var : '$1'.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.
 expr -> expr '!=' expr : {'$2', '$1', '$3'}.
