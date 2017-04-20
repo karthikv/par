@@ -1,7 +1,11 @@
 Nonterminals prg decl expr neg var_list expr_list init_list maybe_else.
 Terminals
-  '=' '(' ')' ',' '==' '!=' '||' '&&' '!' '>' '<' '>=' '<=' '+' '-' '*' '/' '|'
-  if then else let in int bool str var.
+  '=' '(' ')' ','
+  '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
+  '+' '-' '*' '/'
+  '++' '|'
+  if then else let in
+  int bool str var.
 Rootsymbol prg.
 
 prg -> decl : ['$1'].
@@ -27,6 +31,7 @@ expr -> expr '+' expr : {'$2', '$1', '$3'}.
 expr -> expr '-' expr : {'$2', '$1', '$3'}.
 expr -> expr '*' expr : {'$2', '$1', '$3'}.
 expr -> expr '/' expr : {'$2', '$1', '$3'}.
+expr -> expr '++' expr : {'$2', '$1', '$3'}.
 expr -> '!' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
 expr -> '(' expr ')' : '$2'.
@@ -56,6 +61,6 @@ Right 200 'else'.
 Left 300 '||'.
 Left 400 '&&'.
 Nonassoc 500 '==' '!=' '>' '<' '>=' '<='.
-Left 600 '+' '-'.
+Left 600 '+' '-' '++'.
 Left 700 '*' '/'.
 Unary 800 '!' neg.

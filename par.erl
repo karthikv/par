@@ -24,7 +24,7 @@
 % - Type annotations
 % - Int vs. float type
 % - Error messages
-% - Basic types: strings, lists, tuples
+% - Basic types: lists, tuples
 % - Maybe else types (unit type?)
 % - Complex types: ADTs
 % - Typeclasses
@@ -78,15 +78,6 @@ infer_prg(Prg) ->
       {ok, dict:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env)};
     {errors, Errs} -> {errors, Errs}
   end.
-
-pretty({lam, ArgsT, ReturnT}) ->
-  Format = case ArgsT of
-    {lam, _, _} -> "(~s) -> ~s";
-    _ -> "~s -> ~s"
-  end,
-  io_lib:format(Format, [pretty(ArgsT), pretty(ReturnT)]);
-pretty({tv, TV}) -> io_lib:format("~p", [TV]);
-pretty({con, T}) -> io_lib:format("~p", [T]).
 
 infer({fn, Var, Args, Expr}, C) ->
   {ArgsT, C1} = lists:foldr(fun({var, _, ArgName}, {Ts, FoldC}) ->
@@ -182,6 +173,10 @@ infer({{Op, _}, Left, Right}, C) ->
     Op == '+'; Op == '-'; Op == '*'; Op == '/' -> {
       {lam, LeftT, {lam, RightT, TV}},
       {lam, {con, int}, {lam, {con, int}, {con, int}}}
+    };
+    Op == '++' -> {
+      {lam, LeftT, {lam, RightT, TV}},
+      {lam, {con, str}, {lam, {con, str}, {con, str}}}
     }
   end,
 

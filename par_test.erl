@@ -64,6 +64,9 @@ expr_test_() ->
   , ?_test(bad_expr("30 * false", {{con, bool}, {con, int}}))
   , ?_test(bad_expr("30 / false", {{con, bool}, {con, int}}))
 
+  , ?_test({con, str} = ok_expr("\"hello \" ++ \"world\""))
+  , ?_test(bad_expr("30 ++ \"str\"", {{con, int}, {con, str}}))
+
   , ?_test({con, int} = ok_expr("-15"))
   , ?_test({con, bool} = ok_expr("!false"))
   , ?_test({con, bool} = ok_expr("!(-3 == 4)"))

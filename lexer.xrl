@@ -25,6 +25,7 @@ Rules.
 \- : {token, {'-', TokenLine}}.
 \* : {token, {'*', TokenLine}}.
 \/ : {token, {'/', TokenLine}}.
+\+\+ : {token, {'++', TokenLine}}.
 \| : {token, {'|', TokenLine}}.
 if : {token, {'if', TokenLine}}.
 then : {token, {'then', TokenLine}}.
