@@ -4,6 +4,7 @@
 -record(ctx, {csts, env, pid, deps}).
 -record(solver, {subs, errs, pid}).
 
+% TODO: update these conventions
 % Naming conventions:
 % TV - type variable
 % fresh - a function that generates a new TV
@@ -20,7 +21,7 @@
 %   count - a monotonically increasing count used to generate fresh TVs
 %
 % TODO:
-% - TODOs in code
+% - TODOs in code (non-unification error cases)
 % - Type annotations
 % - Error messages
 % - Basic types: lists, tuples
@@ -63,7 +64,7 @@ infer_prg(Prg) ->
 
   C = lists:foldl(fun({fn, {var, _, Name}, _, _}, C) ->
     % TODO: what if name already exists?
-    TV = fresh(C#ctx.pid),
+    TV = tv_server:fresh(C#ctx.pid),
     C#ctx{env=dict:store(Name, {fn, TV}, C#ctx.env)}
   end, #ctx{csts=[], env=dict:new(), pid=Pid, deps=[]}, Ast),
 
@@ -72,15 +73,18 @@ infer_prg(Prg) ->
     {[{TV, FoldC1} | FCs], FoldC1}
   end, {[], C}, Ast),
 
-  case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
+  Result = case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
     {ok, Subs} ->
       {ok, dict:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env)};
     {errors, Errs} -> {errors, Errs}
-  end.
+  end,
+
+  ok = tv_server:stop(Pid),
+  Result.
 
 infer({fn, Var, Args, Expr}, C) ->
   {ArgsT, C1} = lists:foldr(fun({var, _, ArgName}, {Ts, FoldC}) ->
-    TV = fresh(FoldC#ctx.pid),
+    TV = tv_server:fresh(FoldC#ctx.pid),
     {[TV | Ts], FoldC#ctx{
       env=dict:store(ArgName, {arg, TV}, FoldC#ctx.env)
     }}
@@ -106,7 +110,7 @@ infer({fn, Var, Args, Expr}, C) ->
       {T, C2#ctx{env=C#ctx.env}}
   end;
 
-infer({int, _, _}, C) -> {fresh_iface(num, C#ctx.pid), C};
+infer({int, _, _}, C) -> {tv_server:fresh_iface(num, C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, float}, C};
 infer({bool, _, _}, C) -> {{con, bool}, C};
 infer({str, _, _}, C) -> {{con, str}, C};
@@ -127,7 +131,7 @@ infer({app, Var, Args}, C) ->
   end, {[], C}, Args),
 
   {VarT, C2} = infer(Var, C1),
-  TV = fresh(C2#ctx.pid),
+  TV = tv_server:fresh(C2#ctx.pid),
   T = lists:foldr(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsT),
   {TV, C2#ctx{csts=[{T, VarT} | C2#ctx.csts]}};
 
@@ -145,7 +149,7 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
   {ThenT, C2} = infer(Then, C1),
   {ElseT, C3} = infer(Else, C2),
 
-  TV = fresh(C#ctx.pid),
+  TV = tv_server:fresh(C#ctx.pid),
   {TV, C3#ctx{
     csts=[{{con, bool}, ExprT}, {TV, ThenT}, {TV, ElseT} | C3#ctx.csts]}
   };
@@ -154,11 +158,11 @@ infer({{Op, _}, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
   {RightT, C2} = infer(Right, C1),
 
-  TV = fresh(C2#ctx.pid),
+  TV = tv_server:fresh(C2#ctx.pid),
 
   Cst = if
     Op == '=='; Op == '!=' ->
-      OperandTV = fresh(C2#ctx.pid),
+      OperandTV = tv_server:fresh(C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, OperandTV, {lam, OperandTV, {con, bool}}}
@@ -168,13 +172,13 @@ infer({{Op, _}, Left, Right}, C) ->
       {lam, {con, bool}, {lam, {con, bool}, {con, bool}}}
     };
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
-      NumT = fresh_iface(num, C2#ctx.pid),
+      NumT = tv_server:fresh_iface(num, C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, NumT, {lam, NumT, {con, bool}}}
       };
     Op == '+'; Op == '-'; Op == '*'; Op == '/' ->
-      NumT = fresh_iface(num, C2#ctx.pid),
+      NumT = tv_server:fresh_iface(num, C2#ctx.pid),
       ReturnT = if Op == '/' -> {con, float}; true -> NumT end,
       {
         {lam, LeftT, {lam, RightT, TV}},
@@ -190,12 +194,12 @@ infer({{Op, _}, Left, Right}, C) ->
 
 infer({{Op, _}, Expr}, C) ->
   {ExprT, C1} = infer(Expr, C),
-  TV = fresh(C1#ctx.pid),
+  TV = tv_server:fresh(C1#ctx.pid),
 
   Cst = if
     Op == '!' -> {{lam, ExprT, TV}, {lam, {con, bool}, {con, bool}}};
     Op == '-' ->
-      NumT = fresh_iface(num, C1#ctx.pid),
+      NumT = tv_server:fresh_iface(num, C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, NumT, NumT}}
   end,
 
@@ -224,10 +228,10 @@ solve(FCs, S) ->
     true ->
       {Solved, S1} = lists:foldl(fun({TV, C}, {Solved, FoldS}) ->
         Csts = resolve_csts(C#ctx.csts, FoldS),
-        io:format("solving before subs (~p) ~p~n", [TV, C#ctx.csts]),
-        io:format("solving after subs (~p) ~p~n", [TV, Csts]),
-        io:format("result: ~p~n", [unify_csts(Csts, FoldS)]),
-        {gb_sets:add(TV, Solved), unify_csts(Csts, FoldS)}
+        io:format("solving (~p) ~p~n", [TV, Csts]),
+        FoldS1 = unify_csts(Csts, FoldS),
+        io:format("subs: ~p~n", [dict:to_list(FoldS1#solver.subs)]),
+        {gb_sets:add(TV, Solved), FoldS1}
       end, {gb_sets:new(), S}, Solvable),
 
       Rest = if
@@ -251,24 +255,24 @@ resolve_csts([{L, R} | Rest], S) ->
 
 resolve({lam, ArgsT, ReturnT}, S) ->
   {lam, resolve(ArgsT, S), resolve(ReturnT, S)};
-resolve({tv, TV}, _) -> {tv, TV};
-resolve({iface, I, TV}, _) -> {iface, I, TV};
+resolve({tv, V}, _) -> {tv, V};
+resolve({iface, I, V}, _) -> {iface, I, V};
 resolve({con, T}, _) -> {con, T};
 resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
 resolve(none, _) -> none.
 
-inst({GTVs, T}, S) ->
-  Subs = gb_sets:fold(fun(GTV, Subs) ->
-    dict:store(GTV, fresh(S#solver.pid), Subs)
-  end, dict:new(), GTVs),
+inst({GVs, T}, S) ->
+  Subs = gb_sets:fold(fun(V, Subs) ->
+    dict:store(V, tv_server:fresh(S#solver.pid), Subs)
+  end, dict:new(), GVs),
   subs(T, Subs).
 
 generalize(T, EnvList) ->
-  EnvFTVs = lists:foldl(fun({_, {_, EnvT}}, S) ->
-    gb_sets:union(S, ftvs(EnvT))
+  EnvFVs = lists:foldl(fun({_, {_, EnvT}}, S) ->
+    gb_sets:union(S, fvs(EnvT))
   end, gb_sets:new(), EnvList),
-  GTVs = gb_sets:subtract(ftvs(T), EnvFTVs),
-  {GTVs, T}.
+  GVs = gb_sets:subtract(fvs(T), EnvFVs),
+  {GVs, T}.
 
 unify_csts([], S) -> S;
 unify_csts([{L, R} | Rest], S) ->
@@ -283,25 +287,25 @@ unify({{lam, ArgsT1, ReturnT1}, {lam, ArgsT2, ReturnT2}}, S) ->
   ToUnify = {subs(ReturnT1, S1#solver.subs), subs(ReturnT2, S1#solver.subs)},
   unify(ToUnify, S1);
 
-unify({{tv, TV}, T}, S) ->
-  Occurs = occurs(TV, T),
-  if Occurs -> S#solver{errs=[{{tv, TV}, T} | S#solver.errs]};
+unify({{tv, V}, T}, S) ->
+  Occurs = occurs(V, T),
+  if Occurs -> S#solver{errs=[{{tv, V}, T} | S#solver.errs]};
      true ->
-       S#solver{subs=merge_subs(dict:from_list([{TV, T}]), S#solver.subs)}
+       S#solver{subs=merge_subs(dict:from_list([{V, T}]), S#solver.subs)}
   end;
-unify({T, {tv, TV}}, S) -> unify({{tv, TV}, T}, S);
+unify({T, {tv, V}}, S) -> unify({{tv, V}, T}, S);
 
-unify({{iface, I, TV1}, {iface, I, TV2}}, S) ->
-  Subs = merge_subs(dict:from_list([{TV1, {iface, I, TV2}}]), S#solver.subs),
+unify({{iface, I, V1}, {iface, I, V2}}, S) ->
+  Subs = merge_subs(dict:from_list([{V1, {iface, I, V2}}]), S#solver.subs),
   S#solver{subs=Subs};
 
-unify({{iface, I, TV}, T}, S) ->
+unify({{iface, I, V}, T}, S) ->
   Instance = instance(T, I),
   if Instance ->
-       S#solver{subs=merge_subs(dict:from_list([{TV, T}]), S#solver.subs)};
-     true -> S#solver{errs=[{{iface, I, TV}, T} | S#solver.errs]}
+       S#solver{subs=merge_subs(dict:from_list([{V, T}]), S#solver.subs)};
+     true -> S#solver{errs=[{{iface, I, V}, T} | S#solver.errs]}
   end;
-unify({T, {iface, I, TV}}, S) -> unify({{iface, I, TV}, T}, S);
+unify({T, {iface, I, V}}, S) -> unify({{iface, I, V}, T}, S);
 
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
@@ -316,34 +320,31 @@ instance(_, _) -> false.
 
 subs({lam, ArgsT, ReturnT}, Subs) ->
   {lam, subs(ArgsT, Subs), subs(ReturnT, Subs)};
-subs({tv, TV}, Subs) ->
-  case dict:find(TV, Subs) of
+subs({tv, V}, Subs) ->
+  case dict:find(V, Subs) of
     {ok, TSub} -> subs(TSub, Subs);
-    error -> {tv, TV}
+    error -> {tv, V}
   end;
-subs({iface, I, TV}, Subs) ->
-  case dict:find(TV, Subs) of
+subs({iface, I, V}, Subs) ->
+  case dict:find(V, Subs) of
     {ok, TSub} -> subs(TSub, Subs);
-    error -> {iface, I, TV}
+    error -> {iface, I, V}
   end;
 subs({con, T}, _) -> {con, T};
 subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList};
 subs(none, _) -> none.
 
-ftvs({lam, ArgsT, ReturnT}) -> gb_sets:union(ftvs(ArgsT), ftvs(ReturnT));
-ftvs({tv, TV}) -> gb_sets:from_list([TV]);
-ftvs({iface, _, TV}) -> gb_sets:from_list([TV]);
-ftvs({con, _}) -> gb_sets:new();
-% ftvs({inst, ...}) ommitted; all inst should be resolved
-ftvs(none) -> gb_sets:new().
+fvs({lam, ArgsT, ReturnT}) -> gb_sets:union(fvs(ArgsT), fvs(ReturnT));
+fvs({tv, V}) -> gb_sets:from_list([V]);
+fvs({iface, _, V}) -> gb_sets:from_list([V]);
+fvs({con, _}) -> gb_sets:new();
+% fvs({inst, ...}) ommitted; all inst should be resolved
+fvs(none) -> gb_sets:new().
 
-occurs(TV, {lam, ArgsT, ReturnT}) ->
-  occurs(TV, ArgsT) or occurs(TV, ReturnT);
-occurs(TV1, {tv, TV2}) -> TV1 == TV2;
-occurs(TV1, {iface, _, TV2}) -> TV1 == TV2;
+occurs(V, {lam, ArgsT, ReturnT}) ->
+  occurs(V, ArgsT) or occurs(V, ReturnT);
+occurs(V1, {tv, V2}) -> V1 == V2;
+occurs(V1, {iface, _, V2}) -> V1 == V2;
 % occurs({inst, ...}) ommitted; all inst should be resolved
 occurs(_, {con, _}) -> false;
 occurs(_, none) -> false.
-
-fresh(Pid) -> {tv, tv_server:fresh(Pid)}.
-fresh_iface(I, Pid) -> {iface, I, tv_server:fresh(Pid)}.

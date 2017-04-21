@@ -3,6 +3,8 @@
 -export([
   start_link/0,
   fresh/1,
+  fresh_iface/2,
+  stop/1,
   init/1,
   handle_call/3,
   handle_cast/2,
@@ -12,10 +14,12 @@
 ]).
 
 start_link() -> gen_server:start_link(?MODULE, 0, []).
-fresh(Pid) -> gen_server:call(Pid, fresh).
+fresh(Pid) -> {tv, gen_server:call(Pid, next_name)}.
+fresh_iface(I, Pid) -> {iface, I, gen_server:call(Pid, next_name)}.
+stop(Pid) -> gen_server:stop(Pid).
 
 init(Count) -> {ok, Count}.
-handle_call(fresh, _, Count) -> {reply, gen_name(Count), Count + 1}.
+handle_call(next_name, _, Count) -> {reply, gen_name(Count), Count + 1}.
 
 handle_cast(Msg, Count) ->
   io:format("Unexpected message: ~p~n", [Msg]),
@@ -25,10 +29,7 @@ handle_info(Msg, Count) ->
   io:format("Unexpected message: ~p~n", [Msg]),
   {noreply, Count}.
 
-terminate(normal, Count) ->
-  io:format("tv_server (~p) terminated.~n", Count),
-  ok.
-
+terminate(normal, _) -> ok.
 code_change(_, State, _) -> {ok, State}.
 
 gen_name(Count) when Count < 26 -> [$A + Count];
