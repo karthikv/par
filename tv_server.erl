@@ -15,7 +15,7 @@ start_link() -> gen_server:start_link(?MODULE, 0, []).
 fresh(Pid) -> gen_server:call(Pid, fresh).
 
 init(Count) -> {ok, Count}.
-handle_call(fresh, _, Count) -> {reply, {tv, gen_name(Count)}, Count + 1}.
+handle_call(fresh, _, Count) -> {reply, gen_name(Count), Count + 1}.
 
 handle_cast(Msg, Count) ->
   io:format("Unexpected message: ~p~n", [Msg]),

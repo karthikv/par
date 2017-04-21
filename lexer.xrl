@@ -1,6 +1,7 @@
 Definitions.
 
 INT = [0-9]+
+FLOAT = {INT}+\.{INT}+
 BOOL = (true|false)
 VAR = [a-zA-Z][a-zA-Z0-9_]*
 STR = "(\\.|[^\\"])*"
@@ -33,6 +34,7 @@ else : {token, {'else', TokenLine}}.
 let : {token, {'let', TokenLine}}.
 in : {token, {'in', TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
+{FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
 {STR} : {token, {str, TokenLine, drop_quotes(TokenChars)}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
