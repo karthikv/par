@@ -4,7 +4,6 @@
 -record(ctx, {csts, env, pid, deps}).
 -record(solver, {subs, errs, pid}).
 
-% TODO: update these conventions
 % Naming conventions:
 % TV - type variable
 % fresh - a function that generates a new TV
@@ -33,7 +32,7 @@
 % - Extra type variables for return value of operators like == and +?
 % - Better / Efficient EnvList
 % - Codegen / Interpreter
-% - ETS for fresh variables?
+% - Update naming conventions
 
 reload(true) ->
   code:purge(lexer),
@@ -345,6 +344,6 @@ occurs(V, {lam, ArgsT, ReturnT}) ->
   occurs(V, ArgsT) or occurs(V, ReturnT);
 occurs(V1, {tv, V2}) -> V1 == V2;
 occurs(V1, {iface, _, V2}) -> V1 == V2;
-% occurs({inst, ...}) ommitted; all inst should be resolved
 occurs(_, {con, _}) -> false;
+% occurs({inst, ...}) ommitted; all inst should be resolved
 occurs(_, none) -> false.
