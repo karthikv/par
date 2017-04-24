@@ -70,11 +70,11 @@ norm({iface, I, V}, N) ->
 
 norm({con, T}, N) -> {{con, T}, N};
 norm({gen, T, ParamsT}, N) ->
-  {NormParamsT, N1} = lists:foldl(fun(P, {FoldParamsT, FoldN}) ->
+  {NormParamsTRev, N1} = lists:foldl(fun(P, {FoldParamsT, FoldN}) ->
     {NormP, FoldN1} = norm(P, FoldN),
     {[NormP | FoldParamsT], FoldN1}
   end, {[], N}, ParamsT),
-  {{gen, T, NormParamsT}, N1};
+  {{gen, T, lists:reverse(NormParamsTRev)}, N1};
 norm(none, N) -> {none, N}.
 
 pretty({lam, ArgsT, ReturnT}) ->

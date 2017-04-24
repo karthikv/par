@@ -24,7 +24,6 @@
 % - Type annotations
 % - Error messages
 % - Consistent casing for types
-% - Basic types: tuples
 % - Maybe else types (unit type?)
 % - Complex types: ADTs
 % - Typeclasses
@@ -83,7 +82,7 @@ infer_prg(Prg) ->
   Result.
 
 infer({fn, Var, Args, Expr}, C) ->
-  {ArgsT, C1} = lists:foldr(fun({var, _, ArgName}, {Ts, FoldC}) ->
+  {ArgsTRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
     {[TV | Ts], FoldC#ctx{
       env=dict:store(ArgName, {arg, TV}, FoldC#ctx.env)
@@ -92,9 +91,9 @@ infer({fn, Var, Args, Expr}, C) ->
 
   {ReturnT, C2} = infer(Expr, C1),
   T = if length(Args) == 0 -> {lam, none, ReturnT};
-         true -> lists:foldr(fun(ArgT, LastT) ->
+         true -> lists:foldl(fun(ArgT, LastT) ->
            {lam, ArgT, LastT}
-         end, ReturnT, ArgsT)
+         end, ReturnT, ArgsTRev)
       end,
 
   case Var of
@@ -122,6 +121,13 @@ infer({list, Elems}, C) ->
   end, {[], C}, Elems),
 
   {{gen, list, [TV]}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
+infer({tuple, Elems}, C) ->
+  {ParamsTRev, C1} = lists:foldl(fun(Elem, {FoldParamsT, FoldC}) ->
+    {ElemT, FoldC1} = infer(Elem, FoldC),
+    {[ElemT | FoldParamsT], FoldC1}
+  end, {[], C}, Elems),
+
+  {{gen, tuple, lists:reverse(ParamsTRev)}, C1};
 
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
@@ -133,14 +139,14 @@ infer({var, _, Name}, C) ->
   {{inst, T, dict:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
 
 infer({app, Var, Args}, C) ->
-  {ArgsT, C1} = lists:foldr(fun(Arg, {Ts, FoldC}) ->
+  {ArgsTRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
     {T, FoldC1} = infer(Arg, FoldC),
     {[T | Ts], FoldC1}
   end, {[], C}, Args),
 
   {VarT, C2} = infer(Var, C1),
   TV = tv_server:fresh(C2#ctx.pid),
-  T = lists:foldr(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsT),
+  T = lists:foldl(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsTRev),
   {TV, C2#ctx{csts=[{T, VarT} | C2#ctx.csts]}};
 
 infer({{'let', _}, Inits, Expr}, C) ->
@@ -318,7 +324,8 @@ unify({{iface, I, V}, T}, S) ->
   end;
 unify({T, {iface, I, V}}, S) -> unify({{iface, I, V}, T}, S);
 
-unify({{gen, T, ParamsT1}, {gen, T, ParamsT2}}, S) ->
+unify({{gen, T, ParamsT1}, {gen, T, ParamsT2}}, S)
+  when length(ParamsT1) == length(ParamsT2) ->
   lists:foldl(fun(Cst, FoldS) ->
     unify(Cst, FoldS)
   end, S, lists:zip(ParamsT1, ParamsT2));

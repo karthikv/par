@@ -20,6 +20,7 @@ expr -> float : '$1'.
 expr -> bool : '$1'.
 expr -> '[' ']' : {list, []}.
 expr -> '[' expr_list ']' : {list, '$2'}.
+expr -> '(' expr ',' expr_list ')' : {tuple, ['$2' | '$4']}.
 expr -> str : '$1'.
 expr -> var : '$1'.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.
