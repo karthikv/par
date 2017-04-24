@@ -23,7 +23,8 @@
 % - TODOs in code (non-unification error cases)
 % - Type annotations
 % - Error messages
-% - Consistent casing for types
+% - Operation: nth element of tuple?
+% - Data structures: sets, maps
 % - Maybe else types (unit type?)
 % - Complex types: ADTs
 % - Typeclasses
