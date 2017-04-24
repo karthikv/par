@@ -23,7 +23,8 @@
 % - TODOs in code (non-unification error cases)
 % - Type annotations
 % - Error messages
-% - Basic types: lists, tuples
+% - Consistent casing for types
+% - Basic types: tuples
 % - Maybe else types (unit type?)
 % - Complex types: ADTs
 % - Typeclasses
@@ -112,7 +113,15 @@ infer({fn, Var, Args, Expr}, C) ->
 infer({int, _, _}, C) -> {tv_server:fresh_iface(num, C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, float}, C};
 infer({bool, _, _}, C) -> {{con, bool}, C};
-infer({str, _, _}, C) -> {{con, str}, C};
+infer({str, _, _}, C) -> {{gen, list, [{con, char}]}, C};
+infer({list, Elems}, C) ->
+  TV = tv_server:fresh(C#ctx.pid),
+  {Csts, C1} = lists:foldl(fun(Elem, {FoldCsts, FoldC}) ->
+    {ElemT, FoldC1} = infer(Elem, FoldC),
+    {[{ElemT, TV} | FoldCsts], FoldC1}
+  end, {[], C}, Elems),
+
+  {{gen, list, [TV]}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
 
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
@@ -171,22 +180,24 @@ infer({{Op, _}, Left, Right}, C) ->
       {lam, {con, bool}, {lam, {con, bool}, {con, bool}}}
     };
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
-      NumT = tv_server:fresh_iface(num, C2#ctx.pid),
+      NumTV = tv_server:fresh_iface(num, C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
-        {lam, NumT, {lam, NumT, {con, bool}}}
+        {lam, NumTV, {lam, NumTV, {con, bool}}}
       };
     Op == '+'; Op == '-'; Op == '*'; Op == '/' ->
-      NumT = tv_server:fresh_iface(num, C2#ctx.pid),
-      ReturnT = if Op == '/' -> {con, float}; true -> NumT end,
+      NumTV = tv_server:fresh_iface(num, C2#ctx.pid),
+      ReturnT = if Op == '/' -> {con, float}; true -> NumTV end,
       {
         {lam, LeftT, {lam, RightT, TV}},
-        {lam, NumT, {lam, NumT, ReturnT}}
+        {lam, NumTV, {lam, NumTV, ReturnT}}
       };
-    Op == '++' -> {
-      {lam, LeftT, {lam, RightT, TV}},
-      {lam, {con, str}, {lam, {con, str}, {con, str}}}
-    }
+    Op == '++' ->
+      ListT = {gen, list, [tv_server:fresh(C2#ctx.pid)]},
+      {
+        {lam, LeftT, {lam, RightT, TV}},
+        {lam, ListT, {lam, ListT, ListT}}
+      }
   end,
 
   {TV, C2#ctx{csts=[Cst | C2#ctx.csts]}};
@@ -257,6 +268,7 @@ resolve({lam, ArgsT, ReturnT}, S) ->
 resolve({tv, V}, _) -> {tv, V};
 resolve({iface, I, V}, _) -> {iface, I, V};
 resolve({con, T}, _) -> {con, T};
+resolve({gen, T, ParamsT}, _) -> {gen, T, ParamsT};
 resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
 resolve(none, _) -> none.
 
@@ -306,6 +318,11 @@ unify({{iface, I, V}, T}, S) ->
   end;
 unify({T, {iface, I, V}}, S) -> unify({{iface, I, V}, T}, S);
 
+unify({{gen, T, ParamsT1}, {gen, T, ParamsT2}}, S) ->
+  lists:foldl(fun(Cst, FoldS) ->
+    unify(Cst, FoldS)
+  end, S, lists:zip(ParamsT1, ParamsT2));
+
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
 merge_subs(Subs1, Subs2) ->
@@ -330,6 +347,8 @@ subs({iface, I, V}, Subs) ->
     error -> {iface, I, V}
   end;
 subs({con, T}, _) -> {con, T};
+subs({gen, T, ParamsT}, Subs) ->
+  {gen, T, lists:map(fun(P) -> subs(P, Subs) end, ParamsT)};
 subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList};
 subs(none, _) -> none.
 
@@ -337,6 +356,8 @@ fvs({lam, ArgsT, ReturnT}) -> gb_sets:union(fvs(ArgsT), fvs(ReturnT));
 fvs({tv, V}) -> gb_sets:from_list([V]);
 fvs({iface, _, V}) -> gb_sets:from_list([V]);
 fvs({con, _}) -> gb_sets:new();
+fvs({gen, _, ParamsT}) ->
+  gb_sets:union(lists:map(fun(P) -> fvs(P) end, ParamsT));
 % fvs({inst, ...}) ommitted; all inst should be resolved
 fvs(none) -> gb_sets:new().
 
@@ -345,5 +366,6 @@ occurs(V, {lam, ArgsT, ReturnT}) ->
 occurs(V1, {tv, V2}) -> V1 == V2;
 occurs(V1, {iface, _, V2}) -> V1 == V2;
 occurs(_, {con, _}) -> false;
+occurs(V, {gen, _, ParamsT}) -> lists:any(fun(P) -> occurs(V, P) end, ParamsT);
 % occurs({inst, ...}) ommitted; all inst should be resolved
 occurs(_, none) -> false.

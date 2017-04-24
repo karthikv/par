@@ -5,7 +5,7 @@ Terminals
   '+' '-' '*' '/'
   '++' '|'
   if then else let in
-  int float bool str var.
+  int float bool str var '[' ']'.
 Rootsymbol prg.
 
 prg -> decl : ['$1'].
@@ -18,6 +18,8 @@ decl -> var '(' var_list ')' '=' expr : {fn, '$1', '$3', '$6'}.
 expr -> int : '$1'.
 expr -> float : '$1'.
 expr -> bool : '$1'.
+expr -> '[' ']' : {list, []}.
+expr -> '[' expr_list ']' : {list, '$2'}.
 expr -> str : '$1'.
 expr -> var : '$1'.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.

@@ -69,6 +69,12 @@ norm({iface, I, V}, N) ->
   end;
 
 norm({con, T}, N) -> {{con, T}, N};
+norm({gen, T, ParamsT}, N) ->
+  {NormParamsT, N1} = lists:foldl(fun(P, {FoldParamsT, FoldN}) ->
+    {NormP, FoldN1} = norm(P, FoldN),
+    {[NormP | FoldParamsT], FoldN1}
+  end, {[], N}, ParamsT),
+  {{gen, T, NormParamsT}, N1};
 norm(none, N) -> {none, N}.
 
 pretty({lam, ArgsT, ReturnT}) ->
@@ -80,6 +86,9 @@ pretty({lam, ArgsT, ReturnT}) ->
 pretty({tv, TV}) -> format_str("~s", [TV]);
 pretty({iface, I, TV}) -> format_str("~s: ~p", [TV, I]);
 pretty({con, T}) -> format_str("~p", [T]);
+pretty({gen, T, Params}) ->
+  ParamsPretty = lists:map(fun(P) -> pretty(P) end, Params),
+  format_str("~p<~s>", [T, string:join(ParamsPretty, ", ")]);
 pretty(none) -> "()".
 
 format_str(Str, Args) ->
@@ -92,8 +101,13 @@ expr_test_() ->
   , ?_test("float" = ok_expr("0.517"))
   , ?_test("bool" = ok_expr("true"))
   , ?_test("bool" = ok_expr("false"))
-  , ?_test("str" = ok_expr("\"\""))
-  , ?_test("str" = ok_expr("\"some string\n\""))
+  , ?_test("list<char>" = ok_expr("\"\""))
+  , ?_test("list<char>" = ok_expr("\"some string\n\""))
+  , ?_test("list<A>" = ok_expr("[]"))
+  , ?_test("list<A: num>" = ok_expr("[3, 5, 6]"))
+  , ?_test("list<float>" = ok_expr("[3, 5.0, 6]"))
+  , ?_test("list<bool>" = ok_expr("[true, false, true]"))
+  , ?_test(bad_expr("[3.0, true]", {"float", "bool"}))
 
   , ?_test("bool" = ok_expr("1 == 2"))
   , ?_test("bool" = ok_expr("1.0 == 2.0"))
@@ -151,8 +165,12 @@ expr_test_() ->
   , ?_test(bad_expr("30 * false", {"bool", "A: num"}))
   , ?_test(bad_expr("30 / false", {"bool", "A: num"}))
 
-  , ?_test("str" = ok_expr("\"hello \" ++ \"world\""))
-  , ?_test(bad_expr("30.0 ++ \"str\"", {"float", "str"}))
+  , ?_test("list<char>" = ok_expr("\"hello \" ++ \"world\""))
+  , ?_test("list<A: num>" = ok_expr("[1, 2] ++ [3, 4, 5, 6]"))
+  , ?_test("list<bool>" = ok_expr("[] ++ [true, false]"))
+  , ?_test("list<A>" = ok_expr("[] ++ []"))
+  , ?_test(bad_expr("30.0 ++ \"str\"", {"float", "list<A>"}))
+  , ?_test(bad_expr("[true] ++ [1, 2]", {"bool", "A: num"}))
 
   , ?_test("A: num" = ok_expr("-15"))
   , ?_test("float" = ok_expr("-15.0"))

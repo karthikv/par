@@ -36,6 +36,8 @@ in : {token, {'in', TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
 {FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
+\[ : {token, {'[', TokenLine}}.
+\] : {token, {']', TokenLine}}.
 {STR} : {token, {str, TokenLine, drop_quotes(TokenChars)}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
 {WHITESPACE}+ : skip_token.
