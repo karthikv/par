@@ -2,8 +2,9 @@
 -behavior(gen_server).
 -export([
   start_link/0,
+  next_name/1,
   fresh/1,
-  fresh_iface/2,
+  fresh/2,
   stop/1,
   init/1,
   handle_call/3,
@@ -14,8 +15,9 @@
 ]).
 
 start_link() -> gen_server:start_link(?MODULE, 0, []).
-fresh(Pid) -> {tv, gen_server:call(Pid, next_name)}.
-fresh_iface(I, Pid) -> {iface, I, gen_server:call(Pid, next_name)}.
+next_name(Pid) -> gen_server:call(Pid, next_name).
+fresh(Pid) -> {tv, next_name(Pid), none}.
+fresh(I, Pid) -> {tv, next_name(Pid), I}.
 stop(Pid) -> gen_server:stop(Pid).
 
 init(Count) -> {ok, Count}.

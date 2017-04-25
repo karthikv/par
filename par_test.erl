@@ -56,22 +56,13 @@ norm({tuple, LeftT, RightT}, N) ->
   {NormLeftT, N1} = norm(LeftT, N),
   {NormRightT, N2} = norm(RightT, N1),
   {{tuple, NormLeftT, NormRightT}, N2};
-
-norm({tv, V}, N) ->
+norm({tv, V, I}, N) ->
   case dict:find(V, N#norm.subs) of
-    {ok, NormT} -> {NormT, N};
+    {ok, V1} -> {{tv, V1, I}, N};
     error ->
-      NormT = tv_server:fresh(N#norm.pid),
-      {NormT, N#norm{subs=dict:store(V, NormT, N#norm.subs)}}
+      V1 = tv_server:next_name(N#norm.pid),
+      {{tv, V1, I}, N#norm{subs=dict:store(V, V1, N#norm.subs)}}
   end;
-norm({iface, I, V}, N) ->
-  case dict:find(V, N#norm.subs) of
-    {ok, NormT} -> {NormT, N};
-    error ->
-      NormT = tv_server:fresh_iface(I, N#norm.pid),
-      {NormT, N#norm{subs=dict:store(V, NormT, N#norm.subs)}}
-  end;
-
 norm({con, C}, N) -> {{con, C}, N};
 norm({gen, C, ParamT}, N) ->
   {NormParamT, N1} = norm(ParamT, N),
@@ -86,8 +77,8 @@ pretty({lam, ArgsT, ReturnT}) ->
   format_str(Format, [pretty(ArgsT), pretty(ReturnT)]);
 pretty({tuple, LeftT, RightT}) ->
   format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty({tv, TV}) -> format_str("~s", [TV]);
-pretty({iface, I, TV}) -> format_str("~s: ~s", [TV, atom_to_cap_str(I)]);
+pretty({tv, V, none}) -> format_str("~s", [V]);
+pretty({tv, V, I}) -> format_str("~s: ~s", [V, atom_to_cap_str(I)]);
 pretty({con, C}) -> atom_to_cap_str(C);
 pretty({gen, T, ParamT}) ->
   format_str("~s<~s>", [atom_to_cap_str(T), pretty_strip_parens(ParamT)]);
@@ -243,6 +234,14 @@ recur_test_() ->
     ))
   , ?_test(bad_prg(
       "f(n) = if n > 0 then f(n - 1) == 1 else true",
+      {"Bool", "A: Num"}
+    ))
+  ].
+
+iface_test_() ->
+  [ ?_test(bad_prg(
+      "add(x) = x + 3\n"
+      "main() = add(true)",
       {"Bool", "A: Num"}
     ))
   ].

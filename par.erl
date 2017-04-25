@@ -110,7 +110,7 @@ infer({fn, Var, Args, Expr}, C) ->
       {T, C2#ctx{env=C#ctx.env}}
   end;
 
-infer({int, _, _}, C) -> {tv_server:fresh_iface(num, C#ctx.pid), C};
+infer({int, _, _}, C) -> {tv_server:fresh(num, C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, float}, C};
 infer({bool, _, _}, C) -> {{con, bool}, C};
 infer({str, _, _}, C) -> {{gen, list, {con, char}}, C};
@@ -190,13 +190,13 @@ infer({{Op, _}, Left, Right}, C) ->
       {lam, {con, bool}, {lam, {con, bool}, {con, bool}}}
     };
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
-      NumTV = tv_server:fresh_iface(num, C2#ctx.pid),
+      NumTV = tv_server:fresh(num, C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, NumTV, {lam, NumTV, {con, bool}}}
       };
     Op == '+'; Op == '-'; Op == '*'; Op == '/' ->
-      NumTV = tv_server:fresh_iface(num, C2#ctx.pid),
+      NumTV = tv_server:fresh(num, C2#ctx.pid),
       ReturnT = if Op == '/' -> {con, float}; true -> NumTV end,
       {
         {lam, LeftT, {lam, RightT, TV}},
@@ -219,7 +219,7 @@ infer({{Op, _}, Expr}, C) ->
   Cst = if
     Op == '!' -> {{lam, ExprT, TV}, {lam, {con, bool}, {con, bool}}};
     Op == '-' ->
-      NumT = tv_server:fresh_iface(num, C1#ctx.pid),
+      NumT = tv_server:fresh(num, C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, NumT, NumT}}
   end,
 
@@ -277,8 +277,7 @@ resolve({lam, ArgsT, ReturnT}, S) ->
   {lam, resolve(ArgsT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
-resolve({tv, V}, _) -> {tv, V};
-resolve({iface, I, V}, _) -> {iface, I, V};
+resolve({tv, V, I}, _) -> {tv, V, I};
 resolve({con, C}, _) -> {con, C};
 resolve({gen, C, ParamT}, _) -> {gen, C, ParamT};
 resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
@@ -286,7 +285,7 @@ resolve(none, _) -> none.
 
 inst({GVs, T}, S) ->
   Subs = gb_sets:fold(fun(V, Subs) ->
-    dict:store(V, tv_server:fresh(S#solver.pid), Subs)
+    dict:store(V, tv_server:next_name(S#solver.pid), Subs)
   end, dict:new(), GVs),
   subs(T, Subs).
 
@@ -314,25 +313,20 @@ unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   ToUnify = {subs(RightT1, S1#solver.subs), subs(RightT2, S1#solver.subs)},
   unify(ToUnify, S1);
 
-unify({{tv, V}, T}, S) ->
+unify({{tv, V1, I}, {tv, V2, none}}, S) ->
+  Sub = {V2, {tv, V1, I}},
+  S#solver{subs=merge_subs(dict:from_list([Sub]), S#solver.subs)};
+unify({{tv, V, I}, T}, S) ->
+  TV = {tv, V, I},
   Occurs = occurs(V, T),
-  if Occurs -> S#solver{errs=[{{tv, V}, T} | S#solver.errs]};
-     true ->
-       S#solver{subs=merge_subs(dict:from_list([{V, T}]), S#solver.subs)}
-  end;
-unify({T, {tv, V}}, S) -> unify({{tv, V}, T}, S);
-
-unify({{iface, I, V1}, {iface, I, V2}}, S) ->
-  Subs = merge_subs(dict:from_list([{V1, {iface, I, V2}}]), S#solver.subs),
-  S#solver{subs=Subs};
-
-unify({{iface, I, V}, T}, S) ->
   Instance = instance(T, I),
-  if Instance ->
+
+  if Occurs -> S#solver{errs=[{TV, T} | S#solver.errs]};
+     I == none; Instance ->
        S#solver{subs=merge_subs(dict:from_list([{V, T}]), S#solver.subs)};
-     true -> S#solver{errs=[{{iface, I, V}, T} | S#solver.errs]}
+     true -> S#solver{errs=[{TV, T} | S#solver.errs]}
   end;
-unify({T, {iface, I, V}}, S) -> unify({{iface, I, V}, T}, S);
+unify({T, {tv, V, I}}, S) -> unify({{tv, V, I}, T}, S);
 
 unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
   unify({ParamT1, ParamT2}, S);
@@ -344,6 +338,7 @@ merge_subs(Subs1, Subs2) ->
     error({badarg, K}, [K, V1, V2])
   end, Subs1, Subs2).
 
+instance({tv, _, I}, I) -> true;
 instance({con, int}, num) -> true;
 instance({con, float}, num) -> true;
 instance(_, _) -> false.
@@ -352,15 +347,10 @@ subs({lam, ArgsT, ReturnT}, Subs) ->
   {lam, subs(ArgsT, Subs), subs(ReturnT, Subs)};
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
-subs({tv, V}, Subs) ->
+subs({tv, V, I}, Subs) ->
   case dict:find(V, Subs) of
-    {ok, TSub} -> subs(TSub, Subs);
-    error -> {tv, V}
-  end;
-subs({iface, I, V}, Subs) ->
-  case dict:find(V, Subs) of
-    {ok, TSub} -> subs(TSub, Subs);
-    error -> {iface, I, V}
+    {ok, Sub} -> subs(if is_tuple(Sub) -> Sub; true -> {tv, Sub, I} end, Subs);
+    error -> {tv, V, I}
   end;
 subs({con, C}, _) -> {con, C};
 subs({gen, C, ParamT}, Subs) -> {gen, C, subs(ParamT, Subs)};
@@ -369,8 +359,7 @@ subs(none, _) -> none.
 
 fvs({lam, ArgsT, ReturnT}) -> gb_sets:union(fvs(ArgsT), fvs(ReturnT));
 fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
-fvs({tv, V}) -> gb_sets:from_list([V]);
-fvs({iface, _, V}) -> gb_sets:from_list([V]);
+fvs({tv, V, _}) -> gb_sets:from_list([V]);
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamT}) -> fvs(ParamT);
 % fvs({inst, ...}) ommitted; all inst should be resolved
@@ -380,8 +369,7 @@ occurs(V, {lam, ArgsT, ReturnT}) ->
   occurs(V, ArgsT) or occurs(V, ReturnT);
 occurs(V, {tuple, LeftT, RightT}) ->
   occurs(V, LeftT) or occurs(V, RightT);
-occurs(V1, {tv, V2}) -> V1 == V2;
-occurs(V1, {iface, _, V2}) -> V1 == V2;
+occurs(V1, {tv, V2, _}) -> V1 == V2;
 occurs(_, {con, _}) -> false;
 occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
 % occurs({inst, ...}) ommitted; all inst should be resolved
