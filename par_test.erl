@@ -52,6 +52,10 @@ norm({lam, ArgsT, ReturnT}, N) ->
   {NormArgsT, N1} = norm(ArgsT, N),
   {NormReturnT, N2} = norm(ReturnT, N1),
   {{lam, NormArgsT, NormReturnT}, N2};
+norm({tuple, LeftT, RightT}, N) ->
+  {NormLeftT, N1} = norm(LeftT, N),
+  {NormRightT, N2} = norm(RightT, N1),
+  {{tuple, NormLeftT, NormRightT}, N2};
 
 norm({tv, V}, N) ->
   case dict:find(V, N#norm.subs) of
@@ -68,13 +72,10 @@ norm({iface, I, V}, N) ->
       {NormT, N#norm{subs=dict:store(V, NormT, N#norm.subs)}}
   end;
 
-norm({con, T}, N) -> {{con, T}, N};
-norm({gen, T, ParamsT}, N) ->
-  {NormParamsTRev, N1} = lists:foldl(fun(P, {FoldParamsT, FoldN}) ->
-    {NormP, FoldN1} = norm(P, FoldN),
-    {[NormP | FoldParamsT], FoldN1}
-  end, {[], N}, ParamsT),
-  {{gen, T, lists:reverse(NormParamsTRev)}, N1};
+norm({con, C}, N) -> {{con, C}, N};
+norm({gen, C, ParamT}, N) ->
+  {NormParamT, N1} = norm(ParamT, N),
+  {{gen, C, NormParamT}, N1};
 norm(none, N) -> {none, N}.
 
 pretty({lam, ArgsT, ReturnT}) ->
@@ -83,13 +84,18 @@ pretty({lam, ArgsT, ReturnT}) ->
     _ -> "~s -> ~s"
   end,
   format_str(Format, [pretty(ArgsT), pretty(ReturnT)]);
+pretty({tuple, LeftT, RightT}) ->
+  format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
 pretty({tv, TV}) -> format_str("~s", [TV]);
 pretty({iface, I, TV}) -> format_str("~s: ~s", [TV, atom_to_cap_str(I)]);
-pretty({con, T}) -> atom_to_cap_str(T);
-pretty({gen, T, Params}) ->
-  ParamsPretty = lists:map(fun(P) -> pretty(P) end, Params),
-  format_str("~s<~s>", [atom_to_cap_str(T), string:join(ParamsPretty, ", ")]);
+pretty({con, C}) -> atom_to_cap_str(C);
+pretty({gen, T, ParamT}) ->
+  format_str("~s<~s>", [atom_to_cap_str(T), pretty_strip_parens(ParamT)]);
 pretty(none) -> "()".
+
+pretty_strip_parens({tuple, LeftT, RightT}) ->
+  format_str("~s, ~s", [pretty(LeftT), pretty(RightT)]);
+pretty_strip_parens(T) -> pretty(T).
 
 atom_to_cap_str(Atom) ->
   Str = format_str("~p", [Atom]),
@@ -112,9 +118,9 @@ expr_test_() ->
   , ?_test("List<Float>" = ok_expr("[3, 5.0, 6]"))
   , ?_test("List<Bool>" = ok_expr("[true, false, true]"))
   , ?_test(bad_expr("[3.0, true]", {"Float", "Bool"}))
-  , ?_test("Tuple<Bool, Float>" = ok_expr("(true, 3.0)"))
-  , ?_test("Tuple<A: Num, B: Num, List<C: Num>>" = ok_expr("(1, 2, [30, 40])"))
-  , ?_test("Tuple<Tuple<A: Num, Bool>, Float>" = ok_expr("((3, false), 4.0)"))
+  , ?_test("(Bool, Float)" = ok_expr("(true, 3.0)"))
+  , ?_test("(A: Num, B: Num, List<C: Num>)" = ok_expr("(1, 2, [30, 40])"))
+  , ?_test("((A: Num, Bool), Float)" = ok_expr("((3, false), 4.0)"))
 
   , ?_test("Bool" = ok_expr("1 == 2"))
   , ?_test("Bool" = ok_expr("1.0 == 2.0"))

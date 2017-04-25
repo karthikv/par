@@ -113,7 +113,7 @@ infer({fn, Var, Args, Expr}, C) ->
 infer({int, _, _}, C) -> {tv_server:fresh_iface(num, C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, float}, C};
 infer({bool, _, _}, C) -> {{con, bool}, C};
-infer({str, _, _}, C) -> {{gen, list, [{con, char}]}, C};
+infer({str, _, _}, C) -> {{gen, list, {con, char}}, C};
 infer({list, Elems}, C) ->
   TV = tv_server:fresh(C#ctx.pid),
   {Csts, C1} = lists:foldl(fun(Elem, {FoldCsts, FoldC}) ->
@@ -121,14 +121,17 @@ infer({list, Elems}, C) ->
     {[{ElemT, TV} | FoldCsts], FoldC1}
   end, {[], C}, Elems),
 
-  {{gen, list, [TV]}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
+  {{gen, list, TV}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
 infer({tuple, Elems}, C) ->
-  {ParamsTRev, C1} = lists:foldl(fun(Elem, {FoldParamsT, FoldC}) ->
+  {ElemsTRev, C1} = lists:foldl(fun(Elem, {FoldElemsT, FoldC}) ->
     {ElemT, FoldC1} = infer(Elem, FoldC),
-    {[ElemT | FoldParamsT], FoldC1}
+    {[ElemT | FoldElemsT], FoldC1}
   end, {[], C}, Elems),
 
-  {{gen, tuple, lists:reverse(ParamsTRev)}, C1};
+  T = lists:foldl(fun(ElemT, LastT) ->
+    {tuple, ElemT, LastT}
+  end, hd(ElemsTRev), tl(ElemsTRev)),
+  {T, C1};
 
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
@@ -200,7 +203,7 @@ infer({{Op, _}, Left, Right}, C) ->
         {lam, NumTV, {lam, NumTV, ReturnT}}
       };
     Op == '++' ->
-      ListT = {gen, list, [tv_server:fresh(C2#ctx.pid)]},
+      ListT = {gen, list, tv_server:fresh(C2#ctx.pid)},
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, ListT, {lam, ListT, ListT}}
@@ -272,10 +275,12 @@ resolve_csts([{L, R} | Rest], S) ->
 
 resolve({lam, ArgsT, ReturnT}, S) ->
   {lam, resolve(ArgsT, S), resolve(ReturnT, S)};
+resolve({tuple, LeftT, RightT}, S) ->
+  {tuple, resolve(LeftT, S), resolve(RightT, S)};
 resolve({tv, V}, _) -> {tv, V};
 resolve({iface, I, V}, _) -> {iface, I, V};
-resolve({con, T}, _) -> {con, T};
-resolve({gen, T, ParamsT}, _) -> {gen, T, ParamsT};
+resolve({con, C}, _) -> {con, C};
+resolve({gen, C, ParamT}, _) -> {gen, C, ParamT};
 resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
 resolve(none, _) -> none.
 
@@ -304,6 +309,10 @@ unify({{lam, ArgsT1, ReturnT1}, {lam, ArgsT2, ReturnT2}}, S) ->
   S1 = unify({ArgsT1, ArgsT2}, S),
   ToUnify = {subs(ReturnT1, S1#solver.subs), subs(ReturnT2, S1#solver.subs)},
   unify(ToUnify, S1);
+unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
+  S1 = unify({LeftT1, LeftT2}, S),
+  ToUnify = {subs(RightT1, S1#solver.subs), subs(RightT2, S1#solver.subs)},
+  unify(ToUnify, S1);
 
 unify({{tv, V}, T}, S) ->
   Occurs = occurs(V, T),
@@ -325,11 +334,8 @@ unify({{iface, I, V}, T}, S) ->
   end;
 unify({T, {iface, I, V}}, S) -> unify({{iface, I, V}, T}, S);
 
-unify({{gen, T, ParamsT1}, {gen, T, ParamsT2}}, S)
-  when length(ParamsT1) == length(ParamsT2) ->
-  lists:foldl(fun(Cst, FoldS) ->
-    unify(Cst, FoldS)
-  end, S, lists:zip(ParamsT1, ParamsT2));
+unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
+  unify({ParamT1, ParamT2}, S);
 
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
@@ -344,6 +350,8 @@ instance(_, _) -> false.
 
 subs({lam, ArgsT, ReturnT}, Subs) ->
   {lam, subs(ArgsT, Subs), subs(ReturnT, Subs)};
+subs({tuple, LeftT, RightT}, Subs) ->
+  {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
 subs({tv, V}, Subs) ->
   case dict:find(V, Subs) of
     {ok, TSub} -> subs(TSub, Subs);
@@ -354,26 +362,27 @@ subs({iface, I, V}, Subs) ->
     {ok, TSub} -> subs(TSub, Subs);
     error -> {iface, I, V}
   end;
-subs({con, T}, _) -> {con, T};
-subs({gen, T, ParamsT}, Subs) ->
-  {gen, T, lists:map(fun(P) -> subs(P, Subs) end, ParamsT)};
+subs({con, C}, _) -> {con, C};
+subs({gen, C, ParamT}, Subs) -> {gen, C, subs(ParamT, Subs)};
 subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList};
 subs(none, _) -> none.
 
 fvs({lam, ArgsT, ReturnT}) -> gb_sets:union(fvs(ArgsT), fvs(ReturnT));
+fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
 fvs({tv, V}) -> gb_sets:from_list([V]);
 fvs({iface, _, V}) -> gb_sets:from_list([V]);
 fvs({con, _}) -> gb_sets:new();
-fvs({gen, _, ParamsT}) ->
-  gb_sets:union(lists:map(fun(P) -> fvs(P) end, ParamsT));
+fvs({gen, _, ParamT}) -> fvs(ParamT);
 % fvs({inst, ...}) ommitted; all inst should be resolved
 fvs(none) -> gb_sets:new().
 
 occurs(V, {lam, ArgsT, ReturnT}) ->
   occurs(V, ArgsT) or occurs(V, ReturnT);
+occurs(V, {tuple, LeftT, RightT}) ->
+  occurs(V, LeftT) or occurs(V, RightT);
 occurs(V1, {tv, V2}) -> V1 == V2;
 occurs(V1, {iface, _, V2}) -> V1 == V2;
 occurs(_, {con, _}) -> false;
-occurs(V, {gen, _, ParamsT}) -> lists:any(fun(P) -> occurs(V, P) end, ParamsT);
+occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
 % occurs({inst, ...}) ommitted; all inst should be resolved
 occurs(_, none) -> false.
