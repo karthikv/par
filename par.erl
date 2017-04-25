@@ -314,8 +314,7 @@ unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   unify(ToUnify, S1);
 
 unify({{tv, V1, I}, {tv, V2, none}}, S) ->
-  Sub = {V2, {tv, V1, I}},
-  S#solver{subs=merge_subs(dict:from_list([Sub]), S#solver.subs)};
+  S#solver{subs=add_sub(V2, {tv, V1, I}, S#solver.subs)};
 unify({{tv, V, I}, T}, S) ->
   TV = {tv, V, I},
   Occurs = occurs(V, T),
@@ -323,7 +322,7 @@ unify({{tv, V, I}, T}, S) ->
 
   if Occurs -> S#solver{errs=[{TV, T} | S#solver.errs]};
      I == none; Instance ->
-       S#solver{subs=merge_subs(dict:from_list([{V, T}]), S#solver.subs)};
+       S#solver{subs=add_sub(V, T, S#solver.subs)};
      true -> S#solver{errs=[{TV, T} | S#solver.errs]}
   end;
 unify({T, {tv, V, I}}, S) -> unify({{tv, V, I}, T}, S);
@@ -333,10 +332,11 @@ unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
 
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
-merge_subs(Subs1, Subs2) ->
-  dict:merge(fun(K, V1, V2) ->
-    error({badarg, K}, [K, V1, V2])
-  end, Subs1, Subs2).
+add_sub(Key, Value, Subs) ->
+  case dict:find(Key, Subs) of
+    {ok, Existing} -> error({badarg, Key}, [Key, Existing, Value]);
+    error -> dict:store(Key, Value, Subs)
+  end.
 
 instance({tv, _, I}, I) -> true;
 instance({con, int}, num) -> true;
