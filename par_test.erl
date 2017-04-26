@@ -2,8 +2,6 @@
 -export([run/0]).
 -include_lib("eunit/include/eunit.hrl").
 
--record(norm, {subs, pid}).
-
 run() ->
   par:reload(false),
 
@@ -18,7 +16,7 @@ norm_prg(Prg, Name) ->
   T = dict:fetch(Name, Env),
 
   {ok, Pid} = tv_server:start_link(),
-  {NormT, _} = norm(T, #norm{subs=dict:new(), pid=Pid}),
+  {NormT, _} = norm(T, {dict:new(), Pid}),
   ok = tv_server:stop(Pid),
   NormT.
 
@@ -30,7 +28,7 @@ bad_prg(Prg, {EP1, EP2}) ->
   [{T1, T2}] = Errs,
 
   {ok, Pid} = tv_server:start_link(),
-  {NormT1, N} = norm(T1, #norm{subs=dict:new(), pid=Pid}),
+  {NormT1, N} = norm(T1, {dict:new(), Pid}),
   {NormT2, _} = norm(T2, N),
 
   P1 = pretty(NormT1),
@@ -56,17 +54,17 @@ norm({tuple, LeftT, RightT}, N) ->
   {NormLeftT, N1} = norm(LeftT, N),
   {NormRightT, N2} = norm(RightT, N1),
   {{tuple, NormLeftT, NormRightT}, N2};
-norm({tv, V, I}, N) ->
-  case dict:find(V, N#norm.subs) of
-    {ok, V1} -> {{tv, V1, I}, N};
+norm({tv, V, I, GVs}, {Subs, Pid}) ->
+  case dict:find(V, Subs) of
+    {ok, V1} -> {{tv, V1, I, GVs}, {Subs, Pid}};
     error ->
-      V1 = tv_server:next_name(N#norm.pid),
-      {{tv, V1, I}, N#norm{subs=dict:store(V, V1, N#norm.subs)}}
+      V1 = tv_server:next_name(Pid),
+      {{tv, V1, I, GVs}, {dict:store(V, V1, Subs), Pid}}
   end;
-norm({con, C}, N) -> {{con, C}, N};
-norm({gen, C, ParamT}, N) ->
+norm({con, Con}, N) -> {{con, Con}, N};
+norm({gen, Con, ParamT}, N) ->
   {NormParamT, N1} = norm(ParamT, N),
-  {{gen, C, NormParamT}, N1};
+  {{gen, Con, NormParamT}, N1};
 norm(none, N) -> {none, N}.
 
 pretty({lam, ArgsT, ReturnT}) ->
@@ -77,20 +75,16 @@ pretty({lam, ArgsT, ReturnT}) ->
   format_str(Format, [pretty(ArgsT), pretty(ReturnT)]);
 pretty({tuple, LeftT, RightT}) ->
   format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty({tv, V, none}) -> format_str("~s", [V]);
-pretty({tv, V, I}) -> format_str("~s: ~s", [V, atom_to_cap_str(I)]);
-pretty({con, C}) -> atom_to_cap_str(C);
+pretty({tv, V, none, _}) -> format_str("~s", [tl(V)]);
+pretty({tv, V, I, _}) -> format_str("~s: ~s", [tl(V), atom_to_list(I)]);
+pretty({con, Con}) -> atom_to_list(Con);
 pretty({gen, T, ParamT}) ->
-  format_str("~s<~s>", [atom_to_cap_str(T), pretty_strip_parens(ParamT)]);
+  format_str("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
 pretty(none) -> "()".
 
 pretty_strip_parens({tuple, LeftT, RightT}) ->
   format_str("~s, ~s", [pretty(LeftT), pretty(RightT)]);
 pretty_strip_parens(T) -> pretty(T).
-
-atom_to_cap_str(Atom) ->
-  Str = format_str("~p", [Atom]),
-  [string:to_upper(hd(Str)) | tl(Str)].
 
 format_str(Str, Args) ->
   lists:flatten(io_lib:format(Str, Args)).
@@ -184,6 +178,12 @@ expr_test_() ->
   , ?_test(bad_expr("!15.0", {"Float", "Bool"}))
   , ?_test(bad_expr("!3 == false", {"A: Num", "Bool"}))
 
+  , ?_test("Int" = ok_expr("3 :: Int"))
+  , ?_test("Float" = ok_expr("5 :: Float + 2"))
+  , ?_test(bad_expr("3 :: A", {"A: Num", "B"}))
+  , ?_test(bad_expr("5.0 :: A: Num", {"Float", "A: Num"}))
+  , ?_test(bad_expr("5.0 :: Int", {"Float", "Int"}))
+
   , ?_test("A: Num" = ok_expr("7 - (3 + -5)"))
   , ?_test("Float" = ok_expr("7 - (3.0 + -5)"))
   , ?_test("Bool" = ok_expr("7 == 5.0 || !true && -8 == 3 || false != false"))
@@ -197,6 +197,9 @@ expr_test_() ->
 
   , ?_test("() -> A: Num" = ok_expr("|-| 3"))
   , ?_test("A -> A" = ok_expr("|x| x"))
+  , ?_test("A -> A" = ok_expr("|x| x :: T"))
+  , ?_test("(A -> A) -> A -> A" = ok_expr("|x| x :: T -> T"))
+  , ?_test("A -> A" = ok_expr("(|x| x) :: T -> T"))
   , ?_test("A: Num -> A: Num" = ok_expr("|x| x + 3"))
   , ?_test("Float -> Float" = ok_expr("|x| x + 3.0"))
   , ?_test("(Float -> A) -> Float -> A" = ok_expr("|f, x| f(x - 3.0)"))
@@ -243,5 +246,49 @@ iface_test_() ->
       "add(x) = x + 3\n"
       "main() = add(true)",
       {"Bool", "A: Num"}
+    ))
+  ].
+
+sig_test_() ->
+  [ ?_test("() -> A: Num" = ok_prg(
+      "main :: () -> A: Num\n"
+      "main() = 3",
+      "main"
+    ))
+  , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
+      "add :: A: Num -> A: Num -> A: Num\n"
+      "add(x, y) = x + y",
+      "add"
+    ))
+  , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
+      "add :: A: Num -> A: Num -> A: Num\n"
+      "add(x, y) = x :: B: Num + y :: A:Num",
+      "add"
+    ))
+  , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(
+      "cmp :: (B -> C) -> (A -> B) -> A -> C\n"
+      "cmp(f, g, x) = f(g(x))",
+      "cmp"
+    ))
+  , ?_test("Int -> Int" = ok_prg(
+      "foo :: Int -> Int\n"
+      "foo(x) = x + 3",
+      "foo"
+    ))
+  , ?_test("Int -> Int" = ok_prg(
+      "foo(x) = x :: Int + 3",
+      "foo"
+    ))
+  , ?_test(bad_prg(
+      "id :: A -> B\n"
+      "id(x) = x",
+      {"A", "B"}
+    ))
+  , ?_test(bad_prg(
+      "foo :: Int -> Int\n"
+      "foo(x) = x + 3\n"
+      "bar :: A: Num -> Int\n"
+      "bar(x) = foo(x)",
+      {"Int", "A: Num"}
     ))
   ].

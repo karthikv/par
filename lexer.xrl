@@ -3,8 +3,10 @@ Definitions.
 INT = [0-9]+
 FLOAT = {INT}+\.{INT}+
 BOOL = (true|false)
-VAR = [a-zA-Z][a-zA-Z0-9_]*
 STR = "(\\.|[^\\"])*"
+VAR = [a-z][a-zA-Z0-9_]*
+TV = [A-Z]
+CON = [A-Z][a-zA-Z0-9_]+
 WHITESPACE = [\s\t\n\r]
 
 Rules.
@@ -28,6 +30,9 @@ Rules.
 \/ : {token, {'/', TokenLine}}.
 \+\+ : {token, {'++', TokenLine}}.
 \| : {token, {'|', TokenLine}}.
+\:\: : {token, {'::', TokenLine}}.
+\: : {token, {':', TokenLine}}.
+\-\> : {token, {'->', TokenLine}}.
 if : {token, {'if', TokenLine}}.
 then : {token, {'then', TokenLine}}.
 else : {token, {'else', TokenLine}}.
@@ -40,6 +45,8 @@ in : {token, {'in', TokenLine}}.
 \] : {token, {']', TokenLine}}.
 {STR} : {token, {str, TokenLine, drop_quotes(TokenChars)}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
+{TV} : {token, {sig_tv, TokenLine, TokenChars}}.
+{CON} : {token, {sig_con, TokenLine, TokenChars}}.
 {WHITESPACE}+ : skip_token.
 
 Erlang code.

@@ -16,8 +16,8 @@
 
 start_link() -> gen_server:start_link(?MODULE, 0, []).
 next_name(Pid) -> gen_server:call(Pid, next_name).
-fresh(Pid) -> {tv, next_name(Pid), none}.
-fresh(I, Pid) -> {tv, next_name(Pid), I}.
+fresh(Pid) -> {tv, next_name(Pid), none, gb_sets:new()}.
+fresh(I, Pid) -> {tv, next_name(Pid), I, gb_sets:new()}.
 stop(Pid) -> gen_server:stop(Pid).
 
 init(Count) -> {ok, Count}.
@@ -34,5 +34,5 @@ handle_info(Msg, Count) ->
 terminate(normal, _) -> ok.
 code_change(_, State, _) -> {ok, State}.
 
-gen_name(Count) when Count < 26 -> [$A + Count];
+gen_name(Count) when Count < 26 -> [$*, $A + Count];
 gen_name(Count) -> [$A + (Count rem 26) | gen_name(Count - 26)].

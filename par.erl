@@ -1,5 +1,5 @@
 -module(par).
--export([reload/1, infer_prg/1]).
+-export([reload/1, infer_prg/1, subs/2, fvs/1]).
 
 -record(ctx, {csts, env, pid, deps}).
 -record(solver, {subs, errs, pid}).
@@ -21,13 +21,15 @@
 %
 % TODO:
 % - TODOs in code (non-unification error cases)
-% - Type annotations
 % - Error messages
 % - Operation: nth element of tuple?
+% - Tuples with tuples as the last element?
 % - Data structures: sets, maps
+% - Make true/false capitalized
+% - Global variables
 % - Maybe else types (unit type?)
 % - Complex types: ADTs
-% - Typeclasses
+% - Typeclasses + generics w/o concrete types
 % - Concurrency
 % - Pattern matching
 % - Extra type variables for return value of operators like == and +?
@@ -62,16 +64,37 @@ infer_prg(Prg) ->
   {ok, Ast} = parser:parse(Tokens),
   {ok, Pid} = tv_server:start_link(),
 
-  C = lists:foldl(fun({fn, {var, _, Name}, _, _}, C) ->
-    % TODO: what if name already exists?
-    TV = tv_server:fresh(C#ctx.pid),
-    C#ctx{env=dict:store(Name, {fn, TV}, C#ctx.env)}
+  C = lists:foldl(fun(Node, C) ->
+    case Node of
+      {fn, {var, _, Name}, _, _} ->
+        % TODO: what if name already exists?
+        TV = tv_server:fresh(C#ctx.pid),
+        C#ctx{env=dict:store(Name, {fn, TV}, C#ctx.env)};
+      _ -> C
+    end
   end, #ctx{csts=[], env=dict:new(), pid=Pid, deps=[]}, Ast),
 
-  {FCs, C1} = lists:foldl(fun(Node, {FCs, FoldC}) ->
-    {TV, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
-    {[{TV, FoldC1} | FCs], FoldC1}
-  end, {[], C}, Ast),
+  {_, _, FCs, C1} = lists:foldl(fun(Node, {ExpName, SigT, FCs, FoldC}) ->
+    if
+      % TODO: handle error
+      ExpName =/= none -> {fn, {var, _, ExpName}, _, _} = Node;
+      true -> none
+    end,
+
+    case Node of
+      {fn, _, _, _} ->
+        {TV, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
+        Csts = if
+          SigT == none -> FoldC1#ctx.csts;
+          true -> [{TV, SigT} | FoldC1#ctx.csts]
+        end,
+        FoldC2 = FoldC1#ctx{csts=Csts},
+        {none, none, [{TV, FoldC2} | FCs], FoldC2};
+      {sig, {var, _, Name}, _} ->
+        {T, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
+        {Name, T, FCs, FoldC1}
+    end
+  end, {none, none, [], C}, Ast),
 
   Result = case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
     {ok, Subs} ->
@@ -91,11 +114,12 @@ infer({fn, Var, Args, Expr}, C) ->
   end, {[], C}, Args),
 
   {ReturnT, C2} = infer(Expr, C1),
-  T = if length(Args) == 0 -> {lam, none, ReturnT};
-         true -> lists:foldl(fun(ArgT, LastT) ->
-           {lam, ArgT, LastT}
-         end, ReturnT, ArgsTRev)
-      end,
+  T = if
+    length(Args) == 0 -> {lam, none, ReturnT};
+    true -> lists:foldl(fun(ArgT, LastT) ->
+      {lam, ArgT, LastT}
+    end, ReturnT, ArgsTRev)
+  end,
 
   case Var of
     {var, _, Name} ->
@@ -110,10 +134,42 @@ infer({fn, Var, Args, Expr}, C) ->
       {T, C2#ctx{env=C#ctx.env}}
   end;
 
-infer({int, _, _}, C) -> {tv_server:fresh(num, C#ctx.pid), C};
-infer({float, _, _}, C) -> {{con, float}, C};
-infer({bool, _, _}, C) -> {{con, bool}, C};
-infer({str, _, _}, C) -> {{gen, list, {con, char}}, C};
+infer({sig, _, Sig}, C) ->
+  {SigT, C1} = infer(Sig, C),
+  {norm_sig_type(SigT, C#ctx.pid), C1};
+
+infer({expr_sig, Expr, Sig}, C) ->
+  {ExprT, C1} = infer(Expr, C),
+  {SigT, C2} = infer(Sig, C1),
+
+  NormSigT = norm_sig_type(SigT, C#ctx.pid),
+  {ExprT, C2#ctx{csts=[{ExprT, NormSigT} | C2#ctx.csts]}};
+
+infer({sig_lam, SigArgsT, SigReturnT}, C) ->
+  {ArgsT, C1} = infer(SigArgsT, C),
+  {ReturnT, C2} = infer(SigReturnT, C1),
+  {{lam, ArgsT, ReturnT}, C2};
+infer({sig_tuple, SigLeftT, SigRightT}, C) ->
+  {LeftT, C1} = infer(SigLeftT, C),
+  {RightT, C2} = infer(SigRightT, C1),
+  {{tuple, LeftT, RightT}, C2};
+infer({sig_iface, SigTV, SigCon}, C) ->
+  {{tv, V, none, GVs}, C1} = infer(SigTV, C),
+  {{con, I}, C2} = infer(SigCon, C1),
+  {{tv, V, I, GVs}, C2};
+infer({sig_gen, SigCon, SigParamT}, C) ->
+  {Con, C1} = infer(SigCon, C),
+  {ParamT, C2} = infer(SigParamT, C1),
+  {{gen, Con, ParamT}, C2};
+infer({sig_tv, _, V}, C) -> {{tv, V, none, gb_sets:new()}, C};
+% TODO: ensure these types are valid
+infer({sig_con, _, Con}, C) -> {{con, list_to_atom(Con)}, C};
+infer(none, C) -> {none, C};
+
+infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};
+infer({float, _, _}, C) -> {{con, 'Float'}, C};
+infer({bool, _, _}, C) -> {{con, 'Bool'}, C};
+infer({str, _, _}, C) -> {{gen, 'List', {con, 'Char'}}, C};
 infer({list, Elems}, C) ->
   TV = tv_server:fresh(C#ctx.pid),
   {Csts, C1} = lists:foldl(fun(Elem, {FoldCsts, FoldC}) ->
@@ -121,7 +177,7 @@ infer({list, Elems}, C) ->
     {[{ElemT, TV} | FoldCsts], FoldC1}
   end, {[], C}, Elems),
 
-  {{gen, list, TV}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
+  {{gen, 'List', TV}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
 infer({tuple, Elems}, C) ->
   {ElemsTRev, C1} = lists:foldl(fun(Elem, {FoldElemsT, FoldC}) ->
     {ElemT, FoldC1} = infer(Elem, FoldC),
@@ -169,7 +225,7 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
 
   TV = tv_server:fresh(C#ctx.pid),
   {TV, C3#ctx{
-    csts=[{{con, bool}, ExprT}, {TV, ThenT}, {TV, ElseT} | C3#ctx.csts]}
+    csts=[{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT} | C3#ctx.csts]}
   };
 
 infer({{Op, _}, Left, Right}, C) ->
@@ -183,27 +239,27 @@ infer({{Op, _}, Left, Right}, C) ->
       OperandTV = tv_server:fresh(C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
-        {lam, OperandTV, {lam, OperandTV, {con, bool}}}
+        {lam, OperandTV, {lam, OperandTV, {con, 'Bool'}}}
       };
     Op == '||'; Op == '&&' -> {
       {lam, LeftT, {lam, RightT, TV}},
-      {lam, {con, bool}, {lam, {con, bool}, {con, bool}}}
+      {lam, {con, 'Bool'}, {lam, {con, 'Bool'}, {con, 'Bool'}}}
     };
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
-      NumTV = tv_server:fresh(num, C2#ctx.pid),
+      NumTV = tv_server:fresh('Num', C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
-        {lam, NumTV, {lam, NumTV, {con, bool}}}
+        {lam, NumTV, {lam, NumTV, {con, 'Bool'}}}
       };
     Op == '+'; Op == '-'; Op == '*'; Op == '/' ->
-      NumTV = tv_server:fresh(num, C2#ctx.pid),
-      ReturnT = if Op == '/' -> {con, float}; true -> NumTV end,
+      NumTV = tv_server:fresh('Num', C2#ctx.pid),
+      ReturnT = if Op == '/' -> {con, 'Float'}; true -> NumTV end,
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, NumTV, {lam, NumTV, ReturnT}}
       };
     Op == '++' ->
-      ListT = {gen, list, tv_server:fresh(C2#ctx.pid)},
+      ListT = {gen, 'List', tv_server:fresh(C2#ctx.pid)},
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, ListT, {lam, ListT, ListT}}
@@ -217,13 +273,26 @@ infer({{Op, _}, Expr}, C) ->
   TV = tv_server:fresh(C1#ctx.pid),
 
   Cst = if
-    Op == '!' -> {{lam, ExprT, TV}, {lam, {con, bool}, {con, bool}}};
+    Op == '!' -> {{lam, ExprT, TV}, {lam, {con, 'Bool'}, {con, 'Bool'}}};
     Op == '-' ->
-      NumT = tv_server:fresh(num, C1#ctx.pid),
+      NumT = tv_server:fresh('Num', C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, NumT, NumT}}
   end,
 
   {TV, C1#ctx{csts=[Cst | C1#ctx.csts]}}.
+
+norm_sig_type(SigT, Pid) ->
+  % TODO: is it more intuitive to change each fv to *fv and then replace?
+  FVList = gb_sets:to_list(fvs(SigT)),
+  NewFVList = lists:map(fun(_) -> tv_server:next_name(Pid) end, FVList),
+  FVSubs = dict:from_list(lists:zip(FVList, NewFVList)),
+
+  GVs = gb_sets:from_list(NewFVList),
+  GVSubs = dict:from_list(lists:map(fun(FV) ->
+    {FV, {add_gvs, GVs}}
+  end, NewFVList)),
+
+  subs(subs(SigT, FVSubs), GVSubs).
 
 solve([], #solver{errs=Errs}) when length(Errs) > 0 -> {errors, Errs};
 solve([], #solver{subs=Subs}) -> {ok, Subs};
@@ -277,9 +346,9 @@ resolve({lam, ArgsT, ReturnT}, S) ->
   {lam, resolve(ArgsT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
-resolve({tv, V, I}, _) -> {tv, V, I};
-resolve({con, C}, _) -> {con, C};
-resolve({gen, C, ParamT}, _) -> {gen, C, ParamT};
+resolve({tv, V, I, GVs}, _) -> {tv, V, I, GVs};
+resolve({con, Con}, _) -> {con, Con};
+resolve({gen, Con, ParamT}, _) -> {gen, Con, ParamT};
 resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
 resolve(none, _) -> none.
 
@@ -313,64 +382,103 @@ unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   ToUnify = {subs(RightT1, S1#solver.subs), subs(RightT2, S1#solver.subs)},
   unify(ToUnify, S1);
 
-unify({{tv, V1, I}, {tv, V2, none}}, S) ->
-  S#solver{subs=add_sub(V2, {tv, V1, I}, S#solver.subs)};
-unify({{tv, V, I}, T}, S) ->
-  TV = {tv, V, I},
-  Occurs = occurs(V, T),
-  Instance = instance(T, I),
+unify({{tv, V, I1, GVs1}, {tv, V, I2, GVs2}}, _) ->
+  error({badarg, V, I1, GVs1, I2, GVs2});
+unify({{tv, V1, I1, GVs1}, {tv, V2, I2, GVs2}}, S) ->
+  Err = {{tv, V1, I1, GVs1}, {tv, V2, I2, GVs2}},
+  Occurs = gb_sets:is_member(V1, GVs2) or gb_sets:is_member(V2, GVs1),
+  AllV1 = gb_sets:is_member(V1, GVs1),
+  AllV2 = gb_sets:is_member(V2, GVs2),
 
-  if Occurs -> S#solver{errs=[{TV, T} | S#solver.errs]};
-     I == none; Instance ->
-       S#solver{subs=add_sub(V, T, S#solver.subs)};
-     true -> S#solver{errs=[{TV, T} | S#solver.errs]}
+  if
+    Occurs -> add_err(Err, S);
+
+    % V1 is the most (or equally) constraining; change V2 -> V1
+    I1 == I2, AllV1 ->
+      add_sub(V2, {tv, V1, I1, gb_sets:union(GVs1, GVs2)}, S);
+
+    % V2 is the most (or equally) constraining; change V1 -> V2
+    I1 == I2, not AllV1 ->
+      add_sub(V1, {tv, V2, I2, gb_sets:union(GVs2, GVs1)}, S);
+
+    % can substitute V2 for anything; change V2 -> V1
+    I2 == none, not AllV2 ->
+      add_sub(V2, {tv, V1, I1, gb_sets:union(GVs1, GVs2)}, S);
+
+    % can substitute V1 for anything; change V1 -> V2
+    I1 == none, not AllV1 ->
+      add_sub(V1, {tv, V2, I2, gb_sets:union(GVs2, GVs1)}, S);
+
+    % We're now guaranteed three things:
+    % (1) I1 =/= I2
+    % (2) I2 =/= none or AllV2
+    % (3) I1 =/= none or AllV1
+    %
+    % (1) means the interfaces differ, (2) means we can't change V2 -> V1,
+    % and (3) means we can't change V1 -> V2. We're out of options.
+    true -> add_err(Err, S)
   end;
-unify({T, {tv, V, I}}, S) -> unify({{tv, V, I}, T}, S);
+unify({{tv, V, I, GVs}, T}, S) ->
+  Err = {{tv, V, I, GVs}, T},
+  Occurs = occurs(gb_sets:add(V, GVs), T),
+  Instance = not gb_sets:is_member(V, GVs) and ((I == none) or instance(T, I)),
+
+  if
+    Occurs -> add_err(Err, S);
+    Instance -> add_sub(V, T, S);
+    true -> add_err(Err, S)
+  end;
+unify({T, {tv, V, I, GVs}}, S) -> unify({{tv, V, I, GVs}, T}, S);
 
 unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
   unify({ParamT1, ParamT2}, S);
 
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
-add_sub(Key, Value, Subs) ->
-  case dict:find(Key, Subs) of
-    {ok, Existing} -> error({badarg, Key}, [Key, Existing, Value]);
-    error -> dict:store(Key, Value, Subs)
+add_sub(Key, Value, S) ->
+  case dict:find(Key, S#solver.subs) of
+    {ok, Existing} -> error({badarg, Key, Existing, Value});
+    error -> S#solver{subs=dict:store(Key, Value, S#solver.subs)}
   end.
 
-instance({tv, _, I}, I) -> true;
-instance({con, int}, num) -> true;
-instance({con, float}, num) -> true;
+add_err(Err, S) ->
+  S#solver{errs=[Err | S#solver.errs]}.
+
+instance({con, 'Int'}, 'Num') -> true;
+instance({con, 'Float'}, 'Num') -> true;
 instance(_, _) -> false.
 
 subs({lam, ArgsT, ReturnT}, Subs) ->
   {lam, subs(ArgsT, Subs), subs(ReturnT, Subs)};
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
-subs({tv, V, I}, Subs) ->
+subs({tv, V, I, GVs}, Subs) ->
   case dict:find(V, Subs) of
-    {ok, Sub} -> subs(if is_tuple(Sub) -> Sub; true -> {tv, Sub, I} end, Subs);
-    error -> {tv, V, I}
+    {ok, {add_gvs, NewGVs}} -> {tv, V, I, gb_sets:union(GVs, NewGVs)};
+    {ok, Value} ->
+      Sub = if is_tuple(Value) -> Value; true -> {tv, Value, I, GVs} end,
+      subs(Sub, Subs);
+    error -> {tv, V, I, GVs}
   end;
-subs({con, C}, _) -> {con, C};
-subs({gen, C, ParamT}, Subs) -> {gen, C, subs(ParamT, Subs)};
+subs({con, Con}, _) -> {con, Con};
+subs({gen, Con, ParamT}, Subs) -> {gen, Con, subs(ParamT, Subs)};
 subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList};
 subs(none, _) -> none.
 
 fvs({lam, ArgsT, ReturnT}) -> gb_sets:union(fvs(ArgsT), fvs(ReturnT));
 fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
-fvs({tv, V, _}) -> gb_sets:from_list([V]);
+fvs({tv, V, _, _}) -> gb_sets:from_list([V]);
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamT}) -> fvs(ParamT);
 % fvs({inst, ...}) ommitted; all inst should be resolved
 fvs(none) -> gb_sets:new().
 
-occurs(V, {lam, ArgsT, ReturnT}) ->
-  occurs(V, ArgsT) or occurs(V, ReturnT);
-occurs(V, {tuple, LeftT, RightT}) ->
-  occurs(V, LeftT) or occurs(V, RightT);
-occurs(V1, {tv, V2, _}) -> V1 == V2;
+occurs(S, {lam, ArgsT, ReturnT}) ->
+  occurs(S, ArgsT) or occurs(S, ReturnT);
+occurs(S, {tuple, LeftT, RightT}) ->
+  occurs(S, LeftT) or occurs(S, RightT);
+occurs(S, {tv, V, _, GVs}) -> not gb_sets:is_disjoint(S, gb_sets:add(V, GVs));
 occurs(_, {con, _}) -> false;
-occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
+occurs(S, {gen, _, ParamT}) -> occurs(S, ParamT);
 % occurs({inst, ...}) ommitted; all inst should be resolved
 occurs(_, none) -> false.
