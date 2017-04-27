@@ -74,10 +74,7 @@ pretty({lam, ArgsT, ReturnT}) ->
   end,
   format_str(Format, [pretty(ArgsT), pretty(ReturnT)]);
 pretty({tuple, LeftT, RightT}) ->
-  case RightT of
-    none -> pretty(LeftT);
-    _ -> format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)])
-  end;
+  format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
 pretty({tv, V, none, _}) -> format_str("~s", [tl(V)]);
 pretty({tv, V, I, _}) -> format_str("~s: ~s", [tl(V), atom_to_list(I)]);
 pretty({con, Con}) -> atom_to_list(Con);
@@ -86,10 +83,7 @@ pretty({gen, T, ParamT}) ->
 pretty(none) -> "()".
 
 pretty_strip_parens({tuple, LeftT, RightT}) ->
-  case RightT of
-    none -> pretty(LeftT);
-    _ -> format_str("~s, ~s", [pretty(LeftT), pretty(RightT)])
-  end;
+  format_str("~s, ~s", [pretty(LeftT), pretty(RightT)]);
 pretty_strip_parens(T) -> pretty(T).
 
 format_str(Str, Args) ->
@@ -112,8 +106,7 @@ expr_test_() ->
   , ?_test("(Bool, Float)" = ok_expr("(true, 3.0)"))
   , ?_test("(A: Num, B: Num, List<C: Num>)" = ok_expr("(1, 2, [30, 40])"))
   , ?_test("((A: Num, Bool), Float)" = ok_expr("((3, false), 4.0)"))
-  , ?_test("(A: Num, (Bool, Float))" = ok_expr("(3, (false, 4.0))"))
-  , ?_test("(A: Num, (Bool, Float))" = ok_expr("(3, (false, 4.0))"))
+  , ?_test("(A: Num, Bool, Float)" = ok_expr("(3, (false, 4.0))"))
 
   , ?_test("Bool" = ok_expr("1 == 2"))
   , ?_test("Bool" = ok_expr("1.0 == 2.0"))

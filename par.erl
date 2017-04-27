@@ -23,6 +23,7 @@
 % - TODOs in code (non-unification error cases)
 % - Error messages
 % - Data structures: sets, maps
+% - Native function
 % - Global variables
 % - Complex types: ADTs
 % - Typeclasses + generics w/o concrete types
@@ -186,7 +187,7 @@ infer({tuple, Elems}, C) ->
 
   T = lists:foldl(fun(ElemT, LastT) ->
     {tuple, ElemT, LastT}
-  end, none, ElemsTRev),
+  end, hd(ElemsTRev), tl(ElemsTRev)),
   {T, C1};
 
 infer({var, _, Name}, C) ->
