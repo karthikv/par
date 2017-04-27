@@ -12,7 +12,7 @@ run() ->
   ?MODULE:test().
 
 norm_prg(Prg, Name) ->
-  {ok, Env} = par:infer_prg(Prg),
+  {ok, Env, _} = par:infer_prg(Prg),
   T = dict:fetch(Name, Env),
 
   {ok, Pid} = tv_server:start_link(),

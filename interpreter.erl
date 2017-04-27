@@ -1,0 +1,99 @@
+-module(interpreter).
+-export([reload/1, execute/1]).
+
+reload(LexParse) ->
+  par:reload(LexParse),
+
+  code:purge(?MODULE),
+  {ok, _} = compile:file(?MODULE),
+  code:load_file(?MODULE).
+
+execute(Ast) ->
+  Env = lists:foldl(fun(Node, Env) ->
+    case Node of
+      {fn, {var, _, Name}, _, _} ->
+        dict:store(Name, {lazy, Node}, Env);
+      _ -> Env
+    end
+  end, dict:new(), Ast),
+
+  {lazy, Expr} = dict:fetch("main", Env),
+  Main = eval(Expr, Env),
+  Main([]).
+
+eval({fn, _, Args, Expr}, Env) ->
+  fun(Vs) ->
+    NewEnv = lists:foldl(fun({{var, _, Name}, V}, FoldEnv) ->
+      dict:store(Name, V, FoldEnv)
+    end, Env, lists:zip(Args, Vs)),
+
+    eval(Expr, NewEnv)
+  end;
+
+eval({expr_sig, Expr, _}, Env) -> eval(Expr, Env);
+
+eval({int, _, V}, _) -> V;
+eval({float, _, V}, _) -> V;
+eval({bool, _, V}, _) -> V;
+eval({str, _, V}, _) -> V;
+eval({list, Elems}, Env) ->
+  lists:map(fun(E) -> eval(E, Env) end, Elems);
+eval({tuple, Elems}, Env) ->
+  list_to_tuple(eval({list, Elems}, Env));
+
+eval({var, _, Name}, Env) ->
+  case dict:fetch(Name, Env) of
+    {lazy, Expr} -> eval(Expr, Env);
+    V -> V
+  end;
+
+eval({app, Var, Args}, Env) ->
+  Fn = eval(Var, Env),
+  Vs = lists:map(fun(Arg) -> eval(Arg, Env) end, Args),
+  Fn(Vs);
+
+eval({{'let', _}, Inits, Expr}, Env) ->
+  NewEnv = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldEnv) ->
+    V = eval(InitExpr, FoldEnv),
+    dict:store(Name, V, FoldEnv)
+  end, Env, Inits),
+
+  eval(Expr, NewEnv);
+
+eval({{'if', _}, Expr, Then, Else}, Env) ->
+  case eval(Expr, Env) of
+    true -> eval(Then, Env);
+    false -> eval(Else, Env)
+  end;
+
+eval({{Op, _}, Left, Right}, Env) ->
+  LeftV = eval(Left, Env),
+  RightV = eval(Right, Env),
+
+  case Op of
+    '==' -> LeftV == RightV;
+    '!=' -> LeftV =/= RightV;
+    '||' -> LeftV or RightV;
+    '&&' -> LeftV and RightV;
+    '>' -> LeftV > RightV;
+    '<' -> LeftV < RightV;
+    '>=' -> LeftV >= RightV;
+    '<=' -> LeftV =< RightV;
+    '+' -> LeftV + RightV;
+    '-' -> LeftV - RightV;
+    '*' -> LeftV * RightV;
+    '/' -> LeftV / RightV;
+    '++' ->
+      case is_binary(LeftV) of
+        true -> <<LeftV/binary, RightV/binary>>;
+        _ -> LeftV ++ RightV
+      end
+  end;
+
+eval({{Op, _}, Expr}, Env) ->
+  V = eval(Expr, Env),
+
+  case Op of
+    '!' -> not V;
+    '-' -> -V
+  end.

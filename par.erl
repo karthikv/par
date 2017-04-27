@@ -24,10 +24,9 @@
 % - Error messages
 % - Operation: nth element of tuple?
 % - Tuples with tuples as the last element?
+% - Expressions for function application
 % - Data structures: sets, maps
-% - Make true/false capitalized
 % - Global variables
-% - Maybe else types (unit type?)
 % - Complex types: ADTs
 % - Typeclasses + generics w/o concrete types
 % - Concurrency
@@ -36,6 +35,10 @@
 % - Better / Efficient EnvList
 % - Codegen / Interpreter
 % - Update naming conventions
+%
+% - Make true/false capitalized?
+% - Syntax for lambda with no arg?
+% - Maybe else w/ unit type?
 
 reload(true) ->
   code:purge(lexer),
@@ -51,9 +54,7 @@ reload(true) ->
   reload(false);
 
 reload(false) ->
-  code:purge(tv_server),
-  {ok, _} = compile:file(tv_server),
-  code:load_file(tv_server),
+  tv_server:reload(),
 
   code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
@@ -98,7 +99,7 @@ infer_prg(Prg) ->
 
   Result = case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
     {ok, Subs} ->
-      {ok, dict:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env)};
+      {ok, dict:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env), Ast};
     {errors, Errs} -> {errors, Errs}
   end,
 

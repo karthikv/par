@@ -43,7 +43,7 @@ in : {token, {'in', TokenLine}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
 \[ : {token, {'[', TokenLine}}.
 \] : {token, {']', TokenLine}}.
-{STR} : {token, {str, TokenLine, drop_quotes(TokenChars)}}.
+{STR} : {token, {str, TokenLine, list_to_binary(drop_quotes(TokenChars))}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
 {TV} : {token, {sig_tv, TokenLine, TokenChars}}.
 {CON} : {token, {sig_con, TokenLine, TokenChars}}.
