@@ -22,23 +22,22 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Operation: nth element of tuple?
-% - Tuples with tuples as the last element?
-% - Expressions for function application
 % - Data structures: sets, maps
 % - Global variables
 % - Complex types: ADTs
 % - Typeclasses + generics w/o concrete types
 % - Concurrency
 % - Pattern matching
-% - Extra type variables for return value of operators like == and +?
+% - Exceptions
 % - Better / Efficient EnvList
-% - Codegen / Interpreter
+% - Code generation
 % - Update naming conventions
 %
 % - Make true/false capitalized?
 % - Syntax for lambda with no arg?
 % - Maybe else w/ unit type?
+% - Operation: nth element of tuple?
+% - Unit as valid expression?
 
 reload(true) ->
   code:purge(lexer),
@@ -187,7 +186,7 @@ infer({tuple, Elems}, C) ->
 
   T = lists:foldl(fun(ElemT, LastT) ->
     {tuple, ElemT, LastT}
-  end, hd(ElemsTRev), tl(ElemsTRev)),
+  end, none, ElemsTRev),
   {T, C1};
 
 infer({var, _, Name}, C) ->
@@ -199,16 +198,16 @@ infer({var, _, Name}, C) ->
          end,
   {{inst, T, dict:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
 
-infer({app, Var, Args}, C) ->
+infer({app, Expr, Args}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
     {T, FoldC1} = infer(Arg, FoldC),
     {[T | Ts], FoldC1}
   end, {[], C}, Args),
 
-  {VarT, C2} = infer(Var, C1),
+  {ExprT, C2} = infer(Expr, C1),
   TV = tv_server:fresh(C2#ctx.pid),
   T = lists:foldl(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsTRev),
-  {TV, C2#ctx{csts=[{T, VarT} | C2#ctx.csts]}};
+  {TV, C2#ctx{csts=[{T, ExprT} | C2#ctx.csts]}};
 
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->

@@ -59,8 +59,8 @@ expr -> '!' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
 expr -> expr sig : {expr_sig, '$1', '$2'}.
 expr -> '(' expr ')' : '$2'.
-expr -> var '(' ')' : {app, '$1', []}.
-expr -> var '(' expr_list ')' : {app, '$1', '$3'}.
+expr -> expr '(' ')' : {app, '$1', []}.
+expr -> expr '(' expr_list ')' : {app, '$1', '$3'}.
 expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let init_list in expr : {'$1', '$2', '$4'}.
 expr -> '|' '-' '|' expr : {fn, none, [], '$4'}.
@@ -90,3 +90,4 @@ Left 70 '+' '-' '++'.
 Left 80 '*' '/'.
 Unary 90 '::'.
 Unary 100 '!' neg.
+Unary 110 '('.

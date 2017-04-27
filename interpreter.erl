@@ -21,13 +21,17 @@ execute(Ast) ->
   Main = eval(Expr, Env),
   Main([]).
 
-eval({fn, _, Args, Expr}, Env) ->
+eval({fn, Var, Args, Expr}, Env) ->
   fun(Vs) ->
-    NewEnv = lists:foldl(fun({{var, _, Name}, V}, FoldEnv) ->
-      dict:store(Name, V, FoldEnv)
-    end, Env, lists:zip(Args, Vs)),
+    {LeftArgs, NewEnv} = lists:foldl(fun(V, {FoldArgs, FoldEnv}) ->
+      {var, _, Name} = hd(FoldArgs),
+      {tl(FoldArgs), dict:store(Name, V, FoldEnv)}
+    end, {Args, Env}, Vs),
 
-    eval(Expr, NewEnv)
+    case length(LeftArgs) of
+      0 -> eval(Expr, NewEnv);
+      _ -> eval({fn, Var, LeftArgs, Expr}, NewEnv)
+    end
   end;
 
 eval({expr_sig, Expr, _}, Env) -> eval(Expr, Env);
@@ -47,8 +51,8 @@ eval({var, _, Name}, Env) ->
     V -> V
   end;
 
-eval({app, Var, Args}, Env) ->
-  Fn = eval(Var, Env),
+eval({app, Expr, Args}, Env) ->
+  Fn = eval(Expr, Env),
   Vs = lists:map(fun(Arg) -> eval(Arg, Env) end, Args),
   Fn(Vs);
 

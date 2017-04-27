@@ -27,6 +27,8 @@ expr_test_() ->
   , ?_test({<<"what">>, false} = expr("(\"what\", false)"))
   , ?_test({3.0, true} = (expr("|x| x"))([{3.0, true}]))
   , ?_test(35.0 = (expr("|x, y| x * y * 3.5"))([4, 2.5]))
+  , ?_test(true = expr("(|x| x || true)(false)"))
+  , ?_test(<<"ab">> = expr("(|a, b| a ++ b)(\"a\")(\"b\")"))
 
   , ?_test(5 = expr("let x = 5 in x"))
   , ?_test(true = expr("let x = 5, y = true in x == 4 || y"))
@@ -85,7 +87,7 @@ prg_test_() ->
       "cmp(f, g, x) = f(g(x))\n"
       "two(e) = [e, e]\n"
       "and_true(l) = l ++ [true]\n"
-      "main() = cmp(and_true, two, false)"
+      "main() = cmp(and_true)(two, false)"
     ))
   , ?_test(50 = execute(
       "f(x) = g(x - 10.0)\n"
