@@ -255,6 +255,12 @@ sig_test_() ->
       "main() = 3",
       "main"
     ))
+  , ?_test("A -> A" = ok_prg(
+      "id :: A -> A\n"
+      "id(x) = x\n"
+      "main() = id(3)",
+      "id"
+    ))
   , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
       "add :: A: Num -> A: Num -> A: Num\n"
       "add(x, y) = x + y",

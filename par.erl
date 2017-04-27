@@ -457,7 +457,12 @@ subs({tv, V, I, GVs}, Subs) ->
   case dict:find(V, Subs) of
     {ok, {add_gvs, NewGVs}} -> {tv, V, I, gb_sets:union(GVs, NewGVs)};
     {ok, Value} ->
-      Sub = if is_tuple(Value) -> Value; true -> {tv, Value, I, GVs} end,
+      Sub = if
+        % Replacing with a new type entirely
+        is_tuple(Value) -> Value;
+        % Changing name due to instantiation; GVs don't carry over.
+        true -> {tv, Value, I, gb_sets:new()}
+      end,
       subs(Sub, Subs);
     error -> {tv, V, I, GVs}
   end;
