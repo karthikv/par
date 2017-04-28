@@ -1,15 +1,16 @@
 Nonterminals
   prg decl sig
   type type_list
-  expr var_list expr_list init_list
+  expr var_list expr_list init_list kv_list
   neg maybe_else.
 Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/'
-  '++' '|' '::' ':' '->'
+  '++' '--' '|' '::' ':' '->'
   if then else let in
-  int float bool str var sig_tv sig_con '[' ']'.
+  int float bool str var '[' ']' '{' '}' '=>' '#'
+  sig_tv sig_con.
 Rootsymbol prg.
 
 prg -> '$empty' : [].
@@ -37,11 +38,13 @@ type_list -> type ',' type_list : {tuple, '$1', '$3'}.
 expr -> int : '$1'.
 expr -> float : '$1'.
 expr -> bool : '$1'.
+expr -> str : '$1'.
+expr -> var : '$1'.
 expr -> '[' ']' : {list, []}.
 expr -> '[' expr_list ']' : {list, '$2'}.
 expr -> '(' expr ',' expr_list ')' : {tuple, ['$2' | '$4']}.
-expr -> str : '$1'.
-expr -> var : '$1'.
+expr -> '{' '}' : {map, []}.
+expr -> '{' kv_list '}' : {map, '$2'}.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.
 expr -> expr '!=' expr : {'$2', '$1', '$3'}.
 expr -> expr '||' expr : {'$2', '$1', '$3'}.
@@ -55,7 +58,9 @@ expr -> expr '-' expr : {'$2', '$1', '$3'}.
 expr -> expr '*' expr : {'$2', '$1', '$3'}.
 expr -> expr '/' expr : {'$2', '$1', '$3'}.
 expr -> expr '++' expr : {'$2', '$1', '$3'}.
+expr -> expr '--' expr : {'$2', '$1', '$3'}.
 expr -> '!' expr : {'$1', '$2'}.
+expr -> '#' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
 expr -> expr sig : {expr_sig, '$1', '$2'}.
 expr -> '(' expr ')' : '$2'.
@@ -75,6 +80,9 @@ expr_list -> expr ',' expr_list : ['$1' | '$3'].
 init_list -> var '=' expr : [{'$1', '$3'}].
 init_list -> var '=' expr ',' init_list : [{'$1', '$3'} | '$5'].
 
+kv_list -> expr '=>' expr : [{'$1', '$3'}].
+kv_list -> expr '=>' expr ',' kv_list : [{'$1', '$3'} | '$5'].
+
 neg -> '-' expr : {'$1', '$2'}.
 
 maybe_else -> '$empty' : none.
@@ -86,8 +94,8 @@ Right 30 'else'.
 Left 40 '||'.
 Left 50 '&&'.
 Nonassoc 60 '==' '!=' '>' '<' '>=' '<='.
-Left 70 '+' '-' '++'.
+Left 70 '+' '-' '++' '--'.
 Left 80 '*' '/'.
 Unary 90 '::'.
-Unary 100 '!' neg.
+Unary 100 '!' neg '#'.
 Unary 110 '('.

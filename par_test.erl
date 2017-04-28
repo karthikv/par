@@ -30,13 +30,21 @@ bad_prg(Prg, {EP1, EP2}) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {dict:new(), Pid}),
   {NormT2, _} = norm(T2, N),
+  ok = tv_server:stop(Pid),
 
-  P1 = pretty(NormT1),
-  P2 = pretty(NormT2),
-
-  case {P1, P2} of
+  case {pretty(NormT1), pretty(NormT2)} of
     {EP1, EP2} -> true;
-    {EP2, EP1} -> true
+    {EP2, EP1} -> true;
+    _ ->
+      {ok, FlipPid} = tv_server:start_link(),
+      {FlipNormT2, FlipN} = norm(T2, {dict:new(), FlipPid}),
+      {FlipNormT1, _} = norm(T1, FlipN),
+      ok = tv_server:stop(FlipPid),
+
+      case {pretty(FlipNormT1), pretty(FlipNormT2)} of
+        {EP1, EP2} -> true;
+        {EP2, EP1} -> true
+      end
   end.
 
 ok_expr(Expr) ->
@@ -78,6 +86,8 @@ pretty({tuple, LeftT, RightT}) ->
 pretty({tv, V, none, _}) -> format_str("~s", [tl(V)]);
 pretty({tv, V, I, _}) -> format_str("~s: ~s", [tl(V), atom_to_list(I)]);
 pretty({con, Con}) -> atom_to_list(Con);
+pretty({gen, 'List', ParamT}) ->
+  format_str("[~s]", [pretty_strip_parens(ParamT)]);
 pretty({gen, T, ParamT}) ->
   format_str("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
 pretty(none) -> "()".
@@ -96,17 +106,27 @@ expr_test_() ->
   , ?_test("Float" = ok_expr("0.517"))
   , ?_test("Bool" = ok_expr("true"))
   , ?_test("Bool" = ok_expr("false"))
-  , ?_test("List<Char>" = ok_expr("\"\""))
-  , ?_test("List<Char>" = ok_expr("\"some string\n\""))
-  , ?_test("List<A>" = ok_expr("[]"))
-  , ?_test("List<A: Num>" = ok_expr("[3, 5, 6]"))
-  , ?_test("List<Float>" = ok_expr("[3, 5.0, 6]"))
-  , ?_test("List<Bool>" = ok_expr("[true, false, true]"))
+  , ?_test("String" = ok_expr("\"\""))
+  , ?_test("String" = ok_expr("\"some string\n\""))
+  , ?_test("[A]" = ok_expr("[]"))
+  , ?_test("[A: Num]" = ok_expr("[3, 5, 6]"))
+  , ?_test("[Float]" = ok_expr("[3, 5.0, 6]"))
+  , ?_test("[Bool]" = ok_expr("[true, false, true]"))
   , ?_test(bad_expr("[3.0, true]", {"Float", "Bool"}))
   , ?_test("(Bool, Float)" = ok_expr("(true, 3.0)"))
-  , ?_test("(A: Num, B: Num, List<C: Num>)" = ok_expr("(1, 2, [30, 40])"))
+  , ?_test("(A: Num, B: Num, [C: Num])" = ok_expr("(1, 2, [30, 40])"))
   , ?_test("((A: Num, Bool), Float)" = ok_expr("((3, false), 4.0)"))
   , ?_test("(A: Num, Bool, Float)" = ok_expr("(3, (false, 4.0))"))
+  , ?_test("Map<A, B>" = ok_expr("{}"))
+  , ?_test("Map<String, String>" = ok_expr("{\"key\" => \"value\"}"))
+  , ?_test("Map<A: Num, Float>" = ok_expr("{1 => 2, 3 => 4.0}"))
+  , ?_test(bad_expr("{\"a\" => true, \"b\" => \"c\"}", {"Bool", "String"}))
+  , ?_test("Set<A>" = ok_expr("#[]"))
+  , ?_test("Set<A: Num>" = ok_expr("#[1, 2]"))
+  , ?_test("Set<Float>" = ok_expr("#[3, 4.0]"))
+  , ?_test(bad_expr("#1", {"[A]", "B: Num"}))
+  , ?_test(bad_expr("#\"some str\"", {"[A]", "String"}))
+  , ?_test(bad_expr("#[\"hi\", true]", {"Bool", "String"}))
 
   , ?_test("Bool" = ok_expr("1 == 2"))
   , ?_test("Bool" = ok_expr("1.0 == 2.0"))
@@ -164,12 +184,23 @@ expr_test_() ->
   , ?_test(bad_expr("30 * false", {"Bool", "A: Num"}))
   , ?_test(bad_expr("30 / false", {"Bool", "A: Num"}))
 
-  , ?_test("List<Char>" = ok_expr("\"hello \" ++ \"world\""))
-  , ?_test("List<A: Num>" = ok_expr("[1, 2] ++ [3, 4, 5, 6]"))
-  , ?_test("List<Bool>" = ok_expr("[] ++ [true, false]"))
-  , ?_test("List<A>" = ok_expr("[] ++ []"))
-  , ?_test(bad_expr("30.0 ++ \"str\"", {"Float", "List<A>"}))
+  , ?_test("String" = ok_expr("\"hello \" ++ \"world\""))
+  , ?_test("[A: Num]" = ok_expr("[1, 2] ++ [3, 4, 5, 6]"))
+  , ?_test("[Bool]" = ok_expr("[] ++ [true, false]"))
+  , ?_test("[A]" = ok_expr("[] ++ []"))
+  , ?_test("Map<A, B>" = ok_expr("{} ++ {}"))
+  , ?_test("Map<String, A: Num>" = ok_expr("{\"a\" => 3} ++ {}"))
+  , ?_test("Set<A>" = ok_expr("#[] ++ #[]"))
+  , ?_test("Set<Float>" = ok_expr("#[1, 2] ++ #[3.0]"))
+  , ?_test(bad_expr("30.0 ++ \"str\"", {"Float", "A: Concatable"}))
   , ?_test(bad_expr("[true] ++ [1, 2]", {"Bool", "A: Num"}))
+
+  , ?_test("Set<A>" = ok_expr("#[] -- #[]"))
+  , ?_test("Set<Float>" = ok_expr("#[3.0, 5.7, 6.8] -- #[3.0]"))
+  , ?_test("[A]" = ok_expr("[] -- []"))
+  , ?_test("[Float]" = ok_expr("[3.0, 5.7, 6.8] -- [3.0]"))
+  , ?_test(bad_expr("\"hi\" -- []", {"String", "A: Separable"}))
+  , ?_test(bad_expr("[1] -- #[2, 3]", {"Set<A>", "[B]"}))
 
   , ?_test("A: Num" = ok_expr("-15"))
   , ?_test("Float" = ok_expr("-15.0"))

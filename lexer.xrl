@@ -29,6 +29,7 @@ Rules.
 \* : {token, {'*', TokenLine}}.
 \/ : {token, {'/', TokenLine}}.
 \+\+ : {token, {'++', TokenLine}}.
+\-\- : {token, {'--', TokenLine}}.
 \| : {token, {'|', TokenLine}}.
 \:\: : {token, {'::', TokenLine}}.
 \: : {token, {':', TokenLine}}.
@@ -41,10 +42,14 @@ in : {token, {'in', TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
 {FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
-\[ : {token, {'[', TokenLine}}.
-\] : {token, {']', TokenLine}}.
 {STR} : {token, {str, TokenLine, list_to_binary(drop_quotes(TokenChars))}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
+\[ : {token, {'[', TokenLine}}.
+\] : {token, {']', TokenLine}}.
+\{ : {token, {'{', TokenLine}}.
+\} : {token, {'}', TokenLine}}.
+\=\> : {token, {'=>', TokenLine}}.
+\# : {token, {'#', TokenLine}}.
 {TV} : {token, {sig_tv, TokenLine, TokenChars}}.
 {CON} : {token, {sig_con, TokenLine, TokenChars}}.
 {WHITESPACE}+ : skip_token.

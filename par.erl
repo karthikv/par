@@ -22,18 +22,20 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Data structures: sets, maps
+% - Lists in type signatures
 % - Native function
 % - Global variables
 % - Complex types: ADTs
+% - Imports
 % - Typeclasses + generics w/o concrete types
 % - Concurrency
 % - Pattern matching
 % - Exceptions
-% - Better / Efficient EnvList
 % - Code generation
 % - Update naming conventions
 %
+% - + instead of ++ and - instead of --?
+% - Reverse csts before solving for better error messages?
 % - Make true/false capitalized?
 % - Syntax for lambda with no arg?
 % - Maybe else w/ unit type?
@@ -144,7 +146,7 @@ infer({expr_sig, Expr, Sig}, C) ->
   {SigT, C2} = infer(Sig, C1),
 
   NormSigT = norm_sig_type(SigT, C#ctx.pid),
-  {ExprT, C2#ctx{csts=[{ExprT, NormSigT} | C2#ctx.csts]}};
+  {ExprT, add_csts({ExprT, NormSigT}, C2)};
 
 infer({sig_lam, SigArgsT, SigReturnT}, C) ->
   {ArgsT, C1} = infer(SigArgsT, C),
@@ -170,7 +172,8 @@ infer(none, C) -> {none, C};
 infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, 'Float'}, C};
 infer({bool, _, _}, C) -> {{con, 'Bool'}, C};
-infer({str, _, _}, C) -> {{gen, 'List', {con, 'Char'}}, C};
+infer({str, _, _}, C) -> {{con, 'String'}, C};
+
 infer({list, Elems}, C) ->
   TV = tv_server:fresh(C#ctx.pid),
   {Csts, C1} = lists:foldl(fun(Elem, {FoldCsts, FoldC}) ->
@@ -178,7 +181,8 @@ infer({list, Elems}, C) ->
     {[{ElemT, TV} | FoldCsts], FoldC1}
   end, {[], C}, Elems),
 
-  {{gen, 'List', TV}, C1#ctx{csts=Csts ++ C1#ctx.csts}};
+  {{gen, 'List', TV}, add_csts(Csts, C1)};
+
 infer({tuple, Elems}, C) ->
   {ElemsTRev, C1} = lists:foldl(fun(Elem, {FoldElemsT, FoldC}) ->
     {ElemT, FoldC1} = infer(Elem, FoldC),
@@ -189,6 +193,18 @@ infer({tuple, Elems}, C) ->
     {tuple, ElemT, LastT}
   end, hd(ElemsTRev), tl(ElemsTRev)),
   {T, C1};
+
+infer({map, Pairs}, C) ->
+  KeyTV = tv_server:fresh(C#ctx.pid),
+  ValueTV = tv_server:fresh(C#ctx.pid),
+
+  {Csts, C1} = lists:foldl(fun({Key, Value}, {FoldCsts, FoldC}) ->
+    {KeyT, FoldC1} = infer(Key, FoldC),
+    {ValueT, FoldC2} = infer(Value, FoldC1),
+    {[{KeyT, KeyTV}, {ValueT, ValueTV} | FoldCsts], FoldC2}
+  end, {[], C}, Pairs),
+
+  {{gen, 'Map', {tuple, KeyTV, ValueTV}}, add_csts(Csts, C1)};
 
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
@@ -208,7 +224,7 @@ infer({app, Expr, Args}, C) ->
   {ExprT, C2} = infer(Expr, C1),
   TV = tv_server:fresh(C2#ctx.pid),
   T = lists:foldl(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsTRev),
-  {TV, C2#ctx{csts=[{T, ExprT} | C2#ctx.csts]}};
+  {TV, add_csts({T, ExprT}, C2)};
 
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
@@ -225,9 +241,7 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
   {ElseT, C3} = infer(Else, C2),
 
   TV = tv_server:fresh(C#ctx.pid),
-  {TV, C3#ctx{
-    csts=[{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT} | C3#ctx.csts]}
-  };
+  {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)};
 
 infer({{Op, _}, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
@@ -260,14 +274,20 @@ infer({{Op, _}, Left, Right}, C) ->
         {lam, NumTV, {lam, NumTV, ReturnT}}
       };
     Op == '++' ->
-      ListT = {gen, 'List', tv_server:fresh(C2#ctx.pid)},
+      OperandTV = tv_server:fresh('Concatable', C2#ctx.pid),
       {
         {lam, LeftT, {lam, RightT, TV}},
-        {lam, ListT, {lam, ListT, ListT}}
+        {lam, OperandTV, {lam, OperandTV, OperandTV}}
+      };
+    Op == '--' ->
+      OperandTV = tv_server:fresh('Separable', C2#ctx.pid),
+      {
+        {lam, LeftT, {lam, RightT, TV}},
+        {lam, OperandTV, {lam, OperandTV, OperandTV}}
       }
   end,
 
-  {TV, C2#ctx{csts=[Cst | C2#ctx.csts]}};
+  {TV, add_csts(Cst, C2)};
 
 infer({{Op, _}, Expr}, C) ->
   {ExprT, C1} = infer(Expr, C),
@@ -275,12 +295,21 @@ infer({{Op, _}, Expr}, C) ->
 
   Cst = if
     Op == '!' -> {{lam, ExprT, TV}, {lam, {con, 'Bool'}, {con, 'Bool'}}};
+    Op == '#' ->
+      ElemT = tv_server:fresh(C1#ctx.pid),
+      {{lam, ExprT, TV}, {lam, {gen, 'List', ElemT}, {gen, 'Set', ElemT}}};
     Op == '-' ->
       NumT = tv_server:fresh('Num', C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, NumT, NumT}}
   end,
 
-  {TV, C1#ctx{csts=[Cst | C1#ctx.csts]}}.
+  {TV, add_csts(Cst, C1)}.
+
+add_csts(Csts, C) ->
+  case is_list(Csts) of
+    true -> C#ctx{csts=Csts ++ C#ctx.csts};
+    false -> C#ctx{csts=[Csts | C#ctx.csts]}
+  end.
 
 norm_sig_type(SigT, Pid) ->
   % TODO: is it more intuitive to change each fv to *fv and then replace?
@@ -447,6 +476,12 @@ add_err(Err, S) ->
 
 instance({con, 'Int'}, 'Num') -> true;
 instance({con, 'Float'}, 'Num') -> true;
+instance({con, 'String'}, 'Concatable') -> true;
+instance({gen, 'List', _}, 'Concatable') -> true;
+instance({gen, 'Map', _}, 'Concatable') -> true;
+instance({gen, 'Set', _}, 'Concatable') -> true;
+instance({gen, 'List', _}, 'Separable') -> true;
+instance({gen, 'Set', _}, 'Separable') -> true;
 instance(_, _) -> false.
 
 subs({lam, ArgsT, ReturnT}, Subs) ->

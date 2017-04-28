@@ -25,6 +25,17 @@ expr_test_() ->
   , ?_test(<<"hi">> = expr("\"hi\""))
   , ?_test([3.0, 5] = expr("[3.0, 5]"))
   , ?_test({<<"what">>, false} = expr("(\"what\", false)"))
+  , ?_assertEqual(#{}, expr("{}"))
+  , ?_assertEqual(
+      #{<<"hello">> => <<"world">>, <<"some">> => <<"thing">>},
+      expr("{\"hello\" => \"world\", \"some\" => \"thing\"}")
+    )
+  , ?_assertEqual(gb_sets:new(), expr("#[]"))
+  , ?_assertEqual(
+      gb_sets:from_list([2, 4, 6, 8]),
+      expr("#[2, 4, 2, 6, 4, 8, 6]")
+    )
+
   , ?_test({3.0, true} = (expr("|x| x"))([{3.0, true}]))
   , ?_test(35.0 = (expr("|x, y| x * y * 3.5"))([4, 2.5]))
   , ?_test(true = expr("(|x| x || true)(false)"))
@@ -67,7 +78,22 @@ expr_test_() ->
   , ?_test(17.0 = expr("85 / 5"))
   , ?_test([1, 2, 3, 4] = expr("[1] ++ [2, 3, 4]"))
   , ?_test(<<"hello world">> = expr("\"hello \" ++ \"world\""))
-
+  , ?_assertEqual(
+      #{<<"a">> => 1, <<"b">> => 2.0},
+      expr("{\"a\" => 1} ++ {\"b\" => 2.0}")
+    )
+  , ?_assertEqual(
+      gb_sets:from_list([1, 2, 3]),
+      expr("#[1] ++ #[2, 3]")
+    )
+  , ?_assertEqual(
+      [3, 8],
+      expr("[5, 3, 1, 4, 5, 8, 7] -- [4, 1, 5, 7]")
+    )
+  , ?_assertEqual(
+      gb_sets:from_list([3]),
+      expr("#[3, 2, 3, 1, 2] -- #[1, 8, 6, 2]")
+    )
   , ?_test(-3 = expr("-3"))
   , ?_test(-78.5 = expr("-5 * 15.7"))
   , ?_test(false = expr("!true"))

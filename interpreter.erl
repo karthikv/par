@@ -40,10 +40,16 @@ eval({int, _, V}, _) -> V;
 eval({float, _, V}, _) -> V;
 eval({bool, _, V}, _) -> V;
 eval({str, _, V}, _) -> V;
+
 eval({list, Elems}, Env) ->
   lists:map(fun(E) -> eval(E, Env) end, Elems);
+
 eval({tuple, Elems}, Env) ->
   list_to_tuple(eval({list, Elems}, Env));
+
+eval({map, Pairs}, Env) ->
+  List = lists:map(fun({K, V}) -> {eval(K, Env), eval(V, Env)} end, Pairs),
+  maps:from_list(List);
 
 eval({var, _, Name}, Env) ->
   case dict:fetch(Name, Env) of
@@ -88,9 +94,24 @@ eval({{Op, _}, Left, Right}, Env) ->
     '*' -> LeftV * RightV;
     '/' -> LeftV / RightV;
     '++' ->
-      case is_binary(LeftV) of
-        true -> <<LeftV/binary, RightV/binary>>;
-        _ -> LeftV ++ RightV
+      if
+        is_binary(LeftV) -> <<LeftV/binary, RightV/binary>>;
+        is_list(LeftV) -> LeftV ++ RightV;
+        is_map(LeftV) -> maps:merge(LeftV, RightV);
+        true ->
+          true = gb_sets:is_set(LeftV),
+          gb_sets:union(LeftV, RightV)
+      end;
+    '--' ->
+      if
+        is_list(LeftV) ->
+          Set = gb_sets:from_list(RightV),
+          lists:filter(fun(Elem) ->
+            not gb_sets:is_member(Elem, Set)
+          end, LeftV);
+        true ->
+          true = gb_sets:is_set(LeftV),
+          gb_sets:subtract(LeftV, RightV)
       end
   end;
 
@@ -99,5 +120,6 @@ eval({{Op, _}, Expr}, Env) ->
 
   case Op of
     '!' -> not V;
+    '#' -> gb_sets:from_list(V);
     '-' -> -V
   end.
