@@ -319,6 +319,31 @@ sig_test_() ->
       "foo(x) = x :: Int + 3",
       "foo"
     ))
+  , ?_test("String -> (String, Bool)" = ok_prg(
+      "foo :: String -> (String, Bool)\n"
+      "foo(s) = (s, true)",
+      "foo"
+    ))
+  , ?_test("[Int] -> [Int]" = ok_prg(
+      "push :: [Int] -> [Int]\n"
+      "push(x) = x ++ [1]",
+      "push"
+    ))
+  , ?_test("[A] -> [A] -> Bool" = ok_prg(
+      "empty :: List<A> -> List<A> -> Bool\n"
+      "empty(l1, l2) = l1 ++ l2 == []",
+      "empty"
+    ))
+  , ?_test("Map<A, B> -> Map<A, B> -> Map<A, B>" = ok_prg(
+      "pick :: Map<K, V> -> Map<K, V> -> Map<K, V>\n"
+      "pick(m1, m2) = m1",
+      "pick"
+    ))
+  , ?_test(bad_prg(
+      "main :: () -> String\n"
+      "main() = true",
+      {"String", "Bool"}
+    ))
   , ?_test(bad_prg(
       "id :: A -> B\n"
       "id(x) = x",
@@ -330,5 +355,15 @@ sig_test_() ->
       "bar :: A: Num -> Int\n"
       "bar(x) = foo(x)",
       {"Int", "A: Num"}
+    ))
+  , ?_test(bad_prg(
+      "push :: [A: Num] -> [A: Num]\n"
+      "push(x) = x ++ [1.0]",
+      {"A: Num", "Float"}
+    ))
+  , ?_test(bad_prg(
+      "empty :: List<A> -> List<B> -> Bool\n"
+      "empty(l1, l2) = l1 ++ l2 == []",
+      {"A", "B"}
     ))
   ].

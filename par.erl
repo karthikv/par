@@ -22,7 +22,6 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Lists in type signatures
 % - Native function
 % - Global variables
 % - Complex types: ADTs
@@ -161,9 +160,9 @@ infer({sig_iface, SigTV, SigCon}, C) ->
   {{con, I}, C2} = infer(SigCon, C1),
   {{tv, V, I, GVs}, C2};
 infer({sig_gen, SigCon, SigParamT}, C) ->
-  {Con, C1} = infer(SigCon, C),
+  {{con, T}, C1} = infer(SigCon, C),
   {ParamT, C2} = infer(SigParamT, C1),
-  {{gen, Con, ParamT}, C2};
+  {{gen, T, ParamT}, C2};
 infer({sig_tv, _, V}, C) -> {{tv, V, none, gb_sets:new()}, C};
 % TODO: ensure these types are valid
 infer({sig_con, _, Con}, C) -> {{con, list_to_atom(Con)}, C};

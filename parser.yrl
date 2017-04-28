@@ -28,12 +28,13 @@ type -> sig_con : '$1'.
 type -> sig_tv : '$1'.
 type -> sig_tv ':' sig_con : {sig_iface, '$1', '$3'}.
 type -> sig_con '<' type_list '>' : {sig_gen, '$1', '$3'}.
+type -> '[' type ']' : {sig_gen, {sig_con, element(2, '$1'), "List"}, '$2'}.
 type -> '(' type ',' type_list ')' : {sig_tuple, '$2', '$4'}.
 type -> '(' type ')' : '$2'.
 type -> type '->' type : {sig_lam, '$1', '$3'}.
 
 type_list -> type : '$1'.
-type_list -> type ',' type_list : {tuple, '$1', '$3'}.
+type_list -> type ',' type_list : {sig_tuple, '$1', '$3'}.
 
 expr -> int : '$1'.
 expr -> float : '$1'.
