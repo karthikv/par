@@ -13,10 +13,10 @@ run() ->
 
 norm_prg(Prg, Name) ->
   {ok, Env, _} = par:infer_prg(Prg),
-  T = dict:fetch(Name, Env),
+  #{Name := T} = Env,
 
   {ok, Pid} = tv_server:start_link(),
-  {NormT, _} = norm(T, {dict:new(), Pid}),
+  {NormT, _} = norm(T, {#{}, Pid}),
   ok = tv_server:stop(Pid),
   NormT.
 
@@ -28,7 +28,7 @@ bad_prg(Prg, {EP1, EP2}) ->
   [{T1, T2}] = Errs,
 
   {ok, Pid} = tv_server:start_link(),
-  {NormT1, N} = norm(T1, {dict:new(), Pid}),
+  {NormT1, N} = norm(T1, {#{}, Pid}),
   {NormT2, _} = norm(T2, N),
   ok = tv_server:stop(Pid),
 
@@ -37,7 +37,7 @@ bad_prg(Prg, {EP1, EP2}) ->
     {EP2, EP1} -> true;
     _ ->
       {ok, FlipPid} = tv_server:start_link(),
-      {FlipNormT2, FlipN} = norm(T2, {dict:new(), FlipPid}),
+      {FlipNormT2, FlipN} = norm(T2, {#{}, FlipPid}),
       {FlipNormT1, _} = norm(T1, FlipN),
       ok = tv_server:stop(FlipPid),
 
@@ -63,11 +63,11 @@ norm({tuple, LeftT, RightT}, N) ->
   {NormRightT, N2} = norm(RightT, N1),
   {{tuple, NormLeftT, NormRightT}, N2};
 norm({tv, V, I, GVs}, {Subs, Pid}) ->
-  case dict:find(V, Subs) of
+  case maps:find(V, Subs) of
     {ok, V1} -> {{tv, V1, I, GVs}, {Subs, Pid}};
     error ->
       V1 = tv_server:next_name(Pid),
-      {{tv, V1, I, GVs}, {dict:store(V, V1, Subs), Pid}}
+      {{tv, V1, I, GVs}, {Subs#{V => V1}, Pid}}
   end;
 norm({con, Con}, N) -> {{con, Con}, N};
 norm({gen, Con, ParamT}, N) ->

@@ -16,7 +16,7 @@
 % C - context record with the following fields:
 %   csts - array of constraints, each constraint is an array of two Ts that
 %          must match
-%   env - dict mapping variable name to Scheme
+%   env - maps variable name to Scheme
 %   count - a monotonically increasing count used to generate fresh TVs
 %
 % TODO:
@@ -72,10 +72,10 @@ infer_prg(Prg) ->
       {fn, {var, _, Name}, _, _} ->
         % TODO: what if name already exists?
         TV = tv_server:fresh(C#ctx.pid),
-        C#ctx{env=dict:store(Name, {fn, TV}, C#ctx.env)};
+        add_env(Name, {fn, TV}, C);
       _ -> C
     end
-  end, #ctx{csts=[], env=dict:new(), pid=Pid, deps=[]}, Ast),
+  end, #ctx{csts=[], env=#{}, pid=Pid, deps=[]}, Ast),
 
   {_, _, FCs, C1} = lists:foldl(fun(Node, {ExpName, SigT, FCs, FoldC}) ->
     if
@@ -99,9 +99,9 @@ infer_prg(Prg) ->
     end
   end, {none, none, [], C}, Ast),
 
-  Result = case solve(FCs, #solver{subs=dict:new(), errs=[], pid=Pid}) of
+  Result = case solve(FCs, #solver{subs=#{}, errs=[], pid=Pid}) of
     {ok, Subs} ->
-      {ok, dict:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env), Ast};
+      {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env), Ast};
     {errors, Errs} -> {errors, Errs}
   end,
 
@@ -111,9 +111,7 @@ infer_prg(Prg) ->
 infer({fn, Var, Args, Expr}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
-    {[TV | Ts], FoldC#ctx{
-      env=dict:store(ArgName, {arg, TV}, FoldC#ctx.env)
-    }}
+    {[TV | Ts], add_env(ArgName, {arg, TV}, FoldC)}
   end, {[], C}, Args),
 
   {ReturnT, C2} = infer(Expr, C1),
@@ -126,7 +124,7 @@ infer({fn, Var, Args, Expr}, C) ->
 
   case Var of
     {var, _, Name} ->
-      {_, FnTV} = dict:fetch(Name, C#ctx.env),
+      #{Name := {_, FnTV}} = C#ctx.env,
       {FnTV, C2#ctx{
         csts=[{FnTV, T} | C2#ctx.csts],
         % restore original env
@@ -209,12 +207,12 @@ infer({map, Pairs}, C) ->
 
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
-  {ok, {Type, T}} = dict:find(Name, C#ctx.env),
+  {ok, {Type, T}} = maps:find(Name, C#ctx.env),
   Deps = case Type of
            fn -> [T | C#ctx.deps];
            _ -> C#ctx.deps
          end,
-  {{inst, T, dict:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
+  {{inst, T, maps:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
 
 infer({app, Expr, Args}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
@@ -230,7 +228,7 @@ infer({app, Expr, Args}, C) ->
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
     {T, FoldC1} = infer(InitExpr, FoldC),
-    FoldC1#ctx{env=dict:store(Name, {'let', T}, FoldC1#ctx.env)}
+    add_env(Name, {'let', T}, FoldC1)
   end, C, Inits),
 
   {T, C2} = infer(Expr, C1),
@@ -306,6 +304,9 @@ infer({{Op, _}, Expr}, C) ->
 
   {TV, add_csts(Cst, C1)}.
 
+add_env(Name, Value, C) ->
+  C#ctx{env=(C#ctx.env)#{Name => Value}}.
+
 add_csts(Csts, C) ->
   case is_list(Csts) of
     true -> C#ctx{csts=Csts ++ C#ctx.csts};
@@ -316,10 +317,10 @@ norm_sig_type(SigT, Pid) ->
   % TODO: is it more intuitive to change each fv to *fv and then replace?
   FVList = gb_sets:to_list(fvs(SigT)),
   NewFVList = lists:map(fun(_) -> tv_server:next_name(Pid) end, FVList),
-  FVSubs = dict:from_list(lists:zip(FVList, NewFVList)),
+  FVSubs = maps:from_list(lists:zip(FVList, NewFVList)),
 
   GVs = gb_sets:from_list(NewFVList),
-  GVSubs = dict:from_list(lists:map(fun(FV) ->
+  GVSubs = maps:from_list(lists:map(fun(FV) ->
     {FV, {add_gvs, GVs}}
   end, NewFVList)),
 
@@ -350,7 +351,7 @@ solve(FCs, S) ->
         Csts = resolve_csts(C#ctx.csts, FoldS),
         io:format("solving (~p) ~p~n", [TV, Csts]),
         FoldS1 = unify_csts(Csts, FoldS),
-        io:format("subs: ~p~n", [dict:to_list(FoldS1#solver.subs)]),
+        io:format("subs: ~p~n", [maps:to_list(FoldS1#solver.subs)]),
         {gb_sets:add(TV, Solved), FoldS1}
       end, {gb_sets:new(), S}, Solvable),
 
@@ -385,8 +386,8 @@ resolve(none, _) -> none.
 
 inst({GVs, T}, S) ->
   Subs = gb_sets:fold(fun(V, Subs) ->
-    dict:store(V, tv_server:next_name(S#solver.pid), Subs)
-  end, dict:new(), GVs),
+    Subs#{V => tv_server:next_name(S#solver.pid)}
+  end, #{}, GVs),
   subs(T, Subs).
 
 generalize(T, EnvList) ->
@@ -467,9 +468,9 @@ unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
 add_sub(Key, Value, S) ->
-  case dict:find(Key, S#solver.subs) of
+  case maps:find(Key, S#solver.subs) of
     {ok, Existing} -> error({badarg, Key, Existing, Value});
-    error -> S#solver{subs=dict:store(Key, Value, S#solver.subs)}
+    error -> S#solver{subs=(S#solver.subs)#{Key => Value}}
   end.
 
 add_err(Err, S) ->
@@ -490,7 +491,7 @@ subs({lam, ArgsT, ReturnT}, Subs) ->
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
 subs({tv, V, I, GVs}, Subs) ->
-  case dict:find(V, Subs) of
+  case maps:find(V, Subs) of
     {ok, {add_gvs, NewGVs}} -> {tv, V, I, gb_sets:union(GVs, NewGVs)};
     {ok, Value} ->
       Sub = if

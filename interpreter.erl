@@ -12,12 +12,12 @@ execute(Ast) ->
   Env = lists:foldl(fun(Node, Env) ->
     case Node of
       {fn, {var, _, Name}, _, _} ->
-        dict:store(Name, {lazy, Node}, Env);
+        Env#{Name => {lazy, Node}};
       _ -> Env
     end
-  end, dict:new(), Ast),
+  end, #{}, Ast),
 
-  {lazy, Expr} = dict:fetch("main", Env),
+  #{"main" := {lazy, Expr}} = Env,
   Main = eval(Expr, Env),
   Main([]).
 
@@ -25,7 +25,7 @@ eval({fn, Var, Args, Expr}, Env) ->
   fun(Vs) ->
     {LeftArgs, NewEnv} = lists:foldl(fun(V, {FoldArgs, FoldEnv}) ->
       {var, _, Name} = hd(FoldArgs),
-      {tl(FoldArgs), dict:store(Name, V, FoldEnv)}
+      {tl(FoldArgs), FoldEnv#{Name => V}}
     end, {Args, Env}, Vs),
 
     case length(LeftArgs) of
@@ -53,7 +53,7 @@ eval({map, Pairs}, Env) ->
   maps:from_list(List);
 
 eval({var, _, Name}, Env) ->
-  case dict:fetch(Name, Env) of
+  case maps:get(Name, Env) of
     {lazy, Expr} -> eval(Expr, Env);
     V -> V
   end;
@@ -66,7 +66,7 @@ eval({app, Expr, Args}, Env) ->
 eval({{'let', _}, Inits, Expr}, Env) ->
   NewEnv = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldEnv) ->
     V = eval(InitExpr, FoldEnv),
-    dict:store(Name, V, FoldEnv)
+    FoldEnv#{Name => V}
   end, Env, Inits),
 
   eval(Expr, NewEnv);
