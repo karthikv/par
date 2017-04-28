@@ -108,6 +108,8 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("false"))
   , ?_test("String" = ok_expr("\"\""))
   , ?_test("String" = ok_expr("\"some string\n\""))
+  , ?_test("Atom" = ok_expr("@hello"))
+  , ?_test("Atom" = ok_expr("@\"hello world\""))
   , ?_test("[A]" = ok_expr("[]"))
   , ?_test("[A: Num]" = ok_expr("[3, 5, 6]"))
   , ?_test("[Float]" = ok_expr("[3, 5.0, 6]"))
@@ -302,7 +304,7 @@ sig_test_() ->
     ))
   , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
       "add :: A: Num -> A: Num -> A: Num\n"
-      "add(x, y) = x :: B: Num + y :: A:Num",
+      "add(x, y) = x :: B: Num + y :: A: Num",
       "add"
     ))
   , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(

@@ -1,8 +1,8 @@
 -module(interpreter).
 -export([reload/1, execute/1]).
 
-reload(LexParse) ->
-  par:reload(LexParse),
+reload(Syntax) ->
+  par:reload(Syntax),
 
   code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
@@ -40,6 +40,7 @@ eval({int, _, V}, _) -> V;
 eval({float, _, V}, _) -> V;
 eval({bool, _, V}, _) -> V;
 eval({str, _, V}, _) -> V;
+eval({atom, _, V}, _) -> V;
 
 eval({list, Elems}, Env) ->
   lists:map(fun(E) -> eval(E, Env) end, Elems);

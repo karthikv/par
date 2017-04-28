@@ -23,6 +23,8 @@ expr_test_() ->
   , ?_test(3.0 = expr("3.0"))
   , ?_test(true = expr("true"))
   , ?_test(<<"hi">> = expr("\"hi\""))
+  , ?_test(hi = expr("@hi"))
+  , ?_test('hello world' = expr("@\"hello world\""))
   , ?_test([3.0, 5] = expr("[3.0, 5]"))
   , ?_test({<<"what">>, false} = expr("(\"what\", false)"))
   , ?_assertEqual(#{}, expr("{}"))

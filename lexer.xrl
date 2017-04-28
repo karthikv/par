@@ -4,6 +4,7 @@ INT = [0-9]+
 FLOAT = {INT}+\.{INT}+
 BOOL = (true|false)
 STR = "(\\.|[^\\"])*"
+ATOM = @[a-zA-Z0-9_@]+
 VAR = [a-z][a-zA-Z0-9_]*
 TV = [A-Z]
 CON = [A-Z][a-zA-Z0-9_]+
@@ -43,6 +44,8 @@ in : {token, {'in', TokenLine}}.
 {FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
 {STR} : {token, {str, TokenLine, list_to_binary(drop_quotes(TokenChars))}}.
+\@{STR} : {token, {atom, TokenLine, list_to_atom(drop_quotes(tl(TokenChars)))}}.
+{ATOM} : {token, {atom, TokenLine, list_to_atom(tl(TokenChars))}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
 \[ : {token, {'[', TokenLine}}.
 \] : {token, {']', TokenLine}}.

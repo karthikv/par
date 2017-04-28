@@ -24,6 +24,7 @@
 % - Error messages
 % - Native function
 % - Global variables
+% - Interfaces in type signature, maybe A ~ Num?
 % - Complex types: ADTs
 % - Imports
 % - Typeclasses + generics w/o concrete types
@@ -172,6 +173,7 @@ infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, 'Float'}, C};
 infer({bool, _, _}, C) -> {{con, 'Bool'}, C};
 infer({str, _, _}, C) -> {{con, 'String'}, C};
+infer({atom, _, _}, C) -> {{con, 'Atom'}, C};
 
 infer({list, Elems}, C) ->
   TV = tv_server:fresh(C#ctx.pid),

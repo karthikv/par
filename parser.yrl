@@ -9,7 +9,8 @@ Terminals
   '+' '-' '*' '/'
   '++' '--' '|' '::' ':' '->'
   if then else let in
-  int float bool str var '[' ']' '{' '}' '=>' '#'
+  int float bool str atom var
+  '[' ']' '{' '}' '=>' '#'
   sig_tv sig_con.
 Rootsymbol prg.
 
@@ -40,6 +41,7 @@ expr -> int : '$1'.
 expr -> float : '$1'.
 expr -> bool : '$1'.
 expr -> str : '$1'.
+expr -> atom : '$1'.
 expr -> var : '$1'.
 expr -> '[' ']' : {list, []}.
 expr -> '[' expr_list ']' : {list, '$2'}.
