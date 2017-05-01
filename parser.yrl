@@ -1,8 +1,8 @@
 Nonterminals
   prg decl sig
   type type_list
-  expr var_list expr_list init_list kv_list
-  neg maybe_else.
+  expr lam neg maybe_else
+  var_list expr_list init_list kv_list.
 Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
@@ -75,8 +75,15 @@ expr -> atom ':' var '(' expr_list ')' :
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
 expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let init_list in expr : {'$1', '$2', '$4'}.
-expr -> '|' '-' '|' expr : {fn, none, [], '$4'}.
-expr -> '|' var_list '|' expr : {fn, none, '$2', '$4'}.
+expr -> lam : '$1'.
+
+lam -> '|' '-' '|' expr : {fn, none, [], '$4'}.
+lam -> '|' var_list '|' expr : {fn, none, '$2', '$4'}.
+
+neg -> '-' expr : {'$1', '$2'}.
+
+maybe_else -> '$empty' : none.
+maybe_else -> else expr : '$2'.
 
 var_list -> var : ['$1'].
 var_list -> var ',' var_list : ['$1' | '$3'].
@@ -90,19 +97,15 @@ init_list -> var '=' expr ',' init_list : [{'$1', '$3'} | '$5'].
 kv_list -> expr '=>' expr : [{'$1', '$3'}].
 kv_list -> expr '=>' expr ',' kv_list : [{'$1', '$3'} | '$5'].
 
-neg -> '-' expr : {'$1', '$2'}.
-
-maybe_else -> '$empty' : none.
-maybe_else -> else expr : '$2'.
-
 Nonassoc 10 '='.
 Right 20 '->'.
-Right 30 'else'.
-Left 40 '||'.
-Left 50 '&&'.
-Nonassoc 60 '==' '!=' '>' '<' '>=' '<='.
-Left 70 '+' '-' '++' '--'.
-Left 80 '*' '/'.
-Unary 90 '::'.
-Unary 100 '!' neg '#'.
-Unary 110 '('.
+Unary 30 lam.
+Right 40 'else'.
+Left 50 '||'.
+Left 60 '&&'.
+Nonassoc 70 '==' '!=' '>' '<' '>=' '<='.
+Left 80 '+' '-' '++' '--'.
+Left 90 '*' '/'.
+Unary 100 '::'.
+Unary 110 '!' neg '#'.
+Unary 120 '('.
