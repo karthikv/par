@@ -69,6 +69,10 @@ expr -> expr sig : {expr_sig, '$1', '$2'}.
 expr -> '(' expr ')' : '$2'.
 expr -> expr '(' ')' : {app, '$1', []}.
 expr -> expr '(' expr_list ')' : {app, '$1', '$3'}.
+expr -> atom ':' var '(' ')' : {app, {native, '$1', '$3', 0}, []}.
+expr -> atom ':' var '(' expr_list ')' :
+  {app, {native, '$1', '$3', length('$5')}, '$5'}.
+expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
 expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let init_list in expr : {'$1', '$2', '$4'}.
 expr -> '|' '-' '|' expr : {fn, none, [], '$4'}.

@@ -239,7 +239,14 @@ expr_test_() ->
   , ?_test("(Float -> A) -> Float -> A" = ok_expr("|f, x| f(x - 3.0)"))
   , ?_test("Bool" = ok_expr("(|x| x || true)(false)"))
   , ?_test("A: Num" = ok_expr("(|a, b| a + b)(3)(4)"))
+  , ?_test("A: Num -> A: Num -> A: Num" = ok_expr("|x| |y| x + y"))
   , ?_test(bad_expr("|x| x + true", {"A: Num", "Bool"}))
+  , ?_test(bad_expr("(|x| x)(1, 2)", {"A: Num", "B: Num -> C"}))
+
+  , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
+  , ?_test("Set<A: Num>" =
+             ok_expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])"))
+  , ?_test("A" = ok_expr("@lists:filter/2(1, 2, 3)"))
   ].
 
 para_poly_test_() ->

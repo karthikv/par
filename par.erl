@@ -4,6 +4,15 @@
 -record(ctx, {csts, env, pid, deps}).
 -record(solver, {subs, errs, pid}).
 
+-ifdef(release).
+  -define(LOG(Prefix, Value), true).
+-else.
+  -define(
+    LOG(Prefix, Value),
+    io:format("~n(~p:~p) ~s:~n~p~n", [?MODULE, ?LINE, Prefix, Value])
+  ).
+-endif.
+
 % Naming conventions:
 % TV - type variable
 % fresh - a function that generates a new TV
@@ -21,8 +30,8 @@
 %
 % TODO:
 % - TODOs in code (non-unification error cases)
+% - Nullary functions?
 % - Error messages
-% - Native function
 % - Global variables
 % - Interfaces in type signature, maybe A ~ Num?
 % - Complex types: ADTs
@@ -65,6 +74,7 @@ reload(false) ->
 infer_prg(Prg) ->
   {ok, Tokens, _} = lexer:string(Prg),
   {ok, Ast} = parser:parse(Tokens),
+  ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
   C = lists:foldl(fun(Node, C) ->
@@ -222,8 +232,28 @@ infer({app, Expr, Args}, C) ->
 
   {ExprT, C2} = infer(Expr, C1),
   TV = tv_server:fresh(C2#ctx.pid),
-  T = lists:foldl(fun(ArgT, LastT) -> {lam, ArgT, LastT} end, TV, ArgsTRev),
+  T = if
+    length(ArgsTRev) == 0 -> {lam, none, TV};
+    true ->
+      lists:foldl(fun(ArgT, LastT) ->
+        {lam, ArgT, LastT}
+      end, TV, ArgsTRev)
+  end,
+
   {TV, add_csts({T, ExprT}, C2)};
+
+infer({native, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
+  % TODO: handle case where this fails
+  true = erlang:function_exported(Module, list_to_atom(Name), Arity),
+  T = if
+    Arity == 0 -> {lam, none, tv_server:fresh(C#ctx.pid)};
+    true ->
+      lists:foldl(fun(_, LastT) ->
+        {lam, tv_server:fresh(C#ctx.pid), LastT}
+      end, tv_server:fresh(C#ctx.pid), lists:seq(1, Arity))
+  end,
+
+  {T, C};
 
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
@@ -349,9 +379,9 @@ solve(FCs, S) ->
     true ->
       {Solved, S1} = lists:foldl(fun({TV, C}, {Solved, FoldS}) ->
         Csts = resolve_csts(C#ctx.csts, FoldS),
-        io:format("solving (~p) ~p~n", [TV, Csts]),
         FoldS1 = unify_csts(Csts, FoldS),
-        io:format("subs: ~p~n", [maps:to_list(FoldS1#solver.subs)]),
+        ?LOG("Csts", Csts),
+        ?LOG("Subs", maps:to_list(FoldS1#solver.subs)),
         {gb_sets:add(TV, Solved), FoldS1}
       end, {gb_sets:new(), S}, Solvable),
 

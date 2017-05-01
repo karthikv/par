@@ -36,10 +36,10 @@ Rules.
 \: : {token, {':', TokenLine}}.
 \-\> : {token, {'->', TokenLine}}.
 if : {token, {'if', TokenLine}}.
-then : {token, {'then', TokenLine}}.
-else : {token, {'else', TokenLine}}.
+then : {token, {then, TokenLine}}.
+else : {token, {else, TokenLine}}.
 let : {token, {'let', TokenLine}}.
-in : {token, {'in', TokenLine}}.
+in : {token, {in, TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
 {FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.

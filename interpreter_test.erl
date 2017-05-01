@@ -1,5 +1,5 @@
 -module(interpreter_test).
--export([run/0]).
+-export([run/0, returns_fun/0]).
 -include_lib("eunit/include/eunit.hrl").
 
 run() ->
@@ -42,6 +42,8 @@ expr_test_() ->
   , ?_test(35.0 = (expr("|x, y| x * y * 3.5"))([4, 2.5]))
   , ?_test(true = expr("(|x| x || true)(false)"))
   , ?_test(<<"ab">> = expr("(|a, b| a ++ b)(\"a\")(\"b\")"))
+  , ?_test(5 = expr("(|x| |y| x + y)(2, 3)"))
+  , ?_test([4, 1] = expr("(|x| |-| x -- [3])([4, 3, 1])()"))
 
   , ?_test(5 = expr("let x = 5 in x"))
   , ?_test(true = expr("let x = 5, y = true in x == 4 || y"))
@@ -100,6 +102,15 @@ expr_test_() ->
   , ?_test(-78.5 = expr("-5 * 15.7"))
   , ?_test(false = expr("!true"))
   , ?_test(true = expr("!false && true"))
+
+  , ?_test([4, 6] = expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
+  , ?_test([6] = expr("@lists:filter((|t, x| x > t)(5), [2, 4, 6])"))
+  , ?_test([true] = expr("@lists:map(@erlang:is_atom/1, [@a])"))
+  , ?_assertEqual(
+      gb_sets:from_list([1, 2, 3]),
+      expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])")
+    )
+  , ?_test(3 = expr("@interpreter_test:returns_fun()(1)(2)"))
   ].
 
 prg_test_() ->
@@ -123,3 +134,6 @@ prg_test_() ->
       "main() = f(57)"
     ))
   ].
+
+returns_fun() ->
+  fun(A, B) -> A + B end.
