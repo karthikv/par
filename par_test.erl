@@ -242,6 +242,7 @@ expr_test_() ->
   , ?_test("A: Num -> A: Num -> A: Num" = ok_expr("|x| |y| x + y"))
   , ?_test(bad_expr("|x| x + true", {"A: Num", "Bool"}))
   , ?_test(bad_expr("(|x| x)(1, 2)", {"A: Num", "B: Num -> C"}))
+  , ?_test("[A: Num]" = ok_expr("(|x| |-| x -- [3])([4, 3, 1])()"))
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A: Num>" =
