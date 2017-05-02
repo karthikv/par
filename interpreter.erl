@@ -71,6 +71,12 @@ eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
   curry_native(fun Module:Fn/Arity);
 
+eval({{'if', _}, Expr, Then, Else}, Env) ->
+  case eval(Expr, Env) of
+    true -> eval(Then, Env);
+    false -> eval(Else, Env)
+  end;
+
 eval({{'let', _}, Inits, Expr}, Env) ->
   NewEnv = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldEnv) ->
     V = eval(InitExpr, FoldEnv),
@@ -79,11 +85,8 @@ eval({{'let', _}, Inits, Expr}, Env) ->
 
   eval(Expr, NewEnv);
 
-eval({{'if', _}, Expr, Then, Else}, Env) ->
-  case eval(Expr, Env) of
-    true -> eval(Then, Env);
-    false -> eval(Else, Env)
-  end;
+eval({block, Exprs}, Env) ->
+  lists:foldl(fun(Expr, _) -> eval(Expr, Env) end, none, Exprs);
 
 eval({{Op, _}, Left, Right}, Env) ->
   LeftV = eval(Left, Env),

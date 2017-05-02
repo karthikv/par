@@ -2,17 +2,20 @@ Nonterminals
   prg decl sig
   type type_list
   expr lam neg maybe_else
-  var_list expr_list init_list kv_list.
+  var_list expr_list init_list kv_list semi_list.
+
 Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/'
-  '++' '--' '|' '::' ':' '->'
+  '++' '--' '|' '::' ':' '->' ';'
   if then else let in
   int float bool str atom var
   '[' ']' '{' '}' '=>' '#'
   sig_tv sig_con.
+
 Rootsymbol prg.
+
 
 prg -> '$empty' : [].
 prg -> decl prg : ['$1' | '$2'].
@@ -76,6 +79,7 @@ expr -> atom ':' var '(' expr_list ')' :
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
 expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let init_list in expr : {'$1', '$2', '$4'}.
+expr -> '{' semi_list '}' : {block, '$2'}.
 expr -> lam : '$1'.
 
 lam -> '|' '-' '|' expr : {fn, [], '$4'}.
@@ -98,6 +102,10 @@ init_list -> var '=' expr ',' init_list : [{'$1', '$3'} | '$5'].
 kv_list -> expr '=>' expr : [{'$1', '$3'}].
 kv_list -> expr '=>' expr ',' kv_list : [{'$1', '$3'} | '$5'].
 
+semi_list -> expr : ['$1'].
+semi_list -> expr ';' semi_list : ['$1' | '$3'].
+
+
 Nonassoc 10 '='.
 Right 20 '->'.
 Unary 30 lam.
@@ -110,6 +118,7 @@ Left 90 '*' '/'.
 Unary 100 '::'.
 Unary 110 '!' neg '#'.
 Unary 120 '('.
+
 
 Erlang code.
 

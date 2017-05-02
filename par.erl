@@ -32,10 +32,9 @@
 % - TODOs in code (non-unification error cases)
 % - Error messages
 % - Maybe else w/ unit type
-% - Expr separator
 % - Complex types: ADTs
 % - Imports
-% - Typeclasses + generics w/o concrete types
+% - Typeclasses + generics w/o concrete types (HKTs)
 % - Concurrency
 % - Pattern matching
 % - Exceptions
@@ -254,6 +253,14 @@ infer({native, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
 
   {T, C};
 
+infer({{'if', _}, Expr, Then, Else}, C) ->
+  {ExprT, C1} = infer(Expr, C),
+  {ThenT, C2} = infer(Then, C1),
+  {ElseT, C3} = infer(Else, C2),
+
+  TV = tv_server:fresh(C#ctx.pid),
+  {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)};
+
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
     {T, FoldC1} = infer(InitExpr, FoldC),
@@ -263,13 +270,10 @@ infer({{'let', _}, Inits, Expr}, C) ->
   {T, C2} = infer(Expr, C1),
   {T, C2#ctx{env=C#ctx.env}};
 
-infer({{'if', _}, Expr, Then, Else}, C) ->
-  {ExprT, C1} = infer(Expr, C),
-  {ThenT, C2} = infer(Then, C1),
-  {ElseT, C3} = infer(Else, C2),
-
-  TV = tv_server:fresh(C#ctx.pid),
-  {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)};
+infer({block, Exprs}, C) ->
+  lists:foldl(fun(Expr, {_, FoldC}) ->
+    infer(Expr, FoldC)
+  end, {none, C}, Exprs);
 
 infer({{Op, _}, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),

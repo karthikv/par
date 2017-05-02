@@ -229,6 +229,11 @@ expr_test_() ->
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
   , ?_test(bad_expr("let x = 3.0, y = true in x - y", {"Bool", "Float"}))
 
+  , ?_test("String" = ok_expr("{ \"hello\" }"))
+  , ?_test("Bool" = ok_expr("{ @foo; true }"))
+  , ?_test("Map<String, A: Num>" =
+             ok_expr("let x = 5 in { @erlang:hd([1]); 3.0; {\"hi\" => x} }"))
+
   , ?_test("() -> A: Num" = ok_expr("|-| 3"))
   , ?_test("A -> A" = ok_expr("|x| x"))
   , ?_test("A -> A" = ok_expr("|x| x :: T"))

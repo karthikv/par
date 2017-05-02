@@ -45,6 +45,10 @@ expr_test_() ->
   , ?_test(5 = expr("(|x| |y| x + y)(2, 3)"))
   , ?_test([4, 1] = expr("(|x| |-| x -- [3])([4, 3, 1])()"))
 
+  , ?_test(<<"world">> = expr("if false then \"hello\" else \"world\""))
+  , ?_test([true, false] =
+             expr("if false || true && 3.5 < 4 then [true, false] else [true]"))
+
   , ?_test(5 = expr("let x = 5 in x"))
   , ?_test(true = expr("let x = 5, y = true in x == 4 || y"))
   , ?_test(false =
@@ -52,9 +56,12 @@ expr_test_() ->
   , ?_test([4, 3, 4, 2, 3] =
              expr("let a = [4], f = |x| a ++ x ++ [3] in f([]) ++ f([2])"))
 
-  , ?_test(<<"world">> = expr("if false then \"hello\" else \"world\""))
-  , ?_test([true, false] =
-             expr("if false || true && 3.5 < 4 then [true, false] else [true]"))
+  , ?_test(<<"hello">> = expr("{ \"hello\" }"))
+  , ?_test(true = expr("{ @foo; true }"))
+  , ?_assertEqual(
+      #{<<"hi">> => 5},
+      expr("let x = 5 in { @erlang:hd([1]); 3.0; {\"hi\" => x} }")
+    )
 
   , ?_test(false = expr("1 == 2"))
   , ?_test(true = expr("(3, 4) == (3, 4)"))
