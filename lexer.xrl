@@ -36,6 +36,7 @@ Rules.
 \: : {token, {':', TokenLine}}.
 \-\> : {token, {'->', TokenLine}}.
 \; : {token, {';', TokenLine}}.
+discard : {token, {discard, TokenLine}}.
 if : {token, {'if', TokenLine}}.
 then : {token, {then, TokenLine}}.
 else : {token, {else, TokenLine}}.

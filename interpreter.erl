@@ -72,9 +72,13 @@ eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   curry_native(fun Module:Fn/Arity);
 
 eval({{'if', _}, Expr, Then, Else}, Env) ->
-  case eval(Expr, Env) of
+  Result = case eval(Expr, Env) of
     true -> eval(Then, Env);
     false -> eval(Else, Env)
+  end,
+  case Else of
+    none -> none;
+    _ -> Result
   end;
 
 eval({{'let', _}, Inits, Expr}, Env) ->
@@ -133,7 +137,8 @@ eval({{Op, _}, Expr}, Env) ->
   case Op of
     '!' -> not V;
     '#' -> gb_sets:from_list(V);
-    '-' -> -V
+    '-' -> -V;
+    'discard' -> none
   end.
 
 curry(Arity, Callback, ArgVs) ->

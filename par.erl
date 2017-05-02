@@ -31,7 +31,6 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Maybe else w/ unit type
 % - Complex types: ADTs
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
@@ -47,6 +46,7 @@
 % - Syntax for lambda with no arg?
 % - Operation: nth element of tuple?
 % - Unit as valid expression?
+% - Force all block expressions except last to be type ()?
 
 reload(true) ->
   code:purge(lexer),
@@ -256,10 +256,14 @@ infer({native, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
 infer({{'if', _}, Expr, Then, Else}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {ThenT, C2} = infer(Then, C1),
-  {ElseT, C3} = infer(Else, C2),
 
-  TV = tv_server:fresh(C#ctx.pid),
-  {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)};
+  case Else of
+    none -> {none, add_csts([{{con, 'Bool'}, ExprT}], C2)};
+    _ ->
+      {ElseT, C3} = infer(Else, C2),
+      TV = tv_server:fresh(C#ctx.pid),
+      {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)}
+  end;
 
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
@@ -332,7 +336,8 @@ infer({{Op, _}, Expr}, C) ->
       {{lam, ExprT, TV}, {lam, {gen, 'List', ElemT}, {gen, 'Set', ElemT}}};
     Op == '-' ->
       NumT = tv_server:fresh('Num', C1#ctx.pid),
-      {{lam, ExprT, TV}, {lam, NumT, NumT}}
+      {{lam, ExprT, TV}, {lam, NumT, NumT}};
+    Op == 'discard' -> {TV, none}
   end,
 
   {TV, add_csts(Cst, C1)}.
@@ -529,7 +534,7 @@ subs({tv, V, I, GVs}, Subs) ->
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
-        is_tuple(Value) -> Value;
+        is_tuple(Value) or (Value == none) -> Value;
         % Changing name due to instantiation; GVs don't carry over.
         true -> {tv, Value, I, gb_sets:new()}
       end,

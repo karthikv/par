@@ -19,7 +19,8 @@ expr(Expr) ->
   execute("main() = " ++ Expr).
 
 expr_test_() ->
-  [ ?_test(1 = expr("1"))
+  [ ?_test(none = expr("()"))
+  , ?_test(1 = expr("1"))
   , ?_test(3.0 = expr("3.0"))
   , ?_test(true = expr("true"))
   , ?_test(<<"hi">> = expr("\"hi\""))
@@ -48,6 +49,8 @@ expr_test_() ->
   , ?_test(<<"world">> = expr("if false then \"hello\" else \"world\""))
   , ?_test([true, false] =
              expr("if false || true && 3.5 < 4 then [true, false] else [true]"))
+  , ?_test(none = expr("if true then @foo"))
+  , ?_test(none = expr("if false then @io:nl() :: () else discard 3"))
 
   , ?_test(5 = expr("let x = 5 in x"))
   , ?_test(true = expr("let x = 5, y = true in x == 4 || y"))

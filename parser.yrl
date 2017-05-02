@@ -8,7 +8,7 @@ Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/'
-  '++' '--' '|' '::' ':' '->' ';'
+  '++' '--' '|' '::' ':' '->' ';' 'discard'
   if then else let in
   int float bool str atom var
   '[' ']' '{' '}' '=>' '#'
@@ -69,6 +69,7 @@ expr -> expr '--' expr : {'$2', '$1', '$3'}.
 expr -> '!' expr : {'$1', '$2'}.
 expr -> '#' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
+expr -> 'discard' expr : {'$1', '$2'}.
 expr -> expr sig : {expr_sig, '$1', '$2'}.
 expr -> '(' expr ')' : '$2'.
 expr -> expr '(' ')' : {app, '$1', []}.
@@ -116,7 +117,7 @@ Nonassoc 70 '==' '!=' '>' '<' '>=' '<='.
 Left 80 '+' '-' '++' '--'.
 Left 90 '*' '/'.
 Unary 100 '::'.
-Unary 110 '!' neg '#'.
+Unary 110 '!' '#' neg 'discard'.
 Unary 120 '('.
 
 

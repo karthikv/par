@@ -100,7 +100,8 @@ format_str(Str, Args) ->
   lists:flatten(io_lib:format(Str, Args)).
 
 expr_test_() ->
-  [ ?_test("A: Num" = ok_expr("1"))
+  [ ?_test("()" = ok_expr("()"))
+  , ?_test("A: Num" = ok_expr("1"))
   , ?_test("A: Num" = ok_expr("517"))
   , ?_test("Float" = ok_expr("1.0"))
   , ?_test("Float" = ok_expr("0.517"))
@@ -224,6 +225,9 @@ expr_test_() ->
 
   , ?_test("A: Num" = ok_expr("if 3 == 5 then 3 else 5"))
   , ?_test("Bool" = ok_expr("if !(true && false) then false else true"))
+  , ?_test("()" = ok_expr("if true then @foo"))
+  , ?_test("()" = ok_expr("if false then @io:nl() :: () else discard 3"))
+  , ?_test(bad_expr("if false then @io:nl() :: () else 3", {"A: Num", "()"}))
   , ?_test(bad_expr("if true then 3.0 else true", {"Float", "Bool"}))
 
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
