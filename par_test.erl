@@ -246,7 +246,10 @@ expr_test_() ->
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A: Num>" =
              ok_expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])"))
-  , ?_test("A" = ok_expr("@lists:filter/2(1, 2, 3)"))
+  , ?_test("A" = ok_expr("@io:printable_range()"))
+  , ?_test("A" = ok_expr("@io:printable_range(())"))
+  , ?_test("A" = ok_expr("@io:printable_range/0((), 1, 2)"))
+  , ?_test(bad_expr("@io:printable_range/0(1, 2)", {"()", "A: Num"}))
   ].
 
 para_poly_test_() ->

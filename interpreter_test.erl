@@ -111,6 +111,8 @@ expr_test_() ->
       expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])")
     )
   , ?_test(3 = expr("@interpreter_test:returns_fun()(1)(2)"))
+  , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1)(2)"))
+  , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1, 2)"))
   ].
 
 prg_test_() ->

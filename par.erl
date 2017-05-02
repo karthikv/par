@@ -30,7 +30,6 @@
 %
 % TODO:
 % - TODOs in code (non-unification error cases)
-% - Nullary functions?
 % - Error messages
 % - Global variables
 % - Interfaces in type signature, maybe A ~ Num?

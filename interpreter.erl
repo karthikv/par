@@ -19,40 +19,24 @@ execute(Ast) ->
 
   #{"main" := {lazy, Expr}} = Env,
   Main = eval(Expr, Env),
-  Main([]).
+  Main([none]).
 
-eval({fn, Var, Args, Expr}, Env) ->
-  fun(Vs) ->
-    case Vs of
-      unwrap ->
-        % When passing callbacks to native functions, we need to unwrap them so
-        % they're explicit in their argument list, as opposed to taking
-        % a variable-length array of curried arguments. The caller is asking
-        % this function to unwrap itself.
-        unwrap({fn, Var, Args, Expr}, Env);
+eval({fn, _, Args, Expr}, Env) ->
+  curry(length(Args), fun(Vs) ->
+    NewEnv = if
+      length(Args) == 0 -> Env;
+      true ->
+        lists:foldl(fun({{var, _, Name}, V}, FoldEnv) ->
+          FoldEnv#{Name => V}
+        end, Env, lists:zip(Args, Vs))
+    end,
 
-      _ ->
-        {AppVs, LeftVs} = if
-          length(Vs) > length(Args) -> lists:split(length(Args), Vs);
-          true -> {Vs, []}
-        end,
-
-        {LeftArgs, NewEnv} = lists:foldl(fun(V, {FoldArgs, FoldEnv}) ->
-          {var, _, Name} = hd(FoldArgs),
-          {tl(FoldArgs), FoldEnv#{Name => V}}
-        end, {Args, Env}, AppVs),
-
-        case length(LeftArgs) of
-          0 ->
-            Result = eval(Expr, NewEnv),
-            if length(LeftVs) > 0 -> Result(LeftVs); true -> Result end;
-          _ -> eval({fn, Var, LeftArgs, Expr}, NewEnv)
-        end
-    end
-  end;
+    eval(Expr, NewEnv)
+  end, []);
 
 eval({expr_sig, Expr, _}, Env) -> eval(Expr, Env);
 
+eval(none, _) -> none;
 eval({int, _, V}, _) -> V;
 eval({float, _, V}, _) -> V;
 eval({bool, _, V}, _) -> V;
@@ -77,12 +61,15 @@ eval({var, _, Name}, Env) ->
 
 eval({app, Expr, Args}, Env) ->
   Fn = eval(Expr, Env),
-  Vs = lists:map(fun(Arg) -> eval(Arg, Env) end, Args),
+  Vs = if
+    length(Args) == 0 -> [none];
+    true -> lists:map(fun(Arg) -> eval(Arg, Env) end, Args)
+  end,
   Fn(Vs);
 
 eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
-  wrap(fun Module:Fn/Arity, []);
+  curry_native(fun Module:Fn/Arity);
 
 eval({{'let', _}, Inits, Expr}, Env) ->
   NewEnv = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldEnv) ->
@@ -146,77 +133,93 @@ eval({{Op, _}, Expr}, Env) ->
     '-' -> -V
   end.
 
-unwrap({fn, _, Args, Expr}, Env) ->
-  % As far as I know, there's no way to create a function with a dynamic number
-  % of arguments, so we do it manually up to 10 (a guessed maximum) here.
-  case length(Args) of
-    1 -> fun(A) ->
-      unwrap_eval(Args, [A], Expr, Env)
-    end;
-    2 -> fun(A, B) ->
-      unwrap_eval(Args, [A, B], Expr, Env)
-    end;
-    3 -> fun(A, B, C) ->
-      unwrap_eval(Args, [A, B, C], Expr, Env)
-    end;
-    4 -> fun(A, B, C, D) ->
-      unwrap_eval(Args, [A, B, C, D], Expr, Env)
-    end;
-    5 -> fun(A, B, C, D, E) ->
-      unwrap_eval(Args, [A, B, C, D, E], Expr, Env)
-    end;
-    6 -> fun(A, B, C, D, E, F) ->
-      unwrap_eval(Args, [A, B, C, D, E, F], Expr, Env)
-    end;
-    7 -> fun(A, B, C, D, E, F, G) ->
-      unwrap_eval(Args, [A, B, C, D, E, F, G], Expr, Env)
-    end;
-    8 -> fun(A, B, C, D, E, F, G, H) ->
-      unwrap_eval(Args, [A, B, C, D, E, F, G, H], Expr, Env)
-    end;
-    9 -> fun(A, B, C, D, E, F, G, H, I) ->
-      unwrap_eval(Args, [A, B, C, D, E, F, G, H, I], Expr, Env)
-    end;
-    10 -> fun(A, B, C, D, E, F, G, H, I, J) ->
-      unwrap_eval(Args, [A, B, C, D, E, F, G, H, I, J], Expr, Env)
-    end
-  end.
+curry(Arity, Callback, ArgVs) ->
+  fun(Action) ->
+    case Action of
+      uncurry ->
+        uncurry(Arity - length(ArgVs), fun(NewVs) ->
+          Callback(ArgVs ++ NewVs)
+        end);
 
-unwrap_eval(Args, Vs, Expr, Env) ->
-  NewEnv = lists:foldl(fun({{var, _, Name}, V}, FoldEnv) ->
-    FoldEnv#{Name => V}
-  end, Env, lists:zip(Args, Vs)),
+      NewVs when is_list(NewVs) ->
+        Vs = ArgVs ++ NewVs,
 
-  eval(Expr, NewEnv).
-
-wrap(Fun, SavedVs) ->
-  {arity, Arity} = erlang:fun_info(Fun, arity),
-  fun(NewVs) ->
-    case NewVs of
-      unwrap ->
-        % When passing callbacks to native functions, we need to unwrap them so
-        % they're explicit in their argument list, as opposed to taking
-        % a variable-length array of curried arguments. The caller is asking
-        % this function to unwrap itself.
-        Fun;
-
-      _ ->
-        Vs = SavedVs ++ NewVs,
         if
+          Arity == 0 ->
+            [none | Rest] = Vs,
+            Result = Callback([none]),
+            if
+              is_function(Result) and (length(Rest) > 0) -> Result(Rest);
+              true -> Result
+            end;
+
           length(Vs) >= Arity ->
-            {AppVs, LeftVs} = if
+            {AppVs, Rest} = if
               length(Vs) > Arity -> lists:split(Arity, Vs);
               true -> {Vs, []}
             end,
 
-            NativeVs = lists:map(fun(V) ->
-              if is_function(V) -> V(unwrap); true -> V end
-            end, AppVs),
+            Result = Callback(AppVs),
+            if
+              is_function(Result) and (length(Rest) > 0) -> Result(Rest);
+              true -> Result
+            end;
 
-            Raw = apply(Fun, NativeVs),
-            Result = if is_function(Raw) -> wrap(Raw, []); true -> Raw end,
-            if length(LeftVs) > 0 -> Result(LeftVs); true -> Result end;
-          true -> wrap(Fun, Vs)
+          true -> curry(Arity, Callback, Vs)
         end
+    end
+  end.
+
+curry_native(Fun) ->
+  {arity, Arity} = erlang:fun_info(Fun, arity),
+  curry(Arity, fun(Vs) ->
+    Result = if
+      Arity == 0 -> Fun();
+      true ->
+        NativeVs = lists:map(fun(V) ->
+          if is_function(V) -> V(uncurry); true -> V end
+        end, Vs),
+        apply(Fun, NativeVs)
+    end,
+
+    if is_function(Result) -> curry_native(Result); true -> Result end
+  end, []).
+
+uncurry(Arity, Callback) ->
+  % As far as I know, there's no way to create a function with a dynamic number
+  % of arguments, so we do it manually up to 10 (a guessed maximum) here.
+  case Arity of
+    0 -> fun() ->
+      Callback([none])
+    end;
+    1 -> fun(A) ->
+      Callback([A])
+    end;
+    2 -> fun(A, B) ->
+      Callback([A, B])
+    end;
+    3 -> fun(A, B, C) ->
+      Callback([A, B, C])
+    end;
+    4 -> fun(A, B, C, D) ->
+      Callback([A, B, C, D])
+    end;
+    5 -> fun(A, B, C, D, E) ->
+      Callback([A, B, C, D, E])
+    end;
+    6 -> fun(A, B, C, D, E, F) ->
+      Callback([A, B, C, D, E, F])
+    end;
+    7 -> fun(A, B, C, D, E, F, G) ->
+      Callback([A, B, C, D, E, F, G])
+    end;
+    8 -> fun(A, B, C, D, E, F, G, H) ->
+      Callback([A, B, C, D, E, F, G, H])
+    end;
+    9 -> fun(A, B, C, D, E, F, G, H, I) ->
+      Callback([A, B, C, D, E, F, G, H, I])
+    end;
+    10 -> fun(A, B, C, D, E, F, G, H, I, J) ->
+      Callback([A, B, C, D, E, F, G, H, I, J])
     end
   end.

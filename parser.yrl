@@ -37,6 +37,7 @@ type -> type '->' type : {sig_lam, '$1', '$3'}.
 type_list -> type : '$1'.
 type_list -> type ',' type_list : {sig_tuple, '$1', '$3'}.
 
+expr -> '(' ')' : none.
 expr -> int : '$1'.
 expr -> float : '$1'.
 expr -> bool : '$1'.
@@ -71,7 +72,7 @@ expr -> expr '(' ')' : {app, '$1', []}.
 expr -> expr '(' expr_list ')' : {app, '$1', '$3'}.
 expr -> atom ':' var '(' ')' : {app, {native, '$1', '$3', 0}, []}.
 expr -> atom ':' var '(' expr_list ')' :
-  {app, {native, '$1', '$3', length('$5')}, '$5'}.
+  {app, {native, '$1', '$3', num_args('$5')}, '$5'}.
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
 expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let init_list in expr : {'$1', '$2', '$4'}.
@@ -109,3 +110,9 @@ Left 90 '*' '/'.
 Unary 100 '::'.
 Unary 110 '!' neg '#'.
 Unary 120 '('.
+
+Erlang code.
+
+num_args([]) -> 0;
+num_args([none]) -> 0;
+num_args(Args) -> length(Args).
