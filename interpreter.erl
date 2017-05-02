@@ -11,8 +11,8 @@ reload(Syntax) ->
 execute(Ast) ->
   Env = lists:foldl(fun(Node, Env) ->
     case Node of
-      {fn, {var, _, Name}, _, _} ->
-        Env#{Name => {lazy, Node}};
+      {global, {var, _, Name}, Expr} ->
+        Env#{Name => {lazy, Expr}};
       _ -> Env
     end
   end, #{}, Ast),
@@ -21,7 +21,7 @@ execute(Ast) ->
   Main = eval(Expr, Env),
   Main([none]).
 
-eval({fn, _, Args, Expr}, Env) ->
+eval({fn, Args, Expr}, Env) ->
   curry(length(Args), fun(Vs) ->
     NewEnv = if
       length(Args) == 0 -> Env;

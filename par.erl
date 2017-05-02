@@ -31,8 +31,8 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Global variables
-% - Interfaces in type signature, maybe A ~ Num?
+% - Maybe else w/ unit type
+% - Expr separator
 % - Complex types: ADTs
 % - Imports
 % - Typeclasses + generics w/o concrete types
@@ -46,7 +46,6 @@
 % - Reverse csts before solving for better error messages?
 % - Make true/false capitalized?
 % - Syntax for lambda with no arg?
-% - Maybe else w/ unit type?
 % - Operation: nth element of tuple?
 % - Unit as valid expression?
 
@@ -78,37 +77,40 @@ infer_prg(Prg) ->
 
   C = lists:foldl(fun(Node, C) ->
     case Node of
-      {fn, {var, _, Name}, _, _} ->
+      {global, {var, _, Name}, _} ->
         % TODO: what if name already exists?
         TV = tv_server:fresh(C#ctx.pid),
-        add_env(Name, {fn, TV}, C);
+        add_env(Name, {global, TV}, C);
+
       _ -> C
     end
   end, #ctx{csts=[], env=#{}, pid=Pid, deps=[]}, Ast),
 
-  {_, _, FCs, C1} = lists:foldl(fun(Node, {ExpName, SigT, FCs, FoldC}) ->
+  {_, _, GVCs, C1} = lists:foldl(fun(Node, {ExpName, SigT, GVCs, FoldC}) ->
     if
       % TODO: handle error
-      ExpName =/= none -> {fn, {var, _, ExpName}, _, _} = Node;
+      ExpName /= none -> {global, {var, _, ExpName}, _} = Node;
       true -> none
     end,
 
     case Node of
-      {fn, _, _, _} ->
+      {global, _, _} ->
         {TV, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
         Csts = if
           SigT == none -> FoldC1#ctx.csts;
           true -> [{TV, SigT} | FoldC1#ctx.csts]
         end,
+
         FoldC2 = FoldC1#ctx{csts=Csts},
-        {none, none, [{TV, FoldC2} | FCs], FoldC2};
+        {none, none, [{TV, FoldC2} | GVCs], FoldC2};
+
       {sig, {var, _, Name}, _} ->
         {T, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
-        {Name, T, FCs, FoldC1}
+        {Name, T, GVCs, FoldC1}
     end
   end, {none, none, [], C}, Ast),
 
-  Result = case solve(FCs, #solver{subs=#{}, errs=[], pid=Pid}) of
+  Result = case solve(GVCs, #solver{subs=#{}, errs=[], pid=Pid}) of
     {ok, Subs} ->
       {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env), Ast};
     {errors, Errs} -> {errors, Errs}
@@ -117,7 +119,15 @@ infer_prg(Prg) ->
   ok = tv_server:stop(Pid),
   Result.
 
-infer({fn, Var, Args, Expr}, C) ->
+infer({global, {var, _, Name}, Expr}, C) ->
+  {T, C1} = infer(Expr, C),
+  TV = case maps:find(Name, C#ctx.env) of
+    {ok, {_, ExistingTV}} -> ExistingTV;
+    error -> tv_server:fresh(C#ctx.pid)
+  end,
+  {TV, add_csts({TV, T}, C1)};
+
+infer({fn, Args, Expr}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
     {[TV | Ts], add_env(ArgName, {arg, TV}, FoldC)}
@@ -131,18 +141,8 @@ infer({fn, Var, Args, Expr}, C) ->
     end, ReturnT, ArgsTRev)
   end,
 
-  case Var of
-    {var, _, Name} ->
-      #{Name := {_, FnTV}} = C#ctx.env,
-      {FnTV, C2#ctx{
-        csts=[{FnTV, T} | C2#ctx.csts],
-        % restore original env
-        env=C#ctx.env
-      }};
-    none ->
-      % restore original env
-      {T, C2#ctx{env=C#ctx.env}}
-  end;
+  % restore original env
+  {T, C2#ctx{env=C#ctx.env}};
 
 infer({sig, _, Sig}, C) ->
   {SigT, C1} = infer(Sig, C),
@@ -218,7 +218,7 @@ infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
   {ok, {Type, T}} = maps:find(Name, C#ctx.env),
   Deps = case Type of
-           fn -> [T | C#ctx.deps];
+           global -> [T | C#ctx.deps];
            _ -> C#ctx.deps
          end,
   {{inst, T, maps:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
@@ -357,20 +357,20 @@ norm_sig_type(SigT, Pid) ->
 
 solve([], #solver{errs=Errs}) when length(Errs) > 0 -> {errors, Errs};
 solve([], #solver{subs=Subs}) -> {ok, Subs};
-solve(FCs, S) ->
+solve(GVCs, S) ->
   {Solvable, Unsolved} = lists:partition(fun({_, C}) ->
     length(C#ctx.deps) == 0
-  end, FCs),
+  end, GVCs),
 
   if
     length(Solvable) == 0 ->
-      % If all function contexts left have dependencies, that means each
-      % remaining function either is recursive, is mutually recursive, or
-      % depends on a recursive function. We solve all constraints simultaneously
-      % to resolve these. Note that any {inst, ...} of these recursive functions
-      % won't be generalized because the corresponding type variables are
-      % already in the env; we impose this non-polymorphic constraint to infer
-      % types with recursion.
+      % If all global contexts left have dependencies, that means each remaining
+      % global variable either is (mutually) recursive or depends on another
+      % variable that's (mutually) recursive. We solve all constraints
+      % simultaneously to resolve these. Note that any {inst, ...} of these
+      % variables won't be generalized because the corresponding type variables
+      % are already in the env; we impose this non-polymorphic constraint to
+      % infer types with recursion.
       Csts = lists:flatmap(fun({_, C}) -> C#ctx.csts end, Unsolved),
       S1 = unify_csts(resolve_csts(Csts, S), S),
       solve([], S1);
@@ -471,9 +471,9 @@ unify({{tv, V1, I1, GVs1}, {tv, V2, I2, GVs2}}, S) ->
       add_sub(V1, {tv, V2, I2, gb_sets:union(GVs2, GVs1)}, S);
 
     % We're now guaranteed three things:
-    % (1) I1 =/= I2
-    % (2) I2 =/= none or AllV2
-    % (3) I1 =/= none or AllV1
+    % (1) I1 /= I2
+    % (2) I2 /= none or AllV2
+    % (3) I1 /= none or AllV1
     %
     % (1) means the interfaces differ, (2) means we can't change V2 -> V1,
     % and (3) means we can't change V1 -> V2. We're out of options.

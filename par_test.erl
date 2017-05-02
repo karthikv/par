@@ -379,3 +379,48 @@ sig_test_() ->
       {"A", "B"}
     ))
   ].
+
+global_test_() ->
+  [ ?_test("A: Num" = ok_prg("foo = 3", "foo"))
+  , ?_test("[Bool]" = ok_prg(
+      "foo = baz && false\n"
+      "bar = [foo] ++ [true]\n"
+      "baz = true",
+      "bar"
+    ))
+  , ?_test("A: Num -> Float" = ok_prg(
+      "foo = |x| bar(x) / 2\n"
+      "bar(x) = if x == 0 then 1 else foo(x - 1) * 10",
+      "foo"
+    ))
+
+  % Although the following recursive programs will fail at runtime, they should
+  % pass the type checker. It's difficult to assess whether such programs are
+  % correct statically, especially when there are many of mutual dependencies.
+  % It's not worth making the type checker more complex for these cases,
+  % especially since they shouldn't occur often.
+  , ?_test("Float" = ok_prg(
+      "foo = bar(7) + 5.3\n"
+      "bar(x) = 3 + x",
+      "foo"
+    ))
+  , ?_test("Int -> Int" = ok_prg(
+      "foo :: Int\n"
+      "foo = bar(3)\n"
+      "bar(x) = foo + x",
+      "bar"
+    ))
+  , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
+
+  , ?_test(bad_prg(
+      "foo = \"hello\"\n"
+      "main() = foo ++ @world",
+      {"String", "Atom"}
+    ))
+  , ?_test(bad_prg(
+      "foo :: Set<Int>\n"
+      "foo = #[1, 2, 3]\n"
+      "main() = #[5.0, 6] -- foo",
+      {"Float", "Int"}
+    ))
+  ].

@@ -137,5 +137,23 @@ prg_test_() ->
     ))
   ].
 
+global_test_() ->
+  [ ?_test(3 = execute(
+      "foo = 3\n"
+      "main() = foo"
+    ))
+  , ?_test([false, true] = execute(
+      "foo = baz && false\n"
+      "bar = [foo] ++ [true]\n"
+      "baz = true\n"
+      "main() = bar"
+    ))
+  , ?_test(7812.5 = execute(
+      "foo = |x| bar(x) / 2\n"
+      "bar(x) = if x == 0 then 1 else foo(x - 1) * 10\n"
+      "main() = foo(6)"
+    ))
+  ].
+
 returns_fun() ->
   fun(A, B) -> A + B end.

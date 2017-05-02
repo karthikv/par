@@ -18,9 +18,9 @@ prg -> '$empty' : [].
 prg -> decl prg : ['$1' | '$2'].
 prg -> var sig prg : [{sig, '$1', '$2'} | '$3'].
 
-decl -> var '=' expr : {set, '$1', '$3'}.
-decl -> var '(' ')' '=' expr : {fn, '$1', [], '$5'}.
-decl -> var '(' var_list ')' '=' expr : {fn, '$1', '$3', '$6'}.
+decl -> var '=' expr : {global, '$1', '$3'}.
+decl -> var '(' ')' '=' expr : {global, '$1', {fn, [], '$5'}}.
+decl -> var '(' var_list ')' '=' expr : {global, '$1', {fn, '$3', '$6'}}.
 
 sig -> '::' type : '$2'.
 
@@ -78,8 +78,8 @@ expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let init_list in expr : {'$1', '$2', '$4'}.
 expr -> lam : '$1'.
 
-lam -> '|' '-' '|' expr : {fn, none, [], '$4'}.
-lam -> '|' var_list '|' expr : {fn, none, '$2', '$4'}.
+lam -> '|' '-' '|' expr : {fn, [], '$4'}.
+lam -> '|' var_list '|' expr : {fn, '$2', '$4'}.
 
 neg -> '-' expr : {'$1', '$2'}.
 
