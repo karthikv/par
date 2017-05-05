@@ -1,8 +1,11 @@
 -module(par).
--export([reload/1, infer_prg/1, subs/2, fvs/1]).
+-export([reload/1, infer_prg/1, subs/2, fvs/1, pretty/1]).
 
--record(ctx, {csts, env, pid, deps}).
--record(solver, {subs, errs, pid}).
+-record(ctx, {gnr, gnrs, env, pid}).
+-record(solver, {subs, errs, schemes, pid}).
+
+-record(gnr, {v, env, csts, deps, index, low_link, on_stack}).
+-record(tarjan, {stack, map, next_index, solver}).
 
 -ifdef(release).
   -define(LOG(Prefix, Value), true).
@@ -31,6 +34,7 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
+% - Mod operator
 % - Complex types: ADTs
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
@@ -71,21 +75,32 @@ reload(false) ->
 infer_prg(Prg) ->
   {ok, Tokens, _} = lexer:string(Prg),
   {ok, Ast} = parser:parse(Tokens),
-  ?LOG("AST", Ast),
+  %% ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
-  C = lists:foldl(fun(Node, C) ->
+  C = lists:foldl(fun(Node, FoldC) ->
     case Node of
       {global, {var, _, Name}, _} ->
         % TODO: what if name already exists?
-        TV = tv_server:fresh(C#ctx.pid),
-        add_env(Name, {global, TV}, C);
+        TV = tv_server:fresh(FoldC#ctx.pid),
+        add_env(Name, {add_dep, TV}, FoldC);
 
-      _ -> C
+      % TODO: register valid type for each enum/struct
+
+      _ -> FoldC
     end
-  end, #ctx{csts=[], env=#{}, pid=Pid, deps=[]}, Ast),
+  end, #ctx{gnrs=[], env=#{}, pid=Pid}, Ast),
 
-  {_, _, GVCs, C1} = lists:foldl(fun(Node, {ExpName, SigT, GVCs, FoldC}) ->
+  C1 = lists:foldl(fun(Node, FoldC) ->
+    case Node of
+      {enum, _, _} ->
+        {_, FoldC1} = infer(Node, FoldC),
+        FoldC1;
+      _ -> FoldC
+    end
+  end, C, Ast),
+
+  {_, _, C2} = lists:foldl(fun(Node, {ExpName, SigT, FoldC}) ->
     if
       % TODO: handle error
       ExpName /= none -> {global, {var, _, ExpName}, _} = Node;
@@ -94,24 +109,28 @@ infer_prg(Prg) ->
 
     case Node of
       {global, _, _} ->
-        {TV, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
-        Csts = if
-          SigT == none -> FoldC1#ctx.csts;
-          true -> [{TV, SigT} | FoldC1#ctx.csts]
-        end,
+        {_, FoldC1} = infer(Node, FoldC),
+        %% Csts = if
+        %%   SigT == none -> FoldC1#ctx.csts;
+        %%   true -> [{TV, SigT} | FoldC1#ctx.csts]
+        %% end,
 
-        FoldC2 = FoldC1#ctx{csts=Csts},
-        {none, none, [{TV, FoldC2} | GVCs], FoldC2};
+        %% FoldC2 = FoldC1#ctx{csts=lists:reverse(Csts)},
+        {none, none, FoldC1};
 
-      {sig, {var, _, Name}, _} ->
-        {T, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
-        {Name, T, GVCs, FoldC1}
+      %% {sig, {var, _, Name}, _} ->
+      %%   {T, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
+      %%   {Name, T, GVCs, FoldC1};
+
+      % we've already processed enums/structs
+      _ -> {ExpName, SigT, FoldC}
     end
-  end, {none, none, [], C}, Ast),
+  end, {none, none, C1}, Ast),
 
-  Result = case solve(GVCs, #solver{subs=#{}, errs=[], pid=Pid}) of
+  S = #solver{subs=#{}, errs=[], schemes=#{}, pid=Pid},
+  Result = case solve(C2#ctx.gnrs, S) of
     {ok, Subs} ->
-      {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C1#ctx.env), Ast};
+      {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C2#ctx.env), Ast};
     {errors, Errs} -> {errors, Errs}
   end,
 
@@ -119,17 +138,15 @@ infer_prg(Prg) ->
   Result.
 
 infer({global, {var, _, Name}, Expr}, C) ->
-  {T, C1} = infer(Expr, C),
-  TV = case maps:find(Name, C#ctx.env) of
-    {ok, {_, ExistingTV}} -> ExistingTV;
-    error -> tv_server:fresh(C#ctx.pid)
-  end,
-  {TV, add_csts({TV, T}, C1)};
+  #{Name := {add_dep, TV}} = C#ctx.env,
+  {T, C1} = infer(Expr, new_gnr(TV, C)),
+  C2 = add_csts({TV, T}, C1),
+  {TV, finish_gnr(C2, none)};
 
 infer({fn, Args, Expr}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
-    {[TV | Ts], add_env(ArgName, {arg, TV}, FoldC)}
+    {[TV | Ts], add_env(ArgName, {no_dep, TV}, FoldC)}
   end, {[], C}, Args),
 
   {ReturnT, C2} = infer(Expr, C1),
@@ -147,34 +164,54 @@ infer({sig, _, Sig}, C) ->
   {SigT, C1} = infer(Sig, C),
   {norm_sig_type(SigT, C#ctx.pid), C1};
 
-infer({expr_sig, Expr, Sig}, C) ->
+infer({sig_expr, Expr, Sig}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {SigT, C2} = infer(Sig, C1),
 
   NormSigT = norm_sig_type(SigT, C#ctx.pid),
   {ExprT, add_csts({ExprT, NormSigT}, C2)};
 
-infer({sig_lam, SigArgsT, SigReturnT}, C) ->
-  {ArgsT, C1} = infer(SigArgsT, C),
-  {ReturnT, C2} = infer(SigReturnT, C1),
-  {{lam, ArgsT, ReturnT}, C2};
-infer({sig_tuple, SigLeftT, SigRightT}, C) ->
-  {LeftT, C1} = infer(SigLeftT, C),
-  {RightT, C2} = infer(SigRightT, C1),
+infer({lam_expr, Arg, Return}, C) ->
+  {ArgT, C1} = infer(Arg, C),
+  {ReturnT, C2} = infer(Return, C1),
+  {{lam, ArgT, ReturnT}, C2};
+infer({tuple_expr, Left, Right}, C) ->
+  {LeftT, C1} = infer(Left, C),
+  {RightT, C2} = infer(Right, C1),
   {{tuple, LeftT, RightT}, C2};
-infer({sig_iface, SigTV, SigCon}, C) ->
-  {{tv, V, none, GVs}, C1} = infer(SigTV, C),
-  {{con, I}, C2} = infer(SigCon, C1),
+infer({iface_expr, TVToken, ConToken}, C) ->
+  {{tv, V, none, GVs}, C1} = infer(TVToken, C),
+  {{con, I}, C2} = infer(ConToken, C1),
   {{tv, V, I, GVs}, C2};
-infer({sig_gen, SigCon, SigParamT}, C) ->
-  {{con, T}, C1} = infer(SigCon, C),
-  {ParamT, C2} = infer(SigParamT, C1),
+infer({gen_expr, ConToken, Param}, C) ->
+  {{con, T}, C1} = infer(ConToken, C),
+  {ParamT, C2} = infer(Param, C1),
   {{gen, T, ParamT}, C2};
-infer({sig_tv, _, V}, C) -> {{tv, V, none, gb_sets:new()}, C};
-% TODO: ensure these types are valid
-infer({sig_con, _, Con}, C) -> {{con, list_to_atom(Con)}, C};
-infer(none, C) -> {none, C};
+infer({tv_token, _, Name}, C) -> {{tv, Name, none, gb_sets:new()}, C};
+% TODO: ensure these types are valid except when creating a new type
+infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 
+%% infer({enum, ConToken, Options}, C) ->
+%%   {T, C1} = infer(ConToken, C),
+%%   C2 = lists:foldl(fun({option, {con_token, _, Name}, Args}, FoldC) ->
+%%     {ArgsTRev, FoldC1} = lists:foldl(fun(Arg, {Ts, InnerC}) ->
+%%       {ArgT, InnerC1} = infer(Arg, InnerC),
+%%       {[ArgT | Ts], InnerC1}
+%%     end, {[], FoldC}, Args),
+%%
+%%     OptionT = lists:foldl(fun(ArgT, LastT) ->
+%%       {lam, ArgT, LastT}
+%%     end, T, ArgsTRev),
+%%     NormOptionT = norm_sig_type(OptionT, C#ctx.pid),
+%%
+%%     % TODO: what if name already exists?
+%%     TV = tv_server:fresh(C#ctx.pid),
+%%     add_env(Name, {enum, TV}, add_csts({TV, NormOptionT}, FoldC1))
+%%   end, C1, Options),
+%%
+%%   {T, C2};
+
+infer(none, C) -> {none, C};
 infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, 'Float'}, C};
 infer({bool, _, _}, C) -> {{con, 'Bool'}, C};
@@ -215,12 +252,20 @@ infer({map, Pairs}, C) ->
 
 infer({var, _, Name}, C) ->
   % TODO: handle case where can't find variable
-  {ok, {Type, T}} = maps:find(Name, C#ctx.env),
-  Deps = case Type of
-           global -> [T | C#ctx.deps];
-           _ -> C#ctx.deps
-         end,
-  {{inst, T, maps:to_list(C#ctx.env)}, C#ctx{deps=Deps}};
+  case maps:find(Name, C#ctx.env) of
+    {ok, {add_dep, EnvTV}} ->
+      {tv, V, _, _} = EnvTV,
+      G = C#ctx.gnr,
+      G1 = G#gnr{deps=[V | G#gnr.deps]},
+
+      % We need to defer instantiation until we start solving constraints.
+      % Otherwise, we don't know the real types of these variables, and can't
+      % instantiate properly.
+      {{inst, EnvTV}, C#ctx{gnr=G1}};
+
+    {ok, {_, EnvTV}} ->
+      {EnvTV, C}
+  end;
 
 infer({app, Expr, Args}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
@@ -266,13 +311,21 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
   end;
 
 infer({{'let', _}, Inits, Expr}, C) ->
-  C1 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
-    {T, FoldC1} = infer(InitExpr, FoldC),
-    add_env(Name, {'let', T}, FoldC1)
+  C1 = lists:foldl(fun({{var, _, Name}, _}, FoldC) ->
+    TV = tv_server:fresh(FoldC#ctx.pid),
+    % TODO: name conflicts?
+    add_env(Name, {add_dep, TV}, FoldC)
   end, C, Inits),
 
-  {T, C2} = infer(Expr, C1),
-  {T, C2#ctx{env=C#ctx.env}};
+  C2 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
+    #{Name := {add_dep, TV}} = FoldC#ctx.env,
+    {T, FoldC1} = infer(InitExpr, new_gnr(TV, FoldC)),
+    FoldC2 = add_csts({TV, T}, FoldC1),
+    finish_gnr(FoldC2, FoldC#ctx.gnr)
+  end, C1, Inits),
+
+  {T, C3} = infer(Expr, C2),
+  {T, C3#ctx{env=C#ctx.env}};
 
 infer({block, Exprs}, C) ->
   lists:foldl(fun(Expr, {_, FoldC}) ->
@@ -343,13 +396,24 @@ infer({{Op, _}, Expr}, C) ->
   {TV, add_csts(Cst, C1)}.
 
 add_env(Name, Value, C) ->
+  {_, {tv, _, _, _}} = Value,
   C#ctx{env=(C#ctx.env)#{Name => Value}}.
 
+new_gnr({tv, V, _, _}, C) ->
+  G = #gnr{v=V, env=C#ctx.env, csts=[], deps=[]},
+  C#ctx{gnr=G}.
+
+finish_gnr(C, NewG) ->
+  C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=NewG}.
+
 add_csts(Csts, C) ->
-  case is_list(Csts) of
-    true -> C#ctx{csts=Csts ++ C#ctx.csts};
-    false -> C#ctx{csts=[Csts | C#ctx.csts]}
-  end.
+  G = C#ctx.gnr,
+  G1 = case is_list(Csts) of
+    true -> G#gnr{csts=Csts ++ G#gnr.csts};
+    false -> G#gnr{csts=[Csts | G#gnr.csts]}
+  end,
+
+  C#ctx{gnr=G1}.
 
 norm_sig_type(SigT, Pid) ->
   % TODO: is it more intuitive to change each fv to *fv and then replace?
@@ -364,87 +428,181 @@ norm_sig_type(SigT, Pid) ->
 
   subs(subs(SigT, FVSubs), GVSubs).
 
-solve([], #solver{errs=Errs}) when length(Errs) > 0 -> {errors, Errs};
-solve([], #solver{subs=Subs}) -> {ok, Subs};
-solve(GVCs, S) ->
-  {Solvable, Unsolved} = lists:partition(fun({_, C}) ->
-    length(C#ctx.deps) == 0
-  end, GVCs),
+solve(Gs, S) ->
+  Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.v => G} end, #{}, Gs),
 
-  if
-    length(Solvable) == 0 ->
-      % If all global contexts left have dependencies, that means each remaining
-      % global variable either is (mutually) recursive or depends on another
-      % variable that's (mutually) recursive. We solve all constraints
-      % simultaneously to resolve these. Note that any {inst, ...} of these
-      % variables won't be generalized because the corresponding type variables
-      % are already in the env; we impose this non-polymorphic constraint to
-      % infer types with recursion.
-      Csts = lists:flatmap(fun({_, C}) -> C#ctx.csts end, Unsolved),
-      S1 = unify_csts(resolve_csts(Csts, S), S),
-      solve([], S1);
+  T = lists:foldl(fun(#gnr{v=V}, FoldT) ->
+    #{V := #gnr{index=Index}} = FoldT#tarjan.map,
+    if
+      Index == undefined -> connect(V, FoldT#tarjan{stack=[]});
+      true -> FoldT
+    end
+  end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
 
-    true ->
-      {Solved, S1} = lists:foldl(fun({TV, C}, {Solved, FoldS}) ->
-        Csts = resolve_csts(C#ctx.csts, FoldS),
-        FoldS1 = unify_csts(Csts, FoldS),
-        ?LOG("Csts", Csts),
-        ?LOG("Subs", maps:to_list(FoldS1#solver.subs)),
-        {gb_sets:add(TV, Solved), FoldS1}
-      end, {gb_sets:new(), S}, Solvable),
-
-      Rest = if
-        length(Solvable) == 0 -> [];
-        true -> lists:map(fun({TV, C}) ->
-          Deps = lists:filter(fun(Dep) ->
-            not gb_sets:is_element(Dep, Solved)
-          end, C#ctx.deps),
-          {TV, C#ctx{deps=Deps}}
-        end, Unsolved)
-      end,
-
-      solve(Rest, S1)
+  case T#tarjan.solver of
+    #solver{errs=Errs} when length(Errs) > 0 -> {errors, Errs};
+    #solver{subs=Subs} -> {ok, Subs}
   end.
 
-resolve_csts([], _) -> [];
-resolve_csts([{L, R} | Rest], S) ->
-  ResolvedL = resolve(subs(L, S#solver.subs), S),
-  ResolvedR = resolve(subs(R, S#solver.subs), S),
-  [{ResolvedL, ResolvedR} | resolve_csts(Rest, S)].
+connect(V, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
+  %% io:format("running connect ~p~n", [V]),
+  #{V := G} = Map,
+  Stack1 = [V | Stack],
+  Map1 = Map#{V := G#gnr{index=NextIndex, low_link=NextIndex, on_stack=true}},
 
-resolve({lam, ArgsT, ReturnT}, S) ->
-  {lam, resolve(ArgsT, S), resolve(ReturnT, S)};
+  T1 = #tarjan{stack=Stack1, map=Map1, next_index=NextIndex + 1, solver=S},
+  T2 = lists:foldl(fun(AdjV, FoldT) ->
+    #{AdjV := #gnr{index=AdjIndex, on_stack=AdjOnStack}} = FoldT#tarjan.map,
+    %% io:format("got ~p AdjIndex ~p AdjOnStack ~p~n", [AdjV, AdjIndex, AdjOnStack]),
+    if
+      AdjIndex == undefined ->
+        FoldT1 = connect(AdjV, FoldT),
+        FoldMap1 = FoldT1#tarjan.map,
+        #{V := FoldG1, AdjV := AdjG1} = FoldMap1,
+        FoldG2 = FoldG1#gnr{
+          low_link=min(FoldG1#gnr.low_link, AdjG1#gnr.low_link)
+        },
+        FoldT1#tarjan{map=FoldMap1#{V := FoldG2}};
+
+      AdjOnStack ->
+        FoldMap = FoldT#tarjan.map,
+        #{V := FoldG} = FoldMap,
+        FoldG1 = FoldG#gnr{
+          low_link=min(FoldG#gnr.low_link, AdjIndex)
+        },
+        FoldT#tarjan{map=FoldMap#{V := FoldG1}};
+
+      true -> FoldT
+    end
+  end, T1, G#gnr.deps),
+
+  #tarjan{stack=Stack2, map=Map2, solver=S2} = T2,
+  #{V := G2} = Map2,
+  if
+    G2#gnr.low_link == G2#gnr.index ->
+      {Popped, Left} = lists:splitwith(fun(StackV) ->
+        StackV /= V
+      end, Stack2),
+      SolvableVs = [V | Popped],
+
+      Map3 = lists:foldl(fun(SolV, FoldMap) ->
+        #{SolV := SolG} = FoldMap,
+        FoldMap#{SolV := SolG#gnr{on_stack=false}}
+      end, Map2, SolvableVs),
+      %% io:format("got remaining ~p~n", [Map3]),
+
+      %% io:format("got solvable vs ~p~n", [SolvableVs]),
+      Csts = lists:foldl(fun(SolV, FoldCsts) ->
+        #{SolV := SolG} = Map3,
+        SolG#gnr.csts ++ FoldCsts
+      end, [], SolvableVs),
+
+      S3 = lists:foldl(fun(SolV, FoldS) ->
+        #{SolV := SolG} = Map3,
+        Schemes = FoldS#solver.schemes,
+        T = subs({tv, SolV, none, none}, FoldS#solver.subs),
+        Schemes1 = Schemes#{SolV => generalize(T, SolG#gnr.env)},
+        FoldS#solver{schemes=Schemes1}
+      end, unify_csts(Csts, S2), SolvableVs),
+      %% io:format("got slvr ~p~n", [S3]),
+
+      T2#tarjan{stack=tl(Left), map=Map3, solver=S3};
+
+    true -> T2
+  end.
+
+%% solve(GVCs, S) ->
+%%   {Solvable, Unsolved} = lists:partition(fun({_, C}) ->
+%%     length(C#ctx.deps) == 0
+%%   end, GVCs),
+%%
+%%   if
+%%     length(Solvable) == 0 ->
+%%       % If all global contexts left have dependencies, that means each remaining
+%%       % global variable either is (mutually) recursive or depends on another
+%%       % variable that's (mutually) recursive. We solve all constraints
+%%       % simultaneously to resolve these. Note that any {inst, ...} of these
+%%       % variables won't be generalized because the corresponding type variables
+%%       % are already in the env; we impose this non-polymorphic constraint to
+%%       % infer types with recursion.
+%%       Csts = lists:flatmap(fun({_, C}) -> C#ctx.csts end, Unsolved),
+%%       ?LOG("Csts", pretty_csts(Csts)),
+%%       S1 = unify_csts(Csts, S),
+%%       solve([], S1);
+%%
+%%     true ->
+%%       {Solved, S1} = lists:foldl(fun({TV, C}, {Solved, FoldS}) ->
+%%         ?LOG("Csts", pretty_csts(C#ctx.csts)),
+%%         FoldS1 = unify_csts(C#ctx.csts, FoldS),
+%%         %% ?LOG("Subs", maps:to_list(FoldS1#solver.subs)),
+%%         {gb_sets:add(TV, Solved), FoldS1}
+%%       end, {gb_sets:new(), S}, Solvable),
+%%
+%%       Rest = if
+%%         length(Solvable) == 0 -> [];
+%%         true -> lists:map(fun({TV, C}) ->
+%%           Deps = lists:filter(fun(Dep) ->
+%%             not gb_sets:is_element(Dep, Solved)
+%%           end, C#ctx.deps),
+%%           {TV, C#ctx{deps=Deps}}
+%%         end, Unsolved)
+%%       end,
+%%
+%%       solve(Rest, S1)
+%%   end.
+
+unify_csts(Csts, S) ->
+  lists:foldl(fun({L, R}, FoldS) ->
+    Subs = FoldS#solver.subs,
+    L1 = subs(resolve(L, FoldS), Subs),
+    R1 = subs(resolve(R, FoldS), Subs),
+    io:format("solving ~p~n", [{pretty(L1), pretty(R1)}]),
+    unify({L1, R1}, FoldS)
+  end, S, Csts).
+
+resolve({lam, ArgT, ReturnT}, S) ->
+  {lam, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
 resolve({tv, V, I, GVs}, _) -> {tv, V, I, GVs};
 resolve({con, Con}, _) -> {con, Con};
 resolve({gen, Con, ParamT}, _) -> {gen, Con, ParamT};
-resolve({inst, T, EnvList}, S) -> inst(generalize(T, EnvList), S);
+% TODO: rename {inst, T} to {inst, TV}
+% TODO: remove GVs from {tv}
+resolve({inst, T}, S) ->
+  {tv, V, _, _} = T,
+  Res = case maps:find(V, S#solver.schemes) of
+    {ok, Scheme} -> inst(Scheme, S);
+    error -> T
+  end,
+  io:format("inst(~p)~n => ~p~n", [T, Res]),
+  Res;
 resolve(none, _) -> none.
 
 inst({GVs, T}, S) ->
-  Subs = gb_sets:fold(fun(V, Subs) ->
-    Subs#{V => tv_server:next_name(S#solver.pid)}
+  Subs = gb_sets:fold(fun(V, FoldSubs) ->
+    FoldSubs#{V => tv_server:next_name(S#solver.pid)}
   end, #{}, GVs),
   subs(T, Subs).
 
-generalize(T, EnvList) ->
-  EnvFVs = lists:foldl(fun({_, {_, EnvT}}, S) ->
-    gb_sets:union(S, fvs(EnvT))
-  end, gb_sets:new(), EnvList),
+generalize(T, Env) ->
+  EnvFVs = maps:fold(fun(_, {_, TV}, S) ->
+    gb_sets:union(fvs(TV), S)
+  end, gb_sets:new(), Env),
+
   GVs = gb_sets:subtract(fvs(T), EnvFVs),
   {GVs, T}.
+  %% % TODO: can simply replace add_gvs set with a flag
+  %% Subs = gb_sets:fold(fun(GV, FoldSubs) ->
+  %%   FoldSubs#{GV => {add_gvs, GVs}}
+  %% end, #{}, GVs),
 
-unify_csts([], S) -> S;
-unify_csts([{L, R} | Rest], S) ->
-  Subs = S#solver.subs,
-  S1 = unify({subs(L, Subs), subs(R, Subs)}, S),
-  unify_csts(Rest, S1).
+  %% subs(T, Subs).
 
 unify({T1, T2}, S) when T1 == T2 -> S;
 
-unify({{lam, ArgsT1, ReturnT1}, {lam, ArgsT2, ReturnT2}}, S) ->
-  S1 = unify({ArgsT1, ArgsT2}, S),
+unify({{lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}}, S) ->
+  S1 = unify({ArgT1, ArgT2}, S),
   ToUnify = {subs(ReturnT1, S1#solver.subs), subs(ReturnT2, S1#solver.subs)},
   unify(ToUnify, S1);
 unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
@@ -463,29 +621,21 @@ unify({{tv, V1, I1, GVs1}, {tv, V2, I2, GVs2}}, S) ->
   if
     Occurs -> add_err(Err, S);
 
-    % V1 is the most (or equally) constraining; change V2 -> V1
-    I1 == I2, AllV1 ->
-      add_sub(V2, {tv, V1, I1, gb_sets:union(GVs1, GVs2)}, S);
-
-    % V2 is the most (or equally) constraining; change V1 -> V2
-    I1 == I2, not AllV1 ->
+    % V2 is equally or more constraining; change V1 -> V2
+    AllV1 == AllV2, I1 == I2; AllV1 == AllV2, I1 == none ->
       add_sub(V1, {tv, V2, I2, gb_sets:union(GVs2, GVs1)}, S);
 
-    % can substitute V2 for anything; change V2 -> V1
-    I2 == none, not AllV2 ->
+    % V1 is equally or more constraining; change V1 -> V2
+    AllV1 == AllV2, I2 == none ->
       add_sub(V2, {tv, V1, I1, gb_sets:union(GVs1, GVs2)}, S);
 
-    % can substitute V1 for anything; change V1 -> V2
-    I1 == none, not AllV1 ->
-      add_sub(V1, {tv, V2, I2, gb_sets:union(GVs2, GVs1)}, S);
-
-    % We're now guaranteed three things:
-    % (1) I1 /= I2
-    % (2) I2 /= none or AllV2
-    % (3) I1 /= none or AllV1
+    % We're now guaranteed either:
+    % (1) AllV1 /= AllV2
+    % (2) I1 /= I2 and I1 /= none and I2 /= none
     %
-    % (1) means the interfaces differ, (2) means we can't change V2 -> V1,
-    % and (3) means we can't change V1 -> V2. We're out of options.
+    % We can't reconcile (1) because for all A. A is different from B.
+    % We can't reconcile (2) because there are two opposing interfaces.
+    % We're out of options.
     true -> add_err(Err, S)
   end;
 unify({{tv, V, I, GVs}, T}, S) ->
@@ -524,42 +674,105 @@ instance({gen, 'List', _}, 'Separable') -> true;
 instance({gen, 'Set', _}, 'Separable') -> true;
 instance(_, _) -> false.
 
-subs({lam, ArgsT, ReturnT}, Subs) ->
-  {lam, subs(ArgsT, Subs), subs(ReturnT, Subs)};
+subs({lam, ArgT, ReturnT}, Subs) ->
+  {lam, subs(ArgT, Subs), subs(ReturnT, Subs)};
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
 subs({tv, V, I, GVs}, Subs) ->
   case maps:find(V, Subs) of
+    error -> {tv, V, I, GVs};
     {ok, {add_gvs, NewGVs}} -> {tv, V, I, gb_sets:union(GVs, NewGVs)};
+
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
         is_tuple(Value) or (Value == none) -> Value;
         % Changing name due to instantiation; GVs don't carry over.
-        true -> {tv, Value, I, gb_sets:new()}
+        true ->
+          %% NewGVs = gb_sets:from_list(lists:map(fun(GV) ->
+          %%   case maps:find(GV, Subs) of
+          %%     {ok, Value} when not is_tuple(Value) and (Value /= none) -> Value;
+          %%     _ -> GV
+          %%   end
+          %% end, gb_sets:to_list(GVs))),
+          {tv, Value, I, gb_sets:new()}
       end,
-      subs(Sub, Subs);
-    error -> {tv, V, I, GVs}
+      subs(Sub, Subs)
   end;
 subs({con, Con}, _) -> {con, Con};
 subs({gen, Con, ParamT}, Subs) -> {gen, Con, subs(ParamT, Subs)};
-subs({inst, T, EnvList}, Subs) -> {inst, subs(T, Subs), EnvList};
+subs({inst, T}, Subs) -> {inst, subs(T, Subs)};
 subs(none, _) -> none.
 
-fvs({lam, ArgsT, ReturnT}) -> gb_sets:union(fvs(ArgsT), fvs(ReturnT));
+fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
 fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
 fvs({tv, V, _, _}) -> gb_sets:from_list([V]);
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamT}) -> fvs(ParamT);
-% fvs({inst, ...}) ommitted; all inst should be resolved
+% fvs({inst/generalize, ...}) ommitted; they should be resolved
 fvs(none) -> gb_sets:new().
 
-occurs(S, {lam, ArgsT, ReturnT}) ->
-  occurs(S, ArgsT) or occurs(S, ReturnT);
+gvs({lam, ArgT, ReturnT}) -> gb_sets:union(gvs(ArgT), gvs(ReturnT));
+gvs({tuple, LeftT, RightT}) -> gb_sets:union(gvs(LeftT), gvs(RightT));
+gvs({tv, V, _, GVs}) ->
+  case gb_sets:is_member(V, GVs) of
+    true -> gb_sets:from_list([V]);
+    false -> gb_sets:new()
+  end;
+gvs({con, _}) -> gb_sets:new();
+gvs({gen, _, ParamT}) -> gvs(ParamT);
+% gvs({inst/generalize, ...}) ommitted; they should be resolved
+gvs(none) -> gb_sets:new().
+
+occurs(S, {lam, ArgT, ReturnT}) ->
+  occurs(S, ArgT) or occurs(S, ReturnT);
 occurs(S, {tuple, LeftT, RightT}) ->
   occurs(S, LeftT) or occurs(S, RightT);
 occurs(S, {tv, V, _, GVs}) -> not gb_sets:is_disjoint(S, gb_sets:add(V, GVs));
 occurs(_, {con, _}) -> false;
 occurs(S, {gen, _, ParamT}) -> occurs(S, ParamT);
-% occurs({inst, ...}) ommitted; all inst should be resolved
+% occurs({inst/generalize, ...}) ommitted; they should be resolved
 occurs(_, none) -> false.
+
+pretty_csts([]) -> [];
+pretty_csts([{L, R} | Rest]) ->
+  [{pretty(L), pretty(R)} | pretty_csts(Rest)].
+
+pretty({lam, ArgT, ReturnT}) ->
+  Format = case ArgT of
+    {lam, _, _} -> "(~s) -> ~s";
+    _ -> "~s -> ~s"
+  end,
+  format_str(Format, [pretty(ArgT), pretty(ReturnT)]);
+pretty({tuple, LeftT, RightT}) ->
+  format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
+pretty({tv, V, I, GVs}) ->
+  VStr = if
+    I == none -> tl(V);
+    true -> format_str("~s: ~s", [tl(V), atom_to_list(I)])
+  end,
+  VStr;
+
+  % TODO: how to deal with this?
+  %% Size = gb_sets:size(GVs),
+  %% if
+  %%   Size > 0 ->
+  %%     GVList = lists:map(fun erlang:tl/1, gb_sets:to_list(GVs)),
+  %%     format_str("for all ~s, ~s", [string:join(GVList, " "), VStr]);
+  %%   true -> format_str("~s", [VStr])
+  %% end;
+pretty({con, Con}) -> atom_to_list(Con);
+pretty({gen, 'List', ParamT}) ->
+  format_str("[~s]", [pretty_strip_parens(ParamT)]);
+pretty({gen, T, ParamT}) ->
+  format_str("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
+pretty({inst, T}) ->
+  format_str("inst(~s)", [pretty(T)]);
+pretty(none) -> "()".
+
+pretty_strip_parens({tuple, LeftT, RightT}) ->
+  format_str("~s, ~s", [pretty(LeftT), pretty(RightT)]);
+pretty_strip_parens(T) -> pretty(T).
+
+format_str(Str, Args) ->
+  lists:flatten(io_lib:format(Str, Args)).

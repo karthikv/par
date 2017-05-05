@@ -21,7 +21,7 @@ norm_prg(Prg, Name) ->
   NormT.
 
 ok_prg(Prg, Name) ->
-  pretty(norm_prg(Prg, Name)).
+  par:pretty(norm_prg(Prg, Name)).
 
 bad_prg(Prg, {EP1, EP2}) ->
   {errors, Errs} = par:infer_prg(Prg),
@@ -32,7 +32,7 @@ bad_prg(Prg, {EP1, EP2}) ->
   {NormT2, _} = norm(T2, N),
   ok = tv_server:stop(Pid),
 
-  case {pretty(NormT1), pretty(NormT2)} of
+  case {par:pretty(NormT1), par:pretty(NormT2)} of
     {EP1, EP2} -> true;
     {EP2, EP1} -> true;
     _ ->
@@ -41,7 +41,7 @@ bad_prg(Prg, {EP1, EP2}) ->
       {FlipNormT1, _} = norm(T1, FlipN),
       ok = tv_server:stop(FlipPid),
 
-      case {pretty(FlipNormT1), pretty(FlipNormT2)} of
+      case {par:pretty(FlipNormT1), par:pretty(FlipNormT2)} of
         {EP1, EP2} -> true;
         {EP2, EP1} -> true
       end
@@ -49,15 +49,36 @@ bad_prg(Prg, {EP1, EP2}) ->
 
 ok_expr(Expr) ->
   {lam, none, T} = norm_prg("main() = " ++ Expr, "main"),
-  pretty(T).
+  par:pretty(T).
 
 bad_expr(Expr, Err) ->
   bad_prg("main() = " ++ Expr, Err).
 
-norm({lam, ArgsT, ReturnT}, N) ->
-  {NormArgsT, N1} = norm(ArgsT, N),
+% TODO: apply this to norm_sig_t?
+%% norm(T, {Subs, Pid}) ->
+%%   NewFVs = gb_sets:filter(fun(V) ->
+%%     not maps:is_key(V, Subs)
+%%   end, par:fvs(T)),
+%% 
+%%   % TODO: use this same logic for norm_sig_type
+%%   PrefixedSubs = gb_sets:fold(fun(GV, FoldSubs) ->
+%%     FoldSubs#{GV => [$* | tv_server:next_name(Pid)]}
+%%   end, Subs, NewFVs),
+%%   StrippedSubs = maps:fold(fun(_, PrefixedV, FoldSubs) ->
+%%     FoldSubs#{PrefixedV => tl(PrefixedV)}
+%%   end, #{}, PrefixedSubs),
+%% 
+%%   NormT = par:subs(par:subs(T, PrefixedSubs), StrippedSubs),
+%%   {NormT, {PrefixedSubs, Pid}}.
+
+% We don't use par:fvs() and par:subs() to implement this because it'll
+% normalize variables in an arbitrary order (e.g. C -> D could become B ->
+% A instead of A -> B). By doing it ourselves, we always guarantee
+% a left-to-right normalization.
+norm({lam, ArgT, ReturnT}, N) ->
+  {NormArgT, N1} = norm(ArgT, N),
   {NormReturnT, N2} = norm(ReturnT, N1),
-  {{lam, NormArgsT, NormReturnT}, N2};
+  {{lam, NormArgT, NormReturnT}, N2};
 norm({tuple, LeftT, RightT}, N) ->
   {NormLeftT, N1} = norm(LeftT, N),
   {NormRightT, N2} = norm(RightT, N1),
@@ -74,30 +95,6 @@ norm({gen, Con, ParamT}, N) ->
   {NormParamT, N1} = norm(ParamT, N),
   {{gen, Con, NormParamT}, N1};
 norm(none, N) -> {none, N}.
-
-pretty({lam, ArgsT, ReturnT}) ->
-  Format = case ArgsT of
-    {lam, _, _} -> "(~s) -> ~s";
-    _ -> "~s -> ~s"
-  end,
-  format_str(Format, [pretty(ArgsT), pretty(ReturnT)]);
-pretty({tuple, LeftT, RightT}) ->
-  format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty({tv, V, none, _}) -> format_str("~s", [tl(V)]);
-pretty({tv, V, I, _}) -> format_str("~s: ~s", [tl(V), atom_to_list(I)]);
-pretty({con, Con}) -> atom_to_list(Con);
-pretty({gen, 'List', ParamT}) ->
-  format_str("[~s]", [pretty_strip_parens(ParamT)]);
-pretty({gen, T, ParamT}) ->
-  format_str("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
-pretty(none) -> "()".
-
-pretty_strip_parens({tuple, LeftT, RightT}) ->
-  format_str("~s, ~s", [pretty(LeftT), pretty(RightT)]);
-pretty_strip_parens(T) -> pretty(T).
-
-format_str(Str, Args) ->
-  lists:flatten(io_lib:format(Str, Args)).
 
 expr_test_() ->
   [ ?_test("()" = ok_expr("()"))
@@ -231,6 +228,7 @@ expr_test_() ->
   , ?_test(bad_expr("if true then 3.0 else true", {"Float", "Bool"}))
 
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
+  , ?_test("Bool" = ok_expr("let x = |a| a in x(3) == 3 && x(true)"))
   , ?_test(bad_expr("let x = 3.0, y = true in x - y", {"Bool", "Float"}))
 
   , ?_test("String" = ok_expr("{ \"hello\" }"))
@@ -240,9 +238,9 @@ expr_test_() ->
 
   , ?_test("() -> A: Num" = ok_expr("|-| 3"))
   , ?_test("A -> A" = ok_expr("|x| x"))
-  , ?_test("A -> A" = ok_expr("|x| x :: T"))
-  , ?_test("(A -> A) -> A -> A" = ok_expr("|x| x :: T -> T"))
-  , ?_test("A -> A" = ok_expr("(|x| x) :: T -> T"))
+  %% , ?_test(bad_expr("|x| x :: T", {"A", "for all B, B"}))
+  %% , ?_test("(A -> A) -> A -> A" = ok_expr("|x| x :: T -> T"))
+  %% , ?_test("A -> A" = ok_expr("(|x| x) :: T -> T"))
   , ?_test("A: Num -> A: Num" = ok_expr("|x| x + 3"))
   , ?_test("Float -> Float" = ok_expr("|x| x + 3.0"))
   , ?_test("(Float -> A) -> Float -> A" = ok_expr("|f, x| f(x - 3.0)"))
@@ -286,6 +284,17 @@ recur_test_() ->
       "f"
     ))
   , ?_test(bad_prg(
+      "f(x) = if x == 0 then 0 else f(x - 1)\n"
+      "h(x) = g(true)\n"
+      "g(x) = f(x)",
+      {"A: Num", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "f(x) = f(x) == 3\n"
+      "g(x) = f(x)",
+      {"A: Num", "Bool"}
+    ))
+  , ?_test(bad_prg(
       "f(x) = f(x) == 3 && f(x) == true\n"
       "g(x) = f(x)",
       {"A: Num", "Bool"}
@@ -304,132 +313,155 @@ iface_test_() ->
     ))
   ].
 
-sig_test_() ->
-  [ ?_test("() -> A: Num" = ok_prg(
-      "main :: () -> A: Num\n"
-      "main() = 3",
-      "main"
-    ))
-  , ?_test("A -> A" = ok_prg(
-      "id :: A -> A\n"
-      "id(x) = x\n"
-      "main() = id(3)",
-      "id"
-    ))
-  , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
-      "add :: A: Num -> A: Num -> A: Num\n"
-      "add(x, y) = x + y",
-      "add"
-    ))
-  , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
-      "add :: A: Num -> A: Num -> A: Num\n"
-      "add(x, y) = x :: B: Num + y :: A: Num",
-      "add"
-    ))
-  , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(
-      "cmp :: (B -> C) -> (A -> B) -> A -> C\n"
-      "cmp(f, g, x) = f(g(x))",
-      "cmp"
-    ))
-  , ?_test("Int -> Int" = ok_prg(
-      "foo :: Int -> Int\n"
-      "foo(x) = x + 3",
-      "foo"
-    ))
-  , ?_test("Int -> Int" = ok_prg(
-      "foo(x) = x :: Int + 3",
-      "foo"
-    ))
-  , ?_test("String -> (String, Bool)" = ok_prg(
-      "foo :: String -> (String, Bool)\n"
-      "foo(s) = (s, true)",
-      "foo"
-    ))
-  , ?_test("[Int] -> [Int]" = ok_prg(
-      "push :: [Int] -> [Int]\n"
-      "push(x) = x ++ [1]",
-      "push"
-    ))
-  , ?_test("[A] -> [A] -> Bool" = ok_prg(
-      "empty :: List<A> -> List<A> -> Bool\n"
-      "empty(l1, l2) = l1 ++ l2 == []",
-      "empty"
-    ))
-  , ?_test("Map<A, B> -> Map<A, B> -> Map<A, B>" = ok_prg(
-      "pick :: Map<K, V> -> Map<K, V> -> Map<K, V>\n"
-      "pick(m1, m2) = m1",
-      "pick"
-    ))
-  , ?_test(bad_prg(
-      "main :: () -> String\n"
-      "main() = true",
-      {"String", "Bool"}
-    ))
-  , ?_test(bad_prg(
-      "id :: A -> B\n"
-      "id(x) = x",
-      {"A", "B"}
-    ))
-  , ?_test(bad_prg(
-      "foo :: Int -> Int\n"
-      "foo(x) = x + 3\n"
-      "bar :: A: Num -> Int\n"
-      "bar(x) = foo(x)",
-      {"Int", "A: Num"}
-    ))
-  , ?_test(bad_prg(
-      "push :: [A: Num] -> [A: Num]\n"
-      "push(x) = x ++ [1.0]",
-      {"A: Num", "Float"}
-    ))
-  , ?_test(bad_prg(
-      "empty :: List<A> -> List<B> -> Bool\n"
-      "empty(l1, l2) = l1 ++ l2 == []",
-      {"A", "B"}
-    ))
-  ].
+%% sig_test_() ->
+%%   [ ?_test("() -> A: Num" = ok_prg(
+%%       "main :: () -> A: Num\n"
+%%       "main() = 3",
+%%       "main"
+%%     ))
+%%   , ?_test("A -> A" = ok_prg(
+%%       "id :: A -> A\n"
+%%       "id(x) = x\n"
+%%       "main() = id(3)",
+%%       "id"
+%%     ))
+%%   , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
+%%       "add :: A: Num -> A: Num -> A: Num\n"
+%%       "add(x, y) = x + y",
+%%       "add"
+%%     ))
+%%   , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
+%%       "add :: A: Num -> A: Num -> A: Num\n"
+%%       "add(x, y) = x :: B: Num + y :: A: Num",
+%%       "add"
+%%     ))
+%%   , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(
+%%       "cmp :: (B -> C) -> (A -> B) -> A -> C\n"
+%%       "cmp(f, g, x) = f(g(x))",
+%%       "cmp"
+%%     ))
+%%   , ?_test("Int -> Int" = ok_prg(
+%%       "foo :: Int -> Int\n"
+%%       "foo(x) = x + 3",
+%%       "foo"
+%%     ))
+%%   , ?_test("Int -> Int" = ok_prg(
+%%       "foo(x) = x :: Int + 3",
+%%       "foo"
+%%     ))
+%%   , ?_test("String -> (String, Bool)" = ok_prg(
+%%       "foo :: String -> (String, Bool)\n"
+%%       "foo(s) = (s, true)",
+%%       "foo"
+%%     ))
+%%   , ?_test("[Int] -> [Int]" = ok_prg(
+%%       "push :: [Int] -> [Int]\n"
+%%       "push(x) = x ++ [1]",
+%%       "push"
+%%     ))
+%%   , ?_test("[A] -> [A] -> Bool" = ok_prg(
+%%       "empty :: List<A> -> List<A> -> Bool\n"
+%%       "empty(l1, l2) = l1 ++ l2 == []",
+%%       "empty"
+%%     ))
+%%   , ?_test("Map<A, B> -> Map<A, B> -> Map<A, B>" = ok_prg(
+%%       "pick :: Map<K, V> -> Map<K, V> -> Map<K, V>\n"
+%%       "pick(m1, m2) = m1",
+%%       "pick"
+%%     ))
+%%   , ?_test(bad_prg(
+%%       "main :: () -> String\n"
+%%       "main() = true",
+%%       {"String", "Bool"}
+%%     ))
+%%   , ?_test(bad_prg(
+%%       "id :: A -> B\n"
+%%       "id(x) = x",
+%%       {"A", "B"}
+%%     ))
+%%   , ?_test(bad_prg(
+%%       "foo :: Int -> Int\n"
+%%       "foo(x) = x + 3\n"
+%%       "bar :: A: Num -> Int\n"
+%%       "bar(x) = foo(x)",
+%%       {"Int", "A: Num"}
+%%     ))
+%%   , ?_test(bad_prg(
+%%       "push :: [A: Num] -> [A: Num]\n"
+%%       "push(x) = x ++ [1.0]",
+%%       {"A: Num", "Float"}
+%%     ))
+%%   , ?_test(bad_prg(
+%%       "empty :: List<A> -> List<B> -> Bool\n"
+%%       "empty(l1, l2) = l1 ++ l2 == []",
+%%       {"A", "B"}
+%%     ))
+%%   ].
+%% 
+%% global_test_() ->
+%%   [ ?_test("A: Num" = ok_prg("foo = 3", "foo"))
+%%   , ?_test("[Bool]" = ok_prg(
+%%       "foo = baz && false\n"
+%%       "bar = [foo] ++ [true]\n"
+%%       "baz = true",
+%%       "bar"
+%%     ))
+%%   , ?_test("A: Num -> Float" = ok_prg(
+%%       "foo = |x| bar(x) / 2\n"
+%%       "bar(x) = if x == 0 then 1 else foo(x - 1) * 10",
+%%       "foo"
+%%     ))
+%% 
+%%   % Although the following recursive programs will fail at runtime, they should
+%%   % pass the type checker. It's difficult to assess whether such programs are
+%%   % correct statically, especially when there are many of mutual dependencies.
+%%   % It's not worth making the type checker more complex for these cases,
+%%   % especially since they shouldn't occur often.
+%%   , ?_test("Float" = ok_prg(
+%%       "foo = bar(7) + 5.3\n"
+%%       "bar(x) = 3 + x",
+%%       "foo"
+%%     ))
+%%   , ?_test("Int -> Int" = ok_prg(
+%%       "foo :: Int\n"
+%%       "foo = bar(3)\n"
+%%       "bar(x) = foo + x",
+%%       "bar"
+%%     ))
+%%   , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
+%% 
+%%   , ?_test(bad_prg(
+%%       "foo = \"hello\"\n"
+%%       "main() = foo ++ @world",
+%%       {"String", "Atom"}
+%%     ))
+%%   , ?_test(bad_prg(
+%%       "foo :: Set<Int>\n"
+%%       "foo = #[1, 2, 3]\n"
+%%       "main() = #[5.0, 6] -- foo",
+%%       {"Float", "Int"}
+%%     ))
+%%   ].
 
-global_test_() ->
-  [ ?_test("A: Num" = ok_prg("foo = 3", "foo"))
-  , ?_test("[Bool]" = ok_prg(
-      "foo = baz && false\n"
-      "bar = [foo] ++ [true]\n"
-      "baz = true",
-      "bar"
-    ))
-  , ?_test("A: Num -> Float" = ok_prg(
-      "foo = |x| bar(x) / 2\n"
-      "bar(x) = if x == 0 then 1 else foo(x - 1) * 10",
-      "foo"
-    ))
-
-  % Although the following recursive programs will fail at runtime, they should
-  % pass the type checker. It's difficult to assess whether such programs are
-  % correct statically, especially when there are many of mutual dependencies.
-  % It's not worth making the type checker more complex for these cases,
-  % especially since they shouldn't occur often.
-  , ?_test("Float" = ok_prg(
-      "foo = bar(7) + 5.3\n"
-      "bar(x) = 3 + x",
-      "foo"
-    ))
-  , ?_test("Int -> Int" = ok_prg(
-      "foo :: Int\n"
-      "foo = bar(3)\n"
-      "bar(x) = foo + x",
-      "bar"
-    ))
-  , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
-
-  , ?_test(bad_prg(
-      "foo = \"hello\"\n"
-      "main() = foo ++ @world",
-      {"String", "Atom"}
-    ))
-  , ?_test(bad_prg(
-      "foo :: Set<Int>\n"
-      "foo = #[1, 2, 3]\n"
-      "main() = #[5.0, 6] -- foo",
-      {"Float", "Int"}
-    ))
-  ].
+%% enum_test_() ->
+%%   [ ?_test("Foo" = ok_prg(
+%%       "enum Foo { Bar }\n"
+%%       "baz = Bar",
+%%       "baz"
+%%     ))
+%%   , ?_test("Foo" = ok_prg(
+%%       "enum Foo { Bar, Other }\n"
+%%       "baz = Other",
+%%       "baz"
+%%     ))
+%%   , ?_test("[String] -> Foo" = ok_prg(
+%%       "enum Foo { Bar(Bool, [String]) }\n"
+%%       "baz = Bar(true)",
+%%       "baz"
+%%     ))
+%%   , ?_test("[String] -> Foo" = bad_prg(
+%%       "enum Foo { Bar(A, A) }\n"
+%%       "baz = Bar(3, true)",
+%%       {"A: Num", "Bool"}
+%%     ))
+%%   ].

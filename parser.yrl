@@ -1,6 +1,6 @@
 Nonterminals
-  prg decl sig
-  type type_list
+  prg global sig
+  t t_list_tuple enum option_list option t_list tv_list
   expr lam neg maybe_else
   var_list expr_list init_list kv_list semi_list.
 
@@ -10,35 +10,52 @@ Terminals
   '+' '-' '*' '/'
   '++' '--' '|' '::' ':' '->' ';' 'discard'
   if then else let in
-  int float bool str atom var
+  enum_token int float bool str atom var
   '[' ']' '{' '}' '=>' '#'
-  sig_tv sig_con.
+  tv_token con_token.
 
 Rootsymbol prg.
 
 
 prg -> '$empty' : [].
-prg -> decl prg : ['$1' | '$2'].
+prg -> global prg : ['$1' | '$2'].
 prg -> var sig prg : [{sig, '$1', '$2'} | '$3'].
+prg -> enum prg : ['$1' | '$2'].
 
-decl -> var '=' expr : {global, '$1', '$3'}.
-decl -> var '(' ')' '=' expr : {global, '$1', {fn, [], '$5'}}.
-decl -> var '(' var_list ')' '=' expr : {global, '$1', {fn, '$3', '$6'}}.
+global -> var '=' expr : {global, '$1', '$3'}.
+global -> var '(' ')' '=' expr : {global, '$1', {fn, [], '$5'}}.
+global -> var '(' var_list ')' '=' expr : {global, '$1', {fn, '$3', '$6'}}.
 
-sig -> '::' type : '$2'.
+sig -> '::' t : '$2'.
 
-type -> '(' ')' : none.
-type -> sig_con : '$1'.
-type -> sig_tv : '$1'.
-type -> sig_tv ':' sig_con : {sig_iface, '$1', '$3'}.
-type -> sig_con '<' type_list '>' : {sig_gen, '$1', '$3'}.
-type -> '[' type ']' : {sig_gen, {sig_con, element(2, '$1'), "List"}, '$2'}.
-type -> '(' type ',' type_list ')' : {sig_tuple, '$2', '$4'}.
-type -> '(' type ')' : '$2'.
-type -> type '->' type : {sig_lam, '$1', '$3'}.
+t -> '(' ')' : none.
+t -> con_token : '$1'.
+t -> tv_token : '$1'.
+t -> tv_token ':' con_token : {iface_expr, '$1', '$3'}.
+t -> con_token '<' t_list_tuple '>' : {gen_expr, '$1', '$3'}.
+t -> '[' t ']' : {gen_expr, {con_token, element(2, '$1'), "List"}, '$2'}.
+t -> '(' t ',' t_list_tuple ')' : {tuple_expr, '$2', '$4'}.
+t -> '(' t ')' : '$2'.
+t -> t '->' t : {lam_expr, '$1', '$3'}.
 
-type_list -> type : '$1'.
-type_list -> type ',' type_list : {sig_tuple, '$1', '$3'}.
+t_list_tuple -> t : '$1'.
+t_list_tuple -> t ',' t_list_tuple : {tuple_expr, '$1', '$3'}.
+
+enum -> enum_token con_token '{' option_list '}' : {enum, '$2', '$4'}.
+enum -> enum_token con_token '<' tv_list '>' '{' option_list '}' :
+  {enum, {gen_expr, '$2', '$4'}, '$7'}.
+
+option_list -> option : ['$1'].
+option_list -> option ',' option_list : ['$1' | '$3'].
+
+option -> con_token : {option, '$1', []}.
+option -> con_token '(' t_list ')' : {option, '$1', '$3'}.
+
+t_list -> t : ['$1'].
+t_list -> t ',' t_list : ['$1' | '$3'].
+
+tv_list -> tv_token : ['$1'].
+tv_list -> tv_token ',' tv_list : ['$1' | '$3'].
 
 expr -> '(' ')' : none.
 expr -> int : '$1'.
@@ -47,6 +64,7 @@ expr -> bool : '$1'.
 expr -> str : '$1'.
 expr -> atom : '$1'.
 expr -> var : '$1'.
+expr -> con_token : {var, element(2, '$1'), element(3, '$1')}.
 expr -> '[' ']' : {list, []}.
 expr -> '[' expr_list ']' : {list, '$2'}.
 expr -> '(' expr ',' expr_list ')' : {tuple, ['$2' | '$4']}.
@@ -69,8 +87,8 @@ expr -> expr '--' expr : {'$2', '$1', '$3'}.
 expr -> '!' expr : {'$1', '$2'}.
 expr -> '#' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
-expr -> 'discard' expr : {'$1', '$2'}.
-expr -> expr sig : {expr_sig, '$1', '$2'}.
+expr -> discard expr : {'$1', '$2'}.
+expr -> expr sig : {sig_expr, '$1', '$2'}.
 expr -> '(' expr ')' : '$2'.
 expr -> expr '(' ')' : {app, '$1', []}.
 expr -> expr '(' expr_list ')' : {app, '$1', '$3'}.

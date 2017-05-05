@@ -42,6 +42,7 @@ then : {token, {then, TokenLine}}.
 else : {token, {else, TokenLine}}.
 let : {token, {'let', TokenLine}}.
 in : {token, {in, TokenLine}}.
+enum : {token, {enum_token, TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
 {FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
@@ -55,8 +56,8 @@ in : {token, {in, TokenLine}}.
 \} : {token, {'}', TokenLine}}.
 \=\> : {token, {'=>', TokenLine}}.
 \# : {token, {'#', TokenLine}}.
-{TV} : {token, {sig_tv, TokenLine, TokenChars}}.
-{CON} : {token, {sig_con, TokenLine, TokenChars}}.
+{TV} : {token, {tv_token, TokenLine, TokenChars}}.
+{CON} : {token, {con_token, TokenLine, TokenChars}}.
 {WHITESPACE}+ : skip_token.
 
 Erlang code.
