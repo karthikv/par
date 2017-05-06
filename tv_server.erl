@@ -22,8 +22,8 @@ reload() ->
 
 start_link() -> gen_server:start_link(?MODULE, 0, []).
 next_name(Pid) -> gen_server:call(Pid, next_name).
-fresh(Pid) -> {tv, next_name(Pid), none, gb_sets:new()}.
-fresh(I, Pid) -> {tv, next_name(Pid), I, gb_sets:new()}.
+fresh(Pid) -> {tv, next_name(Pid), none, false}.
+fresh(I, Pid) -> {tv, next_name(Pid), I, false}.
 stop(Pid) -> gen_server:stop(Pid).
 
 init(Count) -> {ok, Count}.

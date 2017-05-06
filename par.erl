@@ -2,7 +2,7 @@
 -export([reload/1, infer_prg/1, subs/2, fvs/1, pretty/1]).
 
 -record(ctx, {gnr, gnrs, env, pid}).
--record(solver, {subs, errs, schemes, pid}).
+-record(solver, {subs, errs, schemes, rigid_vs, pid}).
 
 -record(gnr, {v, env, csts, deps, index, low_link, on_stack}).
 -record(tarjan, {stack, map, next_index, solver}).
@@ -108,19 +108,30 @@ infer_prg(Prg) ->
     end,
 
     case Node of
-      {global, _, _} ->
-        {_, FoldC1} = infer(Node, FoldC),
+      {global, {var, _, Name}, Expr} ->
+        #{Name := {add_dep, TV}} = FoldC#ctx.env,
+        % for generalization, use env that doesn't contain any globals
+        % TODO: should anything be in this map?
+        FoldC1 = new_gnr(TV, FoldC),
+        {T, FoldC2} = infer(Expr, FoldC1),
+
+        Csts = if
+          SigT == none -> [{TV, T}];
+          true -> [{TV, T}, {TV, SigT}]
+        end,
+        FoldC3 = add_csts(Csts, FoldC2),
+
         %% Csts = if
         %%   SigT == none -> FoldC1#ctx.csts;
         %%   true -> [{TV, SigT} | FoldC1#ctx.csts]
         %% end,
-
         %% FoldC2 = FoldC1#ctx{csts=lists:reverse(Csts)},
-        {none, none, FoldC1};
 
-      %% {sig, {var, _, Name}, _} ->
-      %%   {T, FoldC1} = infer(Node, FoldC#ctx{csts=[], deps=[]}),
-      %%   {Name, T, GVCs, FoldC1};
+        {none, none, finish_gnr(FoldC3, FoldC#ctx.gnr)};
+
+      {sig, {var, _, Name}, _} ->
+        {T, FoldC1} = infer(Node, FoldC),
+        {Name, T, FoldC1};
 
       % we've already processed enums/structs
       _ -> {ExpName, SigT, FoldC}
@@ -137,16 +148,10 @@ infer_prg(Prg) ->
   ok = tv_server:stop(Pid),
   Result.
 
-infer({global, {var, _, Name}, Expr}, C) ->
-  #{Name := {add_dep, TV}} = C#ctx.env,
-  {T, C1} = infer(Expr, new_gnr(TV, C)),
-  C2 = add_csts({TV, T}, C1),
-  {TV, finish_gnr(C2, none)};
-
 infer({fn, Args, Expr}, C) ->
   {ArgsTRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
-    TV = tv_server:fresh(FoldC#ctx.pid),
-    {[TV | Ts], add_env(ArgName, {no_dep, TV}, FoldC)}
+    ArgTV = tv_server:fresh(FoldC#ctx.pid),
+    {[ArgTV | Ts], add_env(ArgName, {no_dep, ArgTV}, FoldC)}
   end, {[], C}, Args),
 
   {ReturnT, C2} = infer(Expr, C1),
@@ -165,11 +170,16 @@ infer({sig, _, Sig}, C) ->
   {norm_sig_type(SigT, C#ctx.pid), C1};
 
 infer({sig_expr, Expr, Sig}, C) ->
-  {ExprT, C1} = infer(Expr, C),
-  {SigT, C2} = infer(Sig, C1),
+  G = C#ctx.gnr,
+  TV = tv_server:fresh(C#ctx.pid),
 
-  NormSigT = norm_sig_type(SigT, C#ctx.pid),
-  {ExprT, add_csts({ExprT, NormSigT}, C2)};
+  {ExprT, C1} = infer(Expr, new_gnr(TV, C)),
+  {SigT, C2} = infer(Sig, C1),
+  NormSigT = norm_sig_type(SigT, C2#ctx.pid),
+
+  C3 = add_csts([{TV, ExprT}, {TV, NormSigT}], C2),
+  {tv, V, _, _} = TV,
+  {{inst, TV}, finish_gnr(C3, G#gnr{deps=[V | G#gnr.deps]})};
 
 infer({lam_expr, Arg, Return}, C) ->
   {ArgT, C1} = infer(Arg, C),
@@ -180,14 +190,14 @@ infer({tuple_expr, Left, Right}, C) ->
   {RightT, C2} = infer(Right, C1),
   {{tuple, LeftT, RightT}, C2};
 infer({iface_expr, TVToken, ConToken}, C) ->
-  {{tv, V, none, GVs}, C1} = infer(TVToken, C),
+  {{tv, V, none, All}, C1} = infer(TVToken, C),
   {{con, I}, C2} = infer(ConToken, C1),
-  {{tv, V, I, GVs}, C2};
+  {{tv, V, I, All}, C2};
 infer({gen_expr, ConToken, Param}, C) ->
   {{con, T}, C1} = infer(ConToken, C),
   {ParamT, C2} = infer(Param, C1),
   {{gen, T, ParamT}, C2};
-infer({tv_token, _, Name}, C) -> {{tv, Name, none, gb_sets:new()}, C};
+infer({tv_token, _, Name}, C) -> {{tv, Name, none, true}, C};
 % TODO: ensure these types are valid except when creating a new type
 infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 
@@ -319,6 +329,7 @@ infer({{'let', _}, Inits, Expr}, C) ->
 
   C2 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
     #{Name := {add_dep, TV}} = FoldC#ctx.env,
+    % for generalization, use env that doesn't contain let variables
     {T, FoldC1} = infer(InitExpr, new_gnr(TV, FoldC)),
     FoldC2 = add_csts({TV, T}, FoldC1),
     finish_gnr(FoldC2, FoldC#ctx.gnr)
@@ -418,18 +429,22 @@ add_csts(Csts, C) ->
 norm_sig_type(SigT, Pid) ->
   % TODO: is it more intuitive to change each fv to *fv and then replace?
   FVList = gb_sets:to_list(fvs(SigT)),
-  NewFVList = lists:map(fun(_) -> tv_server:next_name(Pid) end, FVList),
+  NewFVList = lists:map(fun(_) ->
+    {all, tv_server:next_name(Pid)}
+  end, FVList),
   FVSubs = maps:from_list(lists:zip(FVList, NewFVList)),
+  subs(SigT, FVSubs).
 
-  GVs = gb_sets:from_list(NewFVList),
-  GVSubs = maps:from_list(lists:map(fun(FV) ->
-    {FV, {add_gvs, GVs}}
-  end, NewFVList)),
+  %% GVs = gb_sets:from_list(NewFVList),
+  %% GVSubs = maps:from_list(lists:map(fun(FV) ->
+  %%   {FV, {add_gvs, GVs}}
+  %% end, NewFVList)),
 
-  subs(subs(SigT, FVSubs), GVSubs).
+  %% subs(subs(SigT, FVSubs), GVSubs).
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.v => G} end, #{}, Gs),
+  io:format("got gs ~p~n", [Gs]),
 
   T = lists:foldl(fun(#gnr{v=V}, FoldT) ->
     #{V := #gnr{index=Index}} = FoldT#tarjan.map,
@@ -491,22 +506,26 @@ connect(V, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
       end, Map2, SolvableVs),
       %% io:format("got remaining ~p~n", [Map3]),
 
-      %% io:format("got solvable vs ~p~n", [SolvableVs]),
-      Csts = lists:foldl(fun(SolV, FoldCsts) ->
-        #{SolV := SolG} = Map3,
-        SolG#gnr.csts ++ FoldCsts
-      end, [], SolvableVs),
+      io:format("got solvable vs ~p~n", [SolvableVs]),
 
       S3 = lists:foldl(fun(SolV, FoldS) ->
         #{SolV := SolG} = Map3,
-        Schemes = FoldS#solver.schemes,
-        T = subs({tv, SolV, none, none}, FoldS#solver.subs),
-        Schemes1 = Schemes#{SolV => generalize(T, SolG#gnr.env)},
-        FoldS#solver{schemes=Schemes1}
-      end, unify_csts(Csts, S2), SolvableVs),
-      %% io:format("got slvr ~p~n", [S3]),
+        unify_csts(SolG, FoldS)
+      %% end, S2, SolvableVs),
+      % TODO remove when done
+      end, S2, lists:reverse(SolvableVs)),
+      io:format("got subs ~p~n", [S3#solver.subs]),
 
-      T2#tarjan{stack=tl(Left), map=Map3, solver=S3};
+      S4 = lists:foldl(fun(SolV, FoldS) ->
+        #{SolV := SolG} = Map3,
+        Schemes = FoldS#solver.schemes,
+        T = subs({tv, SolV, none, false}, FoldS#solver.subs),
+        Schemes1 = Schemes#{SolV => generalize(T, SolG#gnr.env)},
+        io:format("generalize(~p, ~p)~n", [T, SolG#gnr.env]),
+        FoldS#solver{schemes=Schemes1}
+      end, S3, SolvableVs),
+
+      T2#tarjan{stack=tl(Left), map=Map3, solver=S4};
 
     true -> T2
   end.
@@ -551,32 +570,40 @@ connect(V, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
 %%       solve(Rest, S1)
 %%   end.
 
-unify_csts(Csts, S) ->
+unify_csts(#gnr{csts=Csts, env=Env}, S) ->
+  RigidVs = maps:fold(fun(_, Value, FoldVs) ->
+    case Value of
+      {no_dep, T} -> gb_sets:union(FoldVs, fvs(T));
+      {add_dep, _} -> FoldVs
+    end
+  end, gb_sets:new(), Env),
+
   lists:foldl(fun({L, R}, FoldS) ->
     Subs = FoldS#solver.subs,
     L1 = subs(resolve(L, FoldS), Subs),
     R1 = subs(resolve(R, FoldS), Subs),
     io:format("solving ~p~n", [{pretty(L1), pretty(R1)}]),
     unify({L1, R1}, FoldS)
-  end, S, Csts).
+  end, S#solver{rigid_vs=RigidVs}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
-resolve({tv, V, I, GVs}, _) -> {tv, V, I, GVs};
+resolve({tv, V, I, All}, _) -> {tv, V, I, All};
 resolve({con, Con}, _) -> {con, Con};
-resolve({gen, Con, ParamT}, _) -> {gen, Con, ParamT};
+resolve({gen, Con, ParamT}, S) -> {gen, Con, resolve(ParamT, S)};
 % TODO: rename {inst, T} to {inst, TV}
 % TODO: remove GVs from {tv}
 resolve({inst, T}, S) ->
   {tv, V, _, _} = T,
-  Res = case maps:find(V, S#solver.schemes) of
+  ResolvedT = case maps:find(V, S#solver.schemes) of
     {ok, Scheme} -> inst(Scheme, S);
+    % Not sure if we should resolve() or not here to make inst vars rigid.
     error -> T
   end,
-  io:format("inst(~p)~n => ~p~n", [T, Res]),
-  Res;
+  io:format("inst(~p)~n => ~p~n", [T, ResolvedT]),
+  resolve(ResolvedT, S);
 resolve(none, _) -> none.
 
 inst({GVs, T}, S) ->
@@ -610,50 +637,81 @@ unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   ToUnify = {subs(RightT1, S1#solver.subs), subs(RightT2, S1#solver.subs)},
   unify(ToUnify, S1);
 
-unify({{tv, V, I1, GVs1}, {tv, V, I2, GVs2}}, _) ->
-  error({badarg, V, I1, GVs1, I2, GVs2});
-unify({{tv, V1, I1, GVs1}, {tv, V2, I2, GVs2}}, S) ->
-  Err = {{tv, V1, I1, GVs1}, {tv, V2, I2, GVs2}},
-  Occurs = gb_sets:is_member(V1, GVs2) or gb_sets:is_member(V2, GVs1),
-  AllV1 = gb_sets:is_member(V1, GVs1),
-  AllV2 = gb_sets:is_member(V2, GVs2),
+unify({{tv, V, I1, All1}, {tv, V, I2, All2}}, _) ->
+  error({badarg, V, I1, All1, I2, All2});
+unify({{tv, V1, I1, All1}, {tv, V2, I2, All2}}, S) ->
+  TV1 = {tv, V1, I1, All1},
+  TV2 = {tv, V2, I2, All2},
+
+  Kind1 = kind(TV1, S),
+  Kind2 = kind(TV2, S),
+  Occurs = occurs(V1, TV2),
 
   if
-    Occurs -> add_err(Err, S);
+    Occurs -> add_err({TV1, TV2}, S);
 
-    % V2 is equally or more constraining; change V1 -> V2
-    AllV1 == AllV2, I1 == I2; AllV1 == AllV2, I1 == none ->
-      add_sub(V1, {tv, V2, I2, gb_sets:union(GVs2, GVs1)}, S);
+    % any(X: I1) ~ rigid(Y: I2) or any(X: I1) ~ all(Y: I2) or
+    % rigid(X: I1) ~ rigid(Y: I2) if I1 <= I2.
+    (Kind1 == any) or ((Kind1 == rigid) and (Kind2 == rigid)),
+    (I1 == none) or (I1 == I2) ->
+      add_sub(V1, TV2, S);
 
-    % V1 is equally or more constraining; change V1 -> V2
-    AllV1 == AllV2, I2 == none ->
-      add_sub(V2, {tv, V1, I1, gb_sets:union(GVs1, GVs2)}, S);
+    % rigid(X: I1) ~ any(Y: I2) or all(X: I1) ~ rigid(Y: I2) or
+    % rigid(X: I1) ~ rigid(Y: I2) if I1 >= I2.
+    (Kind2 == any) or ((Kind1 == rigid) and (Kind2 == rigid)),
+    (I2 == none) or (I1 == I2) ->
+      add_sub(V2, TV1, S);
 
-    % We're now guaranteed either:
-    % (1) AllV1 /= AllV2
-    % (2) I1 /= I2 and I1 /= none and I2 /= none
-    %
-    % We can't reconcile (1) because for all A. A is different from B.
-    % We can't reconcile (2) because there are two opposing interfaces.
-    % We're out of options.
-    true -> add_err(Err, S)
+    % any(X: I) ~ rigid(Y) so long as we convert both to rigid(Y: I).
+    % Note we must keep the same rigid type variable name Y.
+    Kind1 == any, Kind2 == rigid, I2 == none ->
+      add_sub(V2, {set_i, I1}, add_sub(V1, TV2, S));
+      %% NewTV = tv_server:fresh(I1, Kind2, S#solver.pid),
+      %% add_sub(V2, NewTV, add_sub(V1, NewTV, S));
+
+    % rigid(X) ~ any(Y: I) so long as we convert both to rigid(X: I).
+    % Note we must keep the same rigid type variable name X.
+    Kind2 == any, Kind1 == rigid, I1 == none ->
+      add_sub(V1, {set_i, I2}, add_sub(V2, TV1, S));
+      %% NewTV = tv_server:fresh(I2, Kind1, S#solver.pid),
+      %% add_sub(V2, NewTV, add_sub(V1, NewTV, S));
+
+    true -> add_err({TV1, TV2}, S)
   end;
-unify({{tv, V, I, GVs}, T}, S) ->
-  Err = {{tv, V, I, GVs}, T},
-  Occurs = occurs(gb_sets:add(V, GVs), T),
-  Instance = not gb_sets:is_member(V, GVs) and ((I == none) or instance(T, I)),
+unify({{tv, V, I, All}, T}, S) ->
+  TV = {tv, V, I, All},
+  Kind = kind(TV, S),
+
+  Err = {TV, T},
+  Occurs = occurs(V, T),
+  Instance = (I == none) or instance(T, I),
+  HasTV = occurs(any, T),
 
   if
     Occurs -> add_err(Err, S);
+    Kind == all -> add_err(Err, S);
+    (Kind == rigid) and HasTV -> add_err(Err, S);
     Instance -> add_sub(V, T, S);
     true -> add_err(Err, S)
   end;
-unify({T, {tv, V, I, GVs}}, S) -> unify({{tv, V, I, GVs}, T}, S);
+unify({T, {tv, V, I, All}}, S) -> unify({{tv, V, I, All}, T}, S);
 
 unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
   unify({ParamT1, ParamT2}, S);
 
 unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
+
+kind({tv, V, _, All}, S) ->
+  case gb_sets:is_member(V, S#solver.rigid_vs) of
+    true ->
+      false = All,
+      rigid;
+    false ->
+      case All of
+        true -> all;
+        false -> any
+      end
+  end.
 
 add_sub(Key, Value, S) ->
   case maps:find(Key, S#solver.subs) of
@@ -678,16 +736,20 @@ subs({lam, ArgT, ReturnT}, Subs) ->
   {lam, subs(ArgT, Subs), subs(ReturnT, Subs)};
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
-subs({tv, V, I, GVs}, Subs) ->
+subs({tv, V, I, All}, Subs) ->
   case maps:find(V, Subs) of
-    error -> {tv, V, I, GVs};
-    {ok, {add_gvs, NewGVs}} -> {tv, V, I, gb_sets:union(GVs, NewGVs)};
+    error -> {tv, V, I, All};
+    %% {ok, {add_gvs, NewGVs}} -> {tv, V, I, gb_sets:union(GVs, NewGVs)};
+    {ok, {all, V1}} -> {tv, V1, I, true};
+    {ok, {set_i, I1}} ->
+      false = All,
+      {tv, V, I1, All};
 
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
         is_tuple(Value) or (Value == none) -> Value;
-        % Changing name due to instantiation; GVs don't carry over.
+        % Changing name due to instantiation; rigidity is removed.
         true ->
           %% NewGVs = gb_sets:from_list(lists:map(fun(GV) ->
           %%   case maps:find(GV, Subs) of
@@ -695,7 +757,7 @@ subs({tv, V, I, GVs}, Subs) ->
           %%     _ -> GV
           %%   end
           %% end, gb_sets:to_list(GVs))),
-          {tv, Value, I, gb_sets:new()}
+          {tv, Value, I, false}
       end,
       subs(Sub, Subs)
   end;
@@ -709,34 +771,34 @@ fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
 fvs({tv, V, _, _}) -> gb_sets:from_list([V]);
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamT}) -> fvs(ParamT);
-% fvs({inst/generalize, ...}) ommitted; they should be resolved
+% fvs({inst, ...}) ommitted; they should be resolved
 fvs(none) -> gb_sets:new().
 
-gvs({lam, ArgT, ReturnT}) -> gb_sets:union(gvs(ArgT), gvs(ReturnT));
-gvs({tuple, LeftT, RightT}) -> gb_sets:union(gvs(LeftT), gvs(RightT));
-gvs({tv, V, _, GVs}) ->
-  case gb_sets:is_member(V, GVs) of
-    true -> gb_sets:from_list([V]);
-    false -> gb_sets:new()
-  end;
-gvs({con, _}) -> gb_sets:new();
-gvs({gen, _, ParamT}) -> gvs(ParamT);
-% gvs({inst/generalize, ...}) ommitted; they should be resolved
-gvs(none) -> gb_sets:new().
+%% gvs({lam, ArgT, ReturnT}) -> gb_sets:union(gvs(ArgT), gvs(ReturnT));
+%% gvs({tuple, LeftT, RightT}) -> gb_sets:union(gvs(LeftT), gvs(RightT));
+%% gvs({tv, V, _, GVs}) ->
+%%   case gb_sets:is_member(V, GVs) of
+%%     true -> gb_sets:from_list([V]);
+%%     false -> gb_sets:new()
+%%   end;
+%% gvs({con, _}) -> gb_sets:new();
+%% gvs({gen, _, ParamT}) -> gvs(ParamT);
+%% % gvs({inst, ...}) ommitted; they should be resolved
+%% gvs(none) -> gb_sets:new().
 
-occurs(S, {lam, ArgT, ReturnT}) ->
-  occurs(S, ArgT) or occurs(S, ReturnT);
-occurs(S, {tuple, LeftT, RightT}) ->
-  occurs(S, LeftT) or occurs(S, RightT);
-occurs(S, {tv, V, _, GVs}) -> not gb_sets:is_disjoint(S, gb_sets:add(V, GVs));
+occurs(V, {lam, ArgT, ReturnT}) ->
+  occurs(V, ArgT) or occurs(V, ReturnT);
+occurs(V, {tuple, LeftT, RightT}) ->
+  occurs(V, LeftT) or occurs(V, RightT);
+occurs(V, {tv, V1, _, _}) -> (V == any) or (V == V1);
 occurs(_, {con, _}) -> false;
-occurs(S, {gen, _, ParamT}) -> occurs(S, ParamT);
-% occurs({inst/generalize, ...}) ommitted; they should be resolved
+occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
+% occurs({inst, ...}) ommitted; they should be resolved
 occurs(_, none) -> false.
 
-pretty_csts([]) -> [];
-pretty_csts([{L, R} | Rest]) ->
-  [{pretty(L), pretty(R)} | pretty_csts(Rest)].
+%% pretty_csts([]) -> [];
+%% pretty_csts([{L, R} | Rest]) ->
+%%   [{pretty(L), pretty(R)} | pretty_csts(Rest)].
 
 pretty({lam, ArgT, ReturnT}) ->
   Format = case ArgT of
@@ -746,7 +808,7 @@ pretty({lam, ArgT, ReturnT}) ->
   format_str(Format, [pretty(ArgT), pretty(ReturnT)]);
 pretty({tuple, LeftT, RightT}) ->
   format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty({tv, V, I, GVs}) ->
+pretty({tv, V, I, _}) ->
   VStr = if
     I == none -> tl(V);
     true -> format_str("~s: ~s", [tl(V), atom_to_list(I)])
