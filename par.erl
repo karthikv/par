@@ -184,14 +184,18 @@ infer({tuple_expr, Left, Right}, C) ->
   {RightT, C2} = infer(Right, C1),
   {{tuple, LeftT, RightT}, C2};
 infer({iface_expr, TVToken, ConToken}, C) ->
-  {{tv, V, none, All}, C1} = infer(TVToken, C),
+  {{tv, V, none, Cat}, C1} = infer(TVToken, C),
   {{con, I}, C2} = infer(ConToken, C1),
-  {{tv, V, I, All}, C2};
+  {{tv, V, I, Cat}, C2};
 infer({gen_expr, ConToken, Param}, C) ->
   {{con, T}, C1} = infer(ConToken, C),
   {ParamT, C2} = infer(Param, C1),
   {{gen, T, ParamT}, C2};
-infer({tv_token, _, Name}, C) -> {{tv, Name, none, true}, C};
+infer({tv_token, _, Name}, C) ->
+  % This TV should be in category all, but because it's renamed in
+  % norm_sig_type, it's reset to category any. Hence, we don't set category all
+  % here. Rather, after renaming in norm_sig_type, we change to category all.
+  {{tv, Name, none, any}, C};
 % TODO: ensure these types are valid except when creating a new type
 infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 
@@ -504,10 +508,12 @@ connect(V, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
 
       S4 = lists:foldl(fun(SolV, FoldS) ->
         #{SolV := SolG} = Map3,
-        Schemes = FoldS#solver.schemes,
-        T = subs({tv, SolV, none, false}, FoldS#solver.subs),
-        Schemes1 = Schemes#{SolV => generalize(T, SolG#gnr.env)},
-        FoldS#solver{schemes=Schemes1}
+        #solver{subs=Subs, schemes=Schemes} = FoldS,
+        T = subs({tv, SolV, none, any}, Subs),
+        {GVs, GT} = generalize(T, SolG#gnr.env),
+        Schemes1 = Schemes#{SolV => {GVs, GT}},
+        Subs1 = Subs#{SolV => GT},
+        FoldS#solver{subs=Subs1, schemes=Schemes1}
       end, S3, SolvableVs),
 
       T2#tarjan{stack=tl(Left), map=Map3, solver=S4};
@@ -534,7 +540,7 @@ resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
-resolve({tv, V, I, All}, _) -> {tv, V, I, All};
+resolve({tv, V, I, Cat}, _) -> {tv, V, I, Cat};
 resolve({con, Con}, _) -> {con, Con};
 resolve({gen, Con, ParamT}, S) -> {gen, Con, resolve(ParamT, S)};
 resolve({inst, TV}, S) ->
@@ -557,9 +563,13 @@ generalize(T, Env) ->
   EnvFVs = maps:fold(fun(_, {_, TV}, S) ->
     gb_sets:union(fvs(TV), S)
   end, gb_sets:new(), Env),
-
   GVs = gb_sets:subtract(fvs(T), EnvFVs),
-  {GVs, T}.
+
+  % for normalization, change all all(TV) to TV
+  Subs = gb_sets:fold(fun(V, FoldSubs) ->
+    FoldSubs#{V => any}
+  end, #{}, GVs),
+  {GVs, subs(T, Subs)}.
 
 unify({T1, T2}, S) when T1 == T2 -> S;
 
@@ -572,14 +582,14 @@ unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   ToUnify = {subs(RightT1, S1#solver.subs), subs(RightT2, S1#solver.subs)},
   unify(ToUnify, S1);
 
-unify({{tv, V, I1, All1}, {tv, V, I2, All2}}, _) ->
-  error({badarg, V, I1, All1, I2, All2});
-unify({{tv, V1, I1, All1}, {tv, V2, I2, All2}}, S) ->
-  TV1 = {tv, V1, I1, All1},
-  TV2 = {tv, V2, I2, All2},
+unify({{tv, V, I1, Cat1}, {tv, V, I2, Cat2}}, _) ->
+  error({badarg, V, I1, Cat1, I2, Cat2});
+unify({{tv, V1, I1, Cat1}, {tv, V2, I2, Cat2}}, S) ->
+  TV1 = {tv, V1, I1, Cat1},
+  TV2 = {tv, V2, I2, Cat2},
 
-  Kind1 = kind(TV1, S),
-  Kind2 = kind(TV2, S),
+  Ilk1 = ilk(TV1, S),
+  Ilk2 = ilk(TV2, S),
   Occurs = occurs(V1, TV2),
 
   if
@@ -587,31 +597,31 @@ unify({{tv, V1, I1, All1}, {tv, V2, I2, All2}}, S) ->
 
     % any(X: I1) ~ rigid(Y: I2) or any(X: I1) ~ all(Y: I2) or
     % rigid(X: I1) ~ rigid(Y: I2) if I1 <= I2.
-    (Kind1 == any) or ((Kind1 == rigid) and (Kind2 == rigid)),
+    (Ilk1 == any) or ((Ilk1 == rigid) and (Ilk2 == rigid)),
     (I1 == none) or (I1 == I2) ->
       add_sub(V1, TV2, S);
 
     % rigid(X: I1) ~ any(Y: I2) or all(X: I1) ~ rigid(Y: I2) or
     % rigid(X: I1) ~ rigid(Y: I2) if I1 >= I2.
-    (Kind2 == any) or ((Kind1 == rigid) and (Kind2 == rigid)),
+    (Ilk2 == any) or ((Ilk1 == rigid) and (Ilk2 == rigid)),
     (I2 == none) or (I1 == I2) ->
       add_sub(V2, TV1, S);
 
     % any(X: I) ~ rigid(Y) so long as we convert both to rigid(Y: I).
     % Note we must keep the same rigid type variable name Y.
-    Kind1 == any, Kind2 == rigid, I2 == none ->
+    Ilk1 == any, Ilk2 == rigid, I2 == none ->
       add_sub(V2, {set_iface, I1}, add_sub(V1, TV2, S));
 
     % rigid(X) ~ any(Y: I) so long as we convert both to rigid(X: I).
     % Note we must keep the same rigid type variable name X.
-    Kind2 == any, Kind1 == rigid, I1 == none ->
+    Ilk2 == any, Ilk1 == rigid, I1 == none ->
       add_sub(V1, {set_iface, I2}, add_sub(V2, TV1, S));
 
-    true -> add_err({TV1, TV2}, S)
+    true -> add_err({{tv, V1, I1, Ilk1}, {tv, V2, I2, Ilk2}}, S)
   end;
-unify({{tv, V, I, All}, T}, S) ->
-  TV = {tv, V, I, All},
-  Kind = kind(TV, S),
+unify({{tv, V, I, Cat}, T}, S) ->
+  TV = {tv, V, I, Cat},
+  Ilk = ilk(TV, S),
 
   Err = {TV, T},
   Occurs = occurs(V, T),
@@ -620,12 +630,12 @@ unify({{tv, V, I, All}, T}, S) ->
 
   if
     Occurs -> add_err(Err, S);
-    Kind == all -> add_err(Err, S);
-    (Kind == rigid) and HasTV -> add_err(Err, S);
+    (Ilk == all) or ((Ilk == rigid) and HasTV) ->
+      add_err({{tv, V, I, Ilk}, T}, S);
     Instance -> add_sub(V, T, S);
     true -> add_err(Err, S)
   end;
-unify({T, {tv, V, I, All}}, S) -> unify({{tv, V, I, All}, T}, S);
+unify({T, {tv, V, I, Cat}}, S) -> unify({{tv, V, I, Cat}, T}, S);
 
 unify({{gen, C, ParamT1}, {gen, C, ParamT2}}, S) ->
   unify({ParamT1, ParamT2}, S);
@@ -641,16 +651,12 @@ add_sub(Key, Value, S) ->
 add_err(Err, S) ->
   S#solver{errs=[Err | S#solver.errs]}.
 
-kind({tv, V, _, All}, S) ->
+ilk({tv, V, _, Cat}, S) ->
   case gb_sets:is_member(V, S#solver.rigid_vs) of
     true ->
-      false = All,
+      any = Cat,
       rigid;
-    false ->
-      case All of
-        true -> all;
-        false -> any
-      end
+    false -> Cat
   end.
 
 instance({con, 'Int'}, 'Num') -> true;
@@ -667,20 +673,22 @@ subs({lam, ArgT, ReturnT}, Subs) ->
   {lam, subs(ArgT, Subs), subs(ReturnT, Subs)};
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
-subs({tv, V, I, All}, Subs) ->
+subs({tv, V, I, Cat}, Subs) ->
   case maps:find(V, Subs) of
-    error -> {tv, V, I, All};
-    {ok, {all, V1}} -> {tv, V1, I, true};
+    error -> {tv, V, I, Cat};
+    {ok, any} -> {tv, V, I, any};
+    {ok, {all, V1}} -> {tv, V1, I, all};
+
     {ok, {set_iface, I1}} ->
-      false = All,
-      {tv, V, I1, All};
+      any = Cat,
+      {tv, V, I1, Cat};
 
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
         is_tuple(Value) or (Value == none) -> Value;
-        % Changing name due to instantiation; all flag is unset.
-        true -> {tv, Value, I, false}
+        % Instantiation, so category resets to any
+        true -> {tv, Value, I, any}
       end,
       subs(Sub, Subs)
   end;
@@ -719,21 +727,17 @@ pretty({lam, ArgT, ReturnT}) ->
   format_str(Format, [pretty(ArgT), pretty(ReturnT)]);
 pretty({tuple, LeftT, RightT}) ->
   format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty({tv, V, I, _}) ->
-  VStr = if
+pretty({tv, V, I, Ilk}) ->
+  Str = if
     I == none -> tl(V);
     true -> format_str("~s: ~s", [tl(V), atom_to_list(I)])
   end,
-  VStr;
 
-  % TODO: how to deal with this?
-  %% Size = gb_sets:size(GVs),
-  %% if
-  %%   Size > 0 ->
-  %%     GVList = lists:map(fun erlang:tl/1, gb_sets:to_list(GVs)),
-  %%     format_str("for all ~s, ~s", [string:join(GVList, " "), VStr]);
-  %%   true -> format_str("~s", [VStr])
-  %% end;
+  case Ilk of
+    any -> Str;
+    rigid -> format_str("rigid(~s)", [Str]);
+    all -> format_str("all(~s)", [Str])
+  end;
 pretty({con, Con}) -> atom_to_list(Con);
 pretty({gen, 'List', ParamT}) ->
   format_str("[~s]", [pretty_strip_parens(ParamT)]);

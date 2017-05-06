@@ -193,11 +193,19 @@ expr_test_() ->
   , ?_test(bad_expr("!15.0", {"Float", "Bool"}))
   , ?_test(bad_expr("!3 == false", {"A: Num", "Bool"}))
 
+  , ?_test("Bool" = ok_expr("true :: Bool"))
   , ?_test("Int" = ok_expr("3 :: Int"))
-  , ?_test("Float" = ok_expr("5 :: Float + 2"))
-  , ?_test(bad_expr("3 :: A", {"A: Num", "B"}))
-  , ?_test(bad_expr("5.0 :: A: Num", {"Float", "A: Num"}))
+  , ?_test("A: Num" = ok_expr("3 :: A: Num"))
+  , ?_test("Bool -> Bool" = ok_expr("|x| x :: Bool"))
+  , ?_test("A -> A" = ok_expr("(|x| x) :: A -> A"))
+  , ?_test("A: Num" = ok_expr("((|x| x) :: A -> A)(3)"))
+  , ?_test("(A -> B) -> A -> B" = ok_expr("(|x| x) :: (A -> B) -> A -> B"))
+  , ?_test(bad_expr("true :: A", {"Bool", "all(A)"}))
+  , ?_test(bad_expr("3 :: A", {"A: Num", "all(B)"}))
+  , ?_test(bad_expr("5.0 :: A: Num", {"Float", "all(A: Num)"}))
   , ?_test(bad_expr("5.0 :: Int", {"Float", "Int"}))
+  , ?_test(bad_expr("|x| x :: B", {"rigid(A)", "all(B)"}))
+  , ?_test(bad_expr("|x| x :: B -> B", {"rigid(A)", "all(B) -> all(B)"}))
 
   , ?_test("A: Num" = ok_expr("7 - (3 + -5)"))
   , ?_test("Float" = ok_expr("7 - (3.0 + -5)"))
@@ -213,6 +221,7 @@ expr_test_() ->
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
   , ?_test("Bool" = ok_expr("let x = |a| a in x(3) == 3 && x(true)"))
   , ?_test(bad_expr("let x = 3.0, y = true in x - y", {"Bool", "Float"}))
+  , ?_test(bad_expr("(|x| let a = x(3) in x(true))(|y| y)", {"Bool", "A: Num"}))
 
   , ?_test("String" = ok_expr("{ \"hello\" }"))
   , ?_test("Bool" = ok_expr("{ @foo; true }"))
@@ -221,10 +230,6 @@ expr_test_() ->
 
   , ?_test("() -> A: Num" = ok_expr("|-| 3"))
   , ?_test("A -> A" = ok_expr("|x| x"))
-  , ?_test(bad_expr("|x| x :: T", {"A", "B"}))
-  %% , ?_test(bad_expr("|x| x :: T", {"A", "for all B, B"}))
-  %% , ?_test("(A -> A) -> A -> A" = ok_expr("|x| x :: T -> T"))
-  , ?_test("A -> A" = ok_expr("(|x| x) :: T -> T"))
   , ?_test("A: Num -> A: Num" = ok_expr("|x| x + 3"))
   , ?_test("Float -> Float" = ok_expr("|x| x + 3.0"))
   , ?_test("(Float -> A) -> Float -> A" = ok_expr("|f, x| f(x - 3.0)"))
@@ -315,11 +320,11 @@ sig_test_() ->
       "add(x, y) = x + y",
       "add"
     ))
-  %% , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
-  %%     "add :: A: Num -> A: Num -> A: Num\n"
-  %%     "add(x, y) = x :: B: Num + y :: A: Num",
-  %%     "add"
-  %%   ))
+  , ?_test(bad_prg(
+      "inc :: A: Num -> A: Num\n"
+      "inc(x) = x :: B: Num + 1 :: A: Num",
+      {"rigid(A)", "all(B: Num)"}
+    ))
   , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(
       "cmp :: (B -> C) -> (A -> B) -> A -> C\n"
       "cmp(f, g, x) = f(g(x))",
@@ -367,24 +372,24 @@ sig_test_() ->
   , ?_test(bad_prg(
       "id :: A -> B\n"
       "id(x) = x",
-      {"A", "B"}
+      {"all(A)", "all(B)"}
     ))
   , ?_test(bad_prg(
       "foo :: Int -> Int\n"
       "foo(x) = x + 3\n"
       "bar :: A: Num -> Int\n"
       "bar(x) = foo(x)",
-      {"Int", "A: Num"}
+      {"Int", "all(A: Num)"}
     ))
   , ?_test(bad_prg(
       "push :: [A: Num] -> [A: Num]\n"
       "push(x) = x ++ [1.0]",
-      {"A: Num", "Float"}
+      {"all(A: Num)", "Float"}
     ))
   , ?_test(bad_prg(
       "empty :: List<A> -> List<B> -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
-      {"A", "B"}
+      {"all(A)", "all(B)"}
     ))
   ].
 
