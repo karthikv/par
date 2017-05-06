@@ -54,23 +54,6 @@ ok_expr(Expr) ->
 bad_expr(Expr, Err) ->
   bad_prg("main() = " ++ Expr, Err).
 
-% TODO: apply this to norm_sig_t?
-%% norm(T, {Subs, Pid}) ->
-%%   NewFVs = gb_sets:filter(fun(V) ->
-%%     not maps:is_key(V, Subs)
-%%   end, par:fvs(T)),
-%% 
-%%   % TODO: use this same logic for norm_sig_type
-%%   PrefixedSubs = gb_sets:fold(fun(GV, FoldSubs) ->
-%%     FoldSubs#{GV => [$* | tv_server:next_name(Pid)]}
-%%   end, Subs, NewFVs),
-%%   StrippedSubs = maps:fold(fun(_, PrefixedV, FoldSubs) ->
-%%     FoldSubs#{PrefixedV => tl(PrefixedV)}
-%%   end, #{}, PrefixedSubs),
-%% 
-%%   NormT = par:subs(par:subs(T, PrefixedSubs), StrippedSubs),
-%%   {NormT, {PrefixedSubs, Pid}}.
-
 % We don't use par:fvs() and par:subs() to implement this because it'll
 % normalize variables in an arbitrary order (e.g. C -> D could become B ->
 % A instead of A -> B). By doing it ourselves, we always guarantee
@@ -238,7 +221,7 @@ expr_test_() ->
 
   , ?_test("() -> A: Num" = ok_expr("|-| 3"))
   , ?_test("A -> A" = ok_expr("|x| x"))
-  %% , ?_test("A -> A" = ok_expr("(|x| x :: T)(3)"))
+  , ?_test(bad_expr("|x| x :: T", {"A", "B"}))
   %% , ?_test(bad_expr("|x| x :: T", {"A", "for all B, B"}))
   %% , ?_test("(A -> A) -> A -> A" = ok_expr("|x| x :: T -> T"))
   , ?_test("A -> A" = ok_expr("(|x| x) :: T -> T"))

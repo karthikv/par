@@ -88,7 +88,7 @@ expr -> '!' expr : {'$1', '$2'}.
 expr -> '#' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
 expr -> discard expr : {'$1', '$2'}.
-expr -> expr sig : {sig_expr, '$1', '$2'}.
+expr -> expr sig : {expr_sig, '$1', '$2'}.
 expr -> '(' expr ')' : '$2'.
 expr -> expr '(' ')' : {app, '$1', []}.
 expr -> expr '(' expr_list ')' : {app, '$1', '$3'}.
