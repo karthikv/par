@@ -199,25 +199,26 @@ infer({tv_token, _, Name}, C) ->
 % TODO: ensure these types are valid except when creating a new type
 infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 
-%% infer({enum, ConToken, Options}, C) ->
-%%   {T, C1} = infer(ConToken, C),
-%%   C2 = lists:foldl(fun({option, {con_token, _, Name}, Args}, FoldC) ->
-%%     {ArgsTRev, FoldC1} = lists:foldl(fun(Arg, {Ts, InnerC}) ->
-%%       {ArgT, InnerC1} = infer(Arg, InnerC),
-%%       {[ArgT | Ts], InnerC1}
-%%     end, {[], FoldC}, Args),
-%%
-%%     OptionT = lists:foldl(fun(ArgT, LastT) ->
-%%       {lam, ArgT, LastT}
-%%     end, T, ArgsTRev),
-%%     NormOptionT = norm_sig_type(OptionT, C#ctx.pid),
-%%
-%%     % TODO: what if name already exists?
-%%     TV = tv_server:fresh(C#ctx.pid),
-%%     add_env(Name, {enum, TV}, add_csts({TV, NormOptionT}, FoldC1))
-%%   end, C1, Options),
-%%
-%%   {T, C2};
+infer({enum, ConToken, Options}, C) ->
+  {T, C1} = infer(ConToken, C),
+  C2 = lists:foldl(fun({option, {con_token, _, Name}, Args}, FoldC) ->
+    {ArgsTRev, FoldC1} = lists:foldl(fun(Arg, {Ts, InnerC}) ->
+      {ArgT, InnerC1} = infer(Arg, InnerC),
+      {[ArgT | Ts], InnerC1}
+    end, {[], FoldC}, Args),
+
+    OptionT = lists:foldl(fun(ArgT, LastT) ->
+      {lam, ArgT, LastT}
+    end, T, ArgsTRev),
+    NormOptionT = norm_sig_type(OptionT, C#ctx.pid),
+
+    % TODO: what if name already exists?
+    TV = tv_server:fresh(C#ctx.pid),
+    FoldC2 = add_csts({TV, NormOptionT}, new_gnr(TV, FoldC1)),
+    add_env(Name, {add_dep, TV}, finish_gnr(FoldC2, FoldC1#ctx.gnr))
+  end, C1, Options),
+
+  {T, C2};
 
 infer(none, C) -> {none, C};
 infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};

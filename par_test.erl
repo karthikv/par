@@ -254,6 +254,11 @@ para_poly_test_() ->
   , ?_test("(A: Num -> B) -> B" = ok_prg("foo(f) = f(3)", "foo"))
   , ?_test("(A -> B) -> (C -> A) -> C -> B" =
              ok_prg("cmp(f, g, x) = f(g(x))", "cmp"))
+  , ?_test(bad_prg(
+      "add(x) = x + 3\n"
+      "main() = add(true)",
+      {"Bool", "A: Num"}
+    ))
   , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B"}))
   ].
 
@@ -291,14 +296,6 @@ recur_test_() ->
     ))
   , ?_test(bad_prg(
       "f(n) = if n > 0 then f(n - 1) == 1 else true",
-      {"Bool", "A: Num"}
-    ))
-  ].
-
-iface_test_() ->
-  [ ?_test(bad_prg(
-      "add(x) = x + 3\n"
-      "main() = add(true)",
       {"Bool", "A: Num"}
     ))
   ].
@@ -438,25 +435,25 @@ global_test_() ->
     ))
   ].
 
-%% enum_test_() ->
-%%   [ ?_test("Foo" = ok_prg(
-%%       "enum Foo { Bar }\n"
-%%       "baz = Bar",
-%%       "baz"
-%%     ))
-%%   , ?_test("Foo" = ok_prg(
-%%       "enum Foo { Bar, Other }\n"
-%%       "baz = Other",
-%%       "baz"
-%%     ))
-%%   , ?_test("[String] -> Foo" = ok_prg(
-%%       "enum Foo { Bar(Bool, [String]) }\n"
-%%       "baz = Bar(true)",
-%%       "baz"
-%%     ))
-%%   , ?_test("[String] -> Foo" = bad_prg(
-%%       "enum Foo { Bar(A, A) }\n"
-%%       "baz = Bar(3, true)",
-%%       {"A: Num", "Bool"}
-%%     ))
-%%   ].
+enum_test_() ->
+  [ ?_test("Foo" = ok_prg(
+      "enum Foo { Bar }\n"
+      "baz = Bar",
+      "baz"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "enum Foo { Bar, Other(Int) }\n"
+      "baz = Other(5)",
+      "baz"
+    ))
+  , ?_test("[String] -> Foo" = ok_prg(
+      "enum Foo { Bar(Bool, [String]) }\n"
+      "baz = Bar(true)",
+      "baz"
+    ))
+  , ?_test(bad_prg(
+      "enum Foo { Bar(A, A) }\n"
+      "baz = Bar(3, true)",
+      {"A: Num", "Bool"}
+    ))
+  ].
