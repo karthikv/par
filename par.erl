@@ -1,10 +1,64 @@
 -module(par).
 -export([reload/1, infer_prg/1, subs/2, fvs/1, pretty/1]).
 
+% Naming conventions:
+%
+% TV - a type variable, represented as a 4-tuple {tv, V, I, Cat}:
+%   V - the variable name
+%   I - the interface (typeclass) constraining the type variable
+%   Cat - the category of type variable (any or all)
+%
+% T - a type, represented as a tuple:
+%   {con, C} - a concrete type C; e.g. Int
+%   {gen, G, T} - a generic type G<T>; e.g. List<String>
+%   {tuple, L, R} - a tuple type (L, R); e.g. (Int, Bool)
+%   {lam, X, Y} - a lambda type X -> Y; e.g. Int -> Bool
+%   TV - see explanation above
+%
+% fresh - a function that generates a new TV.
+% fvs - a function that computes the set of free TV names in an expression.
+% Scheme - a tuple {GVs, T} that represents a T generalized across GVs, a set of
+%          TV names.
+% Env - a Name => T mapping of bindings in the environment.
+
+% C - A context record for type inference with the following fields:
+%   gnr - the current gnr record that constraints are being added to; see G
+%         below
+%   gnrs - an array of finalized gnr records that need to be solved
+%   env - see Env above
+%   pid - the process id of the TV server used to generated fresh TVs
 -record(ctx, {gnr, gnrs, env, pid}).
+
+% S - a solver record used to unify types and solve constraints
+%   subs - the substitutions made to unify types
+%   errs - any constraints that couldn't be unified
+%   schemes - the schemes of env variables that have been solved for and
+%             generalized
+%   rigid_vs - the set of TV names in the environment
+%   pid - the process id of the TV server used to generated fresh TVs
 -record(solver, {subs, errs, schemes, rigid_vs, pid}).
 
+% G - a gnr record that represents a set of constraints to solve before
+%     generalizing a type variable:
+%   v - the TV name to generalize
+%   env - see Env above
+%   csts - an array of constraints to solve before generalizing
+%   deps - an array of TV names corresponding to gnr records that need to
+%          solved before this record or, in the case of (mutual) recursion,
+%          simultaneously with this record
+%   index / low_link / on_stack - bookkeeping for Tarjan's strongly connected
+%                                 components algorithm; see T below and [1]
 -record(gnr, {v, env, csts, deps, index, low_link, on_stack}).
+
+% T - A tarjan record that's used to apply Tarjan's strongly connected
+%     components algorithm. This is necessary to solve constraints in the proper
+%     order so as to respect dependencies.
+%   map - a V => gnr record mapping so you can find the appropriate node given
+%         the TV name
+%   stack / next_index - bookkeeping for Tarjan's algorithm; see [1]
+%   solver - the solver record used for unification; see S below
+%
+% [1] https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
 -record(tarjan, {stack, map, next_index, solver}).
 
 -ifdef(release).
@@ -16,21 +70,6 @@
   ).
 -endif.
 
-% Naming conventions:
-% TV - type variable
-% fresh - a function that generates a new TV
-% FTV - free type variable; a TV that hasn't yet been generalized
-% ftvs - a function that computes a set of FTVs in an expression
-% T - type; can be a concrete type like int, a TV, or a function type encoded
-%     as an array
-% Scheme - scheme; a tuple {GTVs, T} that represents a T generalized across
-%          GTVs, a set of TVs
-% C - context record with the following fields:
-%   csts - array of constraints, each constraint is an array of two Ts that
-%          must match
-%   env - maps variable name to Scheme
-%   count - a monotonically increasing count used to generate fresh TVs
-%
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
