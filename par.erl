@@ -540,9 +540,7 @@ connect(V, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
       S3 = lists:foldl(fun(SolV, FoldS) ->
         #{SolV := SolG} = Map3,
         unify_csts(SolG, FoldS)
-      %% end, S2, SolvableVs),
-      % TODO remove when done
-      end, S2, lists:reverse(SolvableVs)),
+      end, S2, SolvableVs),
 
       ?LOG("Subs", S3#solver.subs),
 
