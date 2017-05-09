@@ -443,52 +443,100 @@ global_test_() ->
 enum_test_() ->
   [ ?_test("Foo" = ok_prg(
       "enum Foo { Bar }\n"
-      "baz = Bar",
-      "baz"
+      "main = Bar",
+      "main"
     ))
   , ?_test("Foo" = ok_prg(
-      "enum Foo { Bar, Other(Int) }\n"
-      "baz = Other(5)",
-      "baz"
+      "enum Foo { Bar, Baz(Int) }\n"
+      "main = Baz(5)",
+      "main"
     ))
   , ?_test("[String] -> Foo" = ok_prg(
       "enum Foo { Bar(Bool, [String]) }\n"
-      "baz = Bar(true)",
-      "baz"
+      "main = Bar(true)",
+      "main"
     ))
   , ?_test("VariedList" = ok_prg(
       "enum VariedList { Cons(A, VariedList), End }\n"
-      "baz = Cons(\"hello\", Cons((3, true), Cons(@what, End)))",
-      "baz"
+      "main = Cons(\"hello\", Cons((3, true), Cons(@what, End)))",
+      "main"
     ))
   , ?_test("Foo<A>" = ok_prg(
       "enum Foo<A> { Bar }\n"
-      "baz = Bar",
-      "baz"
+      "main = Bar",
+      "main"
     ))
   , ?_test("Foo<A: Num>" = ok_prg(
-      "enum Foo<A> { Bar, Other(A) }\n"
-      "baz = Other(3)",
-      "baz"
+      "enum Foo<A> { Bar, Baz(A) }\n"
+      "main = Baz(3)",
+      "main"
     ))
   , ?_test("UniformList<Float>" = ok_prg(
       "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
-      "baz = Cons(3, Cons(5.0, End))\n",
-      "baz"
+      "main = Cons(3, Cons(5.0, End))\n",
+      "main"
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar((Float, Atom)) }\n"
-      "baz = Bar(([1], @atom))",
+      "main = Bar(([1], @atom))",
       {"[A]", "Float"}
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar(A, A) }\n"
-      "baz = Bar(3, true)",
+      "main = Bar(3, true)",
       {"A: Num", "Bool"}
     ))
   , ?_test(bad_prg(
       "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
-      "baz = Cons(\"hi\", Cons(5.0, End))\n",
+      "main = Cons(\"hi\", Cons(5.0, End))\n",
       {"String", "Float"}
+    ))
+  ].
+
+struct_test_() ->
+  [ ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "main = Foo(3)",
+      "main"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "main = Foo { bar = 3 }",
+      "main"
+    ))
+  , ?_test("[String] -> Foo" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "main = Foo(3)",
+      "main"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [Atom] }\n"
+      "main = Foo { baz = [@first, @second], bar = 15 }",
+      "main"
+    ))
+  , ?_test("A -> Foo<Atom, A>" = ok_prg(
+      "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
+      "main = Foo(@hi)",
+      "main"
+    ))
+  , ?_test("Foo<Atom>" = ok_prg(
+      "struct Foo<X> { bar :: X }\n"
+      "main = Foo { bar = @hi }",
+      "main"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: (Float, Atom) }\n"
+      "main = Foo(([1], @a))",
+      {"[A]", "Float"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<X> { bar :: [X], baz :: Bool }\n"
+      "main = Foo { baz = true, bar = 5 }",
+      {"[A]", "B: Num"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: A, baz :: A }\n"
+      "main = Foo(3, true)",
+      {"A: Num", "Bool"}
     ))
   ].

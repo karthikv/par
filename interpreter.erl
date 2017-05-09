@@ -27,6 +27,21 @@ execute(Ast) ->
           NestedEnv#{Name => Value}
         end, FoldEnv, OptionTEs);
 
+      {struct, StructTE, FieldTEs} ->
+        StructName = case StructTE of
+          {con_token, _, Name} -> Name;
+          {gen_te, {con_token, _, Name}, _} -> Name
+        end,
+
+        FieldNames = lists:map(fun({field, {var, _, FieldName}, _}) ->
+          FieldName
+        end, FieldTEs),
+        Value = curry(length(FieldTEs), fun(Vs) ->
+          list_to_tuple([list_to_atom(StructName) | Vs])
+        end, []),
+
+        FoldEnv#{StructName => {struct, FieldNames, Value}};
+
       {sig, _, _} -> FoldEnv
     end
   end, #{}, Ast),
@@ -70,8 +85,21 @@ eval({map, Pairs}, Env) ->
 eval({var, _, Name}, Env) ->
   case maps:get(Name, Env) of
     {lazy, Expr} -> eval(Expr, Env);
+    {struct, _, V} -> V;
     V -> V
   end;
+
+eval({record, {var, _, Name}, Inits}, Env) ->
+  #{Name := {struct, FieldNames, Fn}} = Env,
+
+  Vs = lists:map(fun(FieldName) ->
+    {_, Expr} = hd(lists:filter(fun({{var, _, InitName}, _}) ->
+      FieldName == InitName
+    end, Inits)),
+    eval(Expr, Env)
+  end, FieldNames),
+
+  Fn(Vs);
 
 eval({app, Expr, Args}, Env) ->
   Fn = eval(Expr, Env),

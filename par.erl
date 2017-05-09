@@ -26,8 +26,9 @@
 %         below
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
+%   types - a Name => TypeInfo mapping of types in the environment
 %   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {gnr, gnrs, env, pid}).
+-record(ctx, {gnr, gnrs, env, types, pid}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -73,9 +74,11 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Complex types: ADTs
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
+% - Allow main to be an expr or a fn
+% - Should nullary functions still exist given laziness? If so, why
+%   should exprs in the top scope be lazy by default?
 % - Concurrency
 % - Pattern matching
 % - Exceptions
@@ -127,13 +130,14 @@ infer_prg(Prg) ->
 
       _ -> FoldC
     end
-  end, #ctx{gnrs=[], env=#{}, pid=Pid}, Ast),
+  end, #ctx{gnrs=[], env=#{}, types=#{}, pid=Pid}, Ast),
 
   C1 = lists:foldl(fun(Node, FoldC) ->
     case Node of
-      {enum, _, _} ->
+      {N, _, _} when N == enum; N == struct ->
         {_, FoldC1} = infer(Node, FoldC),
         FoldC1;
+
       _ -> FoldC
     end
   end, C, Ast),
@@ -181,7 +185,7 @@ infer_prg(Prg) ->
   Result.
 
 infer({fn, Args, Expr}, C) ->
-  {ArgsTRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
+  {ArgTsRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
     ArgTV = tv_server:fresh(FoldC#ctx.pid),
     {[ArgTV | Ts], add_env(ArgName, {no_dep, ArgTV}, FoldC)}
   end, {[], C}, Args),
@@ -191,7 +195,7 @@ infer({fn, Args, Expr}, C) ->
     length(Args) == 0 -> {lam, none, ReturnT};
     true -> lists:foldl(fun(ArgT, LastT) ->
       {lam, ArgT, LastT}
-    end, ReturnT, ArgsTRev)
+    end, ReturnT, ArgTsRev)
   end,
 
   % restore original env
@@ -239,15 +243,15 @@ infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 
 infer({enum, EnumTE, OptionTEs}, C) ->
   {T, C1} = infer(EnumTE, C),
-  C2 = lists:foldl(fun({option, {con_token, _, Name}, ArgsTE}, FoldC) ->
-    {ArgsTRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, InnerC}) ->
+  C2 = lists:foldl(fun({option, {con_token, _, Name}, ArgTEs}, FoldC) ->
+    {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, InnerC}) ->
       {ArgT, InnerC1} = infer(ArgTE, InnerC),
       {[ArgT | Ts], InnerC1}
-    end, {[], FoldC}, ArgsTE),
+    end, {[], FoldC}, ArgTEs),
 
     OptionT = lists:foldl(fun(ArgT, LastT) ->
       {lam, ArgT, LastT}
-    end, T, ArgsTRev),
+    end, T, ArgTsRev),
     NormOptionT = norm_sig_type(OptionT, C#ctx.pid),
 
     % TODO: what if name already exists?
@@ -257,6 +261,31 @@ infer({enum, EnumTE, OptionTEs}, C) ->
   end, C1, OptionTEs),
 
   {T, C2};
+
+infer({struct, StructTE, FieldTEs}, C) ->
+  {T, C1} = infer(StructTE, C),
+  {ArgTsRev, FieldNamesRev, C2} = lists:foldl(fun(TE, {Ts, Names, FoldC}) ->
+    {field, {var, _, Name}, Sig} = TE,
+    {FieldT, FoldC1} = infer(Sig, FoldC),
+    {[FieldT | Ts], [Name | Names], FoldC1}
+  end, {[], [], C1}, FieldTEs),
+
+  FnT = lists:foldl(fun(ArgT, LastT) ->
+    {lam, ArgT, LastT}
+  end, T, ArgTsRev),
+  NormFnT = norm_sig_type(FnT, C2#ctx.pid),
+
+  TV = tv_server:fresh(C2#ctx.pid),
+  C3 = finish_gnr(add_csts({TV, NormFnT}, new_gnr(TV, C2)), C2#ctx.gnr),
+
+  StructName = case StructTE of
+    {con_token, _, Name} -> Name;
+    {gen_te, {con_token, _, Name}, _} -> Name
+  end,
+  NewTypes = (C3#ctx.types)#{StructName => {struct, FieldNamesRev}},
+
+  C4 = C3#ctx{types=NewTypes},
+  {TV, add_env(StructName, {add_dep, TV}, C4)};
 
 infer(none, C) -> {none, C};
 infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};
@@ -310,12 +339,38 @@ infer({var, _, Name}, C) ->
       % instantiate properly.
       {{inst, EnvTV}, C#ctx{gnr=G1}};
 
-    {ok, {_, EnvTV}} ->
-      {EnvTV, C}
+    {ok, {_, EnvTV}} -> {EnvTV, C}
   end;
 
+infer({record, Var, Inits}, C) ->
+  {FnT, C1} = infer(Var, C),
+  {var, _, StructName} = Var,
+  % TODO: should FieldNames be in the types map or in the env map? Update
+  % TypeInfo description in naming conventions after figuring this out
+  #{StructName := {struct, FieldNamesRev}} = C1#ctx.types,
+
+  {InitNameTs, C2} = lists:foldl(fun(Init, {NameTs, FoldC}) ->
+    {{var, _, Name}, Expr} = Init,
+    {T, FoldC1} = infer(Expr, FoldC),
+    {[{Name, T} | NameTs], FoldC1}
+  end, {[], C1}, Inits),
+
+  TV = tv_server:fresh(C2#ctx.pid),
+  T = lists:foldl(fun(FieldName, LastT) ->
+    FieldInitNameTs = lists:filter(fun({Name, _}) ->
+      Name == FieldName
+    end, InitNameTs),
+
+    % TODO: handle error
+    1 = length(FieldInitNameTs),
+    {_, InitT} = hd(FieldInitNameTs),
+    {lam, InitT, LastT}
+  end, TV, FieldNamesRev),
+
+  {TV, add_csts({T, FnT}, C2)};
+
 infer({app, Expr, Args}, C) ->
-  {ArgsTRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
+  {ArgTsRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
     {T, FoldC1} = infer(Arg, FoldC),
     {[T | Ts], FoldC1}
   end, {[], C}, Args),
@@ -323,11 +378,11 @@ infer({app, Expr, Args}, C) ->
   {ExprT, C2} = infer(Expr, C1),
   TV = tv_server:fresh(C2#ctx.pid),
   T = if
-    length(ArgsTRev) == 0 -> {lam, none, TV};
+    length(ArgTsRev) == 0 -> {lam, none, TV};
     true ->
       lists:foldl(fun(ArgT, LastT) ->
         {lam, ArgT, LastT}
-      end, TV, ArgsTRev)
+      end, TV, ArgTsRev)
   end,
 
   {TV, add_csts({T, ExprT}, C2)};

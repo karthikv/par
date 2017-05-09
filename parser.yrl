@@ -1,6 +1,7 @@
 Nonterminals
-  prg global sig
-  te te_list_tuple enum option_list option te_list tv_list_tuple
+  prg global sig te te_list_tuple
+  enum option_list option te_list
+  struct field_list field tv_list_tuple
   expr lam neg maybe_else
   var_list expr_list init_list kv_list semi_list.
 
@@ -10,17 +11,18 @@ Terminals
   '+' '-' '*' '/' '%'
   '++' '--' '|' '::' ':' '->' ';' 'discard'
   if then else let in
-  enum_token int float bool str atom var
+  enum_token struct_token
+  int float bool str atom var
   '[' ']' '{' '}' '=>' '#'
   tv_token con_token.
 
 Rootsymbol prg.
 
-
 prg -> '$empty' : [].
 prg -> global prg : ['$1' | '$2'].
 prg -> var sig prg : [{sig, '$1', '$2'} | '$3'].
 prg -> enum prg : ['$1' | '$2'].
+prg -> struct prg : ['$1' | '$2'].
 
 global -> var '=' expr : {global, '$1', '$3'}.
 global -> var '(' ')' '=' expr : {global, '$1', {fn, [], '$5'}}.
@@ -54,6 +56,15 @@ option -> con_token '(' te_list ')' : {option, '$1', '$3'}.
 te_list -> te : ['$1'].
 te_list -> te ',' te_list : ['$1' | '$3'].
 
+struct -> struct_token con_token '{' field_list '}' : {struct, '$2', '$4'}.
+struct -> struct_token con_token '<' tv_list_tuple '>' '{' field_list '}' :
+  {struct, {gen_te, '$2', '$4'}, '$7'}.
+
+field_list -> field : ['$1'].
+field_list -> field ',' field_list : ['$1' | '$3'].
+
+field -> var sig : {field, '$1', '$2'}.
+
 tv_list_tuple -> tv_token : '$1'.
 tv_list_tuple -> tv_token ',' tv_list_tuple : {tuple_te, '$1', '$3'}.
 
@@ -64,12 +75,14 @@ expr -> bool : '$1'.
 expr -> str : '$1'.
 expr -> atom : '$1'.
 expr -> var : '$1'.
-expr -> con_token : {var, element(2, '$1'), element(3, '$1')}.
+expr -> con_token : con_to_var('$1').
 expr -> '[' ']' : {list, []}.
 expr -> '[' expr_list ']' : {list, '$2'}.
 expr -> '(' expr ',' expr_list ')' : {tuple, ['$2' | '$4']}.
 expr -> '{' '}' : {map, []}.
 expr -> '{' kv_list '}' : {map, '$2'}.
+expr -> con_token '{' init_list '}' : {record, con_to_var('$1'), '$3'}.
+expr -> var '{' init_list '}' : {update_record, '$1', '$3'}.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.
 expr -> expr '!=' expr : {'$2', '$1', '$3'}.
 expr -> expr '||' expr : {'$2', '$1', '$3'}.
@@ -125,7 +138,6 @@ kv_list -> expr '=>' expr ',' kv_list : [{'$1', '$3'} | '$5'].
 semi_list -> expr : ['$1'].
 semi_list -> expr ';' semi_list : ['$1' | '$3'].
 
-
 Nonassoc 10 '='.
 Right 20 '->'.
 Unary 30 lam.
@@ -139,9 +151,10 @@ Unary 100 '::'.
 Unary 110 '!' '#' neg 'discard'.
 Unary 120 '('.
 
-
 Erlang code.
 
 num_args([]) -> 0;
 num_args([none]) -> 0;
 num_args(Args) -> length(Args).
+
+con_to_var({con_token, Line, Name}) -> {var, Line, Name}.

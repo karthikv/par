@@ -181,10 +181,10 @@ enum_test_() ->
       "enum Foo { Bar, Other(Int) }\n"
       "main() = Other(5)"
     ))
-  , ?_test({'Bar', true, [<<"hello">>, <<"world">>]} = execute(
+  , ?_test({'Bar', true, [<<"hello">>]} = (execute(
       "enum Foo { Bar(Bool, [String]) }\n"
-      "main() = Bar(true, [\"hello\", \"world\"])"
-    ))
+      "main() = Bar(true)"
+    ))([[<<"hello">>]]))
   , ?_test({'Cons', <<"hello">>, {'Cons', {3, true}, 'End'}} = execute(
       "enum VariedList { Cons(A, VariedList), End }\n"
       "main() = Cons(\"hello\", Cons((3, true), End))"
@@ -200,5 +200,32 @@ enum_test_() ->
   , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = execute(
       "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
       "main() = Cons(3, Cons(5.0, End))\n"
+    ))
+  ].
+
+struct_test_() ->
+  [ ?_test({'Foo', 3} = execute(
+      "struct Foo { bar :: Int }\n"
+      "main() = Foo(3)"
+    ))
+  , ?_test({'Foo', 3} = execute(
+      "struct Foo { bar :: Int }\n"
+      "main() = Foo { bar = 3 }"
+    ))
+  , ?_test({'Foo', 3, [<<"hello">>]} = (execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "main() = Foo(3)"
+    ))([[<<"hello">>]]))
+  , ?_test({'Foo', 15, [first, second]} = execute(
+      "struct Foo { bar :: Int, baz :: [Atom] }\n"
+      "main() = Foo { baz = [@first, @second], bar = 15 }"
+    ))
+  , ?_test({'Foo', hi, true} = (execute(
+      "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
+      "main() = Foo(@hi)"
+    ))([true]))
+  , ?_test({'Foo', hi} = execute(
+      "struct Foo<X> { bar :: X }\n"
+      "main() = Foo { bar = @hi }"
     ))
   ].
