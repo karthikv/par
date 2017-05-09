@@ -9,11 +9,25 @@ reload(Syntax) ->
   code:load_file(?MODULE).
 
 execute(Ast) ->
-  Env = lists:foldl(fun(Node, Env) ->
+  Env = lists:foldl(fun(Node, FoldEnv) ->
     case Node of
       {global, {var, _, Name}, Expr} ->
-        Env#{Name => {lazy, Expr}};
-      _ -> Env
+        FoldEnv#{Name => {lazy, Expr}};
+
+      {enum, _, OptionTEs} ->
+        lists:foldl(fun({option, {con_token, _, Name}, ArgsTE}, NestedEnv) ->
+          Value = if
+            length(ArgsTE) == 0 -> list_to_atom(Name);
+            true ->
+              curry(length(ArgsTE), fun(Vs) ->
+                list_to_tuple([list_to_atom(Name) | Vs])
+              end, [])
+          end,
+
+          NestedEnv#{Name => Value}
+        end, FoldEnv, OptionTEs);
+
+      {sig, _, _} -> FoldEnv
     end
   end, #{}, Ast),
 

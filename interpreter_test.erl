@@ -128,6 +128,10 @@ expr_test_() ->
   , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1, 2)"))
   ].
 
+% used for the last few tests above
+returns_fun() ->
+  fun(A, B) -> A + B end.
+
 prg_test_() ->
   [ ?_test(3 = execute(
      "main :: () -> Int\n"
@@ -168,5 +172,33 @@ global_test_() ->
     ))
   ].
 
-returns_fun() ->
-  fun(A, B) -> A + B end.
+enum_test_() ->
+  [ ?_test('Bar' = execute(
+      "enum Foo { Bar }\n"
+      "main() = Bar"
+    ))
+  , ?_test({'Other', 5} = execute(
+      "enum Foo { Bar, Other(Int) }\n"
+      "main() = Other(5)"
+    ))
+  , ?_test({'Bar', true, [<<"hello">>, <<"world">>]} = execute(
+      "enum Foo { Bar(Bool, [String]) }\n"
+      "main() = Bar(true, [\"hello\", \"world\"])"
+    ))
+  , ?_test({'Cons', <<"hello">>, {'Cons', {3, true}, 'End'}} = execute(
+      "enum VariedList { Cons(A, VariedList), End }\n"
+      "main() = Cons(\"hello\", Cons((3, true), End))"
+    ))
+  , ?_test('Bar' = execute(
+      "enum Foo<A> { Bar }\n"
+      "main() = Bar"
+    ))
+  , ?_test({'Other', 3} = execute(
+      "enum Foo<A> { Bar, Other(A) }\n"
+      "main() = Other(3)"
+    ))
+  , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = execute(
+      "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
+      "main() = Cons(3, Cons(5.0, End))\n"
+    ))
+  ].

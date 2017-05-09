@@ -456,9 +456,39 @@ enum_test_() ->
       "baz = Bar(true)",
       "baz"
     ))
+  , ?_test("VariedList" = ok_prg(
+      "enum VariedList { Cons(A, VariedList), End }\n"
+      "baz = Cons(\"hello\", Cons((3, true), Cons(@what, End)))",
+      "baz"
+    ))
+  , ?_test("Foo<A>" = ok_prg(
+      "enum Foo<A> { Bar }\n"
+      "baz = Bar",
+      "baz"
+    ))
+  , ?_test("Foo<A: Num>" = ok_prg(
+      "enum Foo<A> { Bar, Other(A) }\n"
+      "baz = Other(3)",
+      "baz"
+    ))
+  , ?_test("UniformList<Float>" = ok_prg(
+      "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
+      "baz = Cons(3, Cons(5.0, End))\n",
+      "baz"
+    ))
+  , ?_test(bad_prg(
+      "enum Foo { Bar((Float, Atom)) }\n"
+      "baz = Bar(([1], @atom))",
+      {"[A]", "Float"}
+    ))
   , ?_test(bad_prg(
       "enum Foo { Bar(A, A) }\n"
       "baz = Bar(3, true)",
       {"A: Num", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
+      "baz = Cons(\"hi\", Cons(5.0, End))\n",
+      {"String", "Float"}
     ))
   ].

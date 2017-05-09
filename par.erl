@@ -213,21 +213,21 @@ infer({expr_sig, Expr, Sig}, C) ->
   {tv, V, _, _} = TV,
   {{inst, TV}, finish_gnr(C3, G#gnr{deps=[V | G#gnr.deps]})};
 
-infer({lam_expr, Arg, Return}, C) ->
-  {ArgT, C1} = infer(Arg, C),
-  {ReturnT, C2} = infer(Return, C1),
+infer({lam_te, ArgTE, ReturnTE}, C) ->
+  {ArgT, C1} = infer(ArgTE, C),
+  {ReturnT, C2} = infer(ReturnTE, C1),
   {{lam, ArgT, ReturnT}, C2};
-infer({tuple_expr, Left, Right}, C) ->
-  {LeftT, C1} = infer(Left, C),
-  {RightT, C2} = infer(Right, C1),
+infer({tuple_te, LeftTE, RightTE}, C) ->
+  {LeftT, C1} = infer(LeftTE, C),
+  {RightT, C2} = infer(RightTE, C1),
   {{tuple, LeftT, RightT}, C2};
-infer({iface_expr, TVToken, ConToken}, C) ->
+infer({iface_te, TVToken, ConToken}, C) ->
   {{tv, V, none, Cat}, C1} = infer(TVToken, C),
   {{con, I}, C2} = infer(ConToken, C1),
   {{tv, V, I, Cat}, C2};
-infer({gen_expr, ConToken, Param}, C) ->
+infer({gen_te, ConToken, ParamTE}, C) ->
   {{con, T}, C1} = infer(ConToken, C),
-  {ParamT, C2} = infer(Param, C1),
+  {ParamT, C2} = infer(ParamTE, C1),
   {{gen, T, ParamT}, C2};
 infer({tv_token, _, Name}, C) ->
   % This TV should be in category all, but because it's renamed in
@@ -237,13 +237,13 @@ infer({tv_token, _, Name}, C) ->
 % TODO: ensure these types are valid except when creating a new type
 infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 
-infer({enum, ConToken, Options}, C) ->
-  {T, C1} = infer(ConToken, C),
-  C2 = lists:foldl(fun({option, {con_token, _, Name}, Args}, FoldC) ->
-    {ArgsTRev, FoldC1} = lists:foldl(fun(Arg, {Ts, InnerC}) ->
-      {ArgT, InnerC1} = infer(Arg, InnerC),
+infer({enum, EnumTE, OptionTEs}, C) ->
+  {T, C1} = infer(EnumTE, C),
+  C2 = lists:foldl(fun({option, {con_token, _, Name}, ArgsTE}, FoldC) ->
+    {ArgsTRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, InnerC}) ->
+      {ArgT, InnerC1} = infer(ArgTE, InnerC),
       {[ArgT | Ts], InnerC1}
-    end, {[], FoldC}, Args),
+    end, {[], FoldC}, ArgsTE),
 
     OptionT = lists:foldl(fun(ArgT, LastT) ->
       {lam, ArgT, LastT}
@@ -254,7 +254,7 @@ infer({enum, ConToken, Options}, C) ->
     TV = tv_server:fresh(C#ctx.pid),
     FoldC2 = add_csts({TV, NormOptionT}, new_gnr(TV, FoldC1)),
     add_env(Name, {add_dep, TV}, finish_gnr(FoldC2, FoldC1#ctx.gnr))
-  end, C1, Options),
+  end, C1, OptionTEs),
 
   {T, C2};
 

@@ -1,6 +1,6 @@
 Nonterminals
   prg global sig
-  t t_list_tuple enum option_list option t_list tv_list
+  te te_list_tuple enum option_list option te_list tv_list_tuple
   expr lam neg maybe_else
   var_list expr_list init_list kv_list semi_list.
 
@@ -26,36 +26,36 @@ global -> var '=' expr : {global, '$1', '$3'}.
 global -> var '(' ')' '=' expr : {global, '$1', {fn, [], '$5'}}.
 global -> var '(' var_list ')' '=' expr : {global, '$1', {fn, '$3', '$6'}}.
 
-sig -> '::' t : '$2'.
+sig -> '::' te : '$2'.
 
-t -> '(' ')' : none.
-t -> con_token : '$1'.
-t -> tv_token : '$1'.
-t -> tv_token ':' con_token : {iface_expr, '$1', '$3'}.
-t -> con_token '<' t_list_tuple '>' : {gen_expr, '$1', '$3'}.
-t -> '[' t ']' : {gen_expr, {con_token, element(2, '$1'), "List"}, '$2'}.
-t -> '(' t ',' t_list_tuple ')' : {tuple_expr, '$2', '$4'}.
-t -> '(' t ')' : '$2'.
-t -> t '->' t : {lam_expr, '$1', '$3'}.
+te -> '(' ')' : none.
+te -> con_token : '$1'.
+te -> tv_token : '$1'.
+te -> tv_token ':' con_token : {iface_te, '$1', '$3'}.
+te -> con_token '<' te_list_tuple '>' : {gen_te, '$1', '$3'}.
+te -> '[' te ']' : {gen_te, {con_token, element(2, '$1'), "List"}, '$2'}.
+te -> '(' te ',' te_list_tuple ')' : {tuple_te, '$2', '$4'}.
+te -> '(' te ')' : '$2'.
+te -> te '->' te : {lam_te, '$1', '$3'}.
 
-t_list_tuple -> t : '$1'.
-t_list_tuple -> t ',' t_list_tuple : {tuple_expr, '$1', '$3'}.
+te_list_tuple -> te : '$1'.
+te_list_tuple -> te ',' te_list_tuple : {tuple_te, '$1', '$3'}.
 
 enum -> enum_token con_token '{' option_list '}' : {enum, '$2', '$4'}.
-enum -> enum_token con_token '<' tv_list '>' '{' option_list '}' :
-  {enum, {gen_expr, '$2', '$4'}, '$7'}.
+enum -> enum_token con_token '<' tv_list_tuple '>' '{' option_list '}' :
+  {enum, {gen_te, '$2', '$4'}, '$7'}.
 
 option_list -> option : ['$1'].
 option_list -> option ',' option_list : ['$1' | '$3'].
 
 option -> con_token : {option, '$1', []}.
-option -> con_token '(' t_list ')' : {option, '$1', '$3'}.
+option -> con_token '(' te_list ')' : {option, '$1', '$3'}.
 
-t_list -> t : ['$1'].
-t_list -> t ',' t_list : ['$1' | '$3'].
+te_list -> te : ['$1'].
+te_list -> te ',' te_list : ['$1' | '$3'].
 
-tv_list -> tv_token : ['$1'].
-tv_list -> tv_token ',' tv_list : ['$1' | '$3'].
+tv_list_tuple -> tv_token : '$1'.
+tv_list_tuple -> tv_token ',' tv_list_tuple : {tuple_te, '$1', '$3'}.
 
 expr -> '(' ')' : none.
 expr -> int : '$1'.
