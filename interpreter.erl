@@ -109,6 +109,7 @@ eval({{Op, _}, Left, Right}, Env) ->
     '-' -> LeftV - RightV;
     '*' -> LeftV * RightV;
     '/' -> LeftV / RightV;
+    '%' -> LeftV rem RightV;
     '++' ->
       if
         is_binary(LeftV) -> <<LeftV/binary, RightV/binary>>;

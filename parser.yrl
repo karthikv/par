@@ -7,7 +7,7 @@ Nonterminals
 Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
-  '+' '-' '*' '/'
+  '+' '-' '*' '/' '%'
   '++' '--' '|' '::' ':' '->' ';' 'discard'
   if then else let in
   enum_token int float bool str atom var
@@ -82,6 +82,7 @@ expr -> expr '+' expr : {'$2', '$1', '$3'}.
 expr -> expr '-' expr : {'$2', '$1', '$3'}.
 expr -> expr '*' expr : {'$2', '$1', '$3'}.
 expr -> expr '/' expr : {'$2', '$1', '$3'}.
+expr -> expr '%' expr : {'$2', '$1', '$3'}.
 expr -> expr '++' expr : {'$2', '$1', '$3'}.
 expr -> expr '--' expr : {'$2', '$1', '$3'}.
 expr -> '!' expr : {'$1', '$2'}.
@@ -133,7 +134,7 @@ Left 50 '||'.
 Left 60 '&&'.
 Nonassoc 70 '==' '!=' '>' '<' '>=' '<='.
 Left 80 '+' '-' '++' '--'.
-Left 90 '*' '/'.
+Left 90 '*' '/' '%'.
 Unary 100 '::'.
 Unary 110 '!' '#' neg 'discard'.
 Unary 120 '('.

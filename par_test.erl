@@ -149,23 +149,28 @@ expr_test_() ->
   , ?_test("A: Num" = ok_expr("100 + 50"))
   , ?_test("Float" = ok_expr("100.1 + 50.23"))
   , ?_test("Float" = ok_expr("100 + 50.23"))
+  , ?_test(bad_expr("true + 30", {"Bool", "A: Num"}))
 
   , ?_test("A: Num" = ok_expr("100 - 50"))
   , ?_test("Float" = ok_expr("100.1 - 50.23"))
   , ?_test("Float" = ok_expr("100.1 - 50"))
+  , ?_test(bad_expr("true - 30.0", {"Bool", "A: Num"}))
 
   , ?_test("A: Num" = ok_expr("100 * 50"))
   , ?_test("Float" = ok_expr("100.1 * 50.23"))
   , ?_test("Float" = ok_expr("100.1 * 50"))
+  , ?_test(bad_expr("30 * false", {"Bool", "A: Num"}))
 
   , ?_test("Float" = ok_expr("100 / 50"))
   , ?_test("Float" = ok_expr("100.1 / 50.23"))
   , ?_test("Float" = ok_expr("100.1 / 50"))
-
-  , ?_test(bad_expr("true + 30", {"Bool", "A: Num"}))
-  , ?_test(bad_expr("true - 30.0", {"Bool", "A: Num"}))
-  , ?_test(bad_expr("30 * false", {"Bool", "A: Num"}))
   , ?_test(bad_expr("30 / false", {"Bool", "A: Num"}))
+
+  , ?_test("A: Num" = ok_expr("5 % 3"))
+  , ?_test(bad_expr("5.3 % 3", {"Float", "Int"}))
+
+  , ?_test("Float" = ok_expr("3 + 5 * 7 - 4 / 2 + 38 % 6 - 8"))
+  , ?_test(bad_expr("7 - 12 / 5 % 6", {"Float", "Int"}))
 
   , ?_test("String" = ok_expr("\"hello \" ++ \"world\""))
   , ?_test("[A: Num]" = ok_expr("[1, 2] ++ [3, 4, 5, 6]"))

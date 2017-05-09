@@ -90,6 +90,9 @@ expr_test_() ->
   , ?_test(37.12 = expr("6.4 * 5.8"))
   , ?_test(1.57 = expr("48.67 / 31"))
   , ?_test(17.0 = expr("85 / 5"))
+  , ?_test(2 = expr("17 % 3"))
+  , ?_test(-3 = expr("-7 % 4"))
+  , ?_test(30.0 = expr("3 + 5 * 7 - 4 / 2 + 38 % 6 - 8"))
   , ?_test([1, 2, 3, 4] = expr("[1] ++ [2, 3, 4]"))
   , ?_test(<<"hello world">> = expr("\"hello \" ++ \"world\""))
   , ?_assertEqual(

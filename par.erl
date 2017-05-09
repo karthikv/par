@@ -73,7 +73,6 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
-% - Mod operator
 % - Complex types: ADTs
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
@@ -410,6 +409,12 @@ infer({{Op, _}, Left, Right}, C) ->
       {
         {lam, LeftT, {lam, RightT, TV}},
         {lam, NumTV, {lam, NumTV, ReturnT}}
+      };
+    Op == '%' ->
+      ReturnTV = tv_server:fresh('Num', C2#ctx.pid),
+      {
+        {lam, LeftT, {lam, RightT, TV}},
+        {lam, {con, 'Int'}, {lam, {con, 'Int'}, ReturnTV}}
       };
     Op == '++' ->
       OperandTV = tv_server:fresh('Concatable', C2#ctx.pid),
