@@ -48,11 +48,10 @@ bad_prg(Prg, {EP1, EP2}) ->
   end.
 
 ok_expr(Expr) ->
-  {lam, none, T} = norm_prg("main() = " ++ Expr, "main"),
-  par:pretty(T).
+  par:pretty(norm_prg("expr = " ++ Expr, "expr")).
 
 bad_expr(Expr, Err) ->
-  bad_prg("main() = " ++ Expr, Err).
+  bad_prg("expr = " ++ Expr, Err).
 
 % We don't use par:fvs() and par:subs() to implement this because it'll
 % normalize variables in an arbitrary order (e.g. C -> D could become B ->
@@ -261,7 +260,7 @@ para_poly_test_() ->
              ok_prg("cmp(f, g, x) = f(g(x))", "cmp"))
   , ?_test(bad_prg(
       "add(x) = x + 3\n"
-      "main() = add(true)",
+      "expr = add(true)",
       {"Bool", "A: Num"}
     ))
   , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B"}))
@@ -307,14 +306,14 @@ recur_test_() ->
 
 sig_test_() ->
   [ ?_test("() -> A: Num" = ok_prg(
-      "main :: () -> A: Num\n"
-      "main() = 3",
-      "main"
+      "foo :: () -> A: Num\n"
+      "foo() = 3",
+      "foo"
     ))
   , ?_test("A -> A" = ok_prg(
       "id :: A -> A\n"
       "id(x) = x\n"
-      "main() = id(3)",
+      "expr = id(3)",
       "id"
     ))
   , ?_test("A: Num -> A: Num -> A: Num" = ok_prg(
@@ -367,8 +366,8 @@ sig_test_() ->
       "bar"
     ))
   , ?_test(bad_prg(
-      "main :: () -> String\n"
-      "main() = true",
+      "foo :: () -> String\n"
+      "foo() = true",
       {"String", "Bool"}
     ))
   , ?_test(bad_prg(
@@ -429,13 +428,13 @@ global_test_() ->
 
   , ?_test(bad_prg(
       "foo = \"hello\"\n"
-      "main() = foo ++ @world",
+      "expr = foo ++ @world",
       {"String", "Atom"}
     ))
   , ?_test(bad_prg(
       "foo :: Set<Int>\n"
       "foo = #[1, 2, 3]\n"
-      "main() = #[5.0, 6] -- foo",
+      "expr = #[5.0, 6] -- foo",
       {"Float", "Int"}
     ))
   ].
@@ -443,52 +442,52 @@ global_test_() ->
 enum_test_() ->
   [ ?_test("Foo" = ok_prg(
       "enum Foo { Bar }\n"
-      "main = Bar",
-      "main"
+      "expr = Bar",
+      "expr"
     ))
   , ?_test("Foo" = ok_prg(
       "enum Foo { Bar, Baz(Int) }\n"
-      "main = Baz(5)",
-      "main"
+      "expr = Baz(5)",
+      "expr"
     ))
   , ?_test("[String] -> Foo" = ok_prg(
       "enum Foo { Bar(Bool, [String]) }\n"
-      "main = Bar(true)",
-      "main"
+      "expr = Bar(true)",
+      "expr"
     ))
   , ?_test("VariedList" = ok_prg(
       "enum VariedList { Cons(A, VariedList), End }\n"
-      "main = Cons(\"hello\", Cons((3, true), Cons(@what, End)))",
-      "main"
+      "expr = Cons(\"hello\", Cons((3, true), Cons(@what, End)))",
+      "expr"
     ))
   , ?_test("Foo<A>" = ok_prg(
       "enum Foo<A> { Bar }\n"
-      "main = Bar",
-      "main"
+      "expr = Bar",
+      "expr"
     ))
   , ?_test("Foo<A: Num>" = ok_prg(
       "enum Foo<A> { Bar, Baz(A) }\n"
-      "main = Baz(3)",
-      "main"
+      "expr = Baz(3)",
+      "expr"
     ))
   , ?_test("UniformList<Float>" = ok_prg(
       "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
-      "main = Cons(3, Cons(5.0, End))\n",
-      "main"
+      "expr = Cons(3, Cons(5.0, End))\n",
+      "expr"
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar((Float, Atom)) }\n"
-      "main = Bar(([1], @atom))",
+      "expr = Bar(([1], @atom))",
       {"[A]", "Float"}
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar(A, A) }\n"
-      "main = Bar(3, true)",
+      "expr = Bar(3, true)",
       {"A: Num", "Bool"}
     ))
   , ?_test(bad_prg(
       "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
-      "main = Cons(\"hi\", Cons(5.0, End))\n",
+      "expr = Cons(\"hi\", Cons(5.0, End))\n",
       {"String", "Float"}
     ))
   ].
@@ -496,47 +495,47 @@ enum_test_() ->
 struct_test_() ->
   [ ?_test("Foo" = ok_prg(
       "struct Foo { bar :: Int }\n"
-      "main = Foo(3)",
-      "main"
+      "expr = Foo(3)",
+      "expr"
     ))
   , ?_test("Foo" = ok_prg(
       "struct Foo { bar :: Int }\n"
-      "main = Foo { bar = 3 }",
-      "main"
+      "expr = Foo { bar = 3 }",
+      "expr"
     ))
   , ?_test("[String] -> Foo" = ok_prg(
       "struct Foo { bar :: Int, baz :: [String] }\n"
-      "main = Foo(3)",
-      "main"
+      "expr = Foo(3)",
+      "expr"
     ))
   , ?_test("Foo" = ok_prg(
       "struct Foo { bar :: Int, baz :: [Atom] }\n"
-      "main = Foo { baz = [@first, @second], bar = 15 }",
-      "main"
+      "expr = Foo { baz = [@first, @second], bar = 15 }",
+      "expr"
     ))
   , ?_test("A -> Foo<Atom, A>" = ok_prg(
       "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
-      "main = Foo(@hi)",
-      "main"
+      "expr = Foo(@hi)",
+      "expr"
     ))
   , ?_test("Foo<Atom>" = ok_prg(
       "struct Foo<X> { bar :: X }\n"
-      "main = Foo { bar = @hi }",
-      "main"
+      "expr = Foo { bar = @hi }",
+      "expr"
     ))
   , ?_test(bad_prg(
       "struct Foo { bar :: (Float, Atom) }\n"
-      "main = Foo(([1], @a))",
+      "expr = Foo(([1], @a))",
       {"[A]", "Float"}
     ))
   , ?_test(bad_prg(
       "struct Foo<X> { bar :: [X], baz :: Bool }\n"
-      "main = Foo { baz = true, bar = 5 }",
+      "expr = Foo { baz = true, bar = 5 }",
       {"[A]", "B: Num"}
     ))
   , ?_test(bad_prg(
       "struct Foo { bar :: A, baz :: A }\n"
-      "main = Foo(3, true)",
+      "expr = Foo(3, true)",
       {"A: Num", "Bool"}
     ))
   ].

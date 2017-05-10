@@ -170,6 +170,13 @@ global_test_() ->
       "bar(x) = if x == 0 then 1 else foo(x - 1) * 10\n"
       "main() = foo(6)"
     ))
+
+  % to ensure globals are evaluated strictly in order
+  , ?_test({ok, <<"bar">>} = execute(
+      "foo = @file:write_file(\"/tmp/par-foo\", \"bar\")\n"
+      "main() = let result = @file:read_file(\"/tmp/par-foo\") in\n"
+      "  { @file:delete(\"/tmp/par-foo\"); result }"
+    ))
   ].
 
 enum_test_() ->

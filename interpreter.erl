@@ -9,48 +9,53 @@ reload(Syntax) ->
   code:load_file(?MODULE).
 
 execute(Ast) ->
-  Env = lists:foldl(fun(Node, FoldEnv) ->
+  {ok, Pid} = global_env_server:start_link(),
+  lists:foreach(fun(Node) -> update_global_env(Node, Pid) end, Ast),
+
+  lists:foreach(fun(Node) ->
     case Node of
-      {global, {var, _, Name}, Expr} ->
-        FoldEnv#{Name => {lazy, Expr}};
-
-      {enum, _, OptionTEs} ->
-        lists:foldl(fun({option, {con_token, _, Name}, ArgsTE}, NestedEnv) ->
-          Value = if
-            length(ArgsTE) == 0 -> list_to_atom(Name);
-            true ->
-              curry(length(ArgsTE), fun(Vs) ->
-                list_to_tuple([list_to_atom(Name) | Vs])
-              end, [])
-          end,
-
-          NestedEnv#{Name => Value}
-        end, FoldEnv, OptionTEs);
-
-      {struct, StructTE, FieldTEs} ->
-        StructName = case StructTE of
-          {con_token, _, Name} -> Name;
-          {gen_te, {con_token, _, Name}, _} -> Name
-        end,
-
-        FieldNames = lists:map(fun({field, {var, _, FieldName}, _}) ->
-          FieldName
-        end, FieldTEs),
-        Value = curry(length(FieldTEs), fun(Vs) ->
-          list_to_tuple([list_to_atom(StructName) | Vs])
-        end, []),
-
-        FoldEnv#{StructName => {struct, FieldNames, Value}};
-
-      {sig, _, _} -> FoldEnv
+      % strictly evaluate all global variables except functions
+      {global, Var, Expr} when element(1, Expr) /= fn -> eval(Var, #{}, Pid);
+      _ -> true
     end
-  end, #{}, Ast),
+  end, Ast),
 
-  #{"main" := {lazy, Expr}} = Env,
-  Main = eval(Expr, Env),
-  Main([none]).
+  eval({app, {var, 0, "main"}, []}, #{}, Pid).
 
-eval({fn, Args, Expr}, Env) ->
+update_global_env({global, {var, _, Name}, Expr}, Pid) ->
+  global_env_server:set(Name, {lazy, Expr}, Pid);
+
+update_global_env({enum, _, OptionTEs}, Pid) ->
+  lists:foreach(fun({option, {con_token, _, Name}, ArgsTE}) ->
+    Value = if
+      length(ArgsTE) == 0 -> list_to_atom(Name);
+      true ->
+        curry(length(ArgsTE), fun(Vs) ->
+          list_to_tuple([list_to_atom(Name) | Vs])
+        end, [])
+    end,
+
+    global_env_server:set(Name, Value, Pid)
+  end, OptionTEs);
+
+update_global_env({struct, StructTE, FieldTEs}, Pid) ->
+  StructName = case StructTE of
+    {con_token, _, Name} -> Name;
+    {gen_te, {con_token, _, Name}, _} -> Name
+  end,
+
+  FieldNames = lists:map(fun({field, {var, _, FieldName}, _}) ->
+    FieldName
+  end, FieldTEs),
+  Value = curry(length(FieldTEs), fun(Vs) ->
+    list_to_tuple([list_to_atom(StructName) | Vs])
+  end, []),
+
+  global_env_server:set(StructName, {struct, FieldNames, Value}, Pid);
+
+update_global_env({sig, _, _}, _) -> true.
+
+eval({fn, Args, Expr}, Env, Pid) ->
   curry(length(Args), fun(Vs) ->
     NewEnv = if
       length(Args) == 0 -> Env;
@@ -60,83 +65,92 @@ eval({fn, Args, Expr}, Env) ->
         end, Env, lists:zip(Args, Vs))
     end,
 
-    eval(Expr, NewEnv)
+    eval(Expr, NewEnv, Pid)
   end, []);
 
-eval({expr_sig, Expr, _}, Env) -> eval(Expr, Env);
+eval({expr_sig, Expr, _}, Env, Pid) -> eval(Expr, Env, Pid);
 
-eval(none, _) -> none;
-eval({int, _, V}, _) -> V;
-eval({float, _, V}, _) -> V;
-eval({bool, _, V}, _) -> V;
-eval({str, _, V}, _) -> V;
-eval({atom, _, V}, _) -> V;
+eval(none, _, _) -> none;
+eval({int, _, V}, _, _) -> V;
+eval({float, _, V}, _, _) -> V;
+eval({bool, _, V}, _, _) -> V;
+eval({str, _, V}, _, _) -> V;
+eval({atom, _, V}, _, _) -> V;
 
-eval({list, Elems}, Env) ->
-  lists:map(fun(E) -> eval(E, Env) end, Elems);
+eval({list, Elems}, Env, Pid) ->
+  lists:map(fun(E) -> eval(E, Env, Pid) end, Elems);
 
-eval({tuple, Elems}, Env) ->
-  list_to_tuple(eval({list, Elems}, Env));
+eval({tuple, Elems}, Env, Pid) ->
+  list_to_tuple(eval({list, Elems}, Env, Pid));
 
-eval({map, Pairs}, Env) ->
-  List = lists:map(fun({K, V}) -> {eval(K, Env), eval(V, Env)} end, Pairs),
+eval({map, Pairs}, Env, Pid) ->
+  List = lists:map(fun({K, V}) ->
+    {eval(K, Env, Pid), eval(V, Env, Pid)}
+  end, Pairs),
   maps:from_list(List);
 
-eval({var, _, Name}, Env) ->
-  case maps:get(Name, Env) of
-    {lazy, Expr} -> eval(Expr, Env);
-    {struct, _, V} -> V;
-    V -> V
+eval({var, _, Name}, Env, Pid) ->
+  case maps:find(Name, Env) of
+    {ok, V} -> V;
+    error ->
+      case global_env_server:get(Name, Pid) of
+        {lazy, Expr} ->
+          V = eval(Expr, Env, Pid),
+          global_env_server:set(Name, V, Pid),
+          V;
+        {struct, _, V} -> V;
+        V -> V
+      end
   end;
 
-eval({record, {var, _, Name}, Inits}, Env) ->
-  #{Name := {struct, FieldNames, Fn}} = Env,
+eval({record, {var, _, Name}, Inits}, Env, Pid) ->
+  {struct, FieldNames, Fn} = global_env_server:get(Name, Pid),
 
   Vs = lists:map(fun(FieldName) ->
     {_, Expr} = hd(lists:filter(fun({{var, _, InitName}, _}) ->
       FieldName == InitName
     end, Inits)),
-    eval(Expr, Env)
+    eval(Expr, Env, Pid)
   end, FieldNames),
 
   Fn(Vs);
 
-eval({app, Expr, Args}, Env) ->
-  Fn = eval(Expr, Env),
+eval({app, Expr, Args}, Env, Pid) ->
+  Fn = eval(Expr, Env, Pid),
   Vs = if
     length(Args) == 0 -> [none];
-    true -> lists:map(fun(Arg) -> eval(Arg, Env) end, Args)
+    true -> lists:map(fun(Arg) -> eval(Arg, Env, Pid) end, Args)
   end,
   Fn(Vs);
 
-eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
+eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _, _) ->
   Fn = list_to_atom(Name),
   curry_native(fun Module:Fn/Arity);
 
-eval({{'if', _}, Expr, Then, Else}, Env) ->
-  Result = case eval(Expr, Env) of
-    true -> eval(Then, Env);
-    false -> eval(Else, Env)
+eval({{'if', _}, Expr, Then, Else}, Env, Pid) ->
+  Result = case eval(Expr, Env, Pid) of
+    true -> eval(Then, Env, Pid);
+    false -> eval(Else, Env, Pid)
   end,
   case Else of
     none -> none;
     _ -> Result
   end;
 
-eval({{'let', _}, Inits, Expr}, Env) ->
+eval({{'let', _}, Inits, Expr}, Env, Pid) ->
   NewEnv = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldEnv) ->
-    V = eval(InitExpr, FoldEnv),
+    V = eval(InitExpr, FoldEnv, Pid),
     FoldEnv#{Name => V}
   end, Env, Inits),
 
-  eval(Expr, NewEnv);
+  eval(Expr, NewEnv, Pid);
 
-eval({block, Exprs}, Env) ->
-  lists:foldl(fun(Expr, _) -> eval(Expr, Env) end, none, Exprs);
+eval({block, Exprs}, Env, Pid) ->
+  lists:foldl(fun(Expr, _) -> eval(Expr, Env, Pid) end, none, Exprs);
 
-eval({{Op, _}, Left, Right}, Env) ->
-  LeftV = eval(Left, Env),
-  RightV = eval(Right, Env),
+eval({{Op, _}, Left, Right}, Env, Pid) ->
+  LeftV = eval(Left, Env, Pid),
+  RightV = eval(Right, Env, Pid),
 
   case Op of
     '==' -> LeftV == RightV;
@@ -174,8 +188,8 @@ eval({{Op, _}, Left, Right}, Env) ->
       end
   end;
 
-eval({{Op, _}, Expr}, Env) ->
-  V = eval(Expr, Env),
+eval({{Op, _}, Expr}, Env, Pid) ->
+  V = eval(Expr, Env, Pid),
 
   case Op of
     '!' -> not V;

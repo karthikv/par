@@ -76,9 +76,6 @@
 % - Error messages
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
-% - Allow main to be an expr or a fn
-% - Should nullary functions still exist given laziness? If so, why
-%   should exprs in the top scope be lazy by default?
 % - Concurrency
 % - Pattern matching
 % - Exceptions
