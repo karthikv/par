@@ -236,3 +236,33 @@ struct_test_() ->
       "main() = Foo { bar = @hi }"
     ))
   ].
+
+pattern_test_() ->
+  [ ?_test(true = expr("match 3 { 3 => true, 4 => false }"))
+  , ?_test(18 = expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test(5 = execute(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "main() = match Baz(5) { Bar => 1, Baz(x) => x }"
+    ))
+  , ?_test([<<"hey">>] = expr(
+      "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
+    ))
+  , ?_test({{false, hi}, 3} = expr(
+      "match (1, true, @hi) {\n"
+      "  (0, b) => (b, 10),\n"
+      "  (a, true, c) => ((false, c), 3 * a),\n"
+      "  (a, b) => (b, a / 2)\n"
+      "}"
+    ))
+  , ?_test(2.0 = expr(
+      "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
+      "  match x {\n"
+      "    [([h | t], _) | _] => h,\n"
+      "    [_, ([], _, c)] => c,\n"
+      "    [(_, _, c), ([x, y | []], _)] => c + x - y\n"
+      "  }"
+    ))
+  , ?_test([1, 2] = expr(
+      "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
+    ))
+  ].

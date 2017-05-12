@@ -27,8 +27,10 @@
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
 %   types - a Name => TypeInfo mapping of types in the environment
+%   in_pattern - true if within a pattern, false otherwise
+%   pattern_env - new variables introduced as part of a pattern
 %   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {gnr, gnrs, env, types, pid}).
+-record(ctx, {gnr, gnrs, env, types, in_pattern, pattern_env, pid}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -76,6 +78,8 @@
 % - Error messages
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
+% - Updating and accessing a struct
+% - else precedence
 % - Concurrency
 % - Pattern matching
 % - Exceptions
@@ -113,10 +117,19 @@ reload(false) ->
 infer_prg(Prg) ->
   {ok, Tokens, _} = lexer:string(Prg),
   {ok, Ast} = parser:parse(Tokens),
-  %% ?LOG("AST", Ast),
+  ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
-  C = lists:foldl(fun(Node, FoldC) ->
+  C = #ctx{
+    gnr=undefined,
+    gnrs=[],
+    env=#{},
+    types=#{},
+    in_pattern=false,
+    pattern_env=undefined,
+    pid=Pid
+  },
+  C1 = lists:foldl(fun(Node, FoldC) ->
     case Node of
       {global, {var, _, Name}, _} ->
         % TODO: what if name already exists?
@@ -127,9 +140,9 @@ infer_prg(Prg) ->
 
       _ -> FoldC
     end
-  end, #ctx{gnrs=[], env=#{}, types=#{}, pid=Pid}, Ast),
+  end, C, Ast),
 
-  C1 = lists:foldl(fun(Node, FoldC) ->
+  C2 = lists:foldl(fun(Node, FoldC) ->
     case Node of
       {N, _, _} when N == enum; N == struct ->
         {_, FoldC1} = infer(Node, FoldC),
@@ -137,9 +150,9 @@ infer_prg(Prg) ->
 
       _ -> FoldC
     end
-  end, C, Ast),
+  end, C1, Ast),
 
-  {_, _, C2} = lists:foldl(fun(Node, {ExpName, SigT, FoldC}) ->
+  {_, _, C3} = lists:foldl(fun(Node, {ExpName, SigT, FoldC}) ->
     if
       % TODO: handle error
       ExpName /= none -> {global, {var, _, ExpName}, _} = Node;
@@ -169,12 +182,12 @@ infer_prg(Prg) ->
       % we've already processed enums/structs
       _ -> {ExpName, SigT, FoldC}
     end
-  end, {none, none, C1}, Ast),
+  end, {none, none, C2}, Ast),
 
   S = #solver{subs=#{}, errs=[], schemes=#{}, pid=Pid},
-  Result = case solve(C2#ctx.gnrs, S) of
+  Result = case solve(C3#ctx.gnrs, S) of
     {ok, Subs} ->
-      {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C2#ctx.env), Ast};
+      {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C3#ctx.env), Ast};
     {errors, Errs} -> {errors, Errs}
   end,
 
@@ -300,16 +313,17 @@ infer({list, Elems}, C) ->
 
   {{gen, 'List', TV}, add_csts(Csts, C1)};
 
-infer({tuple, Elems}, C) ->
-  {ElemsTRev, C1} = lists:foldl(fun(Elem, {FoldElemsT, FoldC}) ->
-    {ElemT, FoldC1} = infer(Elem, FoldC),
-    {[ElemT | FoldElemsT], FoldC1}
-  end, {[], C}, Elems),
+% only occurs when pattern matching to destructure list into head/tail
+infer({list, Elems, Rest}, C) ->
+  true = C#ctx.in_pattern,
+  {T, C1} = infer({list, Elems}, C),
+  {RestT, C2} = infer(Rest, C1),
+  {T, add_csts({T, RestT}, C2)};
 
-  T = lists:foldl(fun(ElemT, LastT) ->
-    {tuple, ElemT, LastT}
-  end, hd(ElemsTRev), tl(ElemsTRev)),
-  {T, C1};
+infer({tuple, Left, Right}, C) ->
+  {LeftT, C1} = infer(Left, C),
+  {RightT, C2} = infer(Right, C1),
+  {{tuple, LeftT, RightT}, C2};
 
 infer({map, Pairs}, C) ->
   KeyTV = tv_server:fresh(C#ctx.pid),
@@ -324,24 +338,29 @@ infer({map, Pairs}, C) ->
   {{gen, 'Map', {tuple, KeyTV, ValueTV}}, add_csts(Csts, C1)};
 
 infer({var, _, Name}, C) ->
-  % TODO: handle case where can't find variable
-  case maps:find(Name, C#ctx.env) of
-    {ok, {add_dep, EnvTV}} ->
-      {tv, V, _, _} = EnvTV,
-      G = C#ctx.gnr,
-      G1 = G#gnr{deps=[V | G#gnr.deps]},
-
-      % We need to defer instantiation until we start solving constraints.
-      % Otherwise, we don't know the real types of these variables, and can't
-      % instantiate properly.
-      {{inst, EnvTV}, C#ctx{gnr=G1}};
-
-    {ok, {_, EnvTV}} -> {EnvTV, C}
+  case C#ctx.in_pattern of
+    false -> lookup(Name, C);
+    true ->
+      PatternEnv = C#ctx.pattern_env,
+      case maps:find(Name, PatternEnv) of
+        {ok, TV} -> {TV, C};
+        error ->
+          TV = tv_server:fresh(C#ctx.pid),
+          {TV, C#ctx{pattern_env=PatternEnv#{Name => TV}}}
+      end
   end;
 
-infer({record, Var, Inits}, C) ->
-  {FnT, C1} = infer(Var, C),
-  {var, _, StructName} = Var,
+% only occurs when pattern matching to designate a non-literal variable
+infer({var_value, _, Name}, C) -> lookup(Name, C);
+
+% only occurs when pattern matching to designate anything
+infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
+
+infer({con_var, _, Name}, C) -> lookup(Name, C);
+
+infer({record, ConVar, Inits}, C) ->
+  {FnT, C1} = infer(ConVar, C),
+  {con_var, _, StructName} = ConVar,
   % TODO: should FieldNames be in the types map or in the env map? Update
   % TypeInfo description in naming conventions after figuring this out
   #{StructName := {struct, FieldNamesRev}} = C1#ctx.types,
@@ -426,6 +445,23 @@ infer({{'let', _}, Inits, Expr}, C) ->
 
   {T, C3} = infer(Expr, C2),
   {T, C3#ctx{env=C#ctx.env}};
+
+infer({{match, _}, Expr, Cases}, C) ->
+  {T, C1} = infer(Expr, C),
+  TV = tv_server:fresh(C#ctx.pid),
+
+  C2 = lists:foldl(fun({'case', Pattern, Then}, FoldC) ->
+    FoldC1 = FoldC#ctx{in_pattern=true, pattern_env=#{}},
+    {PatternT, FoldC2} = infer(Pattern, FoldC1),
+
+    ThenEnv = maps:merge(FoldC2#ctx.env, FoldC2#ctx.pattern_env),
+    {ThenT, FoldC3} = infer(Then, FoldC2#ctx{env=ThenEnv}),
+
+    % revert env to before pattern was parsed
+    add_csts([{T, PatternT}, {TV, ThenT}], FoldC3#ctx{env=FoldC#ctx.env})
+  end, C1, Cases),
+
+  {TV, C2};
 
 infer({block, Exprs}, C) ->
   lists:foldl(fun(Expr, {_, FoldC}) ->
@@ -530,6 +566,22 @@ norm_sig_type(SigT, Pid) ->
   FVSubs = maps:from_list(lists:zip(FVList, NewFVList)),
   subs(SigT, FVSubs).
 
+lookup(Name, C) ->
+  % TODO: handle case where can't find variable
+  case maps:find(Name, C#ctx.env) of
+    {ok, {add_dep, EnvTV}} ->
+      {tv, V, _, _} = EnvTV,
+      G = C#ctx.gnr,
+      G1 = G#gnr{deps=[V | G#gnr.deps]},
+
+      % We need to defer instantiation until we start solving constraints.
+      % Otherwise, we don't know the real types of these variables, and can't
+      % instantiate properly.
+      {{inst, EnvTV}, C#ctx{gnr=G1}};
+
+    {ok, {_, EnvTV}} -> {EnvTV, C}
+  end.
+
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.v => G} end, #{}, Gs),
   ?LOG("Gs", lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)),
@@ -624,12 +676,19 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
     end
   end, gb_sets:new(), Env),
 
+  % Constraints are always prepended to the list in a depth-first manner. Hence,
+  % the shallowest expression's constraints come first. We'd like to solve the
+  % deepest expression's constraints first to have better error messages (e.g.
+  % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
+  % reverse the order here.
+  OrderedCsts = lists:reverse(Csts),
+
   lists:foldl(fun({L, R}, FoldS) ->
     Subs = FoldS#solver.subs,
     L1 = subs(resolve(L, FoldS), Subs),
     R1 = subs(resolve(R, FoldS), Subs),
     unify({L1, R1}, FoldS)
-  end, S#solver{rigid_vs=RigidVs}, Csts).
+  end, S#solver{rigid_vs=RigidVs}, OrderedCsts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};

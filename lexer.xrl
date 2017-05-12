@@ -5,7 +5,8 @@ FLOAT = {INT}+\.{INT}+
 BOOL = (true|false)
 STR = "(\\.|[^\\"])*"
 ATOM = @[a-zA-Z0-9_@]+
-VAR = [a-z][a-zA-Z0-9_]*
+WORD = [a-zA-Z0-9_]
+VAR = ([a-z]{WORD}*|_{WORD}+)
 TV = [A-Z]
 CON = [A-Z][a-zA-Z0-9_]+
 WHITESPACE = [\s\t\n\r]
@@ -43,6 +44,7 @@ then : {token, {then, TokenLine}}.
 else : {token, {else, TokenLine}}.
 let : {token, {'let', TokenLine}}.
 in : {token, {in, TokenLine}}.
+match : {token, {match, TokenLine}}.
 enum : {token, {enum_token, TokenLine}}.
 struct : {token, {struct_token, TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
@@ -52,6 +54,7 @@ struct : {token, {struct_token, TokenLine}}.
 \@{STR} : {token, {atom, TokenLine, list_to_atom(drop_quotes(tl(TokenChars)))}}.
 {ATOM} : {token, {atom, TokenLine, list_to_atom(tl(TokenChars))}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
+\_ : {token, {'_', TokenLine}}.
 \[ : {token, {'[', TokenLine}}.
 \] : {token, {']', TokenLine}}.
 \{ : {token, {'{', TokenLine}}.

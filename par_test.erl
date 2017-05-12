@@ -187,7 +187,7 @@ expr_test_() ->
   , ?_test("[A]" = ok_expr("[] -- []"))
   , ?_test("[Float]" = ok_expr("[3.0, 5.7, 6.8] -- [3.0]"))
   , ?_test(bad_expr("\"hi\" -- []", {"String", "A: Separable"}))
-  , ?_test(bad_expr("[1] -- #[2, 3]", {"Set<A>", "[B]"}))
+  , ?_test(bad_expr("[1] -- #[2, 3]", {"Set<A: Num>", "[B: Num]"}))
 
   , ?_test("A: Num" = ok_expr("-15"))
   , ?_test("Float" = ok_expr("-15.0"))
@@ -294,11 +294,6 @@ recur_test_() ->
       {"A: Num", "Bool"}
     ))
   , ?_test(bad_prg(
-      "f(x) = f(x) == 3 && f(x) == true\n"
-      "g(x) = f(x)",
-      {"A: Num", "Bool"}
-    ))
-  , ?_test(bad_prg(
       "f(n) = if n > 0 then f(n - 1) == 1 else true",
       {"Bool", "A: Num"}
     ))
@@ -383,7 +378,7 @@ sig_test_() ->
       {"Int", "all(A: Num)"}
     ))
   , ?_test(bad_prg(
-      "push :: [A: Num] -> [A: Num]\n"
+      "push :: [Float] -> [A: Num]\n"
       "push(x) = x ++ [1.0]",
       {"all(A: Num)", "Float"}
     ))
@@ -478,7 +473,7 @@ enum_test_() ->
   , ?_test(bad_prg(
       "enum Foo { Bar((Float, Atom)) }\n"
       "expr = Bar(([1], @atom))",
-      {"[A]", "Float"}
+      {"[A: Num]", "Float"}
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar(A, A) }\n"
@@ -526,7 +521,7 @@ struct_test_() ->
   , ?_test(bad_prg(
       "struct Foo { bar :: (Float, Atom) }\n"
       "expr = Foo(([1], @a))",
-      {"[A]", "Float"}
+      {"[A: Num]", "Float"}
     ))
   , ?_test(bad_prg(
       "struct Foo<X> { bar :: [X], baz :: Bool }\n"
@@ -537,5 +532,72 @@ struct_test_() ->
       "struct Foo { bar :: A, baz :: A }\n"
       "expr = Foo(3, true)",
       {"A: Num", "Bool"}
+    ))
+  ].
+
+pattern_test_() ->
+  [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
+  , ?_test("A: Num" = ok_expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test("Int" = ok_prg(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "expr = match Baz(5) { Bar => 1, Baz(x) => x }",
+      "expr"
+    ))
+  , ?_test("[String]" = ok_expr(
+      "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
+    ))
+  , ?_test("((Bool, Atom), Float)" = ok_expr(
+      "match (1, true, @hi) {\n"
+      "  (0, b) => (b, 10),\n"
+      "  (a, true, c) => ((false, c), 3 * a),\n"
+      "  (a, b) => (b, a / 2)\n"
+      "}"
+    ))
+  , ?_test("Float" = ok_expr(
+      "let m = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
+      "  match m {\n"
+      "    [([h | t], _) | _] => h,\n"
+      "    [_, ([], _, c)] => c,\n"
+      "    [(_, _, c), ([x, y | []], _)] => c + x - y\n"
+      "  }"
+    ))
+  , ?_test("[A: Num]" = ok_expr(
+      "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
+    ))
+  , ?_test(bad_expr(
+      "match \"hi\" { \"hey\" => true, \"hello\" => 1 }",
+      {"Bool", "A: Num"}
+    ))
+  , ?_test(bad_expr(
+      "match \"hi\" { @hi => [1, 2], \"hello\" => [3.0, 7, 5] }",
+      {"String", "Atom"}
+    ))
+  , ?_test(bad_prg(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "enum Animal { Cat, Dog }\n"
+      "expr = match Baz(5) { Cat => 3, Bar => 1 }",
+      {"Foo", "Animal"}
+    ))
+  , ?_test(bad_expr(
+      "match [1, 2] { [a, b] => a + b, [_ | t] => t }",
+      {"[A]", "B: Num"}
+    ))
+  , ?_test(bad_expr(
+      "match (1, true, @hi) {\n"
+      "  (0, b) => (b, 10),\n"
+      "  (a, b, c, d) => ((b, c), a / 2)\n"
+      "}",
+      {"Atom", "(Atom, A)"}
+    ))
+  , ?_test(bad_expr(
+      "match [([], \"hi\", 3.0)] {\n"
+      "  [(a)] => a,\n"
+      "  [(_, _, c) | _] => c\n"
+      "}",
+      {"Float", "([A], String, Float)"}
+    ))
+  , ?_test(bad_expr(
+      "let x = 3, y = [2] in match [1] { y => y ++ [1], *x => x ++ [2] }",
+      {"[A: Num]", "B: Num"}
     ))
   ].

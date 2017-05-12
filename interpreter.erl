@@ -1,6 +1,12 @@
 -module(interpreter).
 -export([reload/1, execute/1]).
 
+% For pattern matching a value.
+%   pattern_env - a Name => V mapping of new bindings introduced by the pattern
+%   env - a Name => V mapping of existing bindings in the environment
+%   pid - the process id of the global env server used to resolve global refs
+-record(matcher, {pattern_env, env, pid}).
+
 reload(Syntax) ->
   par:reload(Syntax),
 
@@ -71,17 +77,16 @@ eval({fn, Args, Expr}, Env, Pid) ->
 eval({expr_sig, Expr, _}, Env, Pid) -> eval(Expr, Env, Pid);
 
 eval(none, _, _) -> none;
-eval({int, _, V}, _, _) -> V;
-eval({float, _, V}, _, _) -> V;
-eval({bool, _, V}, _, _) -> V;
-eval({str, _, V}, _, _) -> V;
-eval({atom, _, V}, _, _) -> V;
+eval({N, _, V}, _, _)
+  when N == int; N == float; N == bool; N == str; N == atom -> V;
 
 eval({list, Elems}, Env, Pid) ->
   lists:map(fun(E) -> eval(E, Env, Pid) end, Elems);
 
-eval({tuple, Elems}, Env, Pid) ->
-  list_to_tuple(eval({list, Elems}, Env, Pid));
+eval({tuple, Left, Right}, Env, Pid) ->
+  LeftV = eval(Left, Env, Pid),
+  RightV = eval(Right, Env, Pid),
+  {LeftV, RightV};
 
 eval({map, Pairs}, Env, Pid) ->
   List = lists:map(fun({K, V}) ->
@@ -103,7 +108,9 @@ eval({var, _, Name}, Env, Pid) ->
       end
   end;
 
-eval({record, {var, _, Name}, Inits}, Env, Pid) ->
+eval({con_var, Line, Name}, Env, Pid) -> eval({var, Line, Name}, Env, Pid);
+
+eval({record, {con_var, _, Name}, Inits}, Env, Pid) ->
   {struct, FieldNames, Fn} = global_env_server:get(Name, Pid),
 
   Vs = lists:map(fun(FieldName) ->
@@ -144,6 +151,10 @@ eval({{'let', _}, Inits, Expr}, Env, Pid) ->
   end, Env, Inits),
 
   eval(Expr, NewEnv, Pid);
+
+eval({{'match', _}, Expr, Cases}, Env, Pid) ->
+  V = eval(Expr, Env, Pid),
+  match_cases(V, Cases, Env, Pid);
 
 eval({block, Exprs}, Env, Pid) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, Env, Pid) end, none, Exprs);
@@ -288,3 +299,74 @@ uncurry(Arity, Callback) ->
       Callback([A, B, C, D, E, F, G, H, I, J])
     end
   end.
+
+match_cases(V, [], _, _) -> error({badmatch, V});
+match_cases(V, [{'case', Pattern, Expr} | Rest], Env, Pid) ->
+  M = #matcher{pattern_env=#{}, env=Env, pid=Pid},
+  case match(V, Pattern, M) of
+    {true, NewM} -> eval(Expr, maps:merge(Env, NewM#matcher.pattern_env), Pid);
+    {false, _} -> match_cases(V, Rest, Env, Pid)
+  end.
+
+match(V1, {N, _, V2}, M)
+  when N == int; N == float; N == bool; N == str; N == atom ->
+  {V1 == V2, M};
+
+match(V1, {var, _, Name}, M) ->
+  PatternEnv = M#matcher.pattern_env,
+  case maps:find(Name, PatternEnv) of
+    {ok, V2} -> {V1 == V2, M};
+    error ->
+      NewPatternEnv = PatternEnv#{Name => V1},
+      {true, M#matcher{pattern_env=NewPatternEnv}}
+  end;
+
+match(V1, {var_value, _, Name}, M) ->
+  #{Name := V2} = M#matcher.env,
+  {V1 == V2, M};
+
+match(_, {'_', _}, M) -> {true, M};
+
+match(V1, {con_var, _, Name}, M) ->
+  case global_env_server:get(Name, M#matcher.pid) of
+    {struct, _, _} -> {false, M};
+    V2 -> {V1 == V2, M}
+  end;
+
+match(V, {app, {con_var, Line, Name}, Args}, M) ->
+  Atom = list_to_atom(Name),
+  if
+    length(Args) == 0 -> {V == Atom, M};
+    true ->
+      VList = tuple_to_list(V),
+      match(VList, {list, [{atom, Line, Atom} | Args]}, M)
+  end;
+
+match(V, {list, List}, M) ->
+  if
+    length(V) /= length(List) -> {false, M};
+    true ->
+      lists:foldl(fun({ExpV, Elem}, {Matched, FoldM}) ->
+        case Matched of
+          false -> {Matched, FoldM};
+          true -> match(ExpV, Elem, FoldM)
+        end
+      end, {true, M}, lists:zip(V, List))
+  end;
+
+match(V, {list, List, Rest}, M) ->
+  ListLength = length(List),
+  if
+    length(V) < ListLength -> {false, M};
+    true ->
+      SubV = lists:sublist(V, ListLength),
+      RestV = lists:sublist(V, ListLength + 1, ListLength),
+
+      case match(SubV, {list, List}, M) of
+        {false, NewM} -> {false, NewM};
+        {true, NewM} -> match(RestV, Rest, NewM)
+      end
+  end;
+
+match(V, {tuple, Left, Right}, M) ->
+  match(tuple_to_list(V), {list, [Left, Right]}, M).
