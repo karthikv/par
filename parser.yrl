@@ -78,7 +78,7 @@ expr -> atom ':' var '(' expr_list ')' :
   {app, {native, '$1', '$3', num_args('$5')}, '$5'}.
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
 expr -> if expr_pattern then expr maybe_else : {'$1', '$2', '$4', '$5'}.
-expr -> let init_list in expr : {'$1', '$2', '$4'}.
+expr -> let let_list in expr : {'$1', '$2', '$4'}.
 expr -> match expr start_match case_list '}' : {'$1', '$2', '$4'}.
 expr -> '{' semi_list '}' : {block, '$2'}.
 
@@ -88,7 +88,7 @@ expr_list -> expr : ['$1'].
 expr_list -> expr ',' expr_list : ['$1' | '$3'].
 
 expr_list_tuple -> expr : '$1'.
-expr_list_tuple -> expr ',' expr : {tuple, '$1', '$3'}.
+expr_list_tuple -> expr ',' expr_list_tuple : {tuple, '$1', '$3'}.
 
 kv_list -> expr '=>' expr : [{'$1', '$3'}].
 kv_list -> expr '=>' expr ',' kv_list : [{'$1', '$3'} | '$5'].
@@ -116,8 +116,8 @@ maybe_else -> else expr : '$2'.
 semi_list -> expr : ['$1'].
 semi_list -> expr ';' semi_list : ['$1' | '$3'].
 
-let_list -> pattern '=' expr : [{pattern, '$1', '$3'}].
-let_list -> pattern '=' expr ',' let_list : [{pattern, '$1', '$3'} | '$5'].
+let_list -> pattern '=' expr : [{'$1', '$3'}].
+let_list -> pattern '=' expr ',' let_list : [{'$1', '$3'} | '$5'].
 
 start_match -> '{' : '$1'.
 

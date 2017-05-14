@@ -51,7 +51,7 @@
 %          simultaneously with this record
 %   index / low_link / on_stack - bookkeeping for Tarjan's strongly connected
 %                                 components algorithm; see T below and [1]
--record(gnr, {v, env, csts, deps, index, low_link, on_stack}).
+-record(gnr, {id, vs, env, csts, deps, index, low_link, on_stack}).
 
 % T - A tarjan record that's used to apply Tarjan's strongly connected
 %     components algorithm. This is necessary to solve constraints in the proper
@@ -133,8 +133,8 @@ infer_prg(Prg) ->
     case Node of
       {global, {var, _, Name}, _} ->
         % TODO: what if name already exists?
-        TV = tv_server:fresh(FoldC#ctx.pid),
-        add_env(Name, {add_dep, TV}, FoldC);
+        {TV, ID} = tv_server:fresh_gnr_id(FoldC#ctx.pid),
+        add_env(Name, {add_dep, TV, ID}, FoldC);
 
       % TODO: register valid type for each enum/struct
 
@@ -161,10 +161,10 @@ infer_prg(Prg) ->
 
     case Node of
       {global, {var, _, Name}, Expr} ->
-        #{Name := {add_dep, TV}} = FoldC#ctx.env,
+        #{Name := {add_dep, TV, ID}} = FoldC#ctx.env,
         % for generalization, use env that doesn't contain any globals
         % TODO: should anything be in this map?
-        FoldC1 = new_gnr(TV, FoldC),
+        FoldC1 = new_gnr(TV, ID, FoldC),
         {T, FoldC2} = infer(Expr, FoldC1),
 
         Csts = if
@@ -187,7 +187,14 @@ infer_prg(Prg) ->
   S = #solver{subs=#{}, errs=[], schemes=#{}, pid=Pid},
   Result = case solve(C3#ctx.gnrs, S) of
     {ok, Subs} ->
-      {ok, maps:map(fun(_, {_, T}) -> subs(T, Subs) end, C3#ctx.env), Ast};
+      SubbedEnv = maps:map(fun(_, Value) ->
+        EnvTV = case Value of
+          {no_dep, TV} -> TV;
+          {add_dep, TV, _} -> TV
+        end,
+        subs(EnvTV, Subs)
+      end, C3#ctx.env),
+      {ok, SubbedEnv, Ast};
     {errors, Errs} -> {errors, Errs}
   end,
 
@@ -217,15 +224,14 @@ infer({sig, _, Sig}, C) ->
 
 infer({expr_sig, Expr, Sig}, C) ->
   G = C#ctx.gnr,
-  TV = tv_server:fresh(C#ctx.pid),
+  {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
 
-  {ExprT, C1} = infer(Expr, new_gnr(TV, C)),
+  {ExprT, C1} = infer(Expr, new_gnr(TV, ID, C)),
   {SigT, C2} = infer(Sig, C1),
   NormSigT = norm_sig_type(SigT, C2#ctx.pid),
 
   C3 = add_csts([{TV, ExprT}, {TV, NormSigT}], C2),
-  {tv, V, _, _} = TV,
-  {{inst, TV}, finish_gnr(C3, G#gnr{deps=[V | G#gnr.deps]})};
+  {{inst, TV}, finish_gnr(C3, G#gnr{deps=[ID | G#gnr.deps]})};
 
 infer({lam_te, ArgTE, ReturnTE}, C) ->
   {ArgT, C1} = infer(ArgTE, C),
@@ -265,9 +271,9 @@ infer({enum, EnumTE, OptionTEs}, C) ->
     NormOptionT = norm_sig_type(OptionT, C#ctx.pid),
 
     % TODO: what if name already exists?
-    TV = tv_server:fresh(C#ctx.pid),
-    FoldC2 = add_csts({TV, NormOptionT}, new_gnr(TV, FoldC1)),
-    add_env(Name, {add_dep, TV}, finish_gnr(FoldC2, FoldC1#ctx.gnr))
+    {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
+    FoldC2 = add_csts({TV, NormOptionT}, new_gnr(TV, ID, FoldC1)),
+    add_env(Name, {add_dep, TV, ID}, finish_gnr(FoldC2, FoldC1#ctx.gnr))
   end, C1, OptionTEs),
 
   {T, C2};
@@ -285,17 +291,19 @@ infer({struct, StructTE, FieldTEs}, C) ->
   end, T, ArgTsRev),
   NormFnT = norm_sig_type(FnT, C2#ctx.pid),
 
-  TV = tv_server:fresh(C2#ctx.pid),
-  C3 = finish_gnr(add_csts({TV, NormFnT}, new_gnr(TV, C2)), C2#ctx.gnr),
-
   StructName = case StructTE of
     {con_token, _, Name} -> Name;
     {gen_te, {con_token, _, Name}, _} -> Name
   end,
+
+  % TODO: test recursive struct
+  {TV, ID} = tv_server:fresh_gnr_id(C2#ctx.pid),
+  C3 = add_env(StructName, {add_dep, TV, ID}, C2),
   NewTypes = (C3#ctx.types)#{StructName => {struct, FieldNamesRev}},
 
-  C4 = C3#ctx{types=NewTypes},
-  {TV, add_env(StructName, {add_dep, TV}, C4)};
+  C4 = new_gnr(TV, ID, C3#ctx{types=NewTypes}),
+  C5 = finish_gnr(add_csts({TV, NormFnT}, C4), C3#ctx.gnr),
+  {TV, C5};
 
 infer(none, C) -> {none, C};
 infer({int, _, _}, C) -> {tv_server:fresh('Num', C#ctx.pid), C};
@@ -430,15 +438,15 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
 
 infer({{'let', _}, Inits, Expr}, C) ->
   C1 = lists:foldl(fun({{var, _, Name}, _}, FoldC) ->
-    TV = tv_server:fresh(FoldC#ctx.pid),
+    {TV, ID} = tv_server:fresh_gnr_id(FoldC#ctx.pid),
     % TODO: name conflicts?
-    add_env(Name, {add_dep, TV}, FoldC)
+    add_env(Name, {add_dep, TV, ID}, FoldC)
   end, C, Inits),
 
   C2 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
-    #{Name := {add_dep, TV}} = FoldC#ctx.env,
+    #{Name := {add_dep, TV, ID}} = FoldC#ctx.env,
     % for generalization, use env that doesn't contain let variables
-    {T, FoldC1} = infer(InitExpr, new_gnr(TV, FoldC)),
+    {T, FoldC1} = infer(InitExpr, new_gnr(TV, ID, FoldC)),
     FoldC2 = add_csts({TV, T}, FoldC1),
     finish_gnr(FoldC2, FoldC#ctx.gnr)
   end, C1, Inits),
@@ -447,21 +455,19 @@ infer({{'let', _}, Inits, Expr}, C) ->
   {T, C3#ctx{env=C#ctx.env}};
 
 infer({{match, _}, Expr, Cases}, C) ->
-  {T, C1} = infer(Expr, C),
   TV = tv_server:fresh(C#ctx.pid),
 
-  C2 = lists:foldl(fun({'case', Pattern, Then}, FoldC) ->
-    FoldC1 = FoldC#ctx{in_pattern=true, pattern_env=#{}},
-    {PatternT, FoldC2} = infer(Pattern, FoldC1),
-
-    ThenEnv = maps:merge(FoldC2#ctx.env, FoldC2#ctx.pattern_env),
-    {ThenT, FoldC3} = infer(Then, FoldC2#ctx{env=ThenEnv}),
+  C1 = lists:foldl(fun({'case', Pattern, Then}, FoldC) ->
+    {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
+    {PatternT, FoldC2} = infer(Pattern, start_pattern(FoldC1)),
+    FoldC3 = add_csts({ExprT, PatternT}, FoldC2),
+    {ThenT, FoldC4} = infer(Then, finish_gnr_pattern(FoldC3, FoldC#ctx.gnr)),
 
     % revert env to before pattern was parsed
-    add_csts([{T, PatternT}, {TV, ThenT}], FoldC3#ctx{env=FoldC#ctx.env})
-  end, C1, Cases),
+    add_csts([{TV, ThenT}], FoldC4#ctx{env=FoldC#ctx.env})
+  end, C, Cases),
 
-  {TV, C2};
+  {TV, C1};
 
 infer({block, Exprs}, C) ->
   lists:foldl(fun(Expr, {_, FoldC}) ->
@@ -538,15 +544,54 @@ infer({{Op, _}, Expr}, C) ->
   {TV, add_csts(Cst, C1)}.
 
 add_env(Name, Value, C) ->
-  {_, {tv, _, _, _}} = Value,
+  % just a sanity assertion that Value is in the right format
+  case Value of
+    {add_dep, {tv, _, _, _}, _} -> true;
+    {no_dep, {tv, _, _, _}} -> true
+  end,
   C#ctx{env=(C#ctx.env)#{Name => Value}}.
 
-new_gnr({tv, V, _, _}, C) ->
-  G = #gnr{v=V, env=C#ctx.env, csts=[], deps=[]},
+new_gnr(C) ->
+  ID = tv_server:next_gnr_id(C#ctx.pid),
+  G = #gnr{id=ID, env=C#ctx.env, csts=[], deps=[]},
   C#ctx{gnr=G}.
 
-finish_gnr(C, NewG) ->
-  C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=NewG}.
+% TODO: just use next_gnr_id in here and get rid of fresh_gnr_id
+new_gnr({tv, V, _, _}, ID, C) ->
+  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=[]},
+  C#ctx{gnr=G}.
+
+finish_gnr(C, OldG) ->
+  C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=OldG}.
+
+start_pattern(C) ->
+  C#ctx{in_pattern=true, pattern_env=#{}}.
+
+finish_gnr_pattern(C, OldG) ->
+  G = C#ctx.gnr,
+  Vs = maps:fold(fun(_, {tv, V, _, _}, FoldVs) ->
+    [V | FoldVs]
+  end, [], C#ctx.pattern_env),
+
+  C1 = case length(Vs) of
+    % No variables to generalize, so just merge G into OldG.
+    0 ->
+      OldG1 = OldG#gnr{
+        csts=G#gnr.csts ++ OldG#gnr.csts,
+        deps=G#gnr.deps ++ OldG#gnr.deps
+      },
+      C#ctx{gnr=OldG1};
+
+    _ ->
+      G1 = G#gnr{vs=Vs},
+      PatternEnv = maps:map(fun(_, TV) ->
+        {add_dep, TV, G1#gnr.id}
+      end, C#ctx.pattern_env),
+      NewEnv = maps:merge(C#ctx.env, PatternEnv),
+      C#ctx{gnrs=[G1 | C#ctx.gnrs], gnr=OldG, env=NewEnv}
+  end,
+
+  C1#ctx{in_pattern=false, pattern_env=undefined}.
 
 add_csts(Csts, C) ->
   G = C#ctx.gnr,
@@ -569,10 +614,9 @@ norm_sig_type(SigT, Pid) ->
 lookup(Name, C) ->
   % TODO: handle case where can't find variable
   case maps:find(Name, C#ctx.env) of
-    {ok, {add_dep, EnvTV}} ->
-      {tv, V, _, _} = EnvTV,
+    {ok, {add_dep, EnvTV, ID}} ->
       G = C#ctx.gnr,
-      G1 = G#gnr{deps=[V | G#gnr.deps]},
+      G1 = G#gnr{deps=[ID | G#gnr.deps]},
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
@@ -583,13 +627,13 @@ lookup(Name, C) ->
   end.
 
 solve(Gs, S) ->
-  Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.v => G} end, #{}, Gs),
+  Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
   ?LOG("Gs", lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)),
 
-  T = lists:foldl(fun(#gnr{v=V}, FoldT) ->
-    #{V := #gnr{index=Index}} = FoldT#tarjan.map,
+  T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
+    #{ID := #gnr{index=Index}} = FoldT#tarjan.map,
     if
-      Index == undefined -> connect(V, FoldT#tarjan{stack=[]});
+      Index == undefined -> connect(ID, FoldT#tarjan{stack=[]});
       true -> FoldT
     end
   end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
@@ -599,69 +643,75 @@ solve(Gs, S) ->
     #solver{subs=Subs} -> {ok, Subs}
   end.
 
-connect(V, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
-  #{V := G} = Map,
-  Stack1 = [V | Stack],
-  Map1 = Map#{V := G#gnr{index=NextIndex, low_link=NextIndex, on_stack=true}},
+connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
+  #{ID := G} = Map,
+  Stack1 = [ID | Stack],
+  Map1 = Map#{ID := G#gnr{index=NextIndex, low_link=NextIndex, on_stack=true}},
 
   T1 = #tarjan{stack=Stack1, map=Map1, next_index=NextIndex + 1, solver=S},
-  T2 = lists:foldl(fun(AdjV, FoldT) ->
-    #{AdjV := #gnr{index=AdjIndex, on_stack=AdjOnStack}} = FoldT#tarjan.map,
+  T2 = lists:foldl(fun(AdjID, FoldT) ->
+    #{AdjID := #gnr{index=AdjIndex, on_stack=AdjOnStack}} = FoldT#tarjan.map,
 
     if
       AdjIndex == undefined ->
-        FoldT1 = connect(AdjV, FoldT),
+        FoldT1 = connect(AdjID, FoldT),
         FoldMap1 = FoldT1#tarjan.map,
-        #{V := FoldG1, AdjV := AdjG1} = FoldMap1,
+        #{ID := FoldG1, AdjID := AdjG1} = FoldMap1,
         FoldG2 = FoldG1#gnr{
           low_link=min(FoldG1#gnr.low_link, AdjG1#gnr.low_link)
         },
-        FoldT1#tarjan{map=FoldMap1#{V := FoldG2}};
+        FoldT1#tarjan{map=FoldMap1#{ID := FoldG2}};
 
       AdjOnStack ->
         FoldMap = FoldT#tarjan.map,
-        #{V := FoldG} = FoldMap,
+        #{ID := FoldG} = FoldMap,
         FoldG1 = FoldG#gnr{
           low_link=min(FoldG#gnr.low_link, AdjIndex)
         },
-        FoldT#tarjan{map=FoldMap#{V := FoldG1}};
+        FoldT#tarjan{map=FoldMap#{ID := FoldG1}};
 
       true -> FoldT
     end
   end, T1, G#gnr.deps),
 
   #tarjan{stack=Stack2, map=Map2, solver=S2} = T2,
-  #{V := G2} = Map2,
+  #{ID := G2} = Map2,
   if
     G2#gnr.low_link == G2#gnr.index ->
-      {Popped, Left} = lists:splitwith(fun(StackV) ->
-        StackV /= V
+      {Popped, Left} = lists:splitwith(fun(StackID) ->
+        StackID /= ID
       end, Stack2),
-      SolvableVs = [V | Popped],
+      SolvableIDs = [ID | Popped],
 
-      Map3 = lists:foldl(fun(SolV, FoldMap) ->
-        #{SolV := SolG} = FoldMap,
-        FoldMap#{SolV := SolG#gnr{on_stack=false}}
-      end, Map2, SolvableVs),
+      Map3 = lists:foldl(fun(SolID, FoldMap) ->
+        #{SolID := SolG} = FoldMap,
+        FoldMap#{SolID := SolG#gnr{on_stack=false}}
+      end, Map2, SolvableIDs),
 
-      ?LOG("Solvable Vs", SolvableVs),
+      ?LOG("Solvable IDs", SolvableIDs),
 
-      S3 = lists:foldl(fun(SolV, FoldS) ->
-        #{SolV := SolG} = Map3,
+      S3 = lists:foldl(fun(SolID, FoldS) ->
+        #{SolID := SolG} = Map3,
         unify_csts(SolG, FoldS)
-      end, S2, SolvableVs),
+      end, S2, SolvableIDs),
 
       ?LOG("Subs", S3#solver.subs),
 
-      S4 = lists:foldl(fun(SolV, FoldS) ->
-        #{SolV := SolG} = Map3,
-        #solver{subs=Subs, schemes=Schemes} = FoldS,
-        T = subs({tv, SolV, none, any}, Subs),
-        {GVs, GT} = generalize(T, SolG#gnr.env),
-        Schemes1 = Schemes#{SolV => {GVs, GT}},
-        Subs1 = Subs#{SolV => GT},
-        FoldS#solver{subs=Subs1, schemes=Schemes1}
-      end, S3, SolvableVs),
+      S4 = lists:foldl(fun(SolID, FoldS) ->
+        #{SolID := SolG} = Map3,
+
+        lists:foldl(fun(SolV, NestedS) ->
+          #solver{subs=Subs, schemes=Schemes} = NestedS,
+          SolTV = {tv, SolV, none, any},
+          T = subs(SolTV, Subs),
+          {GVs, GT} = generalize(T, SolG#gnr.env),
+          Schemes1 = Schemes#{SolV => {GVs, GT}},
+
+          % don't want to sub SolTV for itself and create an infinite loop
+          Subs1 = if SolTV == T -> Subs; true -> Subs#{SolV => GT} end,
+          NestedS#solver{subs=Subs1, schemes=Schemes1}
+        end, FoldS, SolG#gnr.vs)
+      end, S3, SolvableIDs),
 
       T2#tarjan{stack=tl(Left), map=Map3, solver=S4};
 
@@ -672,7 +722,7 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   RigidVs = maps:fold(fun(_, Value, FoldVs) ->
     case Value of
       {no_dep, T} -> gb_sets:union(FoldVs, fvs(T));
-      {add_dep, _} -> FoldVs
+      {add_dep, _, _} -> FoldVs
     end
   end, gb_sets:new(), Env),
 
@@ -714,14 +764,18 @@ inst({GVs, T}, S) ->
   subs(T, Subs).
 
 generalize(T, Env) ->
-  EnvFVs = maps:fold(fun(_, {_, TV}, S) ->
-    gb_sets:union(fvs(TV), S)
+  EnvFVs = maps:fold(fun(_, Value, S) ->
+    EnvTV = case Value of
+      {no_dep, TV} -> TV;
+      {add_dep, TV, _} -> TV
+    end,
+    gb_sets:union(fvs(EnvTV), S)
   end, gb_sets:new(), Env),
   GVs = gb_sets:subtract(fvs(T), EnvFVs),
 
   % for normalization, change all all(TV) to TV
-  Subs = gb_sets:fold(fun(V, FoldSubs) ->
-    FoldSubs#{V => any}
+  Subs = gb_sets:fold(fun(FoldV, FoldSubs) ->
+    FoldSubs#{FoldV => any}
   end, #{}, GVs),
   {GVs, subs(T, Subs)}.
 
@@ -755,7 +809,7 @@ unify({{tv, V1, I1, Cat1}, {tv, V2, I2, Cat2}}, S) ->
     (I1 == none) or (I1 == I2) ->
       add_sub(V1, TV2, S);
 
-    % rigid(X: I1) ~ any(Y: I2) or all(X: I1) ~ rigid(Y: I2) or
+    % rigid(X: I1) ~ any(Y: I2) or all(X: I1) ~ any(Y: I2) or
     % rigid(X: I1) ~ rigid(Y: I2) if I1 >= I2.
     (Ilk2 == any) or ((Ilk1 == rigid) and (Ilk2 == rigid)),
     (I2 == none) or (I1 == I2) ->
@@ -902,7 +956,7 @@ pretty({inst, TV}) ->
 pretty(none) -> "()".
 
 pretty_strip_parens({tuple, LeftT, RightT}) ->
-  format_str("~s, ~s", [pretty(LeftT), pretty(RightT)]);
+  format_str("~s, ~s", [pretty(LeftT), pretty_strip_parens(RightT)]);
 pretty_strip_parens(T) -> pretty(T).
 
 format_str(Str, Args) ->

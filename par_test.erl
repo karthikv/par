@@ -1,5 +1,5 @@
 -module(par_test).
--export([run/0]).
+-export([run/0, ok_expr/1]).
 -include_lib("eunit/include/eunit.hrl").
 
 run() ->
@@ -538,6 +538,16 @@ struct_test_() ->
 pattern_test_() ->
   [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
   , ?_test("A: Num" = ok_expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test("Float" =
+             ok_expr("match |x| x { id => let y = id(true) in id(5.0) }"))
+  , ?_test("(Int, Float, Int, Float)" = ok_expr(
+      "match (3, 4) {\n"
+      "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
+      "}"
+    ))
+  %% , ?_test("(String, Atom)" = ok_expr(
+  %%     "let [_, (_, x)] = [(1.0, \"foo\", @foo), (2, \"bar\", @bar)] in x"
+  %%   ))
   , ?_test("Int" = ok_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Baz(5) { Bar => 1, Baz(x) => x }",
@@ -572,6 +582,10 @@ pattern_test_() ->
       "match \"hi\" { @hi => [1, 2], \"hello\" => [3.0, 7, 5] }",
       {"String", "Atom"}
     ))
+  %% , ?_test(bad_expr(
+  %%     "let [_, (_, x)] = [@foo, @bar] in x",
+  %%     {"(A, B)", "Atom"}
+  %%   ))
   , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "enum Animal { Cat, Dog }\n"
@@ -580,14 +594,14 @@ pattern_test_() ->
     ))
   , ?_test(bad_expr(
       "match [1, 2] { [a, b] => a + b, [_ | t] => t }",
-      {"[A]", "B: Num"}
+      {"[A: Num]", "B: Num"}
     ))
   , ?_test(bad_expr(
       "match (1, true, @hi) {\n"
       "  (0, b) => (b, 10),\n"
       "  (a, b, c, d) => ((b, c), a / 2)\n"
       "}",
-      {"Atom", "(Atom, A)"}
+      {"Atom", "(A, B)"}
     ))
   , ?_test(bad_expr(
       "match [([], \"hi\", 3.0)] {\n"
@@ -597,7 +611,7 @@ pattern_test_() ->
       {"Float", "([A], String, Float)"}
     ))
   , ?_test(bad_expr(
-      "let x = 3, y = [2] in match [1] { y => y ++ [1], *x => x ++ [2] }",
+      "let x = 3, y = [2] in match [1] { y => y ++ [1], *x => [x] }",
       {"[A: Num]", "B: Num"}
     ))
   ].
