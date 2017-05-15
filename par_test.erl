@@ -1,5 +1,5 @@
 -module(par_test).
--export([run/0, ok_expr/1]).
+-export([run/0]).
 -include_lib("eunit/include/eunit.hrl").
 
 run() ->

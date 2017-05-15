@@ -301,7 +301,7 @@ uncurry(Arity, Callback) ->
   end.
 
 match_cases(V, [], _, _) -> error({badmatch, V});
-match_cases(V, [{'case', Pattern, Expr} | Rest], Env, Pid) ->
+match_cases(V, [{Pattern, Expr} | Rest], Env, Pid) ->
   M = #matcher{pattern_env=#{}, env=Env, pid=Pid},
   case match(V, Pattern, M) of
     {true, NewM} -> eval(Expr, maps:merge(Env, NewM#matcher.pattern_env), Pid);
