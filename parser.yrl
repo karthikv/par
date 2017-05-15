@@ -3,7 +3,7 @@ Nonterminals
   expr con_var expr_list expr_list_tuple
   kv_list start_record init_list mul neg lam
   expr_pattern maybe_else semi_list
-  let_list start_match case_list
+  let_list start_match match_list
   pattern pattern_list pattern_list_tuple
   sig te te_list_tuple
   enum option_list option te_list
@@ -79,7 +79,7 @@ expr -> atom ':' var '(' expr_list ')' :
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
 expr -> if expr_pattern then expr maybe_else : {'$1', '$2', '$4', '$5'}.
 expr -> let let_list in expr : {'$1', '$2', '$4'}.
-expr -> match expr start_match case_list '}' : {'$1', '$2', '$4'}.
+expr -> match expr start_match match_list '}' : {'$1', '$2', '$4'}.
 expr -> '{' semi_list '}' : {block, '$2'}.
 
 con_var -> con_token : setelement(1, '$1', con_var).
@@ -121,8 +121,8 @@ let_list -> pattern '=' expr ',' let_list : [{'$1', '$3'} | '$5'].
 
 start_match -> '{' : '$1'.
 
-case_list -> pattern '=>' expr : [{'case', '$1', '$3'}].
-case_list -> pattern '=>' expr ',' case_list : [{'case', '$1', '$3'} | '$5'].
+match_list -> pattern '=>' expr : [{'$1', '$3'}].
+match_list -> pattern '=>' expr ',' match_list : [{'$1', '$3'} | '$5'].
 
 pattern -> int : '$1'.
 pattern -> float : '$1'.

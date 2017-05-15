@@ -30,7 +30,7 @@
 %   in_pattern - true if within a pattern, false otherwise
 %   pattern_env - new variables introduced as part of a pattern
 %   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {gnr, gnrs, env, types, in_pattern, pattern_env, pid}).
+-record(ctx, {gnr, gnrs, env, types, pid}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -78,10 +78,12 @@
 % - Error messages
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
-% - Updating and accessing a struct
+% - Updating and accessing a struct, test recursive struct
 % - else precedence
 % - Concurrency
 % - Pattern matching
+% - What if TV isn't subbed when generalizing?
+%     e.g. foo = @erlang:bar(), so B = F
 % - Exceptions
 % - Code generation
 % - Update naming conventions
@@ -120,15 +122,7 @@ infer_prg(Prg) ->
   ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
-  C = #ctx{
-    gnr=undefined,
-    gnrs=[],
-    env=#{},
-    types=#{},
-    in_pattern=false,
-    pattern_env=undefined,
-    pid=Pid
-  },
+  C = #ctx{gnr=undefined, gnrs=[], env=#{}, types=#{}, pid=Pid},
   C1 = lists:foldl(fun(Node, FoldC) ->
     case Node of
       {global, {var, _, Name}, _} ->
@@ -162,7 +156,6 @@ infer_prg(Prg) ->
     case Node of
       {global, {var, _, Name}, Expr} ->
         #{Name := {add_dep, TV, ID}} = FoldC#ctx.env,
-        % for generalization, use env that doesn't contain any globals
         % TODO: should anything be in this map?
         FoldC1 = new_gnr(TV, ID, FoldC),
         {T, FoldC2} = infer(Expr, FoldC1),
@@ -296,7 +289,6 @@ infer({struct, StructTE, FieldTEs}, C) ->
     {gen_te, {con_token, _, Name}, _} -> Name
   end,
 
-  % TODO: test recursive struct
   {TV, ID} = tv_server:fresh_gnr_id(C2#ctx.pid),
   C3 = add_env(StructName, {add_dep, TV, ID}, C2),
   NewTypes = (C3#ctx.types)#{StructName => {struct, FieldNamesRev}},
@@ -323,7 +315,6 @@ infer({list, Elems}, C) ->
 
 % only occurs when pattern matching to destructure list into head/tail
 infer({list, Elems, Rest}, C) ->
-  true = C#ctx.in_pattern,
   {T, C1} = infer({list, Elems}, C),
   {RestT, C2} = infer(Rest, C1),
   {T, add_csts({T, RestT}, C2)};
@@ -345,26 +336,13 @@ infer({map, Pairs}, C) ->
 
   {{gen, 'Map', {tuple, KeyTV, ValueTV}}, add_csts(Csts, C1)};
 
-infer({var, _, Name}, C) ->
-  case C#ctx.in_pattern of
-    false -> lookup(Name, C);
-    true ->
-      PatternEnv = C#ctx.pattern_env,
-      case maps:find(Name, PatternEnv) of
-        {ok, TV} -> {TV, C};
-        error ->
-          TV = tv_server:fresh(C#ctx.pid),
-          {TV, C#ctx{pattern_env=PatternEnv#{Name => TV}}}
-      end
-  end;
-
+infer({var, _, Name}, C) -> lookup(Name, C);
+infer({con_var, _, Name}, C) -> lookup(Name, C);
 % only occurs when pattern matching to designate a non-literal variable
 infer({var_value, _, Name}, C) -> lookup(Name, C);
 
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
-
-infer({con_var, _, Name}, C) -> lookup(Name, C);
 
 infer({record, ConVar, Inits}, C) ->
   {FnT, C1} = infer(ConVar, C),
@@ -437,19 +415,19 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
   end;
 
 infer({{'let', _}, Inits, Expr}, C) ->
-  C1 = lists:foldl(fun({{var, _, Name}, _}, FoldC) ->
-    {TV, ID} = tv_server:fresh_gnr_id(FoldC#ctx.pid),
-    % TODO: name conflicts?
-    add_env(Name, {add_dep, TV, ID}, FoldC)
+  % TODO: ensure no pattern name overlap!
+  {Gs, C1} = lists:mapfoldl(fun({Pattern, _}, FoldC) ->
+    FoldC1 = with_pattern_env(Pattern, new_gnr(FoldC)),
+    % save new gnr and revert it back to original
+    {FoldC1#ctx.gnr, FoldC1#ctx{gnr=FoldC#ctx.gnr}}
   end, C, Inits),
 
-  C2 = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldC) ->
-    #{Name := {add_dep, TV, ID}} = FoldC#ctx.env,
-    % for generalization, use env that doesn't contain let variables
-    {T, FoldC1} = infer(InitExpr, new_gnr(TV, ID, FoldC)),
-    FoldC2 = add_csts({TV, T}, FoldC1),
-    finish_gnr(FoldC2, FoldC#ctx.gnr)
-  end, C1, Inits),
+  C2 = lists:foldl(fun({G, {Pattern, InitExpr}}, FoldC) ->
+    {PatternT, FoldC1} = infer(Pattern, FoldC#ctx{gnr=G}),
+    {InitExprT, FoldC2} = infer(InitExpr, FoldC1),
+    FoldC3 = add_csts({PatternT, InitExprT}, FoldC2),
+    finish_gnr(FoldC3, FoldC#ctx.gnr)
+  end, C1, lists:zip(Gs, Inits)),
 
   {T, C3} = infer(Expr, C2),
   {T, C3#ctx{env=C#ctx.env}};
@@ -457,11 +435,11 @@ infer({{'let', _}, Inits, Expr}, C) ->
 infer({{match, _}, Expr, Cases}, C) ->
   TV = tv_server:fresh(C#ctx.pid),
 
-  C1 = lists:foldl(fun({'case', Pattern, Then}, FoldC) ->
+  C1 = lists:foldl(fun({Pattern, Then}, FoldC) ->
     {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
-    {PatternT, FoldC2} = infer(Pattern, start_pattern(FoldC1)),
+    {PatternT, FoldC2} = infer(Pattern, with_pattern_env(Pattern, FoldC1)),
     FoldC3 = add_csts({ExprT, PatternT}, FoldC2),
-    {ThenT, FoldC4} = infer(Then, finish_gnr_pattern(FoldC3, FoldC#ctx.gnr)),
+    {ThenT, FoldC4} = infer(Then, finish_gnr(FoldC3, FoldC#ctx.gnr)),
 
     % revert env to before pattern was parsed
     add_csts([{TV, ThenT}], FoldC4#ctx{env=FoldC#ctx.env})
@@ -543,6 +521,34 @@ infer({{Op, _}, Expr}, C) ->
 
   {TV, add_csts(Cst, C1)}.
 
+with_pattern_env(Pattern, C) ->
+  ID = C#ctx.gnr#gnr.id,
+  Names = pattern_names(Pattern),
+
+  {Vs, C1} = gb_sets:fold(fun(Name, {FoldVs, FoldC}) ->
+    TV = tv_server:fresh(C#ctx.pid),
+    {tv, V, _, _} = TV,
+    {[V | FoldVs], add_env(Name, {add_dep, TV, ID}, FoldC)}
+  end, {[], C}, Names),
+
+  C1#ctx{gnr=C1#ctx.gnr#gnr{vs=Vs}}.
+
+pattern_names([]) -> gb_sets:new();
+pattern_names([Node | Rest]) ->
+  gb_sets:union(pattern_names(Node), pattern_names(Rest));
+pattern_names({N, _, _}) when N == int; N == float; N == bool; N == str;
+    N == atom; N == var_value; N == con_var ->
+  gb_sets:new();
+pattern_names({var, _, Name}) -> gb_sets:from_list([Name]);
+pattern_names({'_', _}) -> gb_sets:new();
+pattern_names({app, ConVar, Args}) ->
+  gb_sets:union(pattern_names(ConVar), pattern_names(Args));
+pattern_names({list, List}) -> pattern_names(List);
+pattern_names({list, List, Rest}) ->
+  gb_sets:union(pattern_names(List), pattern_names(Rest));
+pattern_names({tuple, Left, Right}) ->
+  gb_sets:union(pattern_names(Left), pattern_names(Right)).
+
 add_env(Name, Value, C) ->
   % just a sanity assertion that Value is in the right format
   case Value of
@@ -553,45 +559,15 @@ add_env(Name, Value, C) ->
 
 new_gnr(C) ->
   ID = tv_server:next_gnr_id(C#ctx.pid),
-  G = #gnr{id=ID, env=C#ctx.env, csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=[]},
   C#ctx{gnr=G}.
 
-% TODO: just use next_gnr_id in here and get rid of fresh_gnr_id
 new_gnr({tv, V, _, _}, ID, C) ->
   G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=[]},
   C#ctx{gnr=G}.
 
 finish_gnr(C, OldG) ->
   C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=OldG}.
-
-start_pattern(C) ->
-  C#ctx{in_pattern=true, pattern_env=#{}}.
-
-finish_gnr_pattern(C, OldG) ->
-  G = C#ctx.gnr,
-  Vs = maps:fold(fun(_, {tv, V, _, _}, FoldVs) ->
-    [V | FoldVs]
-  end, [], C#ctx.pattern_env),
-
-  C1 = case length(Vs) of
-    % No variables to generalize, so just merge G into OldG.
-    0 ->
-      OldG1 = OldG#gnr{
-        csts=G#gnr.csts ++ OldG#gnr.csts,
-        deps=G#gnr.deps ++ OldG#gnr.deps
-      },
-      C#ctx{gnr=OldG1};
-
-    _ ->
-      G1 = G#gnr{vs=Vs},
-      PatternEnv = maps:map(fun(_, TV) ->
-        {add_dep, TV, G1#gnr.id}
-      end, C#ctx.pattern_env),
-      NewEnv = maps:merge(C#ctx.env, PatternEnv),
-      C#ctx{gnrs=[G1 | C#ctx.gnrs], gnr=OldG, env=NewEnv}
-  end,
-
-  C1#ctx{in_pattern=false, pattern_env=undefined}.
 
 add_csts(Csts, C) ->
   G = C#ctx.gnr,

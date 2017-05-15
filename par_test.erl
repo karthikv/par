@@ -545,9 +545,11 @@ pattern_test_() ->
       "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
       "}"
     ))
-  %% , ?_test("(String, Atom)" = ok_expr(
-  %%     "let [_, (_, x)] = [(1.0, \"foo\", @foo), (2, \"bar\", @bar)] in x"
-  %%   ))
+  , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
+  , ?_test("(Int, Float)" = ok_expr(
+      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "  (x + 3 :: Int, x + 3.0)"
+    ))
   , ?_test("Int" = ok_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Baz(5) { Bar => 1, Baz(x) => x }",
@@ -582,10 +584,11 @@ pattern_test_() ->
       "match \"hi\" { @hi => [1, 2], \"hello\" => [3.0, 7, 5] }",
       {"String", "Atom"}
     ))
-  %% , ?_test(bad_expr(
-  %%     "let [_, (_, x)] = [@foo, @bar] in x",
-  %%     {"(A, B)", "Atom"}
-  %%   ))
+  , ?_test(bad_expr("let true = 3 in []", {"Bool", "A: Num"}))
+  , ?_test(bad_expr(
+      "let [_, (x, _)] = [\"foo\", \"bar\"] in x",
+      {"(A, B)", "String"}
+    ))
   , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "enum Animal { Cat, Dog }\n"
