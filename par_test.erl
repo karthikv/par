@@ -90,19 +90,23 @@ expr_test_() ->
   , ?_test("String" = ok_expr("\"some string\n\""))
   , ?_test("Atom" = ok_expr("@hello"))
   , ?_test("Atom" = ok_expr("@\"hello world\""))
+
   , ?_test("[A]" = ok_expr("[]"))
   , ?_test("[A: Num]" = ok_expr("[3, 5, 6]"))
   , ?_test("[Float]" = ok_expr("[3, 5.0, 6]"))
   , ?_test("[Bool]" = ok_expr("[true, false, true]"))
   , ?_test(bad_expr("[3.0, true]", {"Float", "Bool"}))
+
   , ?_test("(Bool, Float)" = ok_expr("(true, 3.0)"))
   , ?_test("(A: Num, B: Num, [C: Num])" = ok_expr("(1, 2, [30, 40])"))
   , ?_test("((A: Num, Bool), Float)" = ok_expr("((3, false), 4.0)"))
   , ?_test("(A: Num, Bool, Float)" = ok_expr("(3, (false, 4.0))"))
+
   , ?_test("Map<A, B>" = ok_expr("{}"))
   , ?_test("Map<String, String>" = ok_expr("{\"key\" => \"value\"}"))
   , ?_test("Map<A: Num, Float>" = ok_expr("{1 => 2, 3 => 4.0}"))
   , ?_test(bad_expr("{\"a\" => true, \"b\" => \"c\"}", {"Bool", "String"}))
+
   , ?_test("Set<A>" = ok_expr("#[]"))
   , ?_test("Set<A: Num>" = ok_expr("#[1, 2]"))
   , ?_test("Set<Float>" = ok_expr("#[3, 4.0]"))
@@ -270,6 +274,24 @@ para_poly_test_() ->
       {"Bool", "A: Num"}
     ))
   , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B"}))
+
+
+  , ?_test("(Bool, Float, Bool, Float)" = ok_prg(
+      "foo = bar\n"
+      "bar = foo\n"
+      "expr = (bar :: Bool, bar :: Float, foo :: Bool, foo :: Float)",
+      "expr"
+    ))
+  , ?_test("Bool" = ok_prg(
+      "id(a) = let foo(x) = a in let a = 4 in let bar = foo(3) in bar\n"
+      "expr = id(3) == 3 && id(true)",
+      "expr"
+    ))
+  , ?_test(bad_prg(
+      "id(a) = let foo(x) = a in let a = 4 in let bar = foo(3) in bar\n"
+      "expr = id(3) && id(true)",
+      {"A: Num", "Bool"}
+    ))
   ].
 
 recur_test_() ->
@@ -322,11 +344,6 @@ sig_test_() ->
       "add(x, y) = x + y",
       "add"
     ))
-  , ?_test(bad_prg(
-      "inc :: A: Num -> A: Num\n"
-      "inc(x) = x :: B: Num + 1 :: A: Num",
-      {"rigid(A)", "all(B: Num)"}
-    ))
   , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(
       "cmp :: (B -> C) -> (A -> B) -> A -> C\n"
       "cmp(f, g, x) = f(g(x))",
@@ -377,6 +394,11 @@ sig_test_() ->
       {"all(A)", "all(B)"}
     ))
   , ?_test(bad_prg(
+      "inc :: A: Num -> A: Num\n"
+      "inc(x) = x :: B: Num + 1 :: A: Num",
+      {"rigid(A)", "all(B: Num)"}
+    ))
+  , ?_test(bad_prg(
       "foo :: Int -> Int\n"
       "foo(x) = x + 3\n"
       "bar :: A: Num -> Int\n"
@@ -409,6 +431,7 @@ global_test_() ->
       "foo"
     ))
 
+
   % Although the following recursive programs will fail at runtime, they should
   % pass the type checker. It's difficult to assess whether such programs are
   % correct statically, especially when there are many of mutual dependencies.
@@ -426,6 +449,7 @@ global_test_() ->
       "bar"
     ))
   , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
+
 
   , ?_test(bad_prg(
       "foo = \"hello\"\n"
@@ -578,26 +602,6 @@ pattern_test_() ->
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
     ))
 
-  , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
-  , ?_test("(Int, Float)" = ok_expr(
-      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 :: Int, x + 3.0)"
-    ))
-  , ?_test("A: Num" =
-             ok_expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
-
-  , ?_test("()" = ok_expr("if let a = 3.0 then a"))
-  , ?_test("A: Num" = ok_expr(
-      "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
-    ))
-  , ?_test("String" =
-             ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
-  , ?_test("Float" = ok_expr(
-      "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
-      "then f(true)\n"
-      "else 0"
-    ))
-
   , ?_test(bad_expr(
       "match \"hi\" { \"hey\" => true, \"hello\" => 1 }",
       {"Bool", "A: Num"}
@@ -635,6 +639,14 @@ pattern_test_() ->
       {"[A: Num]", "B: Num"}
     ))
 
+
+  , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
+  , ?_test("(Int, Float)" = ok_expr(
+      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "  (x + 3 :: Int, x + 3.0)"
+    ))
+  , ?_test("A: Num" =
+             ok_expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
   , ?_test(bad_expr("let true = 3 in []", {"Bool", "A: Num"}))
   , ?_test(bad_expr("let [x] = x in x", {"A", "[A]"}))
   , ?_test(bad_expr(
@@ -646,6 +658,18 @@ pattern_test_() ->
       {"A: Num", "Bool"}
     ))
 
+
+  , ?_test("()" = ok_expr("if let a = 3.0 then a"))
+  , ?_test("A: Num" = ok_expr(
+      "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
+    ))
+  , ?_test("String" =
+             ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
+  , ?_test("Float" = ok_expr(
+      "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
+      "then f(true)\n"
+      "else 0"
+    ))
   , ?_test(bad_expr("if let a = 3.0 then a else true", {"Float", "Bool"}))
   , ?_test(bad_expr(
       "if let (_, a) = [\"hello\", \"hi\"] then a else \"hey\"",

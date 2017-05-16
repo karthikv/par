@@ -82,8 +82,6 @@
 % - else precedence
 % - Concurrency
 % - Pattern matching
-% - What if TV isn't subbed when generalizing?
-%     e.g. foo = @erlang:bar(), so B = F
 % - uncurry function within e.g. tuple to pass to native erlang?
 % - Exceptions
 % - Code generation
@@ -179,13 +177,13 @@ infer_prg(Prg) ->
 
   S = #solver{subs=#{}, errs=[], schemes=#{}, pid=Pid},
   Result = case solve(C3#ctx.gnrs, S) of
-    {ok, Subs} ->
+    {ok, Schemes} ->
       SubbedEnv = maps:map(fun(_, Value) ->
-        EnvTV = case Value of
+        {tv, V, _, _} = case Value of
           {no_dep, TV} -> TV;
           {add_dep, TV, _} -> TV
         end,
-        subs(EnvTV, Subs)
+        inst(maps:get(V, Schemes), Pid)
       end, C3#ctx.env),
       {ok, SubbedEnv, Ast};
     {errors, Errs} -> {errors, Errs}
@@ -632,7 +630,7 @@ solve(Gs, S) ->
 
   case T#tarjan.solver of
     #solver{errs=Errs} when length(Errs) > 0 -> {errors, Errs};
-    #solver{subs=Subs} -> {ok, Subs}
+    #solver{schemes=Schemes} -> {ok, Schemes}
   end.
 
 connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
@@ -691,17 +689,15 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
 
       S4 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
+        RigidVs = rigid_vs(SolG#gnr.env, FoldS#solver.schemes),
 
         lists:foldl(fun(SolV, NestedS) ->
           #solver{subs=Subs, schemes=Schemes} = NestedS,
           SolTV = {tv, SolV, none, any},
           T = subs(SolTV, Subs),
-          {GVs, GT} = generalize(T, SolG#gnr.env),
-          Schemes1 = Schemes#{SolV => {GVs, GT}},
-
-          % don't want to sub SolTV for itself and create an infinite loop
-          Subs1 = if SolTV == T -> Subs; true -> Subs#{SolV => GT} end,
-          NestedS#solver{subs=Subs1, schemes=Schemes1}
+          GVs = gb_sets:subtract(fvs(T), RigidVs),
+          Schemes1 = Schemes#{SolV => {GVs, T}},
+          NestedS#solver{schemes=Schemes1}
         end, FoldS, SolG#gnr.vs)
       end, S3, SolvableIDs),
 
@@ -711,19 +707,13 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
   end.
 
 unify_csts(#gnr{csts=Csts, env=Env}, S) ->
-  RigidVs = maps:fold(fun(_, Value, FoldVs) ->
-    case Value of
-      {no_dep, T} -> gb_sets:union(FoldVs, fvs(T));
-      {add_dep, _, _} -> FoldVs
-    end
-  end, gb_sets:new(), Env),
-
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
   % deepest expression's constraints first to have better error messages (e.g.
   % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
   % reverse the order here.
   OrderedCsts = lists:reverse(Csts),
+  RigidVs = rigid_vs(Env, S#solver.schemes),
 
   lists:foldl(fun({L, R}, FoldS) ->
     Subs = FoldS#solver.subs,
@@ -742,34 +732,17 @@ resolve({gen, Con, ParamT}, S) -> {gen, Con, resolve(ParamT, S)};
 resolve({inst, TV}, S) ->
   {tv, V, _, _} = TV,
   ResolvedT = case maps:find(V, S#solver.schemes) of
-    {ok, Scheme} -> inst(Scheme, S);
-    % Not sure if we should resolve() or not here to make inst vars rigid.
+    {ok, Scheme} -> inst(Scheme, S#solver.pid);
     error -> TV
   end,
   resolve(ResolvedT, S);
 resolve(none, _) -> none.
 
-inst({GVs, T}, S) ->
+inst({GVs, T}, Pid) ->
   Subs = gb_sets:fold(fun(V, FoldSubs) ->
-    FoldSubs#{V => tv_server:next_name(S#solver.pid)}
+    FoldSubs#{V => tv_server:next_name(Pid)}
   end, #{}, GVs),
   subs(T, Subs).
-
-generalize(T, Env) ->
-  EnvFVs = maps:fold(fun(_, Value, S) ->
-    EnvTV = case Value of
-      {no_dep, TV} -> TV;
-      {add_dep, TV, _} -> TV
-    end,
-    gb_sets:union(fvs(EnvTV), S)
-  end, gb_sets:new(), Env),
-  GVs = gb_sets:subtract(fvs(T), EnvFVs),
-
-  % for normalization, change all all(TV) to TV
-  Subs = gb_sets:fold(fun(FoldV, FoldSubs) ->
-    FoldSubs#{FoldV => any}
-  end, #{}, GVs),
-  {GVs, subs(T, Subs)}.
 
 unify({T1, T2}, S) when T1 == T2 -> S;
 
@@ -896,6 +869,24 @@ subs({con, Con}, _) -> {con, Con};
 subs({gen, Con, ParamT}, Subs) -> {gen, Con, subs(ParamT, Subs)};
 subs({inst, TV}, Subs) -> {inst, subs(TV, Subs)};
 subs(none, _) -> none.
+
+rigid_vs(Env, Schemes) ->
+  maps:fold(fun(_, Value, FoldVs) ->
+    case Value of
+      {no_dep, T} -> gb_sets:union(FoldVs, fvs(T));
+
+      % 1) If a given other binding has been fully generalized already,
+      %    we'll add the rigid type variables from its scheme.
+      % 2) If a given other binding is currently being generalized,
+      %    its TV can be generalized over, and so we shouldn't add it here.
+      {add_dep, {tv, V, _, _}, _} ->
+        case maps:find(V, Schemes) of
+          {ok, {GVs, T}} ->
+            gb_sets:union(FoldVs, gb_sets:difference(fvs(T), GVs));
+          error -> FoldVs
+        end
+    end
+  end, gb_sets:new(), Env).
 
 fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
 fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
