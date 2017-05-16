@@ -223,6 +223,7 @@ expr_test_() ->
   , ?_test(bad_expr("if true then 3.0 else true", {"Float", "Bool"}))
 
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
+  , ?_test("A: Num" = ok_expr("let inc(x) = x + 1 in inc(3)"))
   , ?_test("Bool" = ok_expr("let x = |a| a in x(3) == 3 && x(true)"))
   , ?_test("A: Num" = ok_expr("let a = b + 5, b = 10 in a"))
   , ?_test("A: Num" = ok_expr(
@@ -586,6 +587,9 @@ pattern_test_() ->
              ok_expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
 
   , ?_test("()" = ok_expr("if let a = 3.0 then a"))
+  , ?_test("A: Num" = ok_expr(
+      "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
+    ))
   , ?_test("String" =
              ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test("Float" = ok_expr(

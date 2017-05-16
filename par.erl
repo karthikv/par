@@ -84,14 +84,12 @@
 % - Pattern matching
 % - What if TV isn't subbed when generalizing?
 %     e.g. foo = @erlang:bar(), so B = F
-% - let syntax for defining function
 % - uncurry function within e.g. tuple to pass to native erlang?
 % - Exceptions
 % - Code generation
 % - Update naming conventions
 %
 % - + instead of ++ and - instead of --?
-% - Reverse csts before solving for better error messages?
 % - Make true/false capitalized?
 % - Syntax for lambda with no arg?
 % - Operation: nth element of tuple?
@@ -416,22 +414,6 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
       {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)}
   end;
 
-infer({{if_let, _}, Pattern, Expr, Then, Else}, C) ->
-  C1 = with_pattern_env(Pattern, new_gnr(C)),
-  {PatternT, C2} = infer(Pattern, C1),
-  {ExprT, C3} = infer(Expr, C2),
-  C4 = add_csts({PatternT, ExprT}, C3),
-  {ThenT, C5} = infer(Then, finish_gnr(C4, C#ctx.gnr)),
-
-  case Else of
-    none -> {none, C5};
-    _ ->
-      % must use original env without pattern bindings
-      {ElseT, C6} = infer(Else, C5#ctx{env=C#ctx.env}),
-      TV = tv_server:fresh(C#ctx.pid),
-      {TV, add_csts([{TV, ThenT}, {TV, ElseT}], C6)}
-  end;
-
 infer({{'let', _}, Inits, Expr}, C) ->
   % TODO: ensure no pattern name overlap!
   {Gs, C1} = lists:mapfoldl(fun({Pattern, _}, FoldC) ->
@@ -449,6 +431,22 @@ infer({{'let', _}, Inits, Expr}, C) ->
 
   {T, C3} = infer(Expr, C2),
   {T, C3#ctx{env=C#ctx.env}};
+
+infer({{if_let, _}, {Pattern, Expr}, Then, Else}, C) ->
+  C1 = with_pattern_env(Pattern, new_gnr(C)),
+  {PatternT, C2} = infer(Pattern, C1),
+  {ExprT, C3} = infer(Expr, C2),
+  C4 = add_csts({PatternT, ExprT}, C3),
+  {ThenT, C5} = infer(Then, finish_gnr(C4, C#ctx.gnr)),
+
+  case Else of
+    none -> {none, C5};
+    _ ->
+      % must use original env without pattern bindings
+      {ElseT, C6} = infer(Else, C5#ctx{env=C#ctx.env}),
+      TV = tv_server:fresh(C#ctx.pid),
+      {TV, add_csts([{TV, ThenT}, {TV, ElseT}], C6)}
+  end;
 
 infer({{match, _}, Expr, Cases}, C) ->
   TV = tv_server:fresh(C#ctx.pid),

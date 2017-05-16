@@ -57,7 +57,7 @@ expr_test_() ->
   , ?_test(false =
              expr("let and = |a, b, c| a && b && c in and(true, true, false)"))
   , ?_test([4, 3, 4, 2, 3] =
-             expr("let a = [4], f = |x| a ++ x ++ [3] in f([]) ++ f([2])"))
+             expr("let a = [4], f(x) = a ++ x ++ [3] in f([]) ++ f([2])"))
   , ?_test(15 = expr("let a = b + 5, b = 10 in a"))
   , ?_test(32 = expr(
       "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
@@ -285,6 +285,9 @@ pattern_test_() ->
   , ?_test(7 = expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
 
   , ?_test(none = expr("if let a = 3.0 then a"))
+  , ?_test(3 = expr(
+      "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
+    ))
   , ?_test(<<"hey">> = expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test(2.5 = expr(
       "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
