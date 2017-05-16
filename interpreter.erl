@@ -146,6 +146,28 @@ eval({{'if', _}, Expr, Then, Else}, ID) ->
     _ -> V
   end;
 
+eval({{if_let, _}, Pattern, Expr, Then, Else}, ID) ->
+  ChildID = env_create_child(ID),
+  Names = gb_sets:to_list(par:pattern_names(Pattern)),
+
+  lists:foreach(fun(Name) ->
+    env_set(Name, {lazy_pattern, Pattern, Expr, Names}, ChildID)
+  end, Names),
+
+  ExprV = eval(Expr, ChildID),
+  lists:foreach(fun(Name) ->
+    env_set(Name, {}, ChildID)
+  end, Names),
+
+  V = case match(ExprV, Pattern, ChildID) of
+    false -> eval(Else, ID);
+    true -> eval(Then, ChildID)
+  end,
+  case Else of
+    none -> none;
+    _ -> V
+  end;
+
 eval({{'let', _}, Inits, Expr}, ID) ->
   InitNames = lists:map(fun({Pattern, _}) ->
     gb_sets:to_list(par:pattern_names(Pattern))
@@ -343,7 +365,7 @@ match(V1, {var, _, Name}, ID) ->
     {} ->
       env_set(Name, V1, ID),
       true;
-    V2 -> {V1 == V2}
+    V2 -> V1 == V2
   end;
 
 match(V1, {var_value, Line, Name}, ID) -> V1 == eval({var, Line, Name}, ID);

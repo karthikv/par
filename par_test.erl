@@ -224,6 +224,11 @@ expr_test_() ->
 
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
   , ?_test("Bool" = ok_expr("let x = |a| a in x(3) == 3 && x(true)"))
+  , ?_test("A: Num" = ok_expr("let a = b + 5, b = 10 in a"))
+  , ?_test("A: Num" = ok_expr(
+      "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
+      "  f(5, 1)"
+    ))
   , ?_test(bad_expr("let x = 3.0, y = true in x - y", {"Bool", "Float"}))
   , ?_test(bad_expr("(|x| let a = x(3) in x(true))(|y| y)", {"Bool", "A: Num"}))
 
@@ -545,11 +550,6 @@ pattern_test_() ->
       "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
       "}"
     ))
-  , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
-  , ?_test("(Int, Float)" = ok_expr(
-      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 :: Int, x + 3.0)"
-    ))
   , ?_test("Int" = ok_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Baz(5) { Bar => 1, Baz(x) => x }",
@@ -576,6 +576,24 @@ pattern_test_() ->
   , ?_test("[A: Num]" = ok_expr(
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
     ))
+
+  , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
+  , ?_test("(Int, Float)" = ok_expr(
+      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "  (x + 3 :: Int, x + 3.0)"
+    ))
+  , ?_test("A: Num" =
+             ok_expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
+
+  , ?_test("()" = ok_expr("if let a = 3.0 then a"))
+  , ?_test("String" =
+             ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
+  , ?_test("Float" = ok_expr(
+      "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
+      "then f(true)\n"
+      "else 0"
+    ))
+
   , ?_test(bad_expr(
       "match \"hi\" { \"hey\" => true, \"hello\" => 1 }",
       {"Bool", "A: Num"}
@@ -583,11 +601,6 @@ pattern_test_() ->
   , ?_test(bad_expr(
       "match \"hi\" { @hi => [1, 2], \"hello\" => [3.0, 7, 5] }",
       {"String", "Atom"}
-    ))
-  , ?_test(bad_expr("let true = 3 in []", {"Bool", "A: Num"}))
-  , ?_test(bad_expr(
-      "let [_, (x, _)] = [\"foo\", \"bar\"] in x",
-      {"(A, B)", "String"}
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
@@ -616,5 +629,28 @@ pattern_test_() ->
   , ?_test(bad_expr(
       "let x = 3, y = [2] in match [1] { y => y ++ [1], *x => [x] }",
       {"[A: Num]", "B: Num"}
+    ))
+
+  , ?_test(bad_expr("let true = 3 in []", {"Bool", "A: Num"}))
+  , ?_test(bad_expr("let [x] = x in x", {"A", "[A]"}))
+  , ?_test(bad_expr(
+      "let [_, (x, _)] = [\"foo\", \"bar\"] in x",
+      {"(A, B)", "String"}
+    ))
+  , ?_test(bad_expr(
+      "let (*a, b) = (3, 7), [_, a] = [true, false] in b",
+      {"A: Num", "Bool"}
+    ))
+
+  , ?_test(bad_expr("if let a = 3.0 then a else true", {"Float", "Bool"}))
+  , ?_test(bad_expr(
+      "if let (_, a) = [\"hello\", \"hi\"] then a else \"hey\"",
+      {"(A, B)", "[String]"}
+    ))
+  , ?_test( bad_expr(
+      "if let tuple = (tuple, 1)\n"
+      "then tuple\n"
+      "else 0",
+      {"A", "(A, B: Num)"}
     ))
   ].

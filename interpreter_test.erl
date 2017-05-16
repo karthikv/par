@@ -251,12 +251,6 @@ pattern_test_() ->
       "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
       "}"
     ))
-  , ?_test([] = expr("let 3 = 3 in []"))
-  , ?_test({5, 5.0} = expr(
-      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 :: Int, x + 3.0)"
-    ))
-  , ?_test(7 = expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
   , ?_test(5 = execute(
       "enum Foo { Bar, Baz(Int) }\n"
       "main() = match Baz(5) { Bar => 1, Baz(x) => x }"
@@ -281,5 +275,20 @@ pattern_test_() ->
     ))
   , ?_test([1, 2] = expr(
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
+    ))
+
+  , ?_test([] = expr("let 3 = 3 in []"))
+  , ?_test({5, 5.0} = expr(
+      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "  (x + 3 :: Int, x + 3.0)"
+    ))
+  , ?_test(7 = expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
+
+  , ?_test(none = expr("if let a = 3.0 then a"))
+  , ?_test(<<"hey">> = expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
+  , ?_test(2.5 = expr(
+      "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
+      "then f(true)\n"
+      "else 0"
     ))
   ].

@@ -2,7 +2,7 @@ Nonterminals
   prg global var_list
   expr con_var expr_list expr_list_tuple
   kv_list start_record init_list mul neg lam
-  expr_pattern maybe_else semi_list
+  maybe_else semi_list
   let_list start_match match_list
   pattern pattern_list pattern_list_tuple
   sig te te_list_tuple
@@ -77,7 +77,9 @@ expr -> atom ':' var '(' ')' : {app, {native, '$1', '$3', 0}, []}.
 expr -> atom ':' var '(' expr_list ')' :
   {app, {native, '$1', '$3', num_args('$5')}, '$5'}.
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
-expr -> if expr_pattern then expr maybe_else : {'$1', '$2', '$4', '$5'}.
+expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
+expr -> if let pattern '=' expr then expr maybe_else :
+  {setelement(1, '$1', if_let), '$3', '$5', '$7', '$8'}.
 expr -> let let_list in expr : {'$1', '$2', '$4'}.
 expr -> match expr start_match match_list '}' : {'$1', '$2', '$4'}.
 expr -> '{' semi_list '}' : {block, '$2'}.
@@ -106,9 +108,6 @@ neg -> '-' expr : {'$1', '$2'}.
 
 lam -> '|' '-' '|' expr : {fn, [], '$4'}.
 lam -> '|' var_list '|' expr : {fn, '$2', '$4'}.
-
-expr_pattern -> expr : '$1'.
-expr_pattern -> expr '=' pattern : {pattern, '$3', '$1'}.
 
 maybe_else -> '$empty' : none.
 maybe_else -> else expr : '$2'.

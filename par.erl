@@ -416,6 +416,22 @@ infer({{'if', _}, Expr, Then, Else}, C) ->
       {TV, add_csts([{{con, 'Bool'}, ExprT}, {TV, ThenT}, {TV, ElseT}], C3)}
   end;
 
+infer({{if_let, _}, Pattern, Expr, Then, Else}, C) ->
+  C1 = with_pattern_env(Pattern, new_gnr(C)),
+  {PatternT, C2} = infer(Pattern, C1),
+  {ExprT, C3} = infer(Expr, C2),
+  C4 = add_csts({PatternT, ExprT}, C3),
+  {ThenT, C5} = infer(Then, finish_gnr(C4, C#ctx.gnr)),
+
+  case Else of
+    none -> {none, C5};
+    _ ->
+      % must use original env without pattern bindings
+      {ElseT, C6} = infer(Else, C5#ctx{env=C#ctx.env}),
+      TV = tv_server:fresh(C#ctx.pid),
+      {TV, add_csts([{TV, ThenT}, {TV, ElseT}], C6)}
+  end;
+
 infer({{'let', _}, Inits, Expr}, C) ->
   % TODO: ensure no pattern name overlap!
   {Gs, C1} = lists:mapfoldl(fun({Pattern, _}, FoldC) ->
