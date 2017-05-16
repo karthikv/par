@@ -58,6 +58,11 @@ expr_test_() ->
              expr("let and = |a, b, c| a && b && c in and(true, true, false)"))
   , ?_test([4, 3, 4, 2, 3] =
              expr("let a = [4], f = |x| a ++ x ++ [3] in f([]) ++ f([2])"))
+  , ?_test(15 = expr("let a = b + 5, b = 10 in a"))
+  , ?_test(32 = expr(
+      "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
+      "  f(5, 1)"
+    ))
 
   , ?_test(<<"hello">> = expr("{ \"hello\" }"))
   , ?_test(true = expr("{ @foo; true }"))
@@ -240,6 +245,18 @@ struct_test_() ->
 pattern_test_() ->
   [ ?_test(true = expr("match 3 { 3 => true, 4 => false }"))
   , ?_test(18 = expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test(5.0 = expr("match |x| x { id => let y = id(true) in id(5.0) }"))
+  , ?_test({6, {6.0, {8, 8.0}}} = expr(
+      "match (3, 4) {\n"
+      "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
+      "}"
+    ))
+  , ?_test([] = expr("let 3 = 3 in []"))
+  , ?_test({5, 5.0} = expr(
+      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "  (x + 3 :: Int, x + 3.0)"
+    ))
+  , ?_test(7 = expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
   , ?_test(5 = execute(
       "enum Foo { Bar, Baz(Int) }\n"
       "main() = match Baz(5) { Bar => 1, Baz(x) => x }"

@@ -1,12 +1,6 @@
 -module(interpreter).
 -export([reload/1, execute/1]).
 
-% For pattern matching a value.
-%   pattern_env - a Name => V mapping of new bindings introduced by the pattern
-%   env - a Name => V mapping of existing bindings in the environment
-%   pid - the process id of the global env server used to resolve global refs
--record(matcher, {pattern_env, env, pid}).
-
 reload(Syntax) ->
   par:reload(Syntax),
 
@@ -15,23 +9,23 @@ reload(Syntax) ->
   code:load_file(?MODULE).
 
 execute(Ast) ->
-  {ok, Pid} = global_env_server:start_link(),
-  lists:foreach(fun(Node) -> update_global_env(Node, Pid) end, Ast),
+  ID = env_create_first(),
+  lists:foreach(fun(Node) -> init(Node, ID) end, Ast),
 
   lists:foreach(fun(Node) ->
     case Node of
-      % strictly evaluate all global variables except functions
-      {global, Var, Expr} when element(1, Expr) /= fn -> eval(Var, #{}, Pid);
+      % strictly evaluate all globals
+      {global, Var, _} -> eval(Var, ID);
       _ -> true
     end
   end, Ast),
 
-  eval({app, {var, 0, "main"}, []}, #{}, Pid).
+  eval({app, {var, 0, "main"}, []}, ID).
 
-update_global_env({global, {var, _, Name}, Expr}, Pid) ->
-  global_env_server:set(Name, {lazy, Expr}, Pid);
+init({global, {var, _, Name}, Expr}, ID) ->
+  env_set(Name, {lazy, Expr}, ID);
 
-update_global_env({enum, _, OptionTEs}, Pid) ->
+init({enum, _, OptionTEs}, ID) ->
   lists:foreach(fun({option, {con_token, _, Name}, ArgsTE}) ->
     Value = if
       length(ArgsTE) == 0 -> list_to_atom(Name);
@@ -41,10 +35,10 @@ update_global_env({enum, _, OptionTEs}, Pid) ->
         end, [])
     end,
 
-    global_env_server:set(Name, Value, Pid)
+    env_set(Name, Value, ID)
   end, OptionTEs);
 
-update_global_env({struct, StructTE, FieldTEs}, Pid) ->
+init({struct, StructTE, FieldTEs}, ID) ->
   StructName = case StructTE of
     {con_token, _, Name} -> Name;
     {gen_te, {con_token, _, Name}, _} -> Name
@@ -57,111 +51,139 @@ update_global_env({struct, StructTE, FieldTEs}, Pid) ->
     list_to_tuple([list_to_atom(StructName) | Vs])
   end, []),
 
-  global_env_server:set(StructName, {struct, FieldNames, Value}, Pid);
+  env_set(StructName, {struct, FieldNames, Value}, ID);
 
-update_global_env({sig, _, _}, _) -> true.
+init({sig, _, _}, _) -> true.
 
-eval({fn, Args, Expr}, Env, Pid) ->
+eval({fn, Args, Expr}, ID) ->
   curry(length(Args), fun(Vs) ->
-    NewEnv = if
-      length(Args) == 0 -> Env;
+    NewID = if
+      length(Args) == 0 -> ID;
       true ->
-        lists:foldl(fun({{var, _, Name}, V}, FoldEnv) ->
-          FoldEnv#{Name => V}
-        end, Env, lists:zip(Args, Vs))
+        ChildID = env_create_child(ID),
+        lists:foreach(fun({{var, _, Name}, V}) ->
+          env_set(Name, V, ChildID)
+        end, lists:zip(Args, Vs)),
+        ChildID
     end,
 
-    eval(Expr, NewEnv, Pid)
+    eval(Expr, NewID)
   end, []);
 
-eval({expr_sig, Expr, _}, Env, Pid) -> eval(Expr, Env, Pid);
+eval({expr_sig, Expr, _}, ID) -> eval(Expr, ID);
 
-eval(none, _, _) -> none;
-eval({N, _, V}, _, _)
+eval(none, _) -> none;
+eval({N, _, V}, _)
   when N == int; N == float; N == bool; N == str; N == atom -> V;
 
-eval({list, Elems}, Env, Pid) ->
-  lists:map(fun(E) -> eval(E, Env, Pid) end, Elems);
+eval({list, Elems}, ID) ->
+  lists:map(fun(E) -> eval(E, ID) end, Elems);
 
-eval({tuple, Left, Right}, Env, Pid) ->
-  LeftV = eval(Left, Env, Pid),
-  RightV = eval(Right, Env, Pid),
+eval({tuple, Left, Right}, ID) ->
+  LeftV = eval(Left, ID),
+  RightV = eval(Right, ID),
   {LeftV, RightV};
 
-eval({map, Pairs}, Env, Pid) ->
+eval({map, Pairs}, ID) ->
   List = lists:map(fun({K, V}) ->
-    {eval(K, Env, Pid), eval(V, Env, Pid)}
+    {eval(K, ID), eval(V, ID)}
   end, Pairs),
   maps:from_list(List);
 
-eval({var, _, Name}, Env, Pid) ->
-  case maps:find(Name, Env) of
-    {ok, V} -> V;
-    error ->
-      case global_env_server:get(Name, Pid) of
-        {lazy, Expr} ->
-          V = eval(Expr, Env, Pid),
-          global_env_server:set(Name, V, Pid),
-          V;
-        {struct, _, V} -> V;
-        V -> V
-      end
+eval({var, _, Name}, ID) ->
+  case env_get(Name, ID) of
+    {lazy, Expr} ->
+      V = eval(Expr, ID),
+      env_update(Name, V, ID),
+      V;
+    {lazy_pattern, Pattern, Expr, PatternNames} ->
+      V = eval(Expr, ID),
+      lists:foreach(fun(PatternName) ->
+        env_set(PatternName, {}, ID)
+      end, PatternNames),
+
+      case match(V, Pattern, ID) of
+        false -> error({badmatch, V, Pattern});
+        true -> env_get(Name, ID)
+      end;
+    {struct, _, V} -> V;
+    V -> V
   end;
 
-eval({con_var, Line, Name}, Env, Pid) -> eval({var, Line, Name}, Env, Pid);
+eval({con_var, Line, Name}, ID) -> eval({var, Line, Name}, ID);
 
-eval({record, {con_var, _, Name}, Inits}, Env, Pid) ->
-  {struct, FieldNames, Fn} = global_env_server:get(Name, Pid),
+eval({record, {con_var, _, Name}, Inits}, ID) ->
+  {struct, FieldNames, Fn} = env_get(Name, ID),
 
   Vs = lists:map(fun(FieldName) ->
     {_, Expr} = hd(lists:filter(fun({{var, _, InitName}, _}) ->
       FieldName == InitName
     end, Inits)),
-    eval(Expr, Env, Pid)
+    eval(Expr, ID)
   end, FieldNames),
 
   Fn(Vs);
 
-eval({app, Expr, Args}, Env, Pid) ->
-  Fn = eval(Expr, Env, Pid),
+eval({app, Expr, Args}, ID) ->
+  Fn = eval(Expr, ID),
   Vs = if
     length(Args) == 0 -> [none];
-    true -> lists:map(fun(Arg) -> eval(Arg, Env, Pid) end, Args)
+    true -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
   end,
   Fn(Vs);
 
-eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _, _) ->
+eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
   curry_native(fun Module:Fn/Arity);
 
-eval({{'if', _}, Expr, Then, Else}, Env, Pid) ->
-  Result = case eval(Expr, Env, Pid) of
-    true -> eval(Then, Env, Pid);
-    false -> eval(Else, Env, Pid)
+eval({{'if', _}, Expr, Then, Else}, ID) ->
+  V = case eval(Expr, ID) of
+    true -> eval(Then, ID);
+    false -> eval(Else, ID)
   end,
   case Else of
     none -> none;
-    _ -> Result
+    _ -> V
   end;
 
-eval({{'let', _}, Inits, Expr}, Env, Pid) ->
-  NewEnv = lists:foldl(fun({{var, _, Name}, InitExpr}, FoldEnv) ->
-    V = eval(InitExpr, FoldEnv, Pid),
-    FoldEnv#{Name => V}
-  end, Env, Inits),
+eval({{'let', _}, Inits, Expr}, ID) ->
+  InitNames = lists:map(fun({Pattern, _}) ->
+    gb_sets:to_list(par:pattern_names(Pattern))
+  end, Inits),
+  InitsWithNames = lists:zip(Inits, InitNames),
 
-  eval(Expr, NewEnv, Pid);
+  ChildID = env_create_child(ID),
+  lists:foreach(fun({{Pattern, InitExpr}, Names}) ->
+    lists:foreach(fun(Name) ->
+      Value = {lazy_pattern, Pattern, InitExpr, Names},
+      env_set(Name, Value, ChildID)
+    end, Names)
+  end, InitsWithNames),
 
-eval({{'match', _}, Expr, Cases}, Env, Pid) ->
-  V = eval(Expr, Env, Pid),
-  match_cases(V, Cases, Env, Pid);
+  lists:foreach(fun({{Pattern, InitExpr}, Names}) ->
+    V = eval(InitExpr, ChildID),
+    lists:foreach(fun(Name) ->
+      env_set(Name, {}, ChildID)
+    end, Names),
 
-eval({block, Exprs}, Env, Pid) ->
-  lists:foldl(fun(Expr, _) -> eval(Expr, Env, Pid) end, none, Exprs);
+    case match(V, Pattern, ChildID) of
+      false -> error({badmatch, V, Pattern});
+      true -> true
+    end
+  end, InitsWithNames),
 
-eval({{Op, _}, Left, Right}, Env, Pid) ->
-  LeftV = eval(Left, Env, Pid),
-  RightV = eval(Right, Env, Pid),
+  eval(Expr, ChildID);
+
+eval({{'match', _}, Expr, Cases}, ID) ->
+  V = eval(Expr, ID),
+  match_cases(V, Cases, ID);
+
+eval({block, Exprs}, ID) ->
+  lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
+
+eval({{Op, _}, Left, Right}, ID) ->
+  LeftV = eval(Left, ID),
+  RightV = eval(Right, ID),
 
   case Op of
     '==' -> LeftV == RightV;
@@ -199,8 +221,8 @@ eval({{Op, _}, Left, Right}, Env, Pid) ->
       end
   end;
 
-eval({{Op, _}, Expr}, Env, Pid) ->
-  V = eval(Expr, Env, Pid),
+eval({{Op, _}, Expr}, ID) ->
+  V = eval(Expr, ID),
 
   case Op of
     '!' -> not V;
@@ -300,73 +322,113 @@ uncurry(Arity, Callback) ->
     end
   end.
 
-match_cases(V, [], _, _) -> error({badmatch, V});
-match_cases(V, [{Pattern, Expr} | Rest], Env, Pid) ->
-  M = #matcher{pattern_env=#{}, env=Env, pid=Pid},
-  case match(V, Pattern, M) of
-    {true, NewM} -> eval(Expr, maps:merge(Env, NewM#matcher.pattern_env), Pid);
-    {false, _} -> match_cases(V, Rest, Env, Pid)
+match_cases(V, [], _) -> error({badmatch, V});
+match_cases(V, [{Pattern, Expr} | Rest], ID) ->
+  % TODO: stop all new_childs
+  ChildID = env_create_child(ID),
+  lists:foreach(fun(Name) ->
+    env_set(Name, {}, ChildID)
+  end, gb_sets:to_list(par:pattern_names(Pattern))),
+
+  case match(V, Pattern, ChildID) of
+    true -> eval(Expr, ChildID);
+    false -> match_cases(V, Rest, ID)
   end.
 
-match(V1, {N, _, V2}, M)
-  when N == int; N == float; N == bool; N == str; N == atom ->
-  {V1 == V2, M};
+match(V1, {N, _, V2}, _)
+  when N == int; N == float; N == bool; N == str; N == atom -> V1 == V2;
 
-match(V1, {var, _, Name}, M) ->
-  PatternEnv = M#matcher.pattern_env,
-  case maps:find(Name, PatternEnv) of
-    {ok, V2} -> {V1 == V2, M};
-    error ->
-      NewPatternEnv = PatternEnv#{Name => V1},
-      {true, M#matcher{pattern_env=NewPatternEnv}}
+match(V1, {var, _, Name}, ID) ->
+  case env_get(Name, ID) of
+    {} ->
+      env_set(Name, V1, ID),
+      true;
+    V2 -> {V1 == V2}
   end;
 
-match(V1, {var_value, _, Name}, M) ->
-  #{Name := V2} = M#matcher.env,
-  {V1 == V2, M};
+match(V1, {var_value, Line, Name}, ID) -> V1 == eval({var, Line, Name}, ID);
+match(_, {'_', _}, _) -> true;
 
-match(_, {'_', _}, M) -> {true, M};
-
-match(V1, {con_var, _, Name}, M) ->
-  case global_env_server:get(Name, M#matcher.pid) of
-    {struct, _, _} -> {false, M};
-    V2 -> {V1 == V2, M}
+match(V1, {con_var, _, Name}, ID) ->
+  case env_get(Name, ID) of
+    % can't match functions
+    {struct, _, _} -> false;
+    V2 when not is_function(V2) -> V1 == V2;
+    _ -> false
   end;
 
-match(V, {app, {con_var, Line, Name}, Args}, M) ->
+match(V, {app, {con_var, Line, Name}, Args}, ID) ->
   Atom = list_to_atom(Name),
   if
-    length(Args) == 0 -> {V == Atom, M};
+    length(Args) == 0 -> V == Atom;
     true ->
-      VList = tuple_to_list(V),
-      match(VList, {list, [{atom, Line, Atom} | Args]}, M)
+      match(tuple_to_list(V), {list, [{atom, Line, Atom} | Args]}, ID)
   end;
 
-match(V, {list, List}, M) ->
+match(V, {list, List}, ID) ->
   if
-    length(V) /= length(List) -> {false, M};
+    length(V) /= length(List) -> false;
     true ->
-      lists:foldl(fun({ExpV, Elem}, {Matched, FoldM}) ->
+      lists:foldl(fun({ExpV, Elem}, Matched) ->
         case Matched of
-          false -> {Matched, FoldM};
-          true -> match(ExpV, Elem, FoldM)
+          false -> false;
+          true -> match(ExpV, Elem, ID)
         end
-      end, {true, M}, lists:zip(V, List))
+      end, true, lists:zip(V, List))
   end;
 
-match(V, {list, List, Rest}, M) ->
-  ListLength = length(List),
+match(V, {list, List, Rest}, ID) ->
   if
-    length(V) < ListLength -> {false, M};
+    length(V) < length(List) -> false;
     true ->
-      SubV = lists:sublist(V, ListLength),
-      RestV = lists:sublist(V, ListLength + 1, ListLength),
+      SubV = lists:sublist(V, length(List)),
+      RestV = lists:sublist(V, length(List) + 1, length(V)),
 
-      case match(SubV, {list, List}, M) of
-        {false, NewM} -> {false, NewM};
-        {true, NewM} -> match(RestV, Rest, NewM)
+      case match(SubV, {list, List}, ID) of
+        false -> false;
+        true -> match(RestV, Rest, ID)
       end
   end;
 
-match(V, {tuple, Left, Right}, M) ->
-  match(tuple_to_list(V), {list, [Left, Right]}, M).
+match(V, {tuple, Left, Right}, ID) ->
+  match(tuple_to_list(V), {list, [Left, Right]}, ID).
+
+env_create_first() ->
+  case ets:info(envs) of
+    undefined -> true;
+    _ -> ets:delete(envs)
+  end,
+  ets:new(envs, [set, named_table]),
+  ets:insert(envs, [{next_id, 2}, {1, #{}, undefined}]),
+  1.
+
+env_create_child(ParentID) ->
+  ID = ets:lookup_element(envs, next_id, 2),
+  ets:insert(envs, [{next_id, ID + 1}, {ID, #{}, ParentID}]),
+  ID.
+
+env_get(Name, ID) ->
+  [{_, Env, ParentID}] = ets:lookup(envs, ID),
+  case maps:find(Name, Env) of
+    {ok, Value} -> Value;
+    error ->
+      case ParentID of
+        undefined -> error({badkey, Name});
+        _ -> env_get(Name, ParentID)
+      end
+  end.
+
+env_set(Name, Value, ID) ->
+  [{_, Env, ParentID}] = ets:lookup(envs, ID),
+  ets:insert(envs, {ID, Env#{Name => Value}, ParentID}).
+
+env_update(Name, Value, ID) ->
+  [{_, Env, ParentID}] = ets:lookup(envs, ID),
+  case maps:find(Name, Env) of
+    {ok, _} -> ets:insert(envs, {ID, Env#{Name => Value}, ParentID});
+    error ->
+      case ParentID of
+        undefined -> error({badkey, Name});
+        _ -> env_update(Name, Value, ParentID)
+      end
+  end.

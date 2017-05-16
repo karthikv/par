@@ -1,5 +1,5 @@
 -module(par).
--export([reload/1, infer_prg/1, subs/2, fvs/1, pretty/1]).
+-export([reload/1, infer_prg/1, pretty/1, pattern_names/1]).
 
 % Naming conventions:
 %
@@ -84,6 +84,8 @@
 % - Pattern matching
 % - What if TV isn't subbed when generalizing?
 %     e.g. foo = @erlang:bar(), so B = F
+% - let syntax for defining function
+% - uncurry function within e.g. tuple to pass to native erlang?
 % - Exceptions
 % - Code generation
 % - Update naming conventions
