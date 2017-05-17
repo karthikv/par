@@ -2,8 +2,7 @@ Nonterminals
   prg global var_list
   expr con_var expr_list expr_list_tuple
   kv_list start_record init_list mul neg lam
-  maybe_else semi_list
-  let_list let_init start_match match_list
+  let_list let_init start_match match_list semi_list
   pattern pattern_list pattern_list_tuple
   sig te te_list_tuple
   enum option_list option te_list
@@ -77,10 +76,13 @@ expr -> atom ':' var '(' ')' : {app, {native, '$1', '$3', 0}, []}.
 expr -> atom ':' var '(' expr_list ')' :
   {app, {native, '$1', '$3', num_args('$5')}, '$5'}.
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
-expr -> if expr then expr maybe_else : {'$1', '$2', '$4', '$5'}.
+expr -> if expr then expr : {'$1', '$2', '$4', none}.
+expr -> if expr then expr else expr : {'$1', '$2', '$4', '$6'}.
 expr -> let let_list in expr : {'$1', '$2', '$4'}.
-expr -> if let let_init then expr maybe_else :
-  {setelement(1, '$1', if_let), '$3', '$5', '$6'}.
+expr -> if let let_init then expr :
+  {setelement(1, '$1', if_let), '$3', '$5', none}.
+expr -> if let let_init then expr else expr :
+  {setelement(1, '$1', if_let), '$3', '$5', '$7'}.
 expr -> match expr start_match match_list '}' : {'$1', '$2', '$4'}.
 expr -> '{' semi_list '}' : {block, '$2'}.
 
@@ -109,12 +111,6 @@ neg -> '-' expr : {'$1', '$2'}.
 lam -> '|' '-' '|' expr : {fn, [], '$4'}.
 lam -> '|' var_list '|' expr : {fn, '$2', '$4'}.
 
-maybe_else -> '$empty' : none.
-maybe_else -> else expr : '$2'.
-
-semi_list -> expr : ['$1'].
-semi_list -> expr ';' semi_list : ['$1' | '$3'].
-
 let_list -> let_init : ['$1'].
 let_list -> let_init ',' let_list : ['$1' | '$3'].
 
@@ -126,6 +122,9 @@ start_match -> '{' : '$1'.
 
 match_list -> pattern '=>' expr : [{'$1', '$3'}].
 match_list -> pattern '=>' expr ',' match_list : [{'$1', '$3'} | '$5'].
+
+semi_list -> expr : ['$1'].
+semi_list -> expr ';' semi_list : ['$1' | '$3'].
 
 pattern -> int : '$1'.
 pattern -> float : '$1'.
@@ -192,15 +191,17 @@ tv_list_tuple -> tv_token ',' tv_list_tuple : {tuple_te, '$1', '$3'}.
 Nonassoc 10 '='.
 Right 20 '->'.
 Unary 30 lam.
-Right 40 'else'.
-Left 50 '||'.
-Left 60 '&&'.
-Nonassoc 70 '==' '!=' '>' '<' '>=' '<='.
-Left 80 '+' '-' '++' '--'.
-Left 90 mul '/' '%'.
-Unary 100 '::'.
-Unary 110 '!' '#' neg 'discard'.
-Unary 120 '('.
+Left 40 '||'.
+Left 50 '&&'.
+Nonassoc 60 '==' '!=' '>' '<' '>=' '<='.
+Left 70 '+' '-' '++' '--'.
+Left 80 mul '/' '%'.
+Nonassoc 90 '::'.
+Unary 100 '!' '#' neg 'discard'.
+Nonassoc 110 '('.
+
+Nonassoc 10 'then'.
+Nonassoc 20 'else'.
 
 Nonassoc 10 start_match.
 Nonassoc 20 start_record.

@@ -76,12 +76,11 @@
 % TODO:
 % - TODOs in code (non-unification error cases)
 % - Error messages
+% - Exhaustive pattern matching errors
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Updating and accessing a struct, test recursive struct
-% - else precedence
 % - Concurrency
-% - Pattern matching
 % - uncurry function within e.g. tuple to pass to native erlang?
 % - Exceptions
 % - Code generation
