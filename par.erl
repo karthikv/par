@@ -27,10 +27,9 @@
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
 %   types - a Name => TypeInfo mapping of types in the environment
-%   in_pattern - true if within a pattern, false otherwise
-%   pattern_env - new variables introduced as part of a pattern
+%   field_map - a Field Name => [Struct Name] mapping
 %   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {gnr, gnrs, env, types, pid}).
+-record(ctx, {gnr, gnrs, env, types, field_map, pid}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -38,8 +37,10 @@
 %   schemes - the schemes of env variables that have been solved for and
 %             generalized
 %   rigid_vs - the set of TV names in the environment
+%   types - a Name => TypeInfo mapping of types in the environment
+%   field_map - a Field Name => [Struct Name] mapping
 %   pid - the process id of the TV server used to generated fresh TVs
--record(solver, {subs, errs, schemes, rigid_vs, pid}).
+-record(solver, {subs, errs, schemes, rigid_vs, types, field_map, pid}).
 
 % G - a gnr record that represents a set of constraints to solve before
 %     generalizing a type variable:
@@ -51,7 +52,17 @@
 %          simultaneously with this record
 %   index / low_link / on_stack - bookkeeping for Tarjan's strongly connected
 %                                 components algorithm; see T below and [1]
--record(gnr, {id, vs, env, csts, deps, index, low_link, on_stack}).
+-record(gnr, {
+  id,
+  vs,
+  env,
+  csts,
+  deferred_csts,
+  deps,
+  index,
+  low_link,
+  on_stack
+}).
 
 % T - A tarjan record that's used to apply Tarjan's strongly connected
 %     components algorithm. This is necessary to solve constraints in the proper
@@ -82,6 +93,7 @@
 % - Updating and accessing a struct, test recursive struct
 % - Concurrency
 % - uncurry function within e.g. tuple to pass to native erlang?
+% - Remove arbitrary type variables from ADTs
 % - Exceptions
 % - Code generation
 % - Update naming conventions
@@ -119,7 +131,15 @@ infer_prg(Prg) ->
   ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
-  C = #ctx{gnr=undefined, gnrs=[], env=#{}, types=#{}, pid=Pid},
+  C = #ctx{
+    gnr=undefined,
+    gnrs=[],
+    env=#{},
+    types=#{},
+    field_map=#{},
+    pid=Pid
+  },
+
   C1 = lists:foldl(fun(Node, FoldC) ->
     case Node of
       {global, {var, _, Name}, _} ->
@@ -174,7 +194,15 @@ infer_prg(Prg) ->
     end
   end, {none, none, C2}, Ast),
 
-  S = #solver{subs=#{}, errs=[], schemes=#{}, pid=Pid},
+  S = #solver{
+    subs=#{},
+    errs=[],
+    schemes=#{},
+    types=C3#ctx.types,
+    field_map=C3#ctx.field_map,
+    pid=Pid
+  },
+
   Result = case solve(C3#ctx.gnrs, S) of
     {ok, Schemes} ->
       SubbedEnv = maps:map(fun(_, Value) ->
@@ -221,6 +249,7 @@ infer({expr_sig, Expr, Sig}, C) ->
   NormSigT = norm_sig_type(SigT, C2#ctx.pid),
 
   C3 = add_csts([{TV, ExprT}, {TV, NormSigT}], C2),
+  % TODO: make deps a set
   {{inst, TV}, finish_gnr(C3, G#gnr{deps=[ID | G#gnr.deps]})};
 
 infer({lam_te, ArgTE, ReturnTE}, C) ->
@@ -282,15 +311,23 @@ infer({struct, StructTE, FieldTEs}, C) ->
   NormFnT = norm_sig_type(FnT, C2#ctx.pid),
 
   StructName = case StructTE of
-    {con_token, _, Name} -> Name;
-    {gen_te, {con_token, _, Name}, _} -> Name
+    {con_token, _, ConName} -> ConName;
+    {gen_te, {con_token, _, ConName}, _} -> ConName
   end,
 
   {TV, ID} = tv_server:fresh_gnr_id(C2#ctx.pid),
   C3 = add_env(StructName, {add_dep, TV, ID}, C2),
-  NewTypes = (C3#ctx.types)#{StructName => {struct, FieldNamesRev}},
 
-  C4 = new_gnr(TV, ID, C3#ctx{types=NewTypes}),
+  NewTypes = (C3#ctx.types)#{StructName => {struct, FieldNamesRev, TV}},
+  NewFieldMap = lists:foldl(fun(Name, FieldMap) ->
+    case maps:find(Name, FieldMap) of
+      {ok, StructNames} ->
+        FieldMap#{Name := gb_sets:add(StructName, StructNames)};
+      error -> FieldMap#{Name => gb_sets:singleton(StructName)}
+    end
+  end, C3#ctx.field_map, FieldNamesRev),
+
+  C4 = new_gnr(TV, ID, C3#ctx{types=NewTypes, field_map=NewFieldMap}),
   C5 = finish_gnr(add_csts({TV, NormFnT}, C4), C3#ctx.gnr),
   {TV, C5};
 
@@ -344,9 +381,9 @@ infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 infer({record, ConVar, Inits}, C) ->
   {FnT, C1} = infer(ConVar, C),
   {con_var, _, StructName} = ConVar,
-  % TODO: should FieldNames be in the types map or in the env map? Update
+  % TODO: should FieldNamesRev be in the types map or in the env map? Update
   % TypeInfo description in naming conventions after figuring this out
-  #{StructName := {struct, FieldNamesRev}} = C1#ctx.types,
+  #{StructName := {struct, FieldNamesRev, _}} = C1#ctx.types,
 
   {InitNameTs, C2} = lists:foldl(fun(Init, {NameTs, FoldC}) ->
     {{var, _, Name}, Expr} = Init,
@@ -367,6 +404,25 @@ infer({record, ConVar, Inits}, C) ->
   end, TV, FieldNamesRev),
 
   {TV, add_csts({T, FnT}, C2)};
+
+infer({field, {var, _, Name}}, C) ->
+  % TODO: error case if name doesn't exist
+  #{Name := StructNames} = C#ctx.field_map,
+  C1 = gb_sets:fold(fun(N, FoldC) ->
+    % need each possible struct to be added as a gnr dependency
+    element(2, lookup(N, FoldC))
+  end, C, StructNames),
+
+  StructTV = tv_server:fresh(C1#ctx.pid),
+  FieldTV = tv_server:fresh(C1#ctx.pid),
+  T = {lam, StructTV, FieldTV},
+  {T, defer_csts({FieldTV, {field, StructTV, Name}}, C1)};
+
+infer({field, Expr, Var}, C) ->
+  {ExprT, C1} = infer(Expr, C),
+  {FieldT, C2} = infer({field, Var}, C1),
+  TV = tv_server:fresh(C2#ctx.pid),
+  {TV, add_csts({{lam, ExprT, TV}, FieldT}, C2)};
 
 infer({app, Expr, Args}, C) ->
   {ArgTsRev, C1} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
@@ -552,7 +608,7 @@ pattern_names([Node | Rest]) ->
 pattern_names({N, _, _}) when N == int; N == float; N == bool; N == str;
     N == atom; N == var_value; N == con_var ->
   gb_sets:new();
-pattern_names({var, _, Name}) -> gb_sets:from_list([Name]);
+pattern_names({var, _, Name}) -> gb_sets:singleton(Name);
 pattern_names({'_', _}) -> gb_sets:new();
 pattern_names({app, ConVar, Args}) ->
   gb_sets:union(pattern_names(ConVar), pattern_names(Args));
@@ -572,11 +628,11 @@ add_env(Name, Value, C) ->
 
 new_gnr(C) ->
   ID = tv_server:next_gnr_id(C#ctx.pid),
-  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deferred_csts=[], deps=[]},
   C#ctx{gnr=G}.
 
 new_gnr({tv, V, _, _}, ID, C) ->
-  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deferred_csts=[], deps=[]},
   C#ctx{gnr=G}.
 
 finish_gnr(C, OldG) ->
@@ -587,6 +643,15 @@ add_csts(Csts, C) ->
   G1 = case is_list(Csts) of
     true -> G#gnr{csts=Csts ++ G#gnr.csts};
     false -> G#gnr{csts=[Csts | G#gnr.csts]}
+  end,
+
+  C#ctx{gnr=G1}.
+
+defer_csts(Csts, C) ->
+  G = C#ctx.gnr,
+  G1 = case is_list(Csts) of
+    true -> G#gnr{deferred_csts=Csts ++ G#gnr.deferred_csts};
+    false -> G#gnr{deferred_csts=[Csts | G#gnr.deferred_csts]}
   end,
 
   C#ctx{gnr=G1}.
@@ -705,21 +770,25 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
     true -> T2
   end.
 
-unify_csts(#gnr{csts=Csts, env=Env}, S) ->
+unify_csts(#gnr{csts=Csts, deferred_csts=Deferred, env=Env}, S) ->
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
   % deepest expression's constraints first to have better error messages (e.g.
   % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
   % reverse the order here.
   OrderedCsts = lists:reverse(Csts),
+  OrderedDeferred = lists:reverse(Deferred),
   RigidVs = rigid_vs(Env, S#solver.schemes),
 
-  lists:foldl(fun({L, R}, FoldS) ->
-    Subs = FoldS#solver.subs,
-    L1 = subs(resolve(L, FoldS), Subs),
-    R1 = subs(resolve(R, FoldS), Subs),
-    unify({L1, R1}, FoldS)
-  end, S#solver{rigid_vs=RigidVs}, OrderedCsts).
+  % two folds avoids copying OrderedCsts list
+  S1 = lists:foldl(fun process_cst/2, S#solver{rigid_vs=RigidVs}, OrderedCsts),
+  lists:foldl(fun process_cst/2, S1, OrderedDeferred).
+
+process_cst({L, R}, S) ->
+  Subs = S#solver.subs,
+  L1 = subs(resolve(L, S), Subs),
+  R1 = subs(resolve(R, S), Subs),
+  unify({L1, R1}, S).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
@@ -735,6 +804,7 @@ resolve({inst, TV}, S) ->
     error -> TV
   end,
   resolve(ResolvedT, S);
+resolve({field, StructT, Name}, S) -> {field, resolve(StructT, S), Name};
 resolve(none, _) -> none.
 
 inst({GVs, T}, Pid) ->
@@ -742,6 +812,91 @@ inst({GVs, T}, Pid) ->
     FoldSubs#{V => tv_server:next_name(Pid)}
   end, #{}, GVs),
   subs(T, Subs).
+
+unify({{field, StructT, Name}, FieldT}, S) ->
+  % field is known to exist in some struct(s) from inference
+  #{Name := StructNames} = S#solver.field_map,
+
+  Choices = gb_sets:fold(fun(StructName, FoldChoices) ->
+    #{StructName := {struct, FieldNamesRev, {tv, V, _, _}}} = S#solver.types,
+    #{V := Scheme} = S#solver.schemes,
+    FnT = inst(Scheme, S#solver.pid),
+
+    {Choice, _} = lists:foldl(fun(FieldName, {FoldChoice, FieldDone}) ->
+      {FoldStructT, FoldFieldT, FoldS} = FoldChoice,
+      {NewFieldT, NewFieldDone} = case {FieldName, FieldDone} of
+        {_, true} -> {FoldFieldT, true};
+        {Name, false} -> {element(2, FoldFieldT), true};
+        {_, false} -> {element(3, FoldFieldT), false}
+      end,
+      {{element(3, FoldStructT), NewFieldT, FoldS}, NewFieldDone}
+    end, {{FnT, FnT, S}, false}, lists:reverse(FieldNamesRev)),
+
+    [Choice | FoldChoices]
+  end, [], StructNames),
+
+  case length(Choices) of
+    1 ->
+      {ExpStructT, ExpFieldT, S1} = hd(Choices),
+      S2 = process_cst({StructT, ExpStructT}, S1),
+      process_cst({FieldT, ExpFieldT}, S2);
+
+    % 0 should never happen, as ensured during inference
+    L when L > 1 ->
+      FieldChoices = lists:filtermap(fun({FoldStructT, FoldFieldT, FoldS}) ->
+        FoldS1 = process_cst({StructT, FoldStructT}, FoldS),
+        if
+          length(FoldS1#solver.errs) == length(FoldS#solver.errs) ->
+            Subs = FoldS1#solver.subs,
+            {true, {subs(FoldStructT, Subs), subs(FoldFieldT, Subs), FoldS1}};
+          true -> false
+        end
+      end, Choices),
+
+      case length(FieldChoices) of
+        0 ->
+          Options = lists:map(fun({FoldStructT, _, _}) ->
+            FoldStructT
+          end, Choices),
+          add_err({StructT, {either, Options}}, S);
+
+        1 ->
+          {_, ExpFieldT, S1} = hd(FieldChoices),
+          process_cst({FieldT, ExpFieldT}, S1);
+
+        _ ->
+          ValidChoices = lists:filtermap(fun({FoldStructT, FoldFieldT, FoldS}) ->
+            FoldS1 = process_cst({FieldT, FoldFieldT}, FoldS),
+            if
+              length(FoldS1#solver.errs) == length(FoldS#solver.errs) ->
+                Subs = FoldS1#solver.subs,
+                {true, {
+                  subs(FoldStructT, Subs),
+                  subs(FoldFieldT, Subs),
+                  FoldS1
+                }};
+              true -> false
+            end
+          end, FieldChoices),
+
+          case length(ValidChoices) of
+            0 ->
+              Options = lists:map(fun({_, FoldFieldT, _}) ->
+                FoldFieldT
+              end, FieldChoices),
+              add_err({FieldT, {either, Options}}, S);
+
+            1 -> element(3, hd(ValidChoices));
+
+            _ ->
+              Options = lists:map(fun({FoldStructT, _, _}) ->
+                FoldStructT
+              end, ValidChoices),
+              add_err({StructT, {ambig, Options}}, S)
+          end
+      end
+  end;
+unify({T, {field, StructT, Name}}, S) -> unify({{field, StructT, Name}, T}, S);
 
 unify({T1, T2}, S) when T1 == T2 -> S;
 
@@ -867,6 +1022,7 @@ subs({tv, V, I, Cat}, Subs) ->
 subs({con, Con}, _) -> {con, Con};
 subs({gen, Con, ParamT}, Subs) -> {gen, Con, subs(ParamT, Subs)};
 subs({inst, TV}, Subs) -> {inst, subs(TV, Subs)};
+subs({field, StructT, Name}, Subs) -> {field, subs(StructT, Subs), Name};
 subs(none, _) -> none.
 
 rigid_vs(Env, Schemes) ->
@@ -889,7 +1045,7 @@ rigid_vs(Env, Schemes) ->
 
 fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
 fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
-fvs({tv, V, _, _}) -> gb_sets:from_list([V]);
+fvs({tv, V, _, _}) -> gb_sets:singleton(V);
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamT}) -> fvs(ParamT);
 % fvs({inst, ...}) ommitted; they should be resolved
@@ -935,6 +1091,9 @@ pretty({gen, T, ParamT}) ->
   format_str("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
 pretty({inst, TV}) ->
   format_str("inst(~s)", [pretty(TV)]);
+pretty({A, Options}) when A == either; A == ambig ->
+  Strs = lists:map(fun(O) -> pretty(O) end, Options),
+  format_str("~s(~s)", [atom_to_list(A), string:join(lists:sort(Strs), ", ")]);
 pretty(none) -> "()".
 
 pretty_strip_parens({tuple, LeftT, RightT}) ->

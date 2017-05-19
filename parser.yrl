@@ -12,7 +12,7 @@ Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/' '%'
-  '++' '--' '|' '::' ':' '->' ';' 'discard'
+  '++' '--' '.' '|' '::' ':' '->' ';' 'discard'
   if then else let in match
   enum_token struct_token
   int float bool str atom var '_'
@@ -41,6 +41,7 @@ expr -> bool : '$1'.
 expr -> str : '$1'.
 expr -> atom : '$1'.
 expr -> var : '$1'.
+expr -> '.' var : {field, '$2'}.
 expr -> con_var : '$1'.
 expr -> '[' ']' : {list, []}.
 expr -> '[' expr_list ']' : {list, '$2'}.
@@ -64,6 +65,7 @@ expr -> expr '/' expr : {'$2', '$1', '$3'}.
 expr -> expr '%' expr : {'$2', '$1', '$3'}.
 expr -> expr '++' expr : {'$2', '$1', '$3'}.
 expr -> expr '--' expr : {'$2', '$1', '$3'}.
+expr -> expr '.' var : {field, '$1', '$3'}.
 expr -> '!' expr : {'$1', '$2'}.
 expr -> '#' expr : {'$1', '$2'}.
 expr -> neg : '$1'.
@@ -199,6 +201,7 @@ Left 80 mul '/' '%'.
 Nonassoc 90 '::'.
 Unary 100 '!' '#' neg 'discard'.
 Nonassoc 110 '('.
+Nonassoc 120 '.'.
 
 Nonassoc 10 'then'.
 Nonassoc 20 'else'.

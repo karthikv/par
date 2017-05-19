@@ -76,6 +76,11 @@ norm({con, Con}, N) -> {{con, Con}, N};
 norm({gen, Con, ParamT}, N) ->
   {NormParamT, N1} = norm(ParamT, N),
   {{gen, Con, NormParamT}, N1};
+norm({A, Options}, N) when A == either; A == ambig ->
+  {NormOptions, N1} = lists:mapfoldl(fun(O, FoldN) ->
+    norm(O, FoldN)
+  end, N, Options),
+  {{A, NormOptions}, N1};
 norm(none, N) -> {none, N}.
 
 expr_test_() ->
@@ -562,6 +567,127 @@ struct_test_() ->
       "struct Foo { bar :: A, baz :: A }\n"
       "expr = Foo(3, true)",
       {"A: Num", "Bool"}
+    ))
+
+
+  , ?_test("Int" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "expr = Foo(3, [\"hi\"]).bar",
+      "expr"
+    ))
+  , ?_test("Foo -> [String]" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "expr = .baz",
+      "expr"
+    ))
+  , ?_test("(String, Bool)" = ok_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = let id(a) = a, f = Foo { bar = id } in\n"
+      "  (f.bar(\"hi\"), f.bar(true))",
+      "expr"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "expr = Foo(3, [\"hi\"]).bar ++ [1]",
+      {"Int", "[A: Num]"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = Foo(\"hi\").bar && true",
+      {"String", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "f(x) = (x.bar && true, x.bar ++ \"hi\")",
+      {"Bool", "String"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = let id(a) = a in\n"
+      "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
+      {"String", "Bool"}
+    ))
+
+
+  , ?_test("Foo<A: Num> -> (A: Num, A: Num)" = ok_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = (x.bar + 3, x.bar)",
+      "f"
+    ))
+  , ?_test("Foo -> Other -> Bool" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x, y) = x.bar + 3 == 5 && y.bar == \"hi\"",
+      "f"
+    ))
+  , ?_test("Foo -> Int" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = (x :: Foo).bar",
+      "f"
+    ))
+  , ?_test("Other -> String" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = x.bar :: String",
+      "f"
+    ))
+  , ?_test("Foo -> Int" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f :: Foo -> Int\n"
+      "f(x) = x.bar + 5",
+      "f"
+    ))
+  , ?_test("Foo<A -> B> -> A -> B" = ok_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x, a) = x.bar(a)",
+      "f"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = (x.bar(\"hi\"), x.bar(true))",
+      {"String", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: Int }\n"
+      "f(x) = x + x.bar",
+      {"A: Num", "either(Foo, Other)"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = x.bar && true",
+      {"Bool", "either(Int, String)"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = x.bar",
+      {"A", "ambig(Foo, Other)"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: Int }\n"
+      "f(x) = x.bar + 5",
+      {"A", "ambig(Foo, Other)"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = x.bar ++ \"hi\"",
+      {"A", "ambig(Foo<String>, Other)"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String -> Bool }\n"
+      "f(x, a) = x.bar(a)",
+      {"A", "ambig(Foo<B -> C>, Other)"}
     ))
   ].
 
