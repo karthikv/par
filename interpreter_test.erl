@@ -245,6 +245,10 @@ struct_test_() ->
       "struct Foo<X> { bar :: X }\n"
       "main() = Foo { bar = @hi }"
     ))
+  , ?_test({'Foo', hi, [{'Foo', hello, []}]} = execute(
+      "struct Foo { bar :: Atom, baz :: [Foo] }\n"
+      "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
+    ))
 
 
   , ?_test(3 = execute(

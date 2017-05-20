@@ -553,6 +553,17 @@ struct_test_() ->
       "expr = Foo { bar = @hi }",
       "expr"
     ))
+  % Won't be able to create a valid Foo, but should still type check.
+  , ?_test("Bool" = ok_prg(
+      "struct Foo { baz :: Foo }\n"
+      "expr = true",
+      "expr"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Atom, baz :: [Foo] }\n"
+      "expr = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }",
+      "expr"
+    ))
   , ?_test(bad_prg(
       "struct Foo { bar :: (Float, Atom) }\n"
       "expr = Foo(([1], @a))",
