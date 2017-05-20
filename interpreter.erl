@@ -124,6 +124,27 @@ eval({record, {con_var, _, Name}, Inits}, ID) ->
 
   Fn(Vs);
 
+eval({field, {var, _, Name}}, ID) ->
+  curry(1, fun([Struct]) ->
+    StructName = atom_to_list(element(1, Struct)),
+    {struct, FieldNames, _} = env_get(StructName, ID),
+
+    {Index, _} = lists:foldl(fun(FieldName, {Index, Found}) ->
+      case {FieldName, Found} of
+        {Name, false} -> {Index, true};
+        {_, true} -> {Index, true};
+        {_, false} -> {Index + 1, false}
+      end
+    end, {2, false}, FieldNames),
+
+    element(Index, Struct)
+  end, []);
+
+eval({field, Expr, Var}, ID) ->
+  Struct = eval(Expr, ID),
+  Fn = eval({field, Var}, ID),
+  Fn([Struct]);
+
 eval({app, Expr, Args}, ID) ->
   Fn = eval(Expr, ID),
   Vs = if

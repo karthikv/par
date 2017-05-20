@@ -689,6 +689,26 @@ struct_test_() ->
       "f(x, a) = x.bar(a)",
       {"A", "ambig(Foo<B -> C>, Other)"}
     ))
+
+
+  % Ideally we'd make these cases work, but for the sake of keeping the
+  % implementation simple, we can't resolve ambiguity across gnrs or
+  % between composed record accesses. It's possible to implement these
+  % by extending our type system with an either(...) construct, but we
+  % avoid this complexity unless need be.
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "struct Mine { m :: String -> Bool }\n"
+      "f(x, y) = x.m(y.bar)",
+      {"A", "ambig(Foo, Other)"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = let b = x.bar in b + 4",
+      {"A", "ambig(Foo, Other)"}
+    ))
   ].
 
 pattern_test_() ->

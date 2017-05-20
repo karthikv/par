@@ -39,12 +39,14 @@ expr_test_() ->
       expr("#[2, 4, 2, 6, 4, 8, 6]")
     )
 
+
   , ?_test({3.0, true} = (expr("|x| x"))([{3.0, true}]))
   , ?_test(35.0 = (expr("|x, y| x * y * 3.5"))([4, 2.5]))
   , ?_test(true = expr("(|x| x || true)(false)"))
   , ?_test(<<"ab">> = expr("(|a, b| a ++ b)(\"a\")(\"b\")"))
   , ?_test(5 = expr("(|x| |y| x + y)(2, 3)"))
   , ?_test([4, 1] = expr("(|x| |-| x -- [3])([4, 3, 1])()"))
+
 
   , ?_test(<<"world">> = expr("if false then \"hello\" else \"world\""))
   , ?_test([true, false] =
@@ -63,6 +65,7 @@ expr_test_() ->
       "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
       "  f(5, 1)"
     ))
+
 
   , ?_test(<<"hello">> = expr("{ \"hello\" }"))
   , ?_test(true = expr("{ @foo; true }"))
@@ -121,6 +124,7 @@ expr_test_() ->
   , ?_test(false = expr("!true"))
   , ?_test(true = expr("!false && true"))
 
+
   , ?_test([4, 6] = expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test([6] = expr("@lists:filter((|t, x| x > t)(5), [2, 4, 6])"))
   , ?_test([true] = expr("@lists:map(@erlang:is_atom/1, [@a])"))
@@ -175,6 +179,7 @@ global_test_() ->
       "bar(x) = if x == 0 then 1 else foo(x - 1) * 10\n"
       "main() = foo(6)"
     ))
+
 
   % to ensure globals are evaluated strictly in order
   , ?_test({ok, <<"bar">>} = execute(
@@ -240,6 +245,60 @@ struct_test_() ->
       "struct Foo<X> { bar :: X }\n"
       "main() = Foo { bar = @hi }"
     ))
+
+
+  , ?_test(3 = execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "main() = Foo(3, [\"hi\"]).bar"
+    ))
+  , ?_test([<<"hi">>] = execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f = .baz\n"
+      "main() = f(Foo { bar = 3, baz = [\"hi\"] })"
+    ))
+  , ?_test({<<"hi">>, true} = execute(
+      "struct Foo<A> { bar :: A }\n"
+      "main() = let id(a) = a, f = Foo { bar = id } in\n"
+      "  (f.bar(\"hi\"), f.bar(true))"
+    ))
+  , ?_test({5.0, 2.0} = execute(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = (x.bar + 3, x.bar)\n"
+      "main() = f(Foo { bar = 2.0, baz = [] })"
+    ))
+  , ?_test(false = execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x, y) = x.bar + 3 == 5 && y.bar == \"hi\"\n"
+      "main() = f(Foo { bar = 3, baz = [] }, Other { bar = \"hi\" })"
+    ))
+  , ?_test(10 = execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = (x :: Foo).bar\n"
+      "main() = f(Foo { bar = 10, baz = [] })"
+    ))
+  , ?_test(<<"">> = execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x) = x.bar :: String\n"
+      "main() = f(Other { bar = \"\" })"
+    ))
+  , ?_test(12 = execute(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f :: Foo -> Int\n"
+      "f(x) = x.bar + 5\n"
+      "main() = f(Foo { bar = 7, baz = [] })"
+    ))
+  , ?_test(4.4 = execute(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Other { bar :: String }\n"
+      "f(x, a) = x.bar(a)\n"
+      "main() = f(Foo { bar = |x| 2 * x, baz = [] }, 2.2)"
+    ))
   ].
 
 pattern_test_() ->
@@ -277,12 +336,14 @@ pattern_test_() ->
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
     ))
 
+
   , ?_test([] = expr("let 3 = 3 in []"))
   , ?_test({5, 5.0} = expr(
       "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
       "  (x + 3 :: Int, x + 3.0)"
     ))
   , ?_test(7 = expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
+
 
   , ?_test(none = expr("if let a = 3.0 then a"))
   , ?_test(3 = expr(
