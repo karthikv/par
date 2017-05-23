@@ -49,6 +49,8 @@ expr -> '(' expr ',' expr_list_tuple ')' : {tuple, '$2', '$4'}.
 expr -> '(' expr ')' : '$2'.
 expr -> '{' '}' : {map, []}.
 expr -> '{' kv_list '}' : {map, '$2'}.
+expr -> '{' init_list '}' : {record, '$2'}.
+expr -> '{' var '|' init_list '}' : {update_record, '$2', '$4'}.
 expr -> con_var start_record init_list '}' : {record, '$1', '$3'}.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.
 expr -> expr '!=' expr : {'$2', '$1', '$3'}.

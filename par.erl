@@ -27,9 +27,8 @@
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
 %   types - a Name => TypeInfo mapping of types in the environment
-%   field_map - a Field Name => [Struct Name] mapping
 %   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {gnr, gnrs, env, types, field_map, pid}).
+-record(ctx, {gnr, gnrs, env, types, pid}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -38,9 +37,8 @@
 %             generalized
 %   rigid_vs - the set of TV names in the environment
 %   types - a Name => TypeInfo mapping of types in the environment
-%   field_map - a Field Name => [Struct Name] mapping
 %   pid - the process id of the TV server used to generated fresh TVs
--record(solver, {subs, errs, schemes, rigid_vs, types, field_map, pid}).
+-record(solver, {subs, errs, schemes, rigid_vs, types, pid}).
 
 % G - a gnr record that represents a set of constraints to solve before
 %     generalizing a type variable:
@@ -57,7 +55,6 @@
   vs,
   env,
   csts,
-  deferred_csts,
   deps,
   index,
   low_link,
@@ -136,7 +133,6 @@ infer_prg(Prg) ->
     gnrs=[],
     env=#{},
     types=#{},
-    field_map=#{},
     pid=Pid
   },
 
@@ -199,7 +195,6 @@ infer_prg(Prg) ->
     errs=[],
     schemes=#{},
     types=C3#ctx.types,
-    field_map=C3#ctx.field_map,
     pid=Pid
   },
 
@@ -261,6 +256,7 @@ infer({tuple_te, LeftTE, RightTE}, C) ->
   {RightT, C2} = infer(RightTE, C1),
   {{tuple, LeftT, RightT}, C2};
 infer({iface_te, TVToken, ConToken}, C) ->
+  % TODO: records in signatures
   {{tv, V, none, Cat}, C1} = infer(TVToken, C),
   {{con, I}, C2} = infer(ConToken, C1),
   {{tv, V, I, Cat}, C2};
@@ -319,15 +315,7 @@ infer({struct, StructTE, FieldTEs}, C) ->
   C3 = add_env(StructName, {add_dep, TV, ID}, C2),
 
   NewTypes = (C3#ctx.types)#{StructName => {struct, FieldNamesRev, TV}},
-  NewFieldMap = lists:foldl(fun(Name, FieldMap) ->
-    case maps:find(Name, FieldMap) of
-      {ok, StructNames} ->
-        FieldMap#{Name := gb_sets:add(StructName, StructNames)};
-      error -> FieldMap#{Name => gb_sets:singleton(StructName)}
-    end
-  end, C3#ctx.field_map, FieldNamesRev),
-
-  C4 = new_gnr(TV, ID, C3#ctx{types=NewTypes, field_map=NewFieldMap}),
+  C4 = new_gnr(TV, ID, C3#ctx{types=NewTypes}),
   C5 = finish_gnr(add_csts({TV, NormFnT}, C4), C3#ctx.gnr),
   {TV, C5};
 
@@ -378,6 +366,22 @@ infer({var_value, _, Name}, C) -> lookup(Name, C);
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
+infer({record, Inits}, C) ->
+  {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
+    {{var, _, Name}, Expr} = Init,
+    {T, FoldC1} = infer(Expr, FoldC),
+    {Map#{Name => T}, FoldC1}
+  end, {#{}, C}, Inits),
+
+  {{record, FieldMap}, C1};
+
+infer({update_record, Var, Inits}, C) ->
+  {VarT, C1} = infer(Var, C),
+  {I, C2} = infer({record, Inits}, C1),
+  RecordTV = tv_server:fresh(I, C2#ctx.pid),
+  TV = tv_server:fresh(C2#ctx.pid),
+  {TV, add_csts([{TV, VarT}, {TV, RecordTV}], C2)};
+
 infer({record, ConVar, Inits}, C) ->
   {FnT, C1} = infer(ConVar, C),
   {con_var, _, StructName} = ConVar,
@@ -406,17 +410,9 @@ infer({record, ConVar, Inits}, C) ->
   {TV, add_csts({T, FnT}, C2)};
 
 infer({field, {var, _, Name}}, C) ->
-  % TODO: error case if name doesn't exist
-  #{Name := StructNames} = C#ctx.field_map,
-  C1 = gb_sets:fold(fun(N, FoldC) ->
-    % need each possible struct to be added as a gnr dependency
-    element(2, lookup(N, FoldC))
-  end, C, StructNames),
-
-  StructTV = tv_server:fresh(C1#ctx.pid),
-  FieldTV = tv_server:fresh(C1#ctx.pid),
-  T = {lam, StructTV, FieldTV},
-  {T, defer_csts({FieldTV, {field, StructTV, Name}}, C1)};
+  FieldTV = tv_server:fresh(C#ctx.pid),
+  TV = tv_server:fresh({record, #{Name => FieldTV}}, C#ctx.pid),
+  {{lam, TV, FieldTV}, C};
 
 infer({field, Expr, Var}, C) ->
   {ExprT, C1} = infer(Expr, C),
@@ -628,11 +624,11 @@ add_env(Name, Value, C) ->
 
 new_gnr(C) ->
   ID = tv_server:next_gnr_id(C#ctx.pid),
-  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deferred_csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=[]},
   C#ctx{gnr=G}.
 
 new_gnr({tv, V, _, _}, ID, C) ->
-  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deferred_csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=[]},
   C#ctx{gnr=G}.
 
 finish_gnr(C, OldG) ->
@@ -643,15 +639,6 @@ add_csts(Csts, C) ->
   G1 = case is_list(Csts) of
     true -> G#gnr{csts=Csts ++ G#gnr.csts};
     false -> G#gnr{csts=[Csts | G#gnr.csts]}
-  end,
-
-  C#ctx{gnr=G1}.
-
-defer_csts(Csts, C) ->
-  G = C#ctx.gnr,
-  G1 = case is_list(Csts) of
-    true -> G#gnr{deferred_csts=Csts ++ G#gnr.deferred_csts};
-    false -> G#gnr{deferred_csts=[Csts | G#gnr.deferred_csts]}
   end,
 
   C#ctx{gnr=G1}.
@@ -753,7 +740,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
 
       S4 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
-        RigidVs = rigid_vs(SolG#gnr.env, FoldS#solver.schemes),
+        RigidVs = rigid_vs(SolG#gnr.env, FoldS),
 
         lists:foldl(fun(SolV, NestedS) ->
           #solver{subs=Subs, schemes=Schemes} = NestedS,
@@ -770,19 +757,17 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
     true -> T2
   end.
 
-unify_csts(#gnr{csts=Csts, deferred_csts=Deferred, env=Env}, S) ->
+unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
   % deepest expression's constraints first to have better error messages (e.g.
   % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
   % reverse the order here.
   OrderedCsts = lists:reverse(Csts),
-  OrderedDeferred = lists:reverse(Deferred),
-  RigidVs = rigid_vs(Env, S#solver.schemes),
+  RigidVs = rigid_vs(Env, S),
 
   % two folds avoids copying OrderedCsts list
-  S1 = lists:foldl(fun process_cst/2, S#solver{rigid_vs=RigidVs}, OrderedCsts),
-  lists:foldl(fun process_cst/2, S1, OrderedDeferred).
+  lists:foldl(fun process_cst/2, S#solver{rigid_vs=RigidVs}, OrderedCsts).
 
 process_cst({L, R}, S) ->
   Subs = S#solver.subs,
@@ -794,7 +779,11 @@ resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
-resolve({tv, V, I, Cat}, _) -> {tv, V, I, Cat};
+resolve({tv, V, I, Cat}, S) ->
+  case I of
+    {record, _} -> {tv, V, resolve(I, S), Cat};
+    _ -> {tv, V, I, Cat}
+  end;
 resolve({con, Con}, _) -> {con, Con};
 resolve({gen, Con, ParamT}, S) -> {gen, Con, resolve(ParamT, S)};
 resolve({inst, TV}, S) ->
@@ -804,7 +793,8 @@ resolve({inst, TV}, S) ->
     error -> TV
   end,
   resolve(ResolvedT, S);
-resolve({field, StructT, Name}, S) -> {field, resolve(StructT, S), Name};
+resolve({record, FieldMap}, S) ->
+  {record, maps:map(fun(_, T) -> resolve(T, S) end, FieldMap)};
 resolve(none, _) -> none.
 
 inst({GVs, T}, Pid) ->
@@ -813,101 +803,29 @@ inst({GVs, T}, Pid) ->
   end, #{}, GVs),
   subs(T, Subs).
 
-unify({{field, StructT, Name}, FieldT}, S) ->
-  % field is known to exist in some struct(s) from inference
-  #{Name := StructNames} = S#solver.field_map,
-
-  Choices = gb_sets:fold(fun(StructName, FoldChoices) ->
-    #{StructName := {struct, FieldNamesRev, {tv, V, _, _}}} = S#solver.types,
-    #{V := Scheme} = S#solver.schemes,
-    FnT = inst(Scheme, S#solver.pid),
-
-    {Choice, _} = lists:foldl(fun(FieldName, {FoldChoice, FieldDone}) ->
-      {FoldStructT, FoldFieldT, FoldS} = FoldChoice,
-      {NewFieldT, NewFieldDone} = case {FieldName, FieldDone} of
-        {_, true} -> {FoldFieldT, true};
-        {Name, false} -> {element(2, FoldFieldT), true};
-        {_, false} -> {element(3, FoldFieldT), false}
-      end,
-      {{element(3, FoldStructT), NewFieldT, FoldS}, NewFieldDone}
-    end, {{FnT, FnT, S}, false}, lists:reverse(FieldNamesRev)),
-
-    [Choice | FoldChoices]
-  end, [], StructNames),
-
-  case length(Choices) of
-    1 ->
-      {ExpStructT, ExpFieldT, S1} = hd(Choices),
-      S2 = process_cst({StructT, ExpStructT}, S1),
-      process_cst({FieldT, ExpFieldT}, S2);
-
-    % 0 should never happen, as ensured during inference
-    L when L > 1 ->
-      FieldChoices = lists:filtermap(fun({FoldStructT, FoldFieldT, FoldS}) ->
-        FoldS1 = process_cst({StructT, FoldStructT}, FoldS),
-        if
-          length(FoldS1#solver.errs) == length(FoldS#solver.errs) ->
-            Subs = FoldS1#solver.subs,
-            {true, {subs(FoldStructT, Subs), subs(FoldFieldT, Subs), FoldS1}};
-          true -> false
-        end
-      end, Choices),
-
-      case length(FieldChoices) of
-        0 ->
-          Options = lists:map(fun({FoldStructT, _, _}) ->
-            FoldStructT
-          end, Choices),
-          add_err({StructT, {either, Options}}, S);
-
-        1 ->
-          {_, ExpFieldT, S1} = hd(FieldChoices),
-          process_cst({FieldT, ExpFieldT}, S1);
-
-        _ ->
-          ValidChoices = lists:filtermap(fun({FoldStructT, FoldFieldT, FoldS}) ->
-            FoldS1 = process_cst({FieldT, FoldFieldT}, FoldS),
-            if
-              length(FoldS1#solver.errs) == length(FoldS#solver.errs) ->
-                Subs = FoldS1#solver.subs,
-                {true, {
-                  subs(FoldStructT, Subs),
-                  subs(FoldFieldT, Subs),
-                  FoldS1
-                }};
-              true -> false
-            end
-          end, FieldChoices),
-
-          case length(ValidChoices) of
-            0 ->
-              Options = lists:map(fun({_, FoldFieldT, _}) ->
-                FoldFieldT
-              end, FieldChoices),
-              add_err({FieldT, {either, Options}}, S);
-
-            1 -> element(3, hd(ValidChoices));
-
-            _ ->
-              Options = lists:map(fun({FoldStructT, _, _}) ->
-                FoldStructT
-              end, ValidChoices),
-              add_err({StructT, {ambig, Options}}, S)
-          end
-      end
-  end;
-unify({T, {field, StructT, Name}}, S) -> unify({{field, StructT, Name}, T}, S);
-
+% TODO: how to prevent bug with recursively calling unify instead of process_cst?
 unify({T1, T2}, S) when T1 == T2 -> S;
 
 unify({{lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}}, S) ->
   S1 = unify({ArgT1, ArgT2}, S),
-  ToUnify = {subs(ReturnT1, S1#solver.subs), subs(ReturnT2, S1#solver.subs)},
-  unify(ToUnify, S1);
+  process_cst({ReturnT1, ReturnT2}, S1);
 unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   S1 = unify({LeftT1, LeftT2}, S),
-  ToUnify = {subs(RightT1, S1#solver.subs), subs(RightT2, S1#solver.subs)},
-  unify(ToUnify, S1);
+  process_cst({RightT1, RightT2}, S1);
+
+unify({{record, FieldMap1}, {record, FieldMap2}}, S) ->
+  Keys1 = gb_sets:from_list(maps:keys(FieldMap1)),
+  Keys2 = gb_sets:from_list(maps:keys(FieldMap2)),
+
+  if
+    Keys1 /= Keys2 -> add_err({{record, FieldMap1}, {record, FieldMap2}}, S);
+    true ->
+      gb_sets:fold(fun(Key, FoldS) ->
+        #{Key := T1} = FieldMap1,
+        #{Key := T2} = FieldMap2,
+        process_cst({T1, T2}, FoldS)
+      end, S, Keys1)
+  end;
 
 unify({{tv, V, I1, Cat1}, {tv, V, I2, Cat2}}, _) ->
   error({badarg, V, I1, Cat1, I2, Cat2});
@@ -917,34 +835,44 @@ unify({{tv, V1, I1, Cat1}, {tv, V2, I2, Cat2}}, S) ->
 
   Ilk1 = ilk(TV1, S),
   Ilk2 = ilk(TV2, S),
-  Occurs = occurs(V1, TV2),
+  Occurs = occurs(V1, TV2) or occurs(V2, TV1),
+
+  Err = {{tv, V1, I1, Ilk1}, {tv, V2, I2, Ilk2}},
 
   if
     Occurs -> add_err({TV1, TV2}, S);
 
-    % any(X: I1) ~ rigid(Y: I2) or any(X: I1) ~ all(Y: I2) or
-    % rigid(X: I1) ~ rigid(Y: I2) if I1 <= I2.
-    (Ilk1 == any) or ((Ilk1 == rigid) and (Ilk2 == rigid)),
-    (I1 == none) or (I1 == I2) ->
-      add_sub(V1, TV2, S);
+    Ilk1 == any, Ilk2 == all ->
+      case iface_lte(I1, I2, S) of
+        false -> add_err(Err, S);
+        S1 -> add_sub(V1, TV2, S1)
+      end;
 
-    % rigid(X: I1) ~ any(Y: I2) or all(X: I1) ~ any(Y: I2) or
-    % rigid(X: I1) ~ rigid(Y: I2) if I1 >= I2.
-    (Ilk2 == any) or ((Ilk1 == rigid) and (Ilk2 == rigid)),
-    (I2 == none) or (I1 == I2) ->
-      add_sub(V2, TV1, S);
+    Ilk2 == any, Ilk1 == all ->
+      case iface_lte(I2, I1, S) of
+        false -> add_err(Err, S);
+        S1 -> add_sub(V2, TV1, S1)
+     end;
 
-    % any(X: I) ~ rigid(Y) so long as we convert both to rigid(Y: I).
-    % Note we must keep the same rigid type variable name Y.
-    Ilk1 == any, Ilk2 == rigid, I2 == none ->
-      add_sub(V2, {set_iface, I1}, add_sub(V1, TV2, S));
+    Ilk1 /= all, Ilk2 /= all ->
+      CanKeepEither = ((Ilk1 == any) and (Ilk2 == any)) or
+        ((Ilk1 == rigid) and (Ilk2 == rigid)),
+      MustKeep1 = (Ilk1 == rigid) and (Ilk2 == any),
+      MustKeep2 = (Ilk1 == any) and (Ilk2 == rigid),
 
-    % rigid(X) ~ any(Y: I) so long as we convert both to rigid(X: I).
-    % Note we must keep the same rigid type variable name X.
-    Ilk2 == any, Ilk1 == rigid, I1 == none ->
-      add_sub(V1, {set_iface, I2}, add_sub(V2, TV1, S));
+      case iface_unify(I1, I2, S) of
+        {I2, S1} when CanKeepEither; MustKeep2 -> add_sub(V1, TV2, S1);
+        {I1, S1} when CanKeepEither; MustKeep1 -> add_sub(V2, TV1, S1);
 
-    true -> add_err({{tv, V1, I1, Ilk1}, {tv, V2, I2, Ilk2}}, S)
+        {NewI, S1} when CanKeepEither; MustKeep2 ->
+          add_sub(V2, {set_iface, NewI}, add_sub(V1, TV2, S1));
+        {NewI, S1} when CanKeepEither; MustKeep1 ->
+          add_sub(V1, {set_iface, NewI}, add_sub(V2, TV1, S1));
+
+        _ -> add_err(Err, S)
+      end;
+
+    true -> add_err(Err, S)
   end;
 unify({{tv, V, I, Cat}, T}, S) ->
   TV = {tv, V, I, Cat},
@@ -960,6 +888,12 @@ unify({{tv, V, I, Cat}, T}, S) ->
     (Ilk == all) or ((Ilk == rigid) and HasTV) ->
       add_err({{tv, V, I, Ilk}, T}, S);
     Instance -> add_sub(V, T, S);
+
+    (element(1, I) == record) and (element(1, T) == record) ->
+      case iface_lte(I, T, S) of
+        false -> add_err(Err, S);
+        S1 -> S1
+      end;
     true -> add_err(Err, S)
   end;
 unify({T, {tv, V, I, Cat}}, S) -> unify({{tv, V, I, Cat}, T}, S);
@@ -971,8 +905,10 @@ unify({T1, T2}, S) -> S#solver{errs=[{T1, T2} | S#solver.errs]}.
 
 add_sub(Key, Value, S) ->
   case maps:find(Key, S#solver.subs) of
-    {ok, Existing} -> error({badarg, Key, Existing, Value});
-    error -> S#solver{subs=(S#solver.subs)#{Key => Value}}
+    error -> S#solver{subs=(S#solver.subs)#{Key => Value}};
+    % we're allowed to override set_iface to another value
+    {ok, {set_iface, _}} -> S#solver{subs=(S#solver.subs)#{Key => Value}};
+    {ok, Existing} -> error({badarg, Key, Existing, Value})
   end.
 
 add_err(Err, S) ->
@@ -984,6 +920,57 @@ ilk({tv, V, _, Cat}, S) ->
       any = Cat,
       rigid;
     false -> Cat
+  end.
+
+iface_lte(I1, I2, S) ->
+  if
+    I1 == none; I1 == I2 -> S;
+    true ->
+      case {I1, I2} of
+        {{record, FieldMap1}, {record, FieldMap2}} ->
+          Keys1 = gb_sets:from_list(maps:keys(FieldMap1)),
+          Keys2 = gb_sets:from_list(maps:keys(FieldMap2)),
+
+          case gb_sets:is_subset(Keys1, Keys2) of
+            true ->
+              gb_sets:fold(fun(Key, FoldS) ->
+                #{Key := T1} = FieldMap1,
+                #{Key := T2} = FieldMap2,
+                process_cst({T1, T2}, FoldS)
+              end, S, Keys1);
+            false -> false
+          end;
+        _ -> false
+      end
+  end.
+
+iface_unify(I1, I2, S) ->
+  if
+    I1 == none -> {I2, S};
+    I2 == none -> {I1, S};
+    I1 == I2 -> {I1, S};
+    true ->
+      case {I1, I2} of
+        {{record, FieldMap1}, {record, FieldMap2}} ->
+          {NewMap, S1} = maps:fold(fun(Name, T1, {FoldMap, FoldS}) ->
+            FoldS1 = case maps:find(Name, FieldMap2) of
+              {ok, T2} -> process_cst({T1, T2}, FoldS);
+              error -> FoldS
+            end,
+            {FoldMap#{Name => T1}, FoldS1}
+          end, {#{}, S}, FieldMap1),
+
+          {NewMap1, S2} = maps:fold(fun(Name, T2, {FoldMap, FoldS}) ->
+            FoldS1 = case maps:find(Name, FieldMap1) of
+              {ok, T1} -> process_cst({T1, T2}, FoldS);
+              error -> FoldS
+            end,
+            {FoldMap#{Name => T2}, FoldS1}
+          end, {NewMap, S1}, FieldMap2),
+
+          {{record, NewMap1}, S2};
+        _ -> false
+      end
   end.
 
 instance({con, 'Int'}, 'Num') -> true;
@@ -1001,34 +988,44 @@ subs({lam, ArgT, ReturnT}, Subs) ->
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
 subs({tv, V, I, Cat}, Subs) ->
+  SubI = case I of
+    {record, _} -> subs(I, Subs);
+    _ -> I
+  end,
+
   case maps:find(V, Subs) of
-    error -> {tv, V, I, Cat};
-    {ok, any} -> {tv, V, I, any};
-    {ok, {all, V1}} -> {tv, V1, I, all};
+    error -> {tv, V, SubI, Cat};
+    {ok, any} -> {tv, V, SubI, any};
+    {ok, {all, V1}} -> {tv, V1, SubI, all};
 
     {ok, {set_iface, I1}} ->
       any = Cat,
-      {tv, V, I1, Cat};
+      case I1 of
+        {record, _} -> {tv, V, subs(I1, Subs), Cat};
+        true -> {tv, V, I1, Cat}
+      end;
 
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
         is_tuple(Value) or (Value == none) -> Value;
         % Instantiation, so category resets to any
-        true -> {tv, Value, I, any}
+        true -> {tv, Value, SubI, any}
       end,
       subs(Sub, Subs)
   end;
 subs({con, Con}, _) -> {con, Con};
 subs({gen, Con, ParamT}, Subs) -> {gen, Con, subs(ParamT, Subs)};
 subs({inst, TV}, Subs) -> {inst, subs(TV, Subs)};
-subs({field, StructT, Name}, Subs) -> {field, subs(StructT, Subs), Name};
+subs({record, FieldMap}, Subs) ->
+  {record, maps:map(fun(_, T) -> subs(T, Subs) end, FieldMap)};
 subs(none, _) -> none.
 
-rigid_vs(Env, Schemes) ->
+rigid_vs(Env, S) ->
+  #solver{subs=Subs, schemes=Schemes} = S,
   maps:fold(fun(_, Value, FoldVs) ->
     case Value of
-      {no_dep, T} -> gb_sets:union(FoldVs, fvs(T));
+      {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs)));
 
       % 1) If a given other binding has been fully generalized already,
       %    we'll add the rigid type variables from its scheme.
@@ -1045,20 +1042,35 @@ rigid_vs(Env, Schemes) ->
 
 fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
 fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
-fvs({tv, V, _, _}) -> gb_sets:singleton(V);
+fvs({tv, V, I, _}) ->
+  case I of
+    {record, _} -> gb_sets:add(V, fvs(I));
+    _ -> gb_sets:singleton(V)
+  end;
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamT}) -> fvs(ParamT);
 % fvs({inst, ...}) ommitted; they should be resolved
+fvs({record, FieldMap}) ->
+  maps:fold(fun(_, T, S) ->
+    gb_sets:union(S, fvs(T))
+  end, gb_sets:new(), FieldMap);
 fvs(none) -> gb_sets:new().
 
 occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
 occurs(V, {tuple, LeftT, RightT}) ->
   occurs(V, LeftT) or occurs(V, RightT);
-occurs(V, {tv, V1, _, _}) -> (V == any) or (V == V1);
+occurs(V, {tv, V1, I, _}) ->
+  OccursI = case I of
+    {record, FieldMap} -> occurs(V, {record, FieldMap});
+    _ -> false
+  end,
+  OccursI or (V == any) or (V == V1);
 occurs(_, {con, _}) -> false;
 occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
 % occurs({inst, ...}) ommitted; they should be resolved
+occurs(V, {record, FieldMap}) ->
+  maps:fold(fun(_, T, Occurs) -> Occurs or occurs(V, T) end, false, FieldMap);
 occurs(_, none) -> false.
 
 pretty_csts([]) -> [];
@@ -1074,9 +1086,11 @@ pretty({lam, ArgT, ReturnT}) ->
 pretty({tuple, LeftT, RightT}) ->
   format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
 pretty({tv, V, I, Ilk}) ->
-  Str = if
-    I == none -> tl(V);
-    true -> format_str("~s: ~s", [tl(V), atom_to_list(I)])
+  Str = case I of
+    none -> tl(V);
+    {record, FieldMap} ->
+      format_str("{ ~s | ~s }", [tl(V), pretty_field_map(FieldMap)]);
+    _ -> format_str("~s: ~s", [tl(V), atom_to_list(I)])
   end,
 
   case Ilk of
@@ -1094,11 +1108,19 @@ pretty({inst, TV}) ->
 pretty({A, Options}) when A == either; A == ambig ->
   Strs = lists:map(fun(O) -> pretty(O) end, Options),
   format_str("~s(~s)", [atom_to_list(A), string:join(lists:sort(Strs), ", ")]);
+pretty({record, FieldMap}) ->
+  format_str("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty(none) -> "()".
 
 pretty_strip_parens({tuple, LeftT, RightT}) ->
   format_str("~s, ~s", [pretty(LeftT), pretty_strip_parens(RightT)]);
 pretty_strip_parens(T) -> pretty(T).
+
+pretty_field_map(FieldMap) ->
+  FieldStrs = maps:fold(fun(Name, T, Strs) ->
+    [format_str("~s :: ~s", [Name, pretty(T)]) | Strs]
+  end, [], FieldMap),
+  string:join(lists:sort(FieldStrs), ", ").
 
 format_str(Str, Args) ->
   lists:flatten(io_lib:format(Str, Args)).
