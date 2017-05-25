@@ -554,11 +554,11 @@ record_test_() ->
   , ?_test("{ id :: A -> A }" = ok_expr("let id(a) = a in { id = id }"))
   , ?_test("{ A | bar :: B } -> B" = ok_expr(".bar"))
   , ?_test("Atom" = ok_expr("{ bar = @hi }.bar"))
+  , ?_test("{ bar :: Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
       {"{ foo :: Atom }", "{ A | bar :: B }"}
     ))
-  , ?_test("{ bar :: Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
   , ?_test(bad_expr(
       "{ { bar = 3 } | foo = 4.0 }",
       {"{ bar :: A: Num }", "{ B | foo :: Float }"}

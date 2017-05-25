@@ -202,10 +202,6 @@ enum_test_() ->
       "enum Foo { Bar(Bool, [String]) }\n"
       "main() = Bar(true)"
     ))([[<<"hello">>]]))
-  , ?_test({'Cons', <<"hello">>, {'Cons', {3, true}, 'End'}} = execute(
-      "enum VariedList { Cons(A, VariedList), End }\n"
-      "main() = Cons(\"hello\", Cons((3, true), End))"
-    ))
   , ?_test('Bar' = execute(
       "enum Foo<A> { Bar }\n"
       "main() = Bar"
@@ -215,93 +211,74 @@ enum_test_() ->
       "main() = Other(3)"
     ))
   , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = execute(
-      "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
+      "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
       "main() = Cons(3, Cons(5.0, End))\n"
     ))
   ].
 
-struct_test_() ->
-  [ ?_test({'Foo', 3} = execute(
+record_test_() ->
+  [ ?_assertEqual(#{bar => 3}, expr("{ bar = 3 }"))
+  , ?_assertEqual(#{bar => 3, baz => true}, expr("{ bar = 3, baz = true }"))
+  , ?_test(8 = expr("{ bar = |x| x + 5 }.bar(3)"))
+  , ?_assertEqual(#{bar => 4.0}, expr("{ { bar = 3 } | bar = 4.0 }"))
+
+  , ?_test(false = expr("{ bar = 3 } == { bar = 5 }"))
+  , ?_test(true = expr("{ bar = 3 } == { bar = 3 }"))
+
+
+  , ?_test(true = expr("let f(x) = x.bar || false in f({ bar = true })"))
+  , ?_test(hi = expr("let f(x) = x.bar in f({ bar = @hi, baz = 7 })"))
+
+  , ?_test({11, <<"oh, hi">>} = execute(
+      "f(x) = (x.bar + 4, x.foo ++ \"hi\")\n"
+      "main() = f({ bar = 7, foo = \"oh, \" })"
+    ))
+
+  % named struct
+  , ?_assertEqual(#{bar => 3}, execute(
       "struct Foo { bar :: Int }\n"
       "main() = Foo(3)"
     ))
-  , ?_test({'Foo', 3} = execute(
+  , ?_assertEqual(#{bar => 3}, execute(
       "struct Foo { bar :: Int }\n"
       "main() = Foo { bar = 3 }"
     ))
-  , ?_test({'Foo', 3, [<<"hello">>]} = (execute(
+  , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (execute(
       "struct Foo { bar :: Int, baz :: [String] }\n"
       "main() = Foo(3)"
     ))([[<<"hello">>]]))
-  , ?_test({'Foo', 15, [first, second]} = execute(
+  , ?_assertEqual(#{baz => [first, second], bar => 15}, execute(
       "struct Foo { bar :: Int, baz :: [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
     ))
-  , ?_test({'Foo', hi, true} = (execute(
+  , ?_assertEqual(#{bar => hi, baz => true}, (execute(
       "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
       "main() = Foo(@hi)"
     ))([true]))
-  , ?_test({'Foo', hi} = execute(
+  , ?_assertEqual(#{bar => hi}, execute(
       "struct Foo<X> { bar :: X }\n"
       "main() = Foo { bar = @hi }"
     ))
-  , ?_test({'Foo', hi, [{'Foo', hello, []}]} = execute(
+  % Won't be able to create a valid Foo, but should still type check.
+  , ?_test(true = execute(
+      "struct Foo { baz :: Foo }\n"
+      "main() = true"
+    ))
+  , ?_assertEqual(#{bar => hi, baz => [#{bar => hello, baz => []}]}, execute(
       "struct Foo { bar :: Atom, baz :: [Foo] }\n"
       "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
     ))
 
 
-  , ?_test(3 = execute(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
-      "main() = Foo(3, [\"hi\"]).bar"
-    ))
-  , ?_test([<<"hi">>] = execute(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f = .baz\n"
-      "main() = f(Foo { bar = 3, baz = [\"hi\"] })"
-    ))
+  % generalization cases
   , ?_test({<<"hi">>, true} = execute(
       "struct Foo<A> { bar :: A }\n"
       "main() = let id(a) = a, f = Foo { bar = id } in\n"
       "  (f.bar(\"hi\"), f.bar(true))"
     ))
-  , ?_test({5.0, 2.0} = execute(
-      "struct Foo<A> { bar :: A, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f(x) = (x.bar + 3, x.bar)\n"
-      "main() = f(Foo { bar = 2.0, baz = [] })"
-    ))
-  , ?_test(false = execute(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f(x, y) = x.bar + 3 == 5 && y.bar == \"hi\"\n"
-      "main() = f(Foo { bar = 3, baz = [] }, Other { bar = \"hi\" })"
-    ))
-  , ?_test(10 = execute(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f(x) = (x :: Foo).bar\n"
-      "main() = f(Foo { bar = 10, baz = [] })"
-    ))
-  , ?_test(<<"">> = execute(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f(x) = x.bar :: String\n"
-      "main() = f(Other { bar = \"\" })"
-    ))
-  , ?_test(12 = execute(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f :: Foo -> Int\n"
-      "f(x) = x.bar + 5\n"
-      "main() = f(Foo { bar = 7, baz = [] })"
-    ))
-  , ?_test(4.4 = execute(
-      "struct Foo<A> { bar :: A, baz :: [String] }\n"
-      "struct Other { bar :: String }\n"
-      "f(x, a) = x.bar(a)\n"
-      "main() = f(Foo { bar = |x| 2 * x, baz = [] }, 2.2)"
+  , ?_test(7.5 = execute(
+      "f(x, y) = x.foo(y.bar)\n"
+      "main() = f({ foo = |x| x.baz }, { bar = { baz = 7.5 } })"
     ))
   ].
 

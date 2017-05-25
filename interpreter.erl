@@ -44,14 +44,14 @@ init({struct, StructTE, FieldTEs}, ID) ->
     {gen_te, {con_token, _, Name}, _} -> Name
   end,
 
-  FieldNames = lists:map(fun({field, {var, _, FieldName}, _}) ->
-    FieldName
+  FieldAtoms = lists:map(fun({{var, _, FieldName}, _}) ->
+    list_to_atom(FieldName)
   end, FieldTEs),
-  Value = curry(length(FieldTEs), fun(Vs) ->
-    list_to_tuple([list_to_atom(StructName) | Vs])
+  StructV = curry(length(FieldTEs), fun(Vs) ->
+    maps:from_list(lists:zip(FieldAtoms, Vs))
   end, []),
 
-  env_set(StructName, {struct, FieldNames, Value}, ID);
+  env_set(StructName, StructV, ID);
 
 init({sig, _, _}, _) -> true.
 
@@ -106,44 +106,31 @@ eval({var, _, Name}, ID) ->
         false -> error({badmatch, V, Pattern});
         true -> env_get(Name, ID)
       end;
-    {struct, _, V} -> V;
     V -> V
   end;
 
 eval({con_var, Line, Name}, ID) -> eval({var, Line, Name}, ID);
 
-eval({record, {con_var, _, Name}, Inits}, ID) ->
-  {struct, FieldNames, Fn} = env_get(Name, ID),
+eval({record, Inits}, ID) ->
+  Pairs = lists:map(fun({{var, _, Name}, Expr}) ->
+    {list_to_atom(Name), eval(Expr, ID)}
+  end, Inits),
+  maps:from_list(Pairs);
 
-  Vs = lists:map(fun(FieldName) ->
-    {_, Expr} = hd(lists:filter(fun({{var, _, InitName}, _}) ->
-      FieldName == InitName
-    end, Inits)),
-    eval(Expr, ID)
-  end, FieldNames),
+eval({update_record, Expr, Inits}, C) ->
+  Record = eval(Expr, C),
+  maps:merge(Record, eval({record, Inits}, C));
 
-  Fn(Vs);
+eval({record, _, Inits}, ID) -> eval({record, Inits}, ID);
 
-eval({field, {var, _, Name}}, ID) ->
-  curry(1, fun([Struct]) ->
-    StructName = atom_to_list(element(1, Struct)),
-    {struct, FieldNames, _} = env_get(StructName, ID),
-
-    {Index, _} = lists:foldl(fun(FieldName, {Index, Found}) ->
-      case {FieldName, Found} of
-        {Name, false} -> {Index, true};
-        {_, true} -> {Index, true};
-        {_, false} -> {Index + 1, false}
-      end
-    end, {2, false}, FieldNames),
-
-    element(Index, Struct)
-  end, []);
+eval({field, {var, _, Name}}, _) ->
+  Atom = list_to_atom(Name),
+  curry(1, fun([Record]) -> maps:get(Atom, Record) end, []);
 
 eval({field, Expr, Var}, ID) ->
-  Struct = eval(Expr, ID),
+  Record = eval(Expr, ID),
   Fn = eval({field, Var}, ID),
-  Fn([Struct]);
+  Fn([Record]);
 
 eval({app, Expr, Args}, ID) ->
   Fn = eval(Expr, ID),
@@ -395,7 +382,6 @@ match(_, {'_', _}, _) -> true;
 match(V1, {con_var, _, Name}, ID) ->
   case env_get(Name, ID) of
     % can't match functions
-    {struct, _, _} -> false;
     V2 when not is_function(V2) -> V1 == V2;
     _ -> false
   end;
