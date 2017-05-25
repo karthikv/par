@@ -73,11 +73,11 @@ norm({tv, V, I, Cat}, {Subs, Pid}) ->
       {V1, {Subs#{V => V1}, Pid}}
   end,
 
-  case I of
-    {record, _} ->
-      {NormI, N2} = norm(I, N1),
+  if
+    is_map(I) ->
+      {{record, _, NormI}, N2} = norm({record, none, I}, N1),
       {{tv, NewV, NormI, Cat}, N2};
-    _ -> {{tv, NewV, I, Cat}, N1}
+    true -> {{tv, NewV, I, Cat}, N1}
   end;
 norm({con, Con}, N) -> {{con, Con}, N};
 norm({gen, Con, ParamT}, N) ->
@@ -88,12 +88,12 @@ norm({A, Options}, N) when A == either; A == ambig ->
     norm(O, FoldN)
   end, N, Options),
   {{A, NormOptions}, N1};
-norm({record, FieldMap}, N) ->
-  {NewFieldMap, N1} = maps:fold(fun(Name, T, {FoldMap, FoldN}) ->
-    {NormT, FoldN1} = norm(T, FoldN),
+norm({record, A, FieldMap}, N) ->
+  {NewFieldMap, N1} = maps:fold(fun(Name, FieldT, {FoldMap, FoldN}) ->
+    {NormT, FoldN1} = norm(FieldT, FoldN),
     {FoldMap#{Name => NormT}, FoldN1}
   end, {#{}, N}, FieldMap),
-  {{record, NewFieldMap}, N1};
+  {{record, A, NewFieldMap}, N1};
 norm(none, N) -> {none, N}.
 
 expr_test_() ->
@@ -401,6 +401,16 @@ sig_test_() ->
       "bar(a) = bar(a) :: Bool",
       "bar"
     ))
+  , ?_test("{ bar :: String, baz :: A: Num } -> String" = ok_prg(
+      "foo :: { bar :: String, baz :: A: Num } -> String\n"
+      "foo(x) = x.bar",
+      "foo"
+    ))
+  , ?_test("{ A | bar :: String, baz :: B: Num } -> String" = ok_prg(
+      "foo :: { A | bar :: String, baz :: B: Num } -> String\n"
+      "foo = .bar",
+      "foo"
+    ))
   , ?_test(bad_prg(
       "foo :: () -> String\n"
       "foo() = true",
@@ -432,6 +442,12 @@ sig_test_() ->
       "empty :: List<A> -> List<B> -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
       {"all(A)", "all(B)"}
+    ))
+  , ?_test(bad_prg(
+      "foo :: { bar :: String, baz :: A: Num } -> String\n"
+      "foo(x) = x.bar\n"
+      "main() = foo({ bar = \"hi\" })",
+      {"{ bar :: String }", "{ bar :: String, baz :: A: Num }"}
     ))
   ].
 
@@ -535,11 +551,28 @@ enum_test_() ->
     ))
   ].
 
-struct_test_() ->
-  % simple create record
+record_test_() ->
+  % simple create/access/update record
   [ ?_test("{ bar :: A: Num }" = ok_expr("{ bar = 3 }"))
-  , ?_test("{ bar :: A: Num, baz :: Bool }" = ok_expr("{ bar = 3, baz = true }"))
+  , ?_test("{ bar :: A: Num, baz :: Bool }" =
+             ok_expr("{ bar = 3, baz = true }"))
   , ?_test("{ id :: A -> A }" = ok_expr("let id(a) = a in { id = id }"))
+  , ?_test("{ A | bar :: B } -> B" = ok_expr(".bar"))
+  , ?_test("Atom" = ok_expr("{ bar = @hi }.bar"))
+  , ?_test(bad_expr(
+      "{ foo = @hi }.bar",
+      {"{ foo :: Atom }", "{ A | bar :: B }"}
+    ))
+  , ?_test("{ bar :: Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
+  , ?_test(bad_expr(
+      "{ { bar = 3 } | foo = 4.0 }",
+      {"{ bar :: A: Num }", "{ B | foo :: Float }"}
+    ))
+  , ?_test(bad_expr(
+      "{ { bar = 3 } | bar = true }",
+      {"A: Num", "Bool"}
+    ))
+
 
   % record <=> record unification
   , ?_test("Bool" = ok_expr("{ bar = 3 } == { bar = 5 }"))
@@ -549,6 +582,7 @@ struct_test_() ->
       {"{ bar :: A: Num }", "{ foo :: B: Num }"}
     ))
 
+
   % record <=> iface unification
   , ?_test("Bool" = ok_expr("let f(x) = x.bar || false in f({ bar = true })"))
   , ?_test("Atom" = ok_expr("let f(x) = x.bar in f({ bar = @hi, baz = 7 })"))
@@ -556,6 +590,7 @@ struct_test_() ->
       "let f(x) = x.bar + x.baz in f({ bar = 3 })",
       {"{ A | bar :: B: Num, baz :: B: Num }", "{ bar :: C: Num }"}
     ))
+
 
   % iface <=> iface unification
   , ?_test("{ A | bar :: B: Num, foo :: String } -> (B: Num, String)" = ok_prg(
@@ -567,8 +602,6 @@ struct_test_() ->
       {"String", "Bool"}
     ))
 
-  % record access
-  , ?_test("{ A | bar :: B } -> B" = ok_expr(".bar"))
 
   % occurs checks
   , ?_test(bad_expr("let a = { bar = a } in a", {"A", "{ bar :: A }"}))
@@ -577,6 +610,7 @@ struct_test_() ->
       {"A", "{ B | bar :: A }"}
     ))
 
+
   % record fvs
   , ?_test(bad_prg(
       "f(x) = let a() = x.a in (a() ++ \"hi\", true && a())",
@@ -584,205 +618,173 @@ struct_test_() ->
     ))
 
 
+  % named struct
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "expr = Foo(3)",
+      "expr"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "expr = Foo { bar = 3 }",
+      "expr"
+    ))
+  , ?_test("[String] -> Foo" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "expr = Foo(3)",
+      "expr"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [Atom] }\n"
+      "expr = Foo { baz = [@first, @second], bar = 15 }",
+      "expr"
+    ))
+  , ?_test("A -> Foo<Atom, A>" = ok_prg(
+      "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
+      "expr = Foo(@hi)",
+      "expr"
+    ))
+  , ?_test("Foo<Atom>" = ok_prg(
+      "struct Foo<X> { bar :: X }\n"
+      "expr = Foo { bar = @hi }",
+      "expr"
+    ))
+  % Won't be able to create a valid Foo, but should still type check.
+  , ?_test("Bool" = ok_prg(
+      "struct Foo { baz :: Foo }\n"
+      "expr = true",
+      "expr"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Atom, baz :: [Foo] }\n"
+      "expr = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }",
+      "expr"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: (Float, Atom) }\n"
+      "expr = Foo(([1], @a))",
+      {"[A: Num]", "Float"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<X> { bar :: [X], baz :: Bool }\n"
+      "expr = Foo { baz = true, bar = 5 }",
+      {"[A]", "B: Num"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: A, baz :: A }\n"
+      "expr = Foo(3, true)",
+      {"A: Num", "Bool"}
+    ))
 
 
-  %% , ?_test("Foo" = ok_prg(
-  %%     "struct Foo { bar :: Int }\n"
-  %%     "expr = Foo(3)",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("Foo" = ok_prg(
-  %%     "struct Foo { bar :: Int }\n"
-  %%     "expr = Foo { bar = 3 }",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("[String] -> Foo" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "expr = Foo(3)",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("Foo" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [Atom] }\n"
-  %%     "expr = Foo { baz = [@first, @second], bar = 15 }",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("A -> Foo<Atom, A>" = ok_prg(
-  %%     "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
-  %%     "expr = Foo(@hi)",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("Foo<Atom>" = ok_prg(
-  %%     "struct Foo<X> { bar :: X }\n"
-  %%     "expr = Foo { bar = @hi }",
-  %%     "expr"
-  %%   ))
-  %% % Won't be able to create a valid Foo, but should still type check.
-  %% , ?_test("Bool" = ok_prg(
-  %%     "struct Foo { baz :: Foo }\n"
-  %%     "expr = true",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("Foo" = ok_prg(
-  %%     "struct Foo { bar :: Atom, baz :: [Foo] }\n"
-  %%     "expr = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }",
-  %%     "expr"
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: (Float, Atom) }\n"
-  %%     "expr = Foo(([1], @a))",
-  %%     {"[A: Num]", "Float"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<X> { bar :: [X], baz :: Bool }\n"
-  %%     "expr = Foo { baz = true, bar = 5 }",
-  %%     {"[A]", "B: Num"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: A, baz :: A }\n"
-  %%     "expr = Foo(3, true)",
-  %%     {"A: Num", "Bool"}
-  %%   ))
+  % generalization cases
+  , ?_test("(String, Bool)" = ok_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = let id(a) = a, f = Foo { bar = id } in\n"
+      "  (f.bar(\"hi\"), f.bar(true))",
+      "expr"
+    ))
+  , ?_test("{ A | foo :: B -> C } -> { D | bar :: B } -> C" = ok_prg(
+      "f(x, y) = x.foo(y.bar)",
+      "f"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = Foo(\"hi\").bar && true",
+      {"String", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "f(x) = (x.bar && true, x.bar ++ \"hi\")",
+      {"Bool", "A: Concatable"}
+    ))
+  , ?_test(bad_prg(
+      "f(x) = (x.bar(\"hi\"), x.bar(true))",
+      {"String", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = let id(a) = a in\n"
+      "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
+      {"String", "Bool"}
+    ))
 
 
-  %% , ?_test("Int" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "expr = Foo(3, [\"hi\"]).bar",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("Foo -> [String]" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "expr = .baz",
-  %%     "expr"
-  %%   ))
-  %% , ?_test("(String, Bool)" = ok_prg(
-  %%     "struct Foo<A> { bar :: A }\n"
-  %%     "expr = let id(a) = a, f = Foo { bar = id } in\n"
-  %%     "  (f.bar(\"hi\"), f.bar(true))",
-  %%     "expr"
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "expr = Foo(3, [\"hi\"]).bar ++ [1]",
-  %%     {"Int", "[A: Num]"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A }\n"
-  %%     "expr = Foo(\"hi\").bar && true",
-  %%     {"String", "Bool"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A }\n"
-  %%     "f(x) = (x.bar && true, x.bar ++ \"hi\")",
-  %%     {"Bool", "String"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A }\n"
-  %%     "expr = let id(a) = a in\n"
-  %%     "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
-  %%     {"String", "Bool"}
-  %%   ))
+  % name reconciliation
+  , ?_test("{ bar :: A: Num }" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "expr = { bar = 3 }",
+      "expr"
+    ))
+  , ?_test("Foo" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "expr = let x = { bar = 3 } in { x == Foo { bar = 4 }; x }",
+      "expr"
+    ))
+  , ?_test("(String, Foo<Int>)" = ok_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr :: (String, Foo<Int>)\n"
+      "expr = (\"hi\", { bar = 3 })",
+      "expr"
+    ))
+  , ?_test("Bool" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "struct Baz { bar :: Int }\n"
+      "expr = Foo { bar = 3 } == Baz { bar = 3 }",
+      "expr"
+    ))
+  , ?_test("Bool" = ok_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "struct Baz { bar :: Int }\n"
+      "expr = Foo { bar = 3 } == Baz { bar = 6 }",
+      "expr"
+    ))
+  , ?_test("Bool" = ok_prg(
+      "struct Foo<A> { bar :: A, baz :: String }\n"
+      "struct Baz<A> { bar :: Int, baz :: A }\n"
+      "expr = Foo { bar = 3, baz = \"hi\" } == Baz { bar = 3, baz = \"hi\" }",
+      "expr"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int }\n"
+      "expr = let x = { bar = 3, baz = \"hi\" } in x == Foo { bar = 4 }",
+      {"{ bar :: A: Num, baz :: String }", "{ bar :: Int }"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: String }\n"
+      "struct Baz { bar :: Int }\n"
+      "expr = Foo { bar = \"hi\" } == Baz { bar = 3 }",
+      {"String", "Int"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = { bar = true } == Foo { bar = 5 }",
+      {"Bool", "A: Num"}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A, baz :: String }\n"
+      "struct Baz<A> { bar :: Int, baz :: A }\n"
+      "expr = Foo { bar = 3, baz = \"hi\" } == Baz { bar = 3, baz = true }",
+      {"String", "Bool"}
+    ))
 
 
-  %% , ?_test("Foo<A: Num> -> (A: Num, A: Num)" = ok_prg(
-  %%     "struct Foo<A> { bar :: A, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = (x.bar + 3, x.bar)",
-  %%     "f"
-  %%   ))
-  %% , ?_test("Foo -> Other -> Bool" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x, y) = x.bar + 3 == 5 && y.bar == \"hi\"",
-  %%     "f"
-  %%   ))
-  %% , ?_test("Foo -> Int" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = (x :: Foo).bar",
-  %%     "f"
-  %%   ))
-  %% , ?_test("Other -> String" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = x.bar :: String",
-  %%     "f"
-  %%   ))
-  %% , ?_test("Foo -> Int" = ok_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f :: Foo -> Int\n"
-  %%     "f(x) = x.bar + 5",
-  %%     "f"
-  %%   ))
-  %% , ?_test("Foo<A -> B> -> A -> B" = ok_prg(
-  %%     "struct Foo<A> { bar :: A, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x, a) = x.bar(a)",
-  %%     "f"
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = (x.bar(\"hi\"), x.bar(true))",
-  %%     {"String", "Bool"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: Int }\n"
-  %%     "f(x) = x + x.bar",
-  %%     {"A: Num", "either(Foo, Other)"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = x.bar && true",
-  %%     {"Bool", "either(Int, String)"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = x.bar",
-  %%     {"A", "ambig(Foo, Other)"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: Int }\n"
-  %%     "f(x) = x.bar + 5",
-  %%     {"A", "ambig(Foo, Other)"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = x.bar ++ \"hi\"",
-  %%     {"A", "ambig(Foo<String>, Other)"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A, baz :: [String] }\n"
-  %%     "struct Other { bar :: String -> Bool }\n"
-  %%     "f(x, a) = x.bar(a)",
-  %%     {"A", "ambig(Foo<B -> C>, Other)"}
-  %%   ))
-
-
-  % Ideally we'd make these cases work, but for the sake of keeping the
-  % implementation simple, we can't resolve ambiguity across gnrs or
-  % between composed record accesses. It's possible to implement these
-  % by extending our type system with an either(...) construct, but we
-  % avoid this complexity unless need be.
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "struct Mine { m :: String -> Bool }\n"
-  %%     "f(x, y) = x.m(y.bar)",
-  %%     {"A", "ambig(Foo, Other)"}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: Int, baz :: [String] }\n"
-  %%     "struct Other { bar :: String }\n"
-  %%     "f(x) = let b = x.bar in b + 4",
-  %%     {"A", "ambig(Foo, Other)"}
-  %%   ))
+  % signature cases
+  , ?_test("Foo -> Int" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "f(x) = (x :: Foo).bar",
+      "f"
+    ))
+  , ?_test("{ A | bar :: String } -> String" = ok_prg(
+      "f(x) = x.bar :: String",
+      "f"
+    ))
+  , ?_test("Foo -> Int" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "f :: Foo -> Int\n"
+      "f(x) = x.bar + 5",
+      "f"
+    ))
   ].
 
 pattern_test_() ->

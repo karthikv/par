@@ -50,7 +50,7 @@ expr -> '(' expr ')' : '$2'.
 expr -> '{' '}' : {map, []}.
 expr -> '{' kv_list '}' : {map, '$2'}.
 expr -> '{' init_list '}' : {record, '$2'}.
-expr -> '{' var '|' init_list '}' : {update_record, '$2', '$4'}.
+expr -> '{' expr '|' init_list '}' : {update_record, '$2', '$4'}.
 expr -> con_var start_record init_list '}' : {record, '$1', '$3'}.
 expr -> expr '==' expr : {'$2', '$1', '$3'}.
 expr -> expr '!=' expr : {'$2', '$1', '$3'}.
@@ -162,6 +162,8 @@ te -> con_token '<' te_list_tuple '>' : {gen_te, '$1', '$3'}.
 te -> '[' te ']' : {gen_te, {con_token, element(2, '$1'), "List"}, '$2'}.
 te -> '(' te ',' te_list_tuple ')' : {tuple_te, '$2', '$4'}.
 te -> '(' te ')' : '$2'.
+te -> '{' field_list '}' : {record_te, '$2'}.
+te -> '{' tv_token '|' field_list '}' : {iface_te, '$2', {record_te, '$4'}}.
 te -> te '->' te : {lam_te, '$1', '$3'}.
 
 te_list_tuple -> te : '$1'.
@@ -187,7 +189,7 @@ struct -> struct_token con_token '<' tv_list_tuple '>' '{' field_list '}' :
 field_list -> field : ['$1'].
 field_list -> field ',' field_list : ['$1' | '$3'].
 
-field -> var sig : {field, '$1', '$2'}.
+field -> var sig : {'$1', '$2'}.
 
 tv_list_tuple -> tv_token : '$1'.
 tv_list_tuple -> tv_token ',' tv_list_tuple : {tuple_te, '$1', '$3'}.
