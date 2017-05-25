@@ -88,7 +88,6 @@
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Concurrency
-% - uncurry function within e.g. tuple to pass to native erlang?
 % - composition operator |>
 % - Exceptions
 % - Code generation

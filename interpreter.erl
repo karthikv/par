@@ -30,9 +30,9 @@ init({enum, _, OptionTEs}, ID) ->
     Value = if
       length(ArgsTE) == 0 -> list_to_atom(Name);
       true ->
-        curry(length(ArgsTE), fun(Vs) ->
+        make_fun(length(ArgsTE), fun(Vs) ->
           list_to_tuple([list_to_atom(Name) | Vs])
-        end, [])
+        end)
     end,
 
     env_set(Name, Value, ID)
@@ -47,16 +47,16 @@ init({struct, StructTE, FieldTEs}, ID) ->
   FieldAtoms = lists:map(fun({{var, _, FieldName}, _}) ->
     list_to_atom(FieldName)
   end, FieldTEs),
-  StructV = curry(length(FieldTEs), fun(Vs) ->
+  StructV = make_fun(length(FieldTEs), fun(Vs) ->
     maps:from_list(lists:zip(FieldAtoms, Vs))
-  end, []),
+  end),
 
   env_set(StructName, StructV, ID);
 
 init({sig, _, _}, _) -> true.
 
 eval({fn, Args, Expr}, ID) ->
-  curry(length(Args), fun(Vs) ->
+  make_fun(length(Args), fun(Vs) ->
     NewID = if
       length(Args) == 0 -> ID;
       true ->
@@ -68,7 +68,7 @@ eval({fn, Args, Expr}, ID) ->
     end,
 
     eval(Expr, NewID)
-  end, []);
+  end);
 
 eval({expr_sig, Expr, _}, ID) -> eval(Expr, ID);
 
@@ -125,24 +125,24 @@ eval({record, _, Inits}, ID) -> eval({record, Inits}, ID);
 
 eval({field, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),
-  curry(1, fun([Record]) -> maps:get(Atom, Record) end, []);
+  fun(Record) -> maps:get(Atom, Record) end;
 
 eval({field, Expr, Var}, ID) ->
   Record = eval(Expr, ID),
-  Fn = eval({field, Var}, ID),
-  Fn([Record]);
+  Fun = eval({field, Var}, ID),
+  Fun(Record);
 
 eval({app, Expr, Args}, ID) ->
-  Fn = eval(Expr, ID),
-  Vs = if
-    length(Args) == 0 -> [none];
-    true -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
+  Fun = eval(Expr, ID),
+  Vs = case length(Args) of
+    0 -> [none];
+    _ -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
   end,
-  Fn(Vs);
+  app(Fun, Vs);
 
 eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
-  curry_native(fun Module:Fn/Arity);
+  fun Module:Fn/Arity;
 
 eval({{'if', _}, Expr, Then, Else}, ID) ->
   V = case eval(Expr, ID) of
@@ -261,64 +261,36 @@ eval({{Op, _}, Expr}, ID) ->
     'discard' -> none
   end.
 
-curry(Arity, Callback, ArgVs) ->
-  fun(Action) ->
-    case Action of
-      uncurry ->
-        uncurry(Arity - length(ArgVs), fun(NewVs) ->
-          Callback(ArgVs ++ NewVs)
-        end);
+app(Fun, GivenVs) ->
+  {arity, Arity} = erlang:fun_info(Fun, arity),
 
-      NewVs when is_list(NewVs) ->
-        Vs = ArgVs ++ NewVs,
+  Vs = case Arity of
+    0 ->
+      none = hd(GivenVs),
+      tl(GivenVs);
+    _ -> GivenVs
+  end,
+  NumVs = length(Vs),
 
-        if
-          Arity == 0 ->
-            [none | Rest] = Vs,
-            Result = Callback([none]),
-            if
-              is_function(Result) and (length(Rest) > 0) -> Result(Rest);
-              true -> Result
-            end;
-
-          length(Vs) >= Arity ->
-            {AppVs, Rest} = if
-              length(Vs) > Arity -> lists:split(Arity, Vs);
-              true -> {Vs, []}
-            end,
-
-            Result = Callback(AppVs),
-            if
-              is_function(Result) and (length(Rest) > 0) -> Result(Rest);
-              true -> Result
-            end;
-
-          true -> curry(Arity, Callback, Vs)
-        end
-    end
+  if
+    NumVs < Arity ->
+      make_fun(Arity - NumVs, fun(NewVs) ->
+        apply(Fun, Vs ++ NewVs)
+      end);
+    NumVs == Arity -> apply(Fun, Vs);
+    NumVs > Arity ->
+      DirectVs = lists:sublist(Vs, Arity),
+      FurtherVs = lists:sublist(Vs, Arity + 1, NumVs),
+      io:format("got dvs ~p fvs ~p arity ~p~n", [DirectVs, FurtherVs, Arity]),
+      app(apply(Fun, DirectVs), FurtherVs)
   end.
 
-curry_native(Fun) ->
-  {arity, Arity} = erlang:fun_info(Fun, arity),
-  curry(Arity, fun(Vs) ->
-    Result = if
-      Arity == 0 -> Fun();
-      true ->
-        NativeVs = lists:map(fun(V) ->
-          if is_function(V) -> V(uncurry); true -> V end
-        end, Vs),
-        apply(Fun, NativeVs)
-    end,
-
-    if is_function(Result) -> curry_native(Result); true -> Result end
-  end, []).
-
-uncurry(Arity, Callback) ->
+make_fun(Arity, Callback) ->
   % As far as I know, there's no way to create a function with a dynamic number
   % of arguments, so we do it manually up to 10 (a guessed maximum) here.
   case Arity of
     0 -> fun() ->
-      Callback([none])
+      Callback([])
     end;
     1 -> fun(A) ->
       Callback([A])
@@ -349,6 +321,36 @@ uncurry(Arity, Callback) ->
     end;
     10 -> fun(A, B, C, D, E, F, G, H, I, J) ->
       Callback([A, B, C, D, E, F, G, H, I, J])
+    end;
+    11 -> fun(A, B, C, D, E, F, G, H, I, J, K) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K])
+    end;
+    12 -> fun(A, B, C, D, E, F, G, H, I, J, K, L) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L])
+    end;
+    13 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M])
+    end;
+    14 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N])
+    end;
+    15 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O])
+    end;
+    16 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P])
+    end;
+    17 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q])
+    end;
+    18 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R])
+    end;
+    19 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S])
+    end;
+    20 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T) ->
+      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T])
     end
   end.
 

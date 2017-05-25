@@ -40,8 +40,8 @@ expr_test_() ->
     )
 
 
-  , ?_test({3.0, true} = (expr("|x| x"))([{3.0, true}]))
-  , ?_test(35.0 = (expr("|x, y| x * y * 3.5"))([4, 2.5]))
+  , ?_test({3.0, true} = (expr("|x| x"))({3.0, true}))
+  , ?_test(35.0 = (expr("|x, y| x * y * 3.5"))(4, 2.5))
   , ?_test(true = expr("(|x| x || true)(false)"))
   , ?_test(<<"ab">> = expr("(|a, b| a ++ b)(\"a\")(\"b\")"))
   , ?_test(5 = expr("(|x| |y| x + y)(2, 3)"))
@@ -135,6 +135,8 @@ expr_test_() ->
   , ?_test(3 = expr("@interpreter_test:returns_fun()(1)(2)"))
   , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1)(2)"))
   , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1, 2)"))
+  , ?_test(true = expr("let foo(x) = x == () in foo()"))
+  , ?_test(true = expr("let foo(x) = x == () in foo(())"))
   ].
 
 % used for the last few tests above
@@ -201,7 +203,7 @@ enum_test_() ->
   , ?_test({'Bar', true, [<<"hello">>]} = (execute(
       "enum Foo { Bar(Bool, [String]) }\n"
       "main() = Bar(true)"
-    ))([[<<"hello">>]]))
+    ))([<<"hello">>]))
   , ?_test('Bar' = execute(
       "enum Foo<A> { Bar }\n"
       "main() = Bar"
@@ -246,7 +248,7 @@ record_test_() ->
   , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (execute(
       "struct Foo { bar :: Int, baz :: [String] }\n"
       "main() = Foo(3)"
-    ))([[<<"hello">>]]))
+    ))([<<"hello">>]))
   , ?_assertEqual(#{baz => [first, second], bar => 15}, execute(
       "struct Foo { bar :: Int, baz :: [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
@@ -254,7 +256,7 @@ record_test_() ->
   , ?_assertEqual(#{bar => hi, baz => true}, (execute(
       "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
       "main() = Foo(@hi)"
-    ))([true]))
+    ))(true))
   , ?_assertEqual(#{bar => hi}, execute(
       "struct Foo<X> { bar :: X }\n"
       "main() = Foo { bar = @hi }"
