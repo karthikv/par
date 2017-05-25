@@ -514,11 +514,6 @@ enum_test_() ->
       "expr = Bar(true)",
       "expr"
     ))
-  , ?_test("VariedList" = ok_prg(
-      "enum VariedList { Cons(A, VariedList), End }\n"
-      "expr = Cons(\"hello\", Cons((3, true), Cons(@what, End)))",
-      "expr"
-    ))
   , ?_test("Foo<A>" = ok_prg(
       "enum Foo<A> { Bar }\n"
       "expr = Bar",
@@ -529,8 +524,8 @@ enum_test_() ->
       "expr = Baz(3)",
       "expr"
     ))
-  , ?_test("UniformList<Float>" = ok_prg(
-      "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
+  , ?_test("CustomList<Float>" = ok_prg(
+      "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
       "expr = Cons(3, Cons(5.0, End))\n",
       "expr"
     ))
@@ -540,12 +535,12 @@ enum_test_() ->
       {"[A: Num]", "Float"}
     ))
   , ?_test(bad_prg(
-      "enum Foo { Bar(A, A) }\n"
+      "enum Foo<A> { Bar(A, A) }\n"
       "expr = Bar(3, true)",
       {"A: Num", "Bool"}
     ))
   , ?_test(bad_prg(
-      "enum UniformList<A> { Cons(A, UniformList<A>), End }\n"
+      "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
       "expr = Cons(\"hi\", Cons(5.0, End))\n",
       {"String", "Float"}
     ))
@@ -671,7 +666,7 @@ record_test_() ->
       {"[A]", "B: Num"}
     ))
   , ?_test(bad_prg(
-      "struct Foo { bar :: A, baz :: A }\n"
+      "struct Foo<A> { bar :: A, baz :: A }\n"
       "expr = Foo(3, true)",
       {"A: Num", "Bool"}
     ))

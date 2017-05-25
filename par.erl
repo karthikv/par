@@ -89,7 +89,6 @@
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Concurrency
 % - uncurry function within e.g. tuple to pass to native erlang?
-% - Remove arbitrary type variables from ADTs
 % - composition operator |>
 % - Exceptions
 % - Code generation
@@ -285,6 +284,8 @@ infer({record_te, Fields}, C) ->
 
 infer({enum, EnumTE, Options}, C) ->
   {T, C1} = infer(EnumTE, C),
+  FVs = fvs(T),
+
   C2 = lists:foldl(fun({option, {con_token, _, Name}, ArgTEs}, FoldC) ->
     {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, InnerC}) ->
       {ArgT, InnerC1} = infer(ArgTE, InnerC),
@@ -294,6 +295,9 @@ infer({enum, EnumTE, Options}, C) ->
     OptionT = lists:foldl(fun(ArgT, LastT) ->
       {lam, ArgT, LastT}
     end, T, ArgTsRev),
+
+    % TODO: handle error
+    true = gb_sets:is_empty(gb_sets:difference(fvs(OptionT), FVs)),
 
     % don't need to exclude params; all(X) becomes any(X) during instantiation
     NormOptionT = norm_sig_type(OptionT, [], C#ctx.pid),
@@ -308,10 +312,14 @@ infer({enum, EnumTE, Options}, C) ->
 
 infer({struct, StructTE, Fields}, C) ->
   {T, C1} = infer(StructTE, C),
-  {{record, _, FieldMap}, C2} = infer({record_te, Fields}, C1),
+  {{record, _, RawFieldMap}, C2} = infer({record_te, Fields}, C1),
+
+  FieldFVs = fvs({record, none, RawFieldMap}),
+  % TODO: handle error
+  true = gb_sets:is_empty(gb_sets:difference(FieldFVs, fvs(T))),
 
   FnT = lists:foldr(fun({{var, _, Name}, _}, LastT) ->
-    #{Name := FieldT} = FieldMap,
+    #{Name := FieldT} = RawFieldMap,
     {lam, FieldT, LastT}
   end, T, Fields),
 
@@ -321,12 +329,14 @@ infer({struct, StructTE, Fields}, C) ->
   % TODO: should we have a separate types map or just use env?
   Types = C2#ctx.types,
   {StructCon, Value} = case T of
-    {con, Con} -> {Con, {T, [], FieldMap}};
+    {con, Con} -> {Con, {T, [], RawFieldMap}};
     {gen, Con, ParamT} ->
       Params = param_type_to_list(ParamT),
       Vs = lists:map(fun({tv, V, none, _}) -> V end, Params),
-      {Con, {T, Vs, FieldMap}}
+      {Con, {T, Vs, RawFieldMap}}
   end,
+
+  % TODO: ensure reptitions of same tv have the same iface
 
   {TV, ID} = tv_server:fresh_gnr_id(C2#ctx.pid),
   C3 = add_env(atom_to_list(StructCon), {add_dep, TV, ID}, C2),
@@ -1023,14 +1033,14 @@ iface_unify(I1, I2, S) ->
 
 unalias({con, Con}, S) ->
   case maps:find(Con, S#solver.types) of
-    {ok, {_, [], StructFieldMap}} -> {record, none, StructFieldMap};
+    {ok, {_, [], RawFieldMap}} -> {record, none, RawFieldMap};
     error -> {con, Con}
   end;
 unalias({gen, Con, ParamT}, S) ->
   case maps:find(Con, S#solver.types) of
-    {ok, {_, Vs, StructFieldMap}} ->
+    {ok, {_, Vs, RawFieldMap}} ->
       Subs = maps:from_list(lists:zip(Vs, param_type_to_list(ParamT))),
-      subs({record, none, StructFieldMap}, Subs);
+      subs({record, none, RawFieldMap}, Subs);
     error -> {gen, Con, ParamT}
   end;
 unalias(T, _) -> T.
