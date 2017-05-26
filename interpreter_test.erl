@@ -137,6 +137,10 @@ expr_test_() ->
   , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1, 2)"))
   , ?_test(true = expr("let foo(x) = x == () in foo()"))
   , ?_test(true = expr("let foo(x) = x == () in foo(())"))
+
+  , ?_test(<<"hello world">> = expr("\"hello\" |> |x| x ++ \" world\""))
+  , ?_test(77 = expr("let inc(x) = x + 1 in (5 |> |x| 2 * x |> inc) * 7"))
+  , ?_test(true = (expr("let f(x, y) = x == y in @hi |> f"))(hi))
   ].
 
 % used for the last few tests above

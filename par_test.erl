@@ -23,18 +23,28 @@ norm_prg(Prg, Name) ->
 ok_prg(Prg, Name) ->
   par:pretty(norm_prg(Prg, Name)).
 
-bad_prg(Prg, {EP1, EP2}) ->
+bad_prg(Prg, {Exp1, Exp2}) ->
   {errors, Errs} = par:infer_prg(Prg),
   [{T1, T2}] = Errs,
+  check({T1, T2}, {Exp1, Exp2});
 
+bad_prg(Prg, ExpErrs) ->
+  {errors, Errs} = par:infer_prg(Prg),
+
+  % for simplicitly, we assume errors are in the same order
+  lists:foldl(fun({Err, ExpErr}, Valid) ->
+    Valid and check(Err, ExpErr)
+  end, true, lists:zip(Errs, ExpErrs)).
+
+check({T1, T2}, {Exp1, Exp2}) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {#{}, Pid}),
   {NormT2, _} = norm(T2, N),
   ok = tv_server:stop(Pid),
 
   case {par:pretty(NormT1), par:pretty(NormT2)} of
-    {EP1, EP2} -> true;
-    {EP2, EP1} -> true;
+    {Exp1, Exp2} -> true;
+    {Exp2, Exp1} -> true;
     _ ->
       {ok, FlipPid} = tv_server:start_link(),
       {FlipNormT2, FlipN} = norm(T2, {#{}, FlipPid}),
@@ -42,8 +52,8 @@ bad_prg(Prg, {EP1, EP2}) ->
       ok = tv_server:stop(FlipPid),
 
       case {par:pretty(FlipNormT1), par:pretty(FlipNormT2)} of
-        {EP1, EP2} -> true;
-        {EP2, EP1} -> true
+        {Exp1, Exp2} -> true;
+        {Exp2, Exp1} -> true
       end
   end.
 
@@ -279,6 +289,21 @@ expr_test_() ->
   , ?_test("A" = ok_expr("@io:printable_range(())"))
   , ?_test("A" = ok_expr("@io:printable_range/0((), 1, 2)"))
   , ?_test(bad_expr("@io:printable_range/0(1, 2)", {"()", "A: Num"}))
+
+  , ?_test("String" = ok_expr("\"hello\" |> |x| x ++ \" world\""))
+  , ?_test("A: Num" =
+             ok_expr("let inc(x) = x + 1 in (5 |> |x| 2 * x |> inc) * 7"))
+  , ?_test("Atom -> Bool" = ok_expr("let f(x, y) = x == y in @hi |> f"))
+  , ?_test(bad_expr("3 |> true", {"Bool", "A: Num -> B"}))
+  , ?_test(bad_expr("\"hi\" |> |x| #x", {"String", "[A]"}))
+  , ?_test(bad_expr(
+      "let inc(x) = x + 1 in 5 |> |x| 2 * x |> inc * 7",
+      [{"A: Num -> B", "C: Num"}, {"A: Num -> A: Num", "B: Num"}]
+    ))
+  , ?_test(bad_expr(
+      "3 |> |x| [x] |> |x| x ++ [4] |> |x| 2 * x",
+      {"[A: Num]", "B: Num"}
+    ))
   ].
 
 para_poly_test_() ->

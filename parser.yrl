@@ -10,7 +10,7 @@ Nonterminals
 
 Terminals
   '=' '(' ')' ','
-  '==' '!=' '||' '&&' '!' '>' '<' '>=' '<='
+  '==' '!=' '||' '&&' '|>' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/' '%'
   '++' '--' '.' '|' '::' ':' '->' ';' 'discard'
   if then else let in match
@@ -56,6 +56,7 @@ expr -> expr '==' expr : {'$2', '$1', '$3'}.
 expr -> expr '!=' expr : {'$2', '$1', '$3'}.
 expr -> expr '||' expr : {'$2', '$1', '$3'}.
 expr -> expr '&&' expr : {'$2', '$1', '$3'}.
+expr -> expr '|>' expr : {'$2', '$1', '$3'}.
 expr -> expr '>' expr : {'$2', '$1', '$3'}.
 expr -> expr '<' expr : {'$2', '$1', '$3'}.
 expr -> expr '>=' expr : {'$2', '$1', '$3'}.
@@ -196,16 +197,17 @@ tv_list_tuple -> tv_token ',' tv_list_tuple : {tuple_te, '$1', '$3'}.
 
 Nonassoc 10 '='.
 Right 20 '->'.
-Unary 30 lam.
-Left 40 '||'.
-Left 50 '&&'.
-Nonassoc 60 '==' '!=' '>' '<' '>=' '<='.
-Left 70 '+' '-' '++' '--'.
-Left 80 mul '/' '%'.
-Nonassoc 90 '::'.
-Unary 100 '!' '#' neg 'discard'.
-Nonassoc 110 '('.
-Nonassoc 120 '.'.
+Left 30 '|>'.
+Unary 40 lam.
+Left 50 '||'.
+Left 60 '&&'.
+Nonassoc 70 '==' '!=' '>' '<' '>=' '<='.
+Left 80 '+' '-' '++' '--'.
+Left 90 mul '/' '%'.
+Nonassoc 100 '::'.
+Unary 110 '!' '#' neg 'discard'.
+Nonassoc 120 '('.
+Nonassoc 130 '.'.
 
 Nonassoc 10 'then'.
 Nonassoc 20 'else'.

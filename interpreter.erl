@@ -220,6 +220,7 @@ eval({{Op, _}, Left, Right}, ID) ->
     '!=' -> LeftV /= RightV;
     '||' -> LeftV or RightV;
     '&&' -> LeftV and RightV;
+    '|>' -> app(RightV, [LeftV]);
     '>' -> LeftV > RightV;
     '<' -> LeftV < RightV;
     '>=' -> LeftV >= RightV;

@@ -88,7 +88,6 @@
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Concurrency
-% - composition operator |>
 % - Exceptions
 % - Code generation
 % - Update naming conventions
@@ -546,6 +545,12 @@ infer({{Op, _}, Left, Right}, C) ->
       {lam, LeftT, {lam, RightT, TV}},
       {lam, {con, 'Bool'}, {lam, {con, 'Bool'}, {con, 'Bool'}}}
     };
+    Op == '|>' ->
+      ArgTV = tv_server:fresh(C2#ctx.pid),
+      {
+        {lam, LeftT, {lam, RightT, TV}},
+        {lam, ArgTV, {lam, {lam, ArgTV, TV}, TV}}
+      };
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
       NumTV = tv_server:fresh('Num', C2#ctx.pid),
       {
@@ -823,6 +828,7 @@ unify({T1, T2}, S) when T1 == T2 -> S;
 
 unify({{lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}}, S) ->
   S1 = unify({ArgT1, ArgT2}, S),
+  % TODO: should we short-circuit this unification if args failed?
   unify({ReturnT1, ReturnT2}, S1);
 unify({{tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}}, S) ->
   S1 = unify({LeftT1, LeftT2}, S),
