@@ -10,6 +10,7 @@ VAR = ([a-z]{WORD}*|_{WORD}+)
 TV = [A-Z]
 CON = [A-Z][a-zA-Z0-9_]+
 WHITESPACE = [\s\t\n\r]
+COMMENT = //.*
 
 Rules.
 
@@ -66,6 +67,7 @@ struct : {token, {struct_token, TokenLine}}.
 {TV} : {token, {tv_token, TokenLine, TokenChars}}.
 {CON} : {token, {con_token, TokenLine, TokenChars}}.
 {WHITESPACE}+ : skip_token.
+{COMMENT} : skip_token.
 
 Erlang code.
 
