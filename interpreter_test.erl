@@ -27,7 +27,7 @@ expr_test_() ->
   , ?_test(hi = expr("@hi"))
   , ?_test('hello world' = expr("@\"hello world\""))
   , ?_test([3.0, 5] = expr("[3.0, 5]"))
-  , ?_test({<<"what">>, false} = expr("(\"what\", false)"))
+  , ?_test({<<"what">>, false, 7} = expr("(\"what\", false, 7)"))
   , ?_assertEqual(#{}, expr("{}"))
   , ?_assertEqual(
       #{<<"hello">> => <<"world">>, <<"some">> => <<"thing">>},
@@ -292,7 +292,7 @@ pattern_test_() ->
   [ ?_test(true = expr("match 3 { 3 => true, 4 => false }"))
   , ?_test(18 = expr("let x = 3 in match x + 5 { a => a + 10 }"))
   , ?_test(5.0 = expr("match |x| x { id => let y = id(true) in id(5.0) }"))
-  , ?_test({6, {6.0, {8, 8.0}}} = expr(
+  , ?_test({6, 6.0, 8, 8.0} = expr(
       "match (3, 4) {\n"
       "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
       "}"

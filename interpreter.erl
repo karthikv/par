@@ -82,7 +82,10 @@ eval({list, Elems}, ID) ->
 eval({tuple, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
   RightV = eval(Right, ID),
-  {LeftV, RightV};
+  case element(1, Right) of
+    tuple -> erlang:insert_element(1, RightV, LeftV);
+    _ -> {LeftV, RightV}
+  end;
 
 eval({map, Pairs}, ID) ->
   List = lists:map(fun({K, V}) ->
@@ -423,7 +426,14 @@ match(V, {list, List, Rest}, ID) ->
   end;
 
 match(V, {tuple, Left, Right}, ID) ->
-  match(tuple_to_list(V), {list, [Left, Right]}, ID).
+  case match(element(1, V), Left, ID) of
+    false -> false;
+    true ->
+      case Right of
+        {tuple, _, _} -> match(erlang:delete_element(1, V), Right, ID);
+        _ -> match(element(2, V), Right, ID)
+      end
+  end.
 
 env_create_first() ->
   case ets:info(envs) of
