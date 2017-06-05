@@ -22,7 +22,7 @@ reload() ->
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE).
 
-start_link() -> gen_server:start_link(?MODULE, {0, 0}, []).
+start_link() -> gen_server:start_link(?MODULE, {1, 0}, []).
 next_name(Pid) -> gen_server:call(Pid, next_name).
 next_gnr_id(Pid) -> gen_server:call(Pid, next_gnr_id).
 fresh(Pid) -> {tv, next_name(Pid), none, any}.
@@ -32,7 +32,7 @@ stop(Pid) -> gen_server:stop(Pid).
 
 init({Count, NextID}) -> {ok, {Count, NextID}}.
 handle_call(next_name, _, {Count, NextID}) ->
-  {reply, gen_name(Count), {Count + 1, NextID}};
+  {reply, [$* | lists:reverse(gen_name(Count))], {Count + 1, NextID}};
 handle_call(next_gnr_id, _, {Count, NextID}) ->
   {reply, NextID, {Count, NextID + 1}}.
 
@@ -47,5 +47,5 @@ handle_info(Msg, State) ->
 terminate(normal, _) -> ok.
 code_change(_, State, _) -> {ok, State}.
 
-gen_name(Count) when Count < 26 -> [$*, $A + Count];
-gen_name(Count) -> [$A + (Count rem 26) | gen_name(Count - 26)].
+gen_name(0) -> [];
+gen_name(Count) -> [$A - 1 + Count rem 26 | gen_name(trunc(Count / 26))].
