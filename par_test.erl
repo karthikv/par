@@ -236,12 +236,12 @@ expr_test_() ->
   , ?_test("A -> A" = ok_expr("(|x| x) :: A -> A"))
   , ?_test("A: Num" = ok_expr("((|x| x) :: A -> A)(3)"))
   , ?_test("(A -> B) -> A -> B" = ok_expr("(|x| x) :: (A -> B) -> A -> B"))
-  , ?_test(bad_expr("true :: A", {"Bool", "all(A)"}))
-  , ?_test(bad_expr("3 :: A", {"A: Num", "all(B)"}))
-  , ?_test(bad_expr("5.0 :: A: Num", {"Float", "all(A: Num)"}))
+  , ?_test(bad_expr("true :: A", {"Bool", "rigid(A)"}))
+  , ?_test(bad_expr("3 :: A", {"A: Num", "rigid(B)"}))
+  , ?_test(bad_expr("5.0 :: A: Num", {"Float", "rigid(A: Num)"}))
   , ?_test(bad_expr("5.0 :: Int", {"Float", "Int"}))
-  , ?_test(bad_expr("|x| x :: B", {"rigid(A)", "all(B)"}))
-  , ?_test(bad_expr("|x| x :: B -> B", {"rigid(A)", "all(B) -> all(B)"}))
+  , ?_test(bad_expr("|x| x :: B", {"A", "rigid(B)"}))
+  , ?_test(bad_expr("|x| x :: B -> B", {"A", "rigid(B) -> rigid(B)"}))
 
   , ?_test("A: Num" = ok_expr("7 - (3 + -5)"))
   , ?_test("Float" = ok_expr("7 - (3.0 + -5)"))
@@ -444,29 +444,29 @@ sig_test_() ->
   , ?_test(bad_prg(
       "id :: A -> B\n"
       "id(x) = x",
-      {"all(A)", "all(B)"}
+      {"rigid(A)", "rigid(B)"}
     ))
   , ?_test(bad_prg(
       "inc :: A: Num -> A: Num\n"
       "inc(x) = x :: B: Num + 1 :: A: Num",
-      {"rigid(A)", "all(B: Num)"}
+      {"A", "rigid(B: Num)"}
     ))
   , ?_test(bad_prg(
       "foo :: Int -> Int\n"
       "foo(x) = x + 3\n"
       "bar :: A: Num -> Int\n"
       "bar(x) = foo(x)",
-      {"Int", "all(A: Num)"}
+      {"Int", "rigid(A: Num)"}
     ))
   , ?_test(bad_prg(
       "push :: [Float] -> [A: Num]\n"
       "push(x) = x ++ [1.0]",
-      {"all(A: Num)", "Float"}
+      {"rigid(A: Num)", "Float"}
     ))
   , ?_test(bad_prg(
       "empty :: List<A> -> List<B> -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
-      {"all(A)", "all(B)"}
+      {"rigid(A)", "rigid(B)"}
     ))
   , ?_test(bad_prg(
       "foo :: { bar :: String, baz :: A: Num } -> String\n"
@@ -889,6 +889,10 @@ pattern_test_() ->
     ))
   , ?_test("A: Num" =
              ok_expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
+  , ?_test("(A, B) -> A" = ok_prg(
+      "f(t) = let (a, _) = t in a",
+      "f"
+    ))
   , ?_test(bad_expr("let true = 3 in []", {"Bool", "A: Num"}))
   , ?_test(bad_expr("let [x] = x in x", {"A", "[A]"}))
   , ?_test(bad_expr(
@@ -898,6 +902,11 @@ pattern_test_() ->
   , ?_test(bad_expr(
       "let (*a, b) = (3, 7), [_, a] = [true, false] in b",
       {"A: Num", "Bool"}
+    ))
+  , ?_test(bad_prg(
+      "f(t) = let (a, _) = t in a\n"
+      "g(t) = f(t) :: B",
+      {"A", "rigid(B)"}
     ))
 
 
@@ -917,7 +926,7 @@ pattern_test_() ->
       "if let (_, a) = [\"hello\", \"hi\"] then a else \"hey\"",
       {"(A, B)", "[String]"}
     ))
-  , ?_test( bad_expr(
+  , ?_test(bad_expr(
       "if let tuple = (tuple, 1)\n"
       "then tuple\n"
       "else 0",

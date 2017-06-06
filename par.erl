@@ -3,10 +3,10 @@
 
 % Naming conventions:
 %
-% TV - a type variable, represented as a 4-tuple {tv, V, I, Cat}:
+% TV - a type variable, represented as a 4-tuple {tv, V, I, Rigid}:
 %   V - the variable name
 %   I - the interface (typeclass) constraining the type variable
-%   Cat - the category of type variable (any or all)
+%   Rigid - whether the type variable is rigid
 %
 % T - a type, represented as a tuple:
 %   {con, C} - a concrete type C; e.g. Int
@@ -35,10 +35,10 @@
 %   errs - any constraints that couldn't be unified
 %   schemes - the schemes of env variables that have been solved for and
 %             generalized
-%   rigid_vs - the set of TV names in the environment
+%   bound_vs - the set of TV names in the environment
 %   types - a Name => TypeInfo mapping of types in the environment
 %   pid - the process id of the TV server used to generated fresh TVs
--record(solver, {subs, errs, schemes, rigid_vs, types, pid}).
+-record(solver, {subs, errs, schemes, bound_vs, types, pid}).
 
 % G - a gnr record that represents a set of constraints to solve before
 %     generalizing a type variable:
@@ -85,6 +85,7 @@
 % - TODOs in code (non-unification error cases)
 % - Error messages
 % - Exhaustive pattern matching errors
+% - Pattern matching records
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Concurrency
@@ -92,12 +93,18 @@
 % - Code generation
 % - Update naming conventions
 %
+% From dogfooding:
+% - Syntax to prepend list element
+% - Operation: nth element of tuple? Rethink tuple access
+% - Underscore for arg name
+% - Character type and operations
+%
 % - + instead of ++ and - instead of --?
 % - Make true/false capitalized?
 % - Syntax for lambda with no arg?
-% - Operation: nth element of tuple?
 % - Unit as valid expression?
 % - Force all block expressions except last to be type ()?
+% - List indexing?
 
 reload(true) ->
   code:purge(lexer),
@@ -254,20 +261,19 @@ infer({tuple_te, LeftTE, RightTE}, C) ->
   {{tuple, LeftT, RightT}, C2};
 infer({iface_te, TVToken, TE}, C) ->
   % TODO: records in signatures
-  {{tv, V, none, Cat}, C1} = infer(TVToken, C),
+  {{tv, V, none, Rigid}, C1} = infer(TVToken, C),
   case infer(TE, C1) of
     % TODO: ensure this is a valid iface
-    {{con, I}, C2} -> {{tv, V, I, Cat}, C2};
-    {{record, _, FieldMap}, C2} -> {{tv, V, FieldMap, Cat}, C2}
+    {{con, I}, C2} -> {{tv, V, I, Rigid}, C2};
+    {{record, _, FieldMap}, C2} -> {{tv, V, FieldMap, Rigid}, C2}
   end;
 infer({gen_te, {con_token, _, Name}, ParamTE}, C) ->
   {ParamT, C1} = infer(ParamTE, C),
   {{gen, list_to_atom(Name), ParamT}, C1};
 infer({tv_token, _, Name}, C) ->
-  % This TV should be in category all, but because it's renamed in
-  % norm_sig_type, it's reset to category any. Hence, we don't set category all
-  % here. Rather, after renaming in norm_sig_type, we change to category all.
-  {{tv, Name, none, any}, C};
+  % This TV should be rigid, but it'll be reset to flex in norm_sig_type.
+  % Hence, we don't set rigid here, but rather after renaming.
+  {{tv, Name, none, false}, C};
 % TODO: ensure these types are valid except when creating a new type
 infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
 infer({record_te, Fields}, C) ->
@@ -297,7 +303,7 @@ infer({enum, EnumTE, Options}, C) ->
     % TODO: handle error
     true = gb_sets:is_empty(gb_sets:difference(fvs(OptionT), FVs)),
 
-    % don't need to exclude params; all(X) becomes any(X) during instantiation
+    % don't need to exclude params; rigid(X) becomes X during inst
     NormOptionT = norm_sig_type(OptionT, [], C#ctx.pid),
 
     % TODO: what if name already exists?
@@ -321,7 +327,7 @@ infer({struct, StructTE, Fields}, C) ->
     {lam, FieldT, LastT}
   end, T, Fields),
 
-  % don't need to exclude params; all(x) becomes any(X) during instantiation
+  % don't need to exclude params; rigid(x) becomes X during inst
   NormFnT = norm_sig_type(FnT, [], C2#ctx.pid),
 
   % TODO: should we have a separate types map or just use env?
@@ -667,7 +673,7 @@ norm_sig_type(SigT, ExceptVs, Pid) ->
   Subs = gb_sets:fold(fun(V, FoldSubs) ->
     case gb_sets:is_member(V, ExceptVsSet) of
       true -> FoldSubs#{V => tv_server:next_name(Pid)};
-      false -> FoldSubs#{V => {all, tv_server:next_name(Pid)}}
+      false -> FoldSubs#{V => {rigid, tv_server:next_name(Pid)}}
     end
   end, #{}, fvs(SigT)),
 
@@ -765,13 +771,13 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
 
       S4 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
-        RigidVs = rigid_vs(SolG#gnr.env, FoldS),
+        BoundVs = bound_vs(SolG#gnr.env, FoldS),
 
         lists:foldl(fun(SolV, NestedS) ->
           #solver{subs=Subs, schemes=Schemes} = NestedS,
-          SolTV = {tv, SolV, none, any},
+          SolTV = {tv, SolV, none, false},
           T = subs(SolTV, Subs),
-          GVs = gb_sets:subtract(fvs(T), RigidVs),
+          GVs = gb_sets:subtract(fvs(T), BoundVs),
           Schemes1 = Schemes#{SolV => {GVs, T}},
           NestedS#solver{schemes=Schemes1}
         end, FoldS, SolG#gnr.vs)
@@ -789,21 +795,21 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
   % reverse the order here.
   OrderedCsts = lists:reverse(Csts),
-  RigidVs = rigid_vs(Env, S),
+  BoundVs = bound_vs(Env, S),
   lists:foldl(fun({T1, T2}, FoldS) ->
     unify({resolve(T1, FoldS), resolve(T2, FoldS)}, FoldS)
-  end, S#solver{rigid_vs=RigidVs}, OrderedCsts).
+  end, S#solver{bound_vs=BoundVs}, OrderedCsts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, LeftT, RightT}, S) ->
   {tuple, resolve(LeftT, S), resolve(RightT, S)};
-resolve({tv, V, I, Cat}, S) ->
+resolve({tv, V, I, Rigid}, S) ->
   if
     is_map(I) ->
       NewI = maps:map(fun(_, T) -> resolve(T, S) end, I),
-      {tv, V, NewI, Cat};
-    true -> {tv, V, I, Cat}
+      {tv, V, NewI, Rigid};
+    true -> {tv, V, I, Rigid}
   end;
 resolve({con, Con}, _) -> {con, Con};
 resolve({gen, Con, ParamT}, S) -> {gen, Con, resolve(ParamT, S)};
@@ -857,48 +863,38 @@ unify({{record, A1, FieldMap1}, {record, A2, FieldMap2}}, S) ->
       end
   end;
 
-unify({{tv, V1, I1, Cat1}, {tv, V2, I2, Cat2}}, S) ->
-  TV1 = {tv, V1, I1, Cat1},
-  TV2 = {tv, V2, I2, Cat2},
+unify({{tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}}, S) ->
+  TV1 = {tv, V1, I1, Rigid1},
+  TV2 = {tv, V2, I2, Rigid2},
 
   case {subs(TV1, S#solver.subs), subs(TV2, S#solver.subs)} of
     {TV1, TV2} ->
-      Ilk1 = ilk(TV1, S),
-      Ilk2 = ilk(TV2, S),
+      Bound1 = gb_sets:is_member(V1, S#solver.bound_vs),
+      Bound2 = gb_sets:is_member(V2, S#solver.bound_vs),
       Occurs = occurs(V1, TV2) or occurs(V2, TV1),
-
-      Err = {{tv, V1, I1, Ilk1}, {tv, V2, I2, Ilk2}},
+      Err = {TV1, TV2},
 
       if
-        Occurs -> add_err({TV1, TV2}, S);
+        Occurs -> add_err(Err, S);
 
-        Ilk1 == any, Ilk2 == all ->
+        not Rigid1, not Bound1, Rigid2 ->
           case iface_lte(I1, I2, S) of
             false -> add_err(Err, S);
             S1 -> add_sub(V1, TV2, S1)
           end;
 
-        Ilk2 == any, Ilk1 == all ->
+        not Rigid2, not Bound2, Rigid1 ->
           case iface_lte(I2, I1, S) of
             false -> add_err(Err, S);
             S1 -> add_sub(V2, TV1, S1)
          end;
 
-        Ilk1 /= all, Ilk2 /= all ->
-          CanKeepEither = ((Ilk1 == any) and (Ilk2 == any)) or
-            ((Ilk1 == rigid) and (Ilk2 == rigid)),
-          MustKeep1 = (Ilk1 == rigid) and (Ilk2 == any),
-          MustKeep2 = (Ilk1 == any) and (Ilk2 == rigid),
-
+        not Rigid1, not Rigid2 ->
           case iface_unify(I1, I2, S) of
-            {I2, S1} when CanKeepEither; MustKeep2 -> add_sub(V1, TV2, S1);
-            {I1, S1} when CanKeepEither; MustKeep1 -> add_sub(V2, TV1, S1);
-
-            {NewI, S1} when CanKeepEither; MustKeep2 ->
+            {I2, S1} -> add_sub(V1, TV2, S1);
+            {I1, S1} -> add_sub(V2, TV1, S1);
+            {NewI, S1} ->
               add_sub(V2, {set_iface, NewI}, add_sub(V1, TV2, S1));
-            {NewI, S1} when CanKeepEither; MustKeep1 ->
-              add_sub(V1, {set_iface, NewI}, add_sub(V2, TV1, S1));
-
             _ -> add_err(Err, S)
           end;
 
@@ -907,21 +903,19 @@ unify({{tv, V1, I1, Cat1}, {tv, V2, I2, Cat2}}, S) ->
 
     {NewT1, NewT2} -> unify({NewT1, NewT2}, S)
   end;
-unify({{tv, V, I, Cat}, T}, S) ->
-  TV = {tv, V, I, Cat},
+unify({{tv, V, I, Rigid}, T}, S) ->
+  TV = {tv, V, I, Rigid},
   case {subs(TV, S#solver.subs), subs(T, S#solver.subs)} of
     {TV, T} ->
-      Ilk = ilk(TV, S),
-
       Err = {TV, T},
       Occurs = occurs(V, T),
       Instance = (I == none) or instance(T, I),
-      HasTV = occurs(any, T),
+      Bound = gb_sets:is_member(V, S#solver.bound_vs),
+      WouldEscape = Bound and occurs(true, T),
 
       if
         Occurs -> add_err(Err, S);
-        (Ilk == all) or ((Ilk == rigid) and HasTV) ->
-          add_err({{tv, V, I, Ilk}, T}, S);
+        Rigid or WouldEscape -> add_err(Err, S);
 
         Instance -> add_sub(V, T, S);
         is_map(I) ->
@@ -939,7 +933,7 @@ unify({{tv, V, I, Cat}, T}, S) ->
 
     {NewT1, NewT2} -> unify({NewT1, NewT2}, S)
   end;
-unify({T, {tv, V, I, Cat}}, S) -> unify({{tv, V, I, Cat}, T}, S);
+unify({T, {tv, V, I, Rigid}}, S) -> unify({{tv, V, I, Rigid}, T}, S);
 
 unify({{gen, Con, ParamT1}, {gen, Con, ParamT2}}, S) ->
   unify({ParamT1, ParamT2}, S);
@@ -964,26 +958,29 @@ unify({T1, T2}, S) ->
     {NewT1, NewT2} -> unify({NewT1, NewT2}, S)
   end.
 
-add_sub(Key, Value, S) ->
-  case maps:find(Key, S#solver.subs) of
-    error -> S#solver{subs=(S#solver.subs)#{Key => Value}};
+add_sub(V, Sub, S) ->
+  S1 = case maps:find(V, S#solver.subs) of
+    error -> S#solver{subs=(S#solver.subs)#{V => Sub}};
     % we're allowed to override set_iface to another value
-    {ok, {set_iface, _}} -> S#solver{subs=(S#solver.subs)#{Key => Value}};
-    {ok, Existing} -> error({badarg, Key, Existing, Value})
+    {ok, {set_iface, _}} -> S#solver{subs=(S#solver.subs)#{V => Sub}};
+    {ok, Existing} -> error({badarg, V, Existing, Sub})
+  end,
+
+  BoundVs = S1#solver.bound_vs,
+  case {Sub, gb_sets:is_member(V, BoundVs)} of
+    % no change in fvs
+    {{set_iface, _}, _} -> S1;
+    % when subbing a tv not in env or an anchor
+    {_, false} -> S1;
+    {_, true} ->
+      NewBoundVs = gb_sets:union(fvs(Sub), gb_sets:delete(V, BoundVs)),
+      S1#solver{bound_vs=NewBoundVs}
   end.
 
 add_err({L, R}, S) ->
   Subs = S#solver.subs,
   Err = {subs(L, Subs), subs(R, Subs)},
   S#solver{errs=[Err | S#solver.errs]}.
-
-ilk({tv, V, _, Cat}, S) ->
-  case gb_sets:is_member(V, S#solver.rigid_vs) of
-    true ->
-      any = Cat,
-      rigid;
-    false -> Cat
-  end.
 
 iface_lte(I1, I2, S) ->
   if
@@ -1064,32 +1061,31 @@ subs({lam, ArgT, ReturnT}, Subs) ->
   {lam, subs(ArgT, Subs), subs(ReturnT, Subs)};
 subs({tuple, LeftT, RightT}, Subs) ->
   {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
-subs({tv, V, I, Cat}, Subs) ->
+subs({tv, V, I, Rigid}, Subs) ->
   SubI = if
     is_map(I) -> element(3, subs({record, none, I}, Subs));
     true -> I
   end,
 
   case maps:find(V, Subs) of
-    error -> {tv, V, SubI, Cat};
-    {ok, any} -> {tv, V, SubI, any};
-    {ok, {all, V1}} -> {tv, V1, SubI, all};
+    error -> {tv, V, SubI, Rigid};
+    {ok, {rigid, V1}} -> {tv, V1, SubI, true};
 
     {ok, {set_iface, I1}} ->
-      any = Cat,
+      false = Rigid,
       if
         is_map(I1) ->
           SubI1 = element(3, subs({record, none, I1}, Subs)),
-          {tv, V, SubI1, Cat};
-        true -> {tv, V, I1, Cat}
+          {tv, V, SubI1, Rigid};
+        true -> {tv, V, I1, Rigid}
       end;
 
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
         is_tuple(Value) or (Value == none) -> Value;
-        % Instantiation, so category resets to any
-        true -> {tv, Value, SubI, any}
+        % Instantiation, so rigid resets to false
+        true -> {tv, Value, SubI, false}
       end,
       subs(Sub, Subs)
   end;
@@ -1104,14 +1100,14 @@ subs({record, A, FieldMap}, Subs) ->
   end;
 subs(none, _) -> none.
 
-rigid_vs(Env, S) ->
+bound_vs(Env, S) ->
   #solver{subs=Subs, schemes=Schemes} = S,
   maps:fold(fun(_, Value, FoldVs) ->
     case Value of
       {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs)));
 
       % 1) If a given other binding has been fully generalized already,
-      %    we'll add the rigid type variables from its scheme.
+      %    we'll add the bound type variables from its scheme.
       % 2) If a given other binding is currently being generalized,
       %    its TV can be generalized over, and so we shouldn't add it here.
       {add_dep, {tv, V, _, _}, _} ->
@@ -1143,12 +1139,12 @@ occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
 occurs(V, {tuple, LeftT, RightT}) ->
   occurs(V, LeftT) or occurs(V, RightT);
-occurs(V, {tv, V1, I, _}) ->
+occurs(V, {tv, V1, I, Rigid}) ->
   OccursI = if
     is_map(I) -> occurs(V, {record, none, I});
     true -> false
   end,
-  OccursI or (V == any) or (V == V1);
+  OccursI or (V == Rigid) or (V == V1);
 occurs(_, {con, _}) -> false;
 occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
 % occurs({inst, ...}) ommitted; they should be resolved
@@ -1170,17 +1166,16 @@ pretty({lam, ArgT, ReturnT}) ->
   format_str(Format, [pretty(ArgT), pretty(ReturnT)]);
 pretty({tuple, LeftT, RightT}) ->
   format_str("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty({tv, V, I, Ilk}) ->
+pretty({tv, V, I, Rigid}) ->
   Str = if
     I == none -> tl(V);
     is_map(I) -> format_str("{ ~s | ~s }", [tl(V), pretty_field_map(I)]);
     true -> format_str("~s: ~s", [tl(V), atom_to_list(I)])
   end,
 
-  case Ilk of
-    any -> Str;
-    rigid -> format_str("rigid(~s)", [Str]);
-    all -> format_str("all(~s)", [Str])
+  case Rigid of
+    false -> Str;
+    true -> format_str("rigid(~s)", [Str])
   end;
 pretty({set_iface, I}) ->
   Str = if
@@ -1195,9 +1190,6 @@ pretty({gen, T, ParamT}) ->
   format_str("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
 pretty({inst, TV}) ->
   format_str("inst(~s)", [pretty(TV)]);
-pretty({A, Options}) when A == either; A == ambig ->
-  Strs = lists:map(fun(O) -> pretty(O) end, Options),
-  format_str("~s(~s)", [atom_to_list(A), string:join(lists:sort(Strs), ", ")]);
 pretty({record, _, FieldMap}) ->
   format_str("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty(none) -> "()".

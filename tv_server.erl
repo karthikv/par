@@ -25,9 +25,9 @@ reload() ->
 start_link() -> gen_server:start_link(?MODULE, {1, 0}, []).
 next_name(Pid) -> gen_server:call(Pid, next_name).
 next_gnr_id(Pid) -> gen_server:call(Pid, next_gnr_id).
-fresh(Pid) -> {tv, next_name(Pid), none, any}.
-fresh_gnr_id(Pid) -> {{tv, next_name(Pid), none, any}, next_gnr_id(Pid)}.
-fresh(I, Pid) -> {tv, next_name(Pid), I, any}.
+fresh(Pid) -> {tv, next_name(Pid), none, false}.
+fresh_gnr_id(Pid) -> {{tv, next_name(Pid), none, false}, next_gnr_id(Pid)}.
+fresh(I, Pid) -> {tv, next_name(Pid), I, false}.
 stop(Pid) -> gen_server:stop(Pid).
 
 init({Count, NextID}) -> {ok, {Count, NextID}}.
