@@ -892,6 +892,13 @@ pattern_test_() ->
   , ?_test("[A: Num]" = ok_expr(
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
     ))
+  , ?_test("A: Num" = ok_expr(
+      "match @io:printable_range() {\n"
+      "  (a, _) => 1,\n"
+      "  [] => 2,\n"
+      "  @error => 3\n"
+      "}"
+    ))
   , ?_test(bad_expr(
       "match \"hi\" { \"hey\" => true, \"hello\" => 1 }",
       {"Bool", "A: Num", 1, ?FROM_MATCH_BODY}
