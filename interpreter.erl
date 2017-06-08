@@ -25,7 +25,7 @@ execute(Ast) ->
 init({global, {var, _, Name}, Expr}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
-init({enum, _, OptionTEs}, ID) ->
+init({{enum_token, _}, _, OptionTEs}, ID) ->
   lists:foreach(fun({option, {con_token, _, Name}, ArgsTE}) ->
     Value = if
       length(ArgsTE) == 0 -> list_to_atom(Name);
@@ -38,7 +38,7 @@ init({enum, _, OptionTEs}, ID) ->
     env_set(Name, Value, ID)
   end, OptionTEs);
 
-init({struct, StructTE, FieldTEs}, ID) ->
+init({{struct_token, _}, StructTE, FieldTEs}, ID) ->
   StructName = case StructTE of
     {con_token, _, Name} -> Name;
     {gen_te, {con_token, _, Name}, _} -> Name
@@ -55,7 +55,7 @@ init({struct, StructTE, FieldTEs}, ID) ->
 
 init({sig, _, _}, _) -> true.
 
-eval({fn, Args, Expr}, ID) ->
+eval({{fn, _}, Args, Expr}, ID) ->
   make_fun(length(Args), fun(Vs) ->
     NewID = if
       length(Args) == 0 -> ID;
@@ -70,24 +70,24 @@ eval({fn, Args, Expr}, ID) ->
     eval(Expr, NewID)
   end);
 
-eval({expr_sig, Expr, _}, ID) -> eval(Expr, ID);
+eval({{'::', _}, Expr, _}, ID) -> eval(Expr, ID);
 
-eval(none, _) -> none;
+eval({none, _}, _) -> none;
 eval({N, _, V}, _)
   when N == int; N == float; N == bool; N == str; N == atom -> V;
 
-eval({list, Elems}, ID) ->
+eval({{list, _}, Elems}, ID) ->
   lists:map(fun(E) -> eval(E, ID) end, Elems);
 
-eval({tuple, Left, Right}, ID) ->
+eval({{tuple, _}, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
   RightV = eval(Right, ID),
-  case element(1, Right) of
-    tuple -> erlang:insert_element(1, RightV, LeftV);
+  case Right of
+    {{tuple, _}, _, _} -> erlang:insert_element(1, RightV, LeftV);
     _ -> {LeftV, RightV}
   end;
 
-eval({map, Pairs}, ID) ->
+eval({{map, _}, Pairs}, ID) ->
   List = lists:map(fun({K, V}) ->
     {eval(K, ID), eval(V, ID)}
   end, Pairs),
@@ -114,17 +114,17 @@ eval({var, _, Name}, ID) ->
 
 eval({con_var, Line, Name}, ID) -> eval({var, Line, Name}, ID);
 
-eval({record, Inits}, ID) ->
+eval({{record, _}, Inits}, ID) ->
   Pairs = lists:map(fun({{var, _, Name}, Expr}) ->
     {list_to_atom(Name), eval(Expr, ID)}
   end, Inits),
   maps:from_list(Pairs);
 
-eval({update_record, Expr, Inits}, C) ->
+eval({{update_record, Line}, Expr, Inits}, C) ->
   Record = eval(Expr, C),
-  maps:merge(Record, eval({record, Inits}, C));
+  maps:merge(Record, eval({{record, Line}, Inits}, C));
 
-eval({record, _, Inits}, ID) -> eval({record, Inits}, ID);
+eval({{record, Line}, _, Inits}, ID) -> eval({{record, Line}, Inits}, ID);
 
 eval({field, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),
@@ -153,7 +153,7 @@ eval({{'if', _}, Expr, Then, Else}, ID) ->
     false -> eval(Else, ID)
   end,
   case Else of
-    none -> none;
+    {none, _} -> none;
     _ -> V
   end;
 
@@ -203,7 +203,7 @@ eval({{if_let, _}, {Pattern, Expr}, Then, Else}, ID) ->
     true -> eval(Then, ChildID)
   end,
   case Else of
-    none -> none;
+    {none, _} -> none;
     _ -> V
   end;
 
@@ -211,7 +211,7 @@ eval({{'match', _}, Expr, Cases}, ID) ->
   V = eval(Expr, ID),
   match_cases(V, Cases, ID);
 
-eval({block, Exprs}, ID) ->
+eval({{block, _}, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
 
 eval({{Op, _}, Left, Right}, ID) ->
@@ -291,7 +291,7 @@ app(Fun, GivenVs) ->
 
 make_fun(Arity, Callback) ->
   % As far as I know, there's no way to create a function with a dynamic number
-  % of arguments, so we do it manually up to 10 (a guessed maximum) here.
+  % of arguments, so we do it manually up to 20 (a guessed maximum) here.
   case Arity of
     0 -> fun() ->
       Callback([])
@@ -397,10 +397,10 @@ match(V, {app, {con_var, Line, Name}, Args}, ID) ->
   if
     length(Args) == 0 -> V == Atom;
     true ->
-      match(tuple_to_list(V), {list, [{atom, Line, Atom} | Args]}, ID)
+      match(tuple_to_list(V), {{list, Line}, [{atom, Line, Atom} | Args]}, ID)
   end;
 
-match(V, {list, List}, ID) ->
+match(V, {{list, _}, List}, ID) ->
   if
     length(V) /= length(List) -> false;
     true ->
@@ -412,25 +412,25 @@ match(V, {list, List}, ID) ->
       end, true, lists:zip(V, List))
   end;
 
-match(V, {list, List, Rest}, ID) ->
+match(V, {{list, Line}, List, Rest}, ID) ->
   if
     length(V) < length(List) -> false;
     true ->
       SubV = lists:sublist(V, length(List)),
       RestV = lists:sublist(V, length(List) + 1, length(V)),
 
-      case match(SubV, {list, List}, ID) of
+      case match(SubV, {{list, Line}, List}, ID) of
         false -> false;
         true -> match(RestV, Rest, ID)
       end
   end;
 
-match(V, {tuple, Left, Right}, ID) ->
+match(V, {{tuple, _}, Left, Right}, ID) ->
   case match(element(1, V), Left, ID) of
     false -> false;
     true ->
       case Right of
-        {tuple, _, _} -> match(erlang:delete_element(1, V), Right, ID);
+        {{tuple, _}, _, _} -> match(erlang:delete_element(1, V), Right, ID);
         _ -> match(element(2, V), Right, ID)
       end
   end.
