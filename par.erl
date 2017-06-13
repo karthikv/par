@@ -86,11 +86,10 @@
 -endif.
 
 % TODO:
-% - Simplify let/if-let type checking
 % - (code gen) File name attribute?
 % - (code gen) Remove util functions when they're unused
 % - (code gen) Use a bag instead of a set for constants?
-% - Simplify interpreter let/if-let and tuple access
+% - Use code_gen_utils curry in interpreter
 %
 % - Error messages
 % - TODOs in code (non-unification error cases)
@@ -529,47 +528,33 @@ infer({{'if', Line}, Expr, Then, Else}, C) ->
       {TV, set_line(Line, C6)}
   end;
 
-infer({{'let', Line}, Inits, Expr}, C) ->
+infer({{'let', Line}, Inits, Then}, C) ->
   % TODO: ensure no pattern name overlap!
-  {Gs, C1} = lists:mapfoldl(fun({Pattern, _}, FoldC) ->
-    FoldC1 = with_pattern_env(Pattern, new_gnr(FoldC)),
-    % save new gnr and revert it back to original
-    {FoldC1#ctx.gnr, FoldC1#ctx{gnr=FoldC#ctx.gnr}}
+  C1 = lists:foldl(fun({Pattern, Expr}, FoldC) ->
+    infer_pattern(Pattern, Expr, ?FROM_LET, FoldC)
   end, C, Inits),
 
-  C2 = lists:foldl(fun({G, {Pattern, InitExpr}}, FoldC) ->
-    {PatternT, FoldC1} = infer(Pattern, FoldC#ctx{gnr=G}),
-    PatternLine = FoldC1#ctx.line,
-    {InitExprT, FoldC2} = infer(InitExpr, FoldC1),
-
-    FoldC3 = add_cst(PatternT, InitExprT, PatternLine, ?FROM_LET, FoldC2),
-    finish_gnr(FoldC3, FoldC#ctx.gnr)
-  end, C1, lists:zip(Gs, Inits)),
-
-  {T, C3} = infer(Expr, C2),
-  {T, set_line(Line, C3#ctx{env=C#ctx.env})};
+  {T, C2} = infer(Then, C1),
+  {T, set_line(Line, C2#ctx{env=C#ctx.env})};
 
 infer({{if_let, Line}, {Pattern, Expr}, Then, Else}, C) ->
-  C1 = with_pattern_env(Pattern, new_gnr(C)),
-  {PatternT, C2} = infer(Pattern, C1),
-  PatternLine = C2#ctx.line,
-
-  {ExprT, C3} = infer(Expr, C2),
-  C4 = add_cst(PatternT, ExprT, PatternLine, ?FROM_IF_LET_PATTERN, C3),
-  {ThenT, C5} = infer(Then, finish_gnr(C4, C#ctx.gnr)),
+  C1 = infer_pattern(Pattern, Expr, ?FROM_IF_LET_PATTERN, C),
+  {ThenT, C2} = infer(Then, C1),
+  % revert env to before pattern was parsed
+  C3 = C2#ctx{env=C#ctx.env},
 
   case Else of
-    {none, _} -> {none, set_line(Line, C5)};
+    {none, _} -> {none, set_line(Line, C3)};
     _ ->
-      ThenLine = C5#ctx.line,
+      ThenLine = C3#ctx.line,
       % must use original env without pattern bindings
-      {ElseT, C6} = infer(Else, C5#ctx{env=C#ctx.env}),
-      ElseLine = C6#ctx.line,
+      {ElseT, C4} = infer(Else, C3),
+      ElseLine = C4#ctx.line,
 
-      TV = tv_server:fresh(C#ctx.pid),
-      C7 = add_cst(TV, ThenT, ThenLine, ?FROM_IF_LET_BODY, C6),
-      C8 = add_cst(TV, ElseT, ElseLine, ?FROM_IF_LET_BODY, C7),
-      {TV, set_line(Line, C8)}
+      TV = tv_server:fresh(C4#ctx.pid),
+      C5 = add_cst(TV, ThenT, ThenLine, ?FROM_IF_LET_BODY, C4),
+      C6 = add_cst(TV, ElseT, ElseLine, ?FROM_IF_LET_BODY, C5),
+      {TV, set_line(Line, C6)}
   end;
 
 infer({{match, Line}, Expr, Cases}, C) ->
@@ -672,6 +657,21 @@ infer({{Op, Line}, Expr}, C) ->
 
   C2 = add_cst(T1, T2, Line, ?FROM_OP(Op), C1),
   {TV, set_line(Line, C2)}.
+
+infer_pattern({var, Line, Name}=Pattern, {{fn, _}, _, _}=Expr, From, C) ->
+  {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
+  C1 = add_env(Name, {add_dep, TV, ID}, C),
+  {PatternT, C2} = infer(Pattern, new_gnr(TV, ID, C1)),
+  {ExprT, C3} = infer(Expr, C2),
+  C4 = add_cst(PatternT, ExprT, Line, From, C3),
+  finish_gnr(C4, C#ctx.gnr);
+
+infer_pattern(Pattern, Expr, From, C) ->
+  {ExprT, C1} = infer(Expr, new_gnr(C)),
+  {PatternT, C2} = infer(Pattern, with_pattern_env(Pattern, C1)),
+  Line = C2#ctx.line,
+  C3 = add_cst(PatternT, ExprT, Line, From, C2),
+  finish_gnr(C3, C#ctx.gnr).
 
 with_pattern_env(Pattern, C) ->
   ID = C#ctx.gnr#gnr.id,

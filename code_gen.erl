@@ -270,13 +270,13 @@ rep({{'if', Line}, Cond, Then, Else}, Env) ->
   Clauses = [{clause, Line, [], [[rep(Cond, Env)]], ThenBody}, ElseClause],
   {'if', Line, Clauses};
 
-rep({{'let', Line}, Inits, BodyExpr}, Env) ->
+rep({{'let', Line}, Inits, Then}, Env) ->
   {InitsRep, Env1} = lists:mapfoldl(fun({Pattern, Expr}, FoldEnv) ->
     {PatternRep, ExprRep, FoldEnv1} = rep_pattern(Pattern, Expr, FoldEnv),
     {{match, element(2, PatternRep), PatternRep, ExprRep}, FoldEnv1}
   end, Env, Inits),
 
-  {block, Line, InitsRep ++ [rep(BodyExpr, Env1)]};
+  {block, Line, InitsRep ++ [rep(Then, Env1)]};
 
 rep({{if_let, Line}, {Pattern, Expr}, Then, Else}, Env) ->
   {PatternRep, ExprRep, Env1} = rep_pattern(Pattern, Expr, Env),
@@ -293,13 +293,13 @@ rep({{if_let, Line}, {Pattern, Expr}, Then, Else}, Env) ->
 
 rep({{'match', Line}, Expr, Cases}, Env) ->
   ExprRep = rep(Expr, Env),
-  CaseClauses = lists:map(fun({Pattern, BodyExpr}) ->
+  CaseClauses = lists:map(fun({Pattern, Then}) ->
     Env1 = gb_sets:fold(fun(Name, FoldEnv) ->
       bind(Name, unknown, FoldEnv)
     end, Env, par:pattern_names(Pattern)),
 
     PatternRep = rep(Pattern, Env1#{'*in_pattern' => true}),
-    Body = [rep(BodyExpr, Env1)],
+    Body = [rep(Then, Env1)],
     {clause, element(2, PatternRep), [PatternRep], [], Body}
   end, Cases),
 
@@ -417,7 +417,7 @@ arity({{N, _}, _, Then, Else}, Env) when N == 'if'; N == if_let ->
       Arity -> Arity
     end
   end;
-arity({{'let', _}, _, Expr}, Env) -> arity(Expr, Env);
+arity({{'let', _}, _, Then}, Env) -> arity(Then, Env);
 arity({{'match', _}, _, Cases}, Env) ->
   lists:foldl(fun({_, Expr}, Arity) ->
     case Arity of

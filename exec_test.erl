@@ -67,6 +67,7 @@ expr_test_() ->
       "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
       "  f(5, 1)"
     ))
+  , ?_test(true = expr("let a = 1, a = a == 1 in a"))
 
 
   , ?_test(<<"hello">> = expr("{ \"hello\" }"))
@@ -328,6 +329,9 @@ pattern_test_() ->
 
 
   , ?_test(none = expr("if let a = 3.0 then a"))
+  % to ensure env is reset appropriately
+  , ?_test(true = expr("let a = true in { if let a = 3.0 then a; a }"))
+  , ?_test(true = expr("let a = true in { if let a = 3.0 then a else 5; a }"))
   , ?_test(3 = expr(
       "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
     ))
@@ -337,6 +341,4 @@ pattern_test_() ->
       "then f(true)\n"
       "else 0"
     ))
-
-  %% , ?_test("" = expr("let x = let z = 3 in y, y = { @io:format(\"hi\"); 3 } in 4"))
   ].

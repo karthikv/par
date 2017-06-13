@@ -110,16 +110,6 @@ eval({var, _, Name}, ID) ->
       V = eval(Expr, ID),
       env_update(Name, V, ID),
       V;
-    {lazy_pattern, Pattern, Expr, PatternNames} ->
-      V = eval(Expr, ID),
-      lists:foreach(fun(PatternName) ->
-        env_set(PatternName, {}, ID)
-      end, PatternNames),
-
-      case match(V, Pattern, ID) of
-        false -> error({badmatch, V, Pattern});
-        true -> env_get(Name, ID)
-      end;
     V -> V
   end;
 
@@ -168,51 +158,22 @@ eval({{'if', _}, Expr, Then, Else}, ID) ->
     _ -> V
   end;
 
-eval({{'let', _}, Inits, Expr}, ID) ->
-  InitNames = lists:map(fun({Pattern, _}) ->
-    gb_sets:to_list(par:pattern_names(Pattern))
-  end, Inits),
-  InitsWithNames = lists:zip(Inits, InitNames),
-
-  ChildID = env_create_child(ID),
-  lists:foreach(fun({{Pattern, InitExpr}, Names}) ->
-    lists:foreach(fun(Name) ->
-      Value = {lazy_pattern, Pattern, InitExpr, Names},
-      env_set(Name, Value, ChildID)
-    end, Names)
-  end, InitsWithNames),
-
-  lists:foreach(fun({{Pattern, InitExpr}, Names}) ->
-    V = eval(InitExpr, ChildID),
-    lists:foreach(fun(Name) ->
-      env_set(Name, {}, ChildID)
-    end, Names),
-
-    case match(V, Pattern, ChildID) of
-      false -> error({badmatch, V, Pattern});
-      true -> true
+eval({{'let', _}, Inits, Then}, ID) ->
+  ChildID = lists:foldl(fun({Pattern, Expr}, FoldID) ->
+    case eval_pattern(Pattern, Expr, FoldID) of
+      {{false, V}, _} -> error({badmatch, V, Pattern});
+      {true, FoldChildID} -> FoldChildID
     end
-  end, InitsWithNames),
+  end, ID, Inits),
 
-  eval(Expr, ChildID);
+  eval(Then, ChildID);
 
 eval({{if_let, _}, {Pattern, Expr}, Then, Else}, ID) ->
-  ChildID = env_create_child(ID),
-  Names = gb_sets:to_list(par:pattern_names(Pattern)),
-
-  lists:foreach(fun(Name) ->
-    env_set(Name, {lazy_pattern, Pattern, Expr, Names}, ChildID)
-  end, Names),
-
-  ExprV = eval(Expr, ChildID),
-  lists:foreach(fun(Name) ->
-    env_set(Name, {}, ChildID)
-  end, Names),
-
-  V = case match(ExprV, Pattern, ChildID) of
-    false -> eval(Else, ID);
-    true -> eval(Then, ChildID)
+  V = case eval_pattern(Pattern, Expr, ID) of
+    {{false, _}, _} -> eval(Else, ID);
+    {true, ChildID} -> eval(Then, ChildID)
   end,
+
   case Else of
     {none, _} -> none;
     _ -> V
@@ -274,6 +235,23 @@ eval({{Op, _}, Expr}, ID) ->
     '#' -> gb_sets:from_list(V);
     '-' -> -V;
     'discard' -> none
+  end.
+
+eval_pattern({var, _, Name}, {{fn, _}, _, _}=Expr, ID) ->
+  ChildID = env_create_child(ID),
+  env_set(Name, eval(Expr, ChildID), ChildID),
+  {true, ChildID};
+
+eval_pattern(Pattern, Expr, ID) ->
+  V = eval(Expr, ID),
+  ChildID = env_create_child(ID),
+  lists:foreach(fun(Name) ->
+    env_set(Name, {}, ChildID)
+  end, gb_sets:to_list(par:pattern_names(Pattern))),
+
+  case match(V, Pattern, ChildID) of
+    false -> {{false, V}, ChildID};
+    true -> {true, ChildID}
   end.
 
 app(Fun, GivenVs) ->
@@ -370,7 +348,6 @@ make_fun(Arity, Callback) ->
 
 match_cases(V, [], _) -> error({badmatch, V});
 match_cases(V, [{Pattern, Expr} | Rest], ID) ->
-  % TODO: stop all new_childs
   ChildID = env_create_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, {}, ChildID)
@@ -387,7 +364,7 @@ match(V1, {N, _, V2}, _)
 match(V1, {var, _, Name}, ID) ->
   case env_get(Name, ID) of
     {} ->
-      env_set(Name, V1, ID),
+      env_update(Name, V1, ID),
       true;
     V2 -> V1 == V2
   end;

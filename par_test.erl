@@ -292,11 +292,12 @@ expr_test_() ->
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
   , ?_test("A: Num" = ok_expr("let inc(x) = x + 1 in inc(3)"))
   , ?_test("Bool" = ok_expr("let x = |a| a in x(3) == 3 && x(true)"))
-  , ?_test("A: Num" = ok_expr("let a = b + 5, b = 10 in a"))
+  , ?_test("A: Num" = ok_expr("let a = 10, b = a + 5 in b"))
   , ?_test("A: Num" = ok_expr(
       "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
       "  f(5, 1)"
     ))
+  , ?_test("Bool" = ok_expr("let a = 1, a = a == 1 in a"))
   , ?_test(bad_expr(
       "let x = 3.0, y = true in x - y",
       {"Bool", "Float", 1, ?FROM_OP('-')}
@@ -361,6 +362,7 @@ para_poly_test_() ->
       "expr = add(true)",
       {"Bool", "A: Num", 2, ?FROM_APP}
     ))
+  , ?_test(bad_expr("|x| x == [x]", {"A", "[A]", 1, ?FROM_OP('==')}))
   , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B", 1, ?FROM_APP}))
 
 
@@ -674,12 +676,12 @@ record_test_() ->
 
   % occurs checks
   , ?_test(bad_expr(
-      "let a = { bar = a } in a",
-      {"A", "{ bar :: A }", 1, ?FROM_LET}
+      "|a| a == { bar = a }",
+      {"A", "{ bar :: A }", 1, ?FROM_OP('==')}
     ))
-  , ?_test(bad_prg(
-      "f(x) = let a = { x | bar = a } in a",
-      {"A", "{ B | bar :: A }", 1, ?FROM_LET}
+  , ?_test(bad_expr(
+      "|x, a| a == { x | bar = a }",
+      {"A", "{ B | bar :: A }", 1, ?FROM_OP('==')}
     ))
 
 
@@ -939,19 +941,18 @@ pattern_test_() ->
       "  (x + 3 :: Int, x + 3.0)"
     ))
   , ?_test("A: Num" =
-             ok_expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
+             ok_expr("let [_, a] = [1, 3], (*a, b, *a) = (3, 7, 3) in b"))
   , ?_test("(A, B) -> A" = ok_prg(
       "f(t) = let (a, _) = t in a",
       "f"
     ))
   , ?_test(bad_expr("let true = 3 in []", {"Bool", "A: Num", 1, ?FROM_LET}))
-  , ?_test(bad_expr("let [x] = x in x", {"A", "[A]", 1, ?FROM_LET}))
   , ?_test(bad_expr(
       "let [_, (x, _)] = [\"foo\", \"bar\"] in x",
       {"(A, B)", "String", 1, ?FROM_LET}
     ))
   , ?_test(bad_expr(
-      "let (*a, b) = (3, 7), [_, a] = [true, false] in b",
+      "let [_, a] = [true, false], (*a, b) = (3, 7) in b",
       {"A: Num", "Bool", 1, ?FROM_LET}
     ))
   , ?_test(bad_prg(
@@ -962,13 +963,17 @@ pattern_test_() ->
 
 
   , ?_test("()" = ok_expr("if let a = 3.0 then a"))
+  % to ensure env is reset appropriately
+  , ?_test("Bool" = ok_expr("let a = true in { if let a = 3.0 then a; a }"))
+  , ?_test("Bool" =
+             ok_expr("let a = true in { if let a = 3.0 then a else 5; a }"))
   , ?_test("A: Num" = ok_expr(
       "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
     ))
   , ?_test("String" =
              ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test("Float" = ok_expr(
-      "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
+      "if let f = |b| if b then f(!b) + 1 else 1.5\n"
       "then f(true)\n"
       "else 0"
     ))
@@ -979,11 +984,5 @@ pattern_test_() ->
   , ?_test(bad_expr(
       "if let (_, a) = [\"hello\", \"hi\"] then a else \"hey\"",
       {"(A, B)", "[String]", 1, ?FROM_IF_LET_PATTERN}
-    ))
-  , ?_test(bad_expr(
-      "if let tuple = (tuple, 1)\n"
-      "then tuple\n"
-      "else 0",
-      {"A", "(A, B: Num)", 1, ?FROM_IF_LET_PATTERN}
     ))
   ].
