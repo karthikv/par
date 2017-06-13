@@ -14,8 +14,8 @@ run() ->
 
 run(Prg) ->
   {ok, _, Ast} = par:infer_prg(Prg),
-  code_gen:run_ast(Ast, code_gen_test).
-  %% interpreter:run_ast(Ast, []).
+  code_gen:run_ast(Ast, code_gen_test),
+  interpreter:run_ast(Ast, []).
 
 expr(Expr) ->
   run("main() = " ++ Expr).
@@ -306,31 +306,24 @@ pattern_test_() ->
   , ?_test([<<"hey">>] = expr(
       "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
     ))
-  , ?_test({{false, hi}, 3} = expr(
-      "match (1, true, @hi) {\n"
-      "  (0, b) => (b, 10),\n"
-      "  (a, true, c) => ((false, c), 3 * a),\n"
-      "  (a, b) => (b, a / 2)\n"
-      "}"
+  , ?_test(2.0 = expr(
+      "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
+      "  match x {\n"
+      "    [([h | t], _, _) | _] => h,\n"
+      "    [_, ([], _, c)] => c,\n"
+      "    [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
+      "  }"
     ))
-  %% , ?_test(2.0 = expr(
-  %%     "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
-  %%     "  match x {\n"
-  %%     "    [([h | t], _) | _] => h,\n"
-  %%     "    [_, ([], _, c)] => c,\n"
-  %%     "    [(_, _, c), ([x, y | []], _)] => c + x - y\n"
-  %%     "  }"
-  %%   ))
   , ?_test([1, 2] = expr(
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
     ))
 
 
   , ?_test([] = expr("let 3 = 3 in []"))
-  %% , ?_test({5, 5.0} = expr(
-  %%     "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-  %%     "  (x + 3 :: Int, x + 3.0)"
-  %%   ))
+  , ?_test({5, 5.0} = expr(
+      "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "  (x + 3 :: Int, x + 3.0)"
+    ))
   , ?_test(7 = expr("let [_, a] = [1, 3], (*a, b, *a) = (3, 7, 3) in b"))
 
 

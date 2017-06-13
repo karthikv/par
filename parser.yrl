@@ -1,12 +1,11 @@
 Nonterminals
   prg global var_list
-  expr con_var expr_list expr_list_tuple
+  expr con_var expr_list
   kv_list start_record init_list mul neg lam
   let_list let_init start_match match_list semi_list
-  pattern pattern_list pattern_list_tuple
-  te te_list_tuple
-  enum option_list option te_list
-  struct field_list field tv_list_tuple.
+  pattern pattern_list
+  te te_list enum option_list option
+  struct field_list field tv_list.
 
 Terminals
   '=' '(' ')' ','
@@ -47,8 +46,8 @@ expr -> '.' var : {field, '$2'}.
 expr -> con_var : '$1'.
 expr -> '[' ']' : {{list, element(2, '$1')}, []}.
 expr -> '[' expr_list ']' : {{list, element(2, '$1')}, '$2'}.
-expr -> '(' expr ',' expr_list_tuple ')' :
-  {{tuple, element(2, '$1')}, '$2', '$4'}.
+expr -> '(' expr ',' expr_list ')' :
+  {{tuple, element(2, '$1')}, ['$2' | '$4']}.
 expr -> '(' expr ')' : '$2'.
 expr -> '{' '}' : {{map, element(2, '$1')}, []}.
 expr -> '{' kv_list '}' : {{map, element(2, '$1')}, '$2'}.
@@ -102,10 +101,6 @@ con_var -> con_token : setelement(1, '$1', con_var).
 expr_list -> expr : ['$1'].
 expr_list -> expr ',' expr_list : ['$1' | '$3'].
 
-expr_list_tuple -> expr : '$1'.
-expr_list_tuple -> expr ',' expr_list_tuple :
-  {{tuple, element(2, '$2')}, '$1', '$3'}.
-
 kv_list -> expr '=>' expr : [{'$1', '$3'}].
 kv_list -> expr '=>' expr ',' kv_list : [{'$1', '$3'} | '$5'].
 
@@ -154,34 +149,30 @@ pattern -> '[' ']' : {{list, element(2, '$1')}, []}.
 pattern -> '[' pattern_list ']' : {{list, element(2, '$1')}, '$2'}.
 pattern -> '[' pattern_list '|' pattern ']' :
   {{list, element(2, '$1')}, '$2', '$4'}.
-pattern -> '(' pattern ',' pattern_list_tuple ')' :
-  {{tuple, element(2, '$1')}, '$2', '$4'}.
+pattern -> '(' pattern ',' pattern_list ')' :
+  {{tuple, element(2, '$1')}, ['$2' | '$4']}.
 pattern -> '(' pattern ')' : '$2'.
 
 pattern_list -> pattern : ['$1'].
 pattern_list -> pattern ',' pattern_list : ['$1' | '$3'].
 
-pattern_list_tuple -> pattern : '$1'.
-pattern_list_tuple -> pattern ',' pattern_list_tuple :
-  {{tuple, element(2, '$2')}, '$1', '$3'}.
-
 te -> '(' ')' : {none, element(2, '$1')}.
 te -> con_token : '$1'.
 te -> tv_token : '$1'.
 te -> tv_token ':' con_token : {iface_te, '$1', '$3'}.
-te -> con_token '<' te_list_tuple '>' : {gen_te, '$1', '$3'}.
-te -> '[' te ']' : {gen_te, {con_token, element(2, '$1'), "List"}, '$2'}.
-te -> '(' te ',' te_list_tuple ')' : {tuple_te, '$2', '$4'}.
+te -> con_token '<' te_list '>' : {gen_te, '$1', '$3'}.
+te -> '[' te ']' : {gen_te, {con_token, element(2, '$1'), "List"}, ['$2']}.
+te -> '(' te ',' te_list ')' : {tuple_te, ['$2' | '$4']}.
 te -> '(' te ')' : '$2'.
 te -> '{' field_list '}' : {record_te, '$2'}.
 te -> '{' tv_token '|' field_list '}' : {iface_te, '$2', {record_te, '$4'}}.
 te -> te '->' te : {lam_te, '$1', '$3'}.
 
-te_list_tuple -> te : '$1'.
-te_list_tuple -> te ',' te_list_tuple : {tuple_te, '$1', '$3'}.
+te_list -> te : ['$1'].
+te_list -> te ',' te_list : ['$1' | '$3'].
 
 enum -> enum_token con_token '{' option_list '}' : {'$1', '$2', '$4'}.
-enum -> enum_token con_token '<' tv_list_tuple '>' '{' option_list '}' :
+enum -> enum_token con_token '<' tv_list '>' '{' option_list '}' :
   {'$1', {gen_te, '$2', '$4'}, '$7'}.
 
 option_list -> option : ['$1'].
@@ -190,11 +181,8 @@ option_list -> option ',' option_list : ['$1' | '$3'].
 option -> con_token : {option, '$1', []}.
 option -> con_token '(' te_list ')' : {option, '$1', '$3'}.
 
-te_list -> te : ['$1'].
-te_list -> te ',' te_list : ['$1' | '$3'].
-
 struct -> struct_token con_token '{' field_list '}' : {'$1', '$2', '$4'}.
-struct -> struct_token con_token '<' tv_list_tuple '>' '{' field_list '}' :
+struct -> struct_token con_token '<' tv_list '>' '{' field_list '}' :
   {'$1', {gen_te, '$2', '$4'}, '$7'}.
 
 field_list -> field : ['$1'].
@@ -202,8 +190,8 @@ field_list -> field ',' field_list : ['$1' | '$3'].
 
 field -> var '::' te : {'$1', '$3'}.
 
-tv_list_tuple -> tv_token : '$1'.
-tv_list_tuple -> tv_token ',' tv_list_tuple : {tuple_te, '$1', '$3'}.
+tv_list -> tv_token : ['$1'].
+tv_list -> tv_token ',' tv_list : ['$1' | '$3'].
 
 Nonassoc 10 '='.
 Right 20 '->'.

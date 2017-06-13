@@ -95,13 +95,8 @@ eval({N, _, V}, _)
 eval({{list, _}, Elems}, ID) ->
   lists:map(fun(E) -> eval(E, ID) end, Elems);
 
-eval({{tuple, _}, Left, Right}, ID) ->
-  LeftV = eval(Left, ID),
-  RightV = eval(Right, ID),
-  case Right of
-    {{tuple, _}, _, _} -> erlang:insert_element(1, RightV, LeftV);
-    _ -> {LeftV, RightV}
-  end;
+eval({{tuple, Line}, Elems}, ID) ->
+  list_to_tuple(eval({{list, Line}, Elems}, ID));
 
 eval({{map, _}, Pairs}, ID) ->
   List = lists:map(fun({K, V}) ->
@@ -440,14 +435,18 @@ match(V, {{list, Line}, List, Rest}, ID) ->
       end
   end;
 
-match(V, {{tuple, _}, Left, Right}, ID) ->
-  case match(element(1, V), Left, ID) of
-    false -> false;
+match(V, {{tuple, _}, Elems}, ID) ->
+  if
+    tuple_size(V) /= length(Elems) -> false;
     true ->
-      case Right of
-        {{tuple, _}, _, _} -> match(erlang:delete_element(1, V), Right, ID);
-        _ -> match(element(2, V), Right, ID)
-      end
+      {_, Matched} = lists:foldl(fun(Elem, {Index, Matched}) ->
+        NewMatched = case Matched of
+          false -> false;
+          true -> match(element(Index, V), Elem, ID)
+        end,
+        {Index + 1, NewMatched}
+      end, {1, true}, Elems),
+      Matched
   end.
 
 env_create_first() ->

@@ -12,7 +12,7 @@
 % T - a type, represented as a tuple:
 %   {con, C} - a concrete type C; e.g. Int
 %   {gen, G, T} - a generic type G<T>; e.g. List<String>
-%   {tuple, L, R} - a tuple type (L, R); e.g. (Int, Bool)
+%   {tuple, Ts} - a tuple type (T1, T2, ...); e.g. (Int, Bool)
 %   {lam, X, Y} - a lambda type X -> Y; e.g. Int -> Bool
 %   TV - see explanation above
 %
@@ -87,8 +87,6 @@
 
 % TODO:
 % - Simplify let/if-let type checking
-% - Simplify tuple access
-% - Rename compiler to code gen
 % - (code gen) File name attribute?
 % - (code gen) Remove util functions when they're unused
 % - (code gen) Use a bag instead of a set for constants?
@@ -140,7 +138,7 @@ reload(false) ->
 infer_prg(Prg) ->
   {ok, Tokens, _} = lexer:string(Prg),
   {ok, Ast} = parser:parse(Tokens),
-  ?LOG("AST", Ast),
+  %% ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
   C = #ctx{
@@ -275,10 +273,11 @@ infer({lam_te, ArgTE, ReturnTE}, C) ->
   {ArgT, C1} = infer(ArgTE, C),
   {ReturnT, C2} = infer(ReturnTE, C1),
   {{lam, ArgT, ReturnT}, C2};
-infer({tuple_te, LeftTE, RightTE}, C) ->
-  {LeftT, C1} = infer(LeftTE, C),
-  {RightT, C2} = infer(RightTE, C1),
-  {{tuple, LeftT, RightT}, C2};
+infer({tuple_te, ElemTEs}, C) ->
+  {ElemTs, C1} = lists:mapfoldl(fun(TE, FoldC) ->
+    infer(TE, FoldC)
+  end, C, ElemTEs),
+  {{tuple, ElemTs}, C1};
 infer({iface_te, TVToken, TE}, C) ->
   % TODO: records in signatures
   {{tv, V, none, Rigid}, C1} = infer(TVToken, C),
@@ -287,9 +286,11 @@ infer({iface_te, TVToken, TE}, C) ->
     {{con, I}, C2} -> {{tv, V, I, Rigid}, C2};
     {{record, _, FieldMap}, C2} -> {{tv, V, FieldMap, Rigid}, C2}
   end;
-infer({gen_te, {con_token, _, Name}, ParamTE}, C) ->
-  {ParamT, C1} = infer(ParamTE, C),
-  {{gen, list_to_atom(Name), ParamT}, C1};
+infer({gen_te, {con_token, _, Name}, ParamTEs}, C) ->
+  {ParamTs, C1} = lists:mapfoldl(fun(TE, FoldC) ->
+    infer(TE, FoldC)
+  end, C, ParamTEs),
+  {{gen, list_to_atom(Name), ParamTs}, C1};
 infer({tv_token, _, Name}, C) ->
   % This TV should be rigid, but it'll be reset to flex in norm_sig_type.
   % Hence, we don't set rigid here, but rather after renaming.
@@ -356,9 +357,8 @@ infer({{struct_token, Line}, StructTE, Fields}, C) ->
   Types = C2#ctx.types,
   {StructCon, Value} = case T of
     {con, Con} -> {Con, {T, [], RawFieldMap}};
-    {gen, Con, ParamT} ->
-      Params = param_type_to_list(ParamT),
-      Vs = lists:map(fun({tv, V, none, _}) -> V end, Params),
+    {gen, Con, ParamTs} ->
+      Vs = lists:map(fun({tv, V, none, _}) -> V end, ParamTs),
       {Con, {T, Vs, RawFieldMap}}
   end,
 
@@ -390,7 +390,7 @@ infer({{list, Line}, Elems}, C) ->
     add_cst(ElemT, TV, FoldC1#ctx.line, ?FROM_LIST_ELEM, FoldC1)
   end, C, Elems),
 
-  {{gen, 'List', TV}, set_line(Line, C1)};
+  {{gen, 'List', [TV]}, set_line(Line, C1)};
 
 % only occurs when pattern matching to destructure list into head/tail
 infer({{list, Line}, Elems, Tail}, C) ->
@@ -399,10 +399,11 @@ infer({{list, Line}, Elems, Tail}, C) ->
   C3 = add_cst(T, TailT, C2#ctx.line, ?FROM_LIST_TAIL, C2),
   {T, set_line(Line, C3)};
 
-infer({{tuple, Line}, Left, Right}, C) ->
-  {LeftT, C1} = infer(Left, C),
-  {RightT, C2} = infer(Right, C1),
-  {{tuple, LeftT, RightT}, set_line(Line, C2)};
+infer({{tuple, Line}, Elems}, C) ->
+  {ElemTs, C1} = lists:mapfoldl(fun(Elem, FoldC) ->
+    infer(Elem, FoldC)
+  end, C, Elems),
+  {{tuple, ElemTs}, set_line(Line, C1)};
 
 infer({{map, Line}, Pairs}, C) ->
   KeyTV = tv_server:fresh(C#ctx.pid),
@@ -415,7 +416,7 @@ infer({{map, Line}, Pairs}, C) ->
     add_cst(ValueT, ValueTV, FoldC3#ctx.line, ?FROM_MAP_VALUE, FoldC3)
   end, C, Pairs),
 
-  {{gen, 'Map', {tuple, KeyTV, ValueTV}}, set_line(Line, C1)};
+  {{gen, 'Map', [KeyTV, ValueTV]}, set_line(Line, C1)};
 
 infer({N, Line, Name}, C) when N == var; N == con_var; N == var_value ->
   {T, C1} = lookup(Name, C),
@@ -499,7 +500,6 @@ infer({app, Expr, Args}, C) ->
 
 infer({native, {atom, Line, Module}, {var, _, Name}, Arity}, C) ->
   % TODO: handle case where this fails
-  ?LOG("Checking", {Module, Name, Arity}),
   true = erlang:function_exported(Module, list_to_atom(Name), Arity),
   T = if
     Arity == 0 -> {lam, none, tv_server:fresh(C#ctx.pid)};
@@ -663,7 +663,7 @@ infer({{Op, Line}, Expr}, C) ->
     Op == '!' -> {{lam, ExprT, TV}, {lam, {con, 'Bool'}, {con, 'Bool'}}};
     Op == '#' ->
       ElemT = tv_server:fresh(C1#ctx.pid),
-      {{lam, ExprT, TV}, {lam, {gen, 'List', ElemT}, {gen, 'Set', ElemT}}};
+      {{lam, ExprT, TV}, {lam, {gen, 'List', [ElemT]}, {gen, 'Set', [ElemT]}}};
     Op == '-' ->
       NumT = tv_server:fresh('Num', C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, NumT, NumT}};
@@ -695,11 +695,10 @@ pattern_names({var, _, Name}) -> gb_sets:singleton(Name);
 pattern_names({'_', _}) -> gb_sets:new();
 pattern_names({app, ConVar, Args}) ->
   gb_sets:union(pattern_names(ConVar), pattern_names(Args));
-pattern_names({{list, _}, List}) -> pattern_names(List);
-pattern_names({{list, _}, List, Rest}) ->
-  gb_sets:union(pattern_names(List), pattern_names(Rest));
-pattern_names({{tuple, _}, Left, Right}) ->
-  gb_sets:union(pattern_names(Left), pattern_names(Right)).
+pattern_names({{list, _}, Elems}) -> pattern_names(Elems);
+pattern_names({{list, _}, Elems, Tail}) ->
+  gb_sets:union(pattern_names(Elems), pattern_names(Tail));
+pattern_names({{tuple, _}, Elems}) -> pattern_names(Elems).
 
 add_env(Name, Value, C) ->
   % just a sanity assertion that Value is in the right format
@@ -741,13 +740,8 @@ norm_sig_type(SigT, ExceptVs, Pid) ->
 
   subs(SigT, Subs).
 
-param_type_to_list({tuple, LeftT, RightT}) ->
-  [LeftT | param_type_to_list(RightT)];
-param_type_to_list(T) -> [T].
-
 lookup(Name, C) ->
   % TODO: handle case where can't find variable
-  ?LOG("Looking up", Name),
   case maps:find(Name, C#ctx.env) of
     {ok, {add_dep, EnvTV, ID}} ->
       G = C#ctx.gnr,
@@ -866,8 +860,8 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
-resolve({tuple, LeftT, RightT}, S) ->
-  {tuple, resolve(LeftT, S), resolve(RightT, S)};
+resolve({tuple, ElemTs}, S) ->
+  {tuple, lists:map(fun(T) -> resolve(T, S) end, ElemTs)};
 resolve({tv, V, I, Rigid}, S) ->
   if
     is_map(I) ->
@@ -876,7 +870,8 @@ resolve({tv, V, I, Rigid}, S) ->
     true -> {tv, V, I, Rigid}
   end;
 resolve({con, Con}, _) -> {con, Con};
-resolve({gen, Con, ParamT}, S) -> {gen, Con, resolve(ParamT, S)};
+resolve({gen, Con, ParamTs}, S) ->
+  {gen, Con, lists:map(fun(T) -> resolve(T, S) end, ParamTs)};
 resolve({inst, TV}, S) ->
   {tv, V, _, _} = TV,
   ResolvedT = case maps:find(V, S#solver.schemes) of
@@ -900,9 +895,17 @@ unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   S1 = unify(ArgT1, ArgT2, S),
   % TODO: should we short-circuit this unification if args failed?
   unify(ReturnT1, ReturnT2, S1);
-unify({tuple, LeftT1, RightT1}, {tuple, LeftT2, RightT2}, S) ->
-  S1 = unify(LeftT1, LeftT2, S),
-  unify(RightT1, RightT2, S1);
+
+unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
+  if
+    length(ElemTs1) /= length(ElemTs2) ->
+      add_err({tuple, ElemTs1}, {tuple, ElemTs2}, S);
+
+    true ->
+      lists:foldl(fun({T1, T2}, FoldS) ->
+        unify(T1, T2, FoldS)
+      end, S, lists:zip(ElemTs1, ElemTs2))
+  end;
 
 unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
   Keys1 = gb_sets:from_list(maps:keys(FieldMap1)),
@@ -997,8 +1000,16 @@ unify({tv, V, I, Rigid}, T, S) ->
   end;
 unify(T, {tv, V, I, Rigid}, S) -> unify({tv, V, I, Rigid}, T, S);
 
-unify({gen, Con, ParamT1}, {gen, Con, ParamT2}, S) ->
-  unify(ParamT1, ParamT2, S);
+unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
+  if
+    length(ParamTs1) /= length(ParamTs2) ->
+      add_err({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S);
+
+    true ->
+      lists:foldl(fun({T1, T2}, FoldS) ->
+        unify(T1, T2, FoldS)
+      end, S, lists:zip(ParamTs1, ParamTs2))
+  end;
 
 unify(T, {record, A, FieldMap}, S) ->
   RecordT = {record, A, FieldMap},
@@ -1100,12 +1111,12 @@ unalias({con, Con}, S) ->
     {ok, {_, [], RawFieldMap}} -> {record, none, RawFieldMap};
     error -> {con, Con}
   end;
-unalias({gen, Con, ParamT}, S) ->
+unalias({gen, Con, ParamTs}, S) ->
   case maps:find(Con, S#solver.types) of
     {ok, {_, Vs, RawFieldMap}} ->
-      Subs = maps:from_list(lists:zip(Vs, param_type_to_list(ParamT))),
+      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       subs({record, none, RawFieldMap}, Subs);
-    error -> {gen, Con, ParamT}
+    error -> {gen, Con, ParamTs}
   end;
 unalias(T, _) -> T.
 
@@ -1121,8 +1132,8 @@ instance(_, _) -> false.
 
 subs({lam, ArgT, ReturnT}, Subs) ->
   {lam, subs(ArgT, Subs), subs(ReturnT, Subs)};
-subs({tuple, LeftT, RightT}, Subs) ->
-  {tuple, subs(LeftT, Subs), subs(RightT, Subs)};
+subs({tuple, ElemTs}, Subs) ->
+  {tuple, lists:map(fun(T) -> subs(T, Subs) end, ElemTs)};
 subs({tv, V, I, Rigid}, Subs) ->
   SubI = if
     is_map(I) -> element(3, subs({record, none, I}, Subs));
@@ -1152,7 +1163,8 @@ subs({tv, V, I, Rigid}, Subs) ->
       subs(Sub, Subs)
   end;
 subs({con, Con}, _) -> {con, Con};
-subs({gen, Con, ParamT}, Subs) -> {gen, Con, subs(ParamT, Subs)};
+subs({gen, Con, ParamTs}, Subs) ->
+  {gen, Con, lists:map(fun(T) -> subs(T, Subs) end, ParamTs)};
 subs({record, A, FieldMap}, Subs) ->
   case maps:find(A, Subs) of
     error ->
@@ -1182,14 +1194,20 @@ bound_vs(Env, S) ->
   end, gb_sets:new(), Env).
 
 fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
-fvs({tuple, LeftT, RightT}) -> gb_sets:union(fvs(LeftT), fvs(RightT));
+fvs({tuple, ElemTs}) ->
+  lists:foldl(fun(T, FVs) ->
+    gb_sets:union(FVs, fvs(T))
+  end, gb_sets:new(), ElemTs);
 fvs({tv, V, I, _}) ->
   if
     is_map(I) -> gb_sets:add(V, fvs({record, none, I}));
     true -> gb_sets:singleton(V)
   end;
 fvs({con, _}) -> gb_sets:new();
-fvs({gen, _, ParamT}) -> fvs(ParamT);
+fvs({gen, _, ParamTs}) ->
+  lists:foldl(fun(T, FVs) ->
+    gb_sets:union(FVs, fvs(T))
+  end, gb_sets:new(), ParamTs);
 % fvs({inst, ...}) ommitted; they should be resolved
 fvs({record, _, FieldMap}) ->
   maps:fold(fun(_, T, S) ->
@@ -1199,8 +1217,10 @@ fvs(none) -> gb_sets:new().
 
 occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
-occurs(V, {tuple, LeftT, RightT}) ->
-  occurs(V, LeftT) or occurs(V, RightT);
+occurs(V, {tuple, ElemTs}) ->
+  lists:foldl(fun(T, Occurs) ->
+    Occurs or occurs(V, T)
+  end, false, ElemTs);
 occurs(V, {tv, V1, I, Rigid}) ->
   OccursI = if
     is_map(I) -> occurs(V, {record, none, I});
@@ -1208,7 +1228,10 @@ occurs(V, {tv, V1, I, Rigid}) ->
   end,
   OccursI or (V == Rigid) or (V == V1);
 occurs(_, {con, _}) -> false;
-occurs(V, {gen, _, ParamT}) -> occurs(V, ParamT);
+occurs(V, {gen, _, ParamTs}) ->
+  lists:foldl(fun(T, Occurs) ->
+    Occurs or occurs(V, T)
+  end, false, ParamTs);
 % occurs({inst, ...}) ommitted; they should be resolved
 occurs(V, {record, _, FieldMap}) ->
   maps:fold(fun(_, T, Occurs) ->
@@ -1226,8 +1249,9 @@ pretty({lam, ArgT, ReturnT}) ->
     _ -> "~s -> ~s"
   end,
   ?FMT(Format, [pretty(ArgT), pretty(ReturnT)]);
-pretty({tuple, LeftT, RightT}) ->
-  ?FMT("(~s, ~s)", [pretty(LeftT), pretty_strip_parens(RightT)]);
+pretty({tuple, ElemTs}) ->
+  PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
+  ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);
 pretty({tv, V, I, Rigid}) ->
   Str = if
     I == none -> tl(V);
@@ -1246,19 +1270,16 @@ pretty({set_iface, I}) ->
   end,
   ?FMT("I = ~s", [Str]);
 pretty({con, Con}) -> atom_to_list(Con);
-pretty({gen, 'List', ParamT}) ->
-  ?FMT("[~s]", [pretty_strip_parens(ParamT)]);
-pretty({gen, T, ParamT}) ->
-  ?FMT("~s<~s>", [atom_to_list(T), pretty_strip_parens(ParamT)]);
+pretty({gen, 'List', [ElemT]}) ->
+  ?FMT("[~s]", [pretty(ElemT)]);
+pretty({gen, Con, ParamTs}) ->
+  PrettyParamTs = lists:map(fun(T) -> pretty(T) end, ParamTs),
+  ?FMT("~s<~s>", [atom_to_list(Con), string:join(PrettyParamTs, ", ")]);
 pretty({inst, TV}) ->
   ?FMT("inst(~s)", [pretty(TV)]);
 pretty({record, _, FieldMap}) ->
   ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty(none) -> "()".
-
-pretty_strip_parens({tuple, LeftT, RightT}) ->
-  ?FMT("~s, ~s", [pretty(LeftT), pretty_strip_parens(RightT)]);
-pretty_strip_parens(T) -> pretty(T).
 
 pretty_field_map(FieldMap) ->
   FieldStrs = maps:fold(fun(Name, T, Strs) ->

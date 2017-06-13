@@ -76,10 +76,11 @@ norm({lam, ArgT, ReturnT}, N) ->
   {NormArgT, N1} = norm(ArgT, N),
   {NormReturnT, N2} = norm(ReturnT, N1),
   {{lam, NormArgT, NormReturnT}, N2};
-norm({tuple, LeftT, RightT}, N) ->
-  {NormLeftT, N1} = norm(LeftT, N),
-  {NormRightT, N2} = norm(RightT, N1),
-  {{tuple, NormLeftT, NormRightT}, N2};
+norm({tuple, ElemTs}, N) ->
+  {NormElemTs, N1} = lists:mapfoldl(fun(T, FoldN) ->
+    norm(T, FoldN)
+  end, N, ElemTs),
+  {{tuple, NormElemTs}, N1};
 norm({tv, V, I, Cat}, {Subs, Pid}) ->
   {NewV, N1} = case maps:find(V, Subs) of
     {ok, V1} -> {V1, {Subs, Pid}};
@@ -95,9 +96,11 @@ norm({tv, V, I, Cat}, {Subs, Pid}) ->
     true -> {{tv, NewV, I, Cat}, N1}
   end;
 norm({con, Con}, N) -> {{con, Con}, N};
-norm({gen, Con, ParamT}, N) ->
-  {NormParamT, N1} = norm(ParamT, N),
-  {{gen, Con, NormParamT}, N1};
+norm({gen, Con, ParamTs}, N) ->
+  {NormParamTs, N1} = lists:mapfoldl(fun(T, FoldN) ->
+    norm(T, FoldN)
+  end, N, ParamTs),
+  {{gen, Con, NormParamTs}, N1};
 norm({A, Options}, N) when A == either; A == ambig ->
   {NormOptions, N1} = lists:mapfoldl(fun(O, FoldN) ->
     norm(O, FoldN)
@@ -133,7 +136,7 @@ expr_test_() ->
   , ?_test("(Bool, Float)" = ok_expr("(true, 3.0)"))
   , ?_test("(A: Num, B: Num, [C: Num])" = ok_expr("(1, 2, [30, 40])"))
   , ?_test("((A: Num, Bool), Float)" = ok_expr("((3, false), 4.0)"))
-  , ?_test("(A: Num, Bool, Float)" = ok_expr("(3, (false, 4.0))"))
+  , ?_test("(A: Num, (Bool, Float))" = ok_expr("(3, (false, 4.0))"))
 
   , ?_test("Map<A, B>" = ok_expr("{}"))
   , ?_test("Map<String, String>" = ok_expr("{\"key\" => \"value\"}"))
@@ -874,19 +877,12 @@ pattern_test_() ->
   , ?_test("[String]" = ok_expr(
       "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
     ))
-  , ?_test("((Bool, Atom), Float)" = ok_expr(
-      "match (1, true, @hi) {\n"
-      "  (0, b) => (b, 10),\n"
-      "  (a, true, c) => ((false, c), 3 * a),\n"
-      "  (a, b) => (b, a / 2)\n"
-      "}"
-    ))
   , ?_test("Float" = ok_expr(
       "let m = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
       "  match m {\n"
-      "    [([h | t], _) | _] => h,\n"
+      "    [([h | t], _, _) | _] => h,\n"
       "    [_, ([], _, c)] => c,\n"
-      "    [(_, _, c), ([x, y | []], _)] => c + x - y\n"
+      "    [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
       "  }"
     ))
   , ?_test("[A: Num]" = ok_expr(
@@ -919,10 +915,10 @@ pattern_test_() ->
     ))
   , ?_test(bad_expr(
       "match (1, true, @hi) {\n"
-      "  (0, b) => (b, 10),\n"
-      "  (a, b, c, d) => ((b, c), a / 2)\n"
+      "  (0, b, c) => (b, 10),\n"
+      "  (a, b, c, d) => (b, a / 2)\n"
       "}",
-      {"Atom", "(A, B)", 3, ?FROM_MATCH_PATTERN}
+      {"(A: Num, Bool, Atom)", "(B, C, D, E)", 3, ?FROM_MATCH_PATTERN}
     ))
   , ?_test(bad_expr(
       "match [([], \"hi\", 3.0)] {\n"
@@ -939,7 +935,7 @@ pattern_test_() ->
 
   , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
   , ?_test("(Int, Float)" = ok_expr(
-      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+      "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
       "  (x + 3 :: Int, x + 3.0)"
     ))
   , ?_test("A: Num" =

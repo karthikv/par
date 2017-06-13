@@ -142,14 +142,8 @@ rep({{list, _}, Elems, Tail}, Env) ->
     {cons, element(2, ERep), ERep, FoldRep}
   end, rep(Tail, Env), Elems);
 
-rep({{tuple, Line}, Left, Right}, Env) ->
-  case Right of
-    {{tuple, _}, _, _} ->
-      {tuple, _, Elems} = rep(Right, Env),
-      {tuple, Line, [rep(Left, Env) | Elems]};
-
-    _ -> {tuple, Line, [rep(Left, Env), rep(Right, Env)]}
-  end;
+rep({{tuple, Line}, Elems}, Env) ->
+  {tuple, Line, lists:map(fun(E) -> rep(E, Env) end, Elems)};
 
 rep({{map, Line}, Pairs}, Env) ->
   PairsRep = lists:map(fun({K, V}) ->
