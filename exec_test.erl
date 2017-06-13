@@ -48,6 +48,10 @@ expr_test_() ->
   , ?_test(<<"ab">> = expr("(|a, b| a ++ b)(\"a\")(\"b\")"))
   , ?_test(5 = expr("(|x| |y| x + y)(2, 3)"))
   , ?_test([4, 1] = expr("(|x| |-| x -- [3])([4, 3, 1])()"))
+  % to test code_gen_utils:'_@curry' in the parital application case
+  , ?_test(2 = expr(
+      "let f = (|a| |b, c, d| a - b + c - d)(4), f = f(3) in f(2, 1)"
+    ))
 
 
   , ?_test(<<"world">> = expr("if false then \"hello\" else \"world\""))

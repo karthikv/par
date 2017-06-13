@@ -142,7 +142,7 @@ eval({app, Expr, Args}, ID) ->
     0 -> [none];
     _ -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
   end,
-  app(Fun, Vs);
+  code_gen_utils:'_@curry'(Fun, Vs, ?LINE);
 
 eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
@@ -195,7 +195,7 @@ eval({{Op, _}, Left, Right}, ID) ->
     '!=' -> LeftV /= RightV;
     '||' -> LeftV or RightV;
     '&&' -> LeftV and RightV;
-    '|>' -> app(RightV, [LeftV]);
+    '|>' -> code_gen_utils:'_@curry'(RightV, [LeftV], ?LINE);
     '>' -> LeftV > RightV;
     '<' -> LeftV < RightV;
     '>=' -> LeftV >= RightV;
@@ -254,97 +254,27 @@ eval_pattern(Pattern, Expr, ID) ->
     true -> {true, ChildID}
   end.
 
-app(Fun, GivenVs) ->
-  {arity, Arity} = erlang:fun_info(Fun, arity),
-
-  Vs = case Arity of
-    0 ->
-      none = hd(GivenVs),
-      tl(GivenVs);
-    _ -> GivenVs
-  end,
-  NumVs = length(Vs),
-
-  if
-    NumVs < Arity ->
-      make_fun(Arity - NumVs, fun(NewVs) ->
-        apply(Fun, Vs ++ NewVs)
-      end);
-    NumVs == Arity -> apply(Fun, Vs);
-    NumVs > Arity ->
-      DirectVs = lists:sublist(Vs, Arity),
-      FurtherVs = lists:sublist(Vs, Arity + 1, NumVs),
-      app(apply(Fun, DirectVs), FurtherVs)
-  end.
-
 make_fun(Arity, Callback) ->
-  % As far as I know, there's no way to create a function with a dynamic number
-  % of arguments, so we do it manually up to 20 (a guessed maximum) here.
-  case Arity of
-    0 -> fun() ->
-      Callback([])
-    end;
-    1 -> fun(A) ->
-      Callback([A])
-    end;
-    2 -> fun(A, B) ->
-      Callback([A, B])
-    end;
-    3 -> fun(A, B, C) ->
-      Callback([A, B, C])
-    end;
-    4 -> fun(A, B, C, D) ->
-      Callback([A, B, C, D])
-    end;
-    5 -> fun(A, B, C, D, E) ->
-      Callback([A, B, C, D, E])
-    end;
-    6 -> fun(A, B, C, D, E, F) ->
-      Callback([A, B, C, D, E, F])
-    end;
-    7 -> fun(A, B, C, D, E, F, G) ->
-      Callback([A, B, C, D, E, F, G])
-    end;
-    8 -> fun(A, B, C, D, E, F, G, H) ->
-      Callback([A, B, C, D, E, F, G, H])
-    end;
-    9 -> fun(A, B, C, D, E, F, G, H, I) ->
-      Callback([A, B, C, D, E, F, G, H, I])
-    end;
-    10 -> fun(A, B, C, D, E, F, G, H, I, J) ->
-      Callback([A, B, C, D, E, F, G, H, I, J])
-    end;
-    11 -> fun(A, B, C, D, E, F, G, H, I, J, K) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K])
-    end;
-    12 -> fun(A, B, C, D, E, F, G, H, I, J, K, L) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L])
-    end;
-    13 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M])
-    end;
-    14 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N])
-    end;
-    15 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O])
-    end;
-    16 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P])
-    end;
-    17 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q])
-    end;
-    18 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R])
-    end;
-    19 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S])
-    end;
-    20 -> fun(A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T) ->
-      Callback([A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T])
-    end
-  end.
+  ArgsRep = lists:map(fun(Num) ->
+    {var, ?LINE, list_to_atom(lists:concat(['_@', Num]))}
+  end, lists:seq(1, Arity)),
+  ArgsListRep = lists:foldr(fun(FoldArgRep, FoldListRep) ->
+    {cons, ?LINE, FoldArgRep, FoldListRep}
+  end, {nil, ?LINE}, ArgsRep),
+
+  CallbackVar = {var, ?LINE, '_@Callback'},
+  Body = [{call, ?LINE, CallbackVar, [ArgsListRep]}],
+  Clause = {clause, ?LINE, ArgsRep, [], Body},
+  Expr = {'fun', ?LINE, {clauses, [Clause]}},
+
+  Bindings = erl_eval:add_binding(
+    element(3, CallbackVar),
+    Callback,
+    erl_eval:new_bindings()
+  ),
+
+  {value, Value, _} = erl_eval:expr(Expr, Bindings),
+  Value.
 
 match_cases(V, [], _) -> error({badmatch, V});
 match_cases(V, [{Pattern, Expr} | Rest], ID) ->

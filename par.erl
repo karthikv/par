@@ -89,7 +89,6 @@
 % - (code gen) File name attribute?
 % - (code gen) Remove util functions when they're unused
 % - (code gen) Use a bag instead of a set for constants?
-% - Use code_gen_utils curry in interpreter
 %
 % - Error messages
 % - TODOs in code (non-unification error cases)

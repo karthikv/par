@@ -294,6 +294,7 @@ rep({{if_let, Line}, {Pattern, Expr}, Then, Else}, Env) ->
 rep({{'match', Line}, Expr, Cases}, Env) ->
   ExprRep = rep(Expr, Env),
   CaseClauses = lists:map(fun({Pattern, Then}) ->
+    % TODO: use arity(Expr) in case of simple pattern?
     Env1 = gb_sets:fold(fun(Name, FoldEnv) ->
       bind(Name, unknown, FoldEnv)
     end, Env, par:pattern_names(Pattern)),
@@ -354,6 +355,7 @@ rep_pattern({var, _, Name}=Pattern, {{fn, _}, Args, _}=Expr, Env) ->
   {PatternRep, NamedFun, Env1};
 
 rep_pattern(Pattern, Expr, Env) ->
+  % TODO arity(Expr) for simple patterns
   Env1 = gb_sets:fold(fun(Name, NestedEnv) ->
     bind(Name, unknown, NestedEnv)
   end, Env, par:pattern_names(Pattern)),
@@ -396,7 +398,7 @@ arity({N, _, Name}, Env) when N == var; N == con_var ->
   #{Name := {_, Arity}} = Env,
   Arity;
 arity({field, _}, _) -> 1;
-% TODO: we can figure this out in some cases from typing info
+% TODO: we can figure this out in some cases from typing info or analysis
 arity({field, _, _}, _) -> unknown;
 arity({app, Expr, Args}, Env) ->
   case arity(Expr, Env) of

@@ -35,8 +35,7 @@
       NewArgsRep = lists:map(fun(Num) ->
         {var, Line, list_to_atom(lists:concat(['_@', Num]))}
       end, lists:seq(NumArgs + 1, Arity)),
-      % TODO: ensure test catches this bug (should be foldr)
-      NewArgsListRep = lists:foldl(fun(FoldArgRep, FoldListRep) ->
+      NewArgsListRep = lists:foldr(fun(FoldArgRep, FoldListRep) ->
         {cons, Line, FoldArgRep, FoldListRep}
       end, {nil, Line}, NewArgsRep),
 
