@@ -80,9 +80,10 @@ expr -> neg : '$1'.
 expr -> lam : '$1'.
 expr -> discard expr : {'$1', '$2'}.
 expr -> expr '::' te : {'$2', '$1', '$3'}.
-expr -> expr '(' ')' : {app, '$1', []}.
-expr -> expr '(' expr_list ')' : {app, '$1', '$3'}.
-expr -> atom ':' var '(' ')' : {app, {native, '$1', '$3', 0}, []}.
+expr -> expr '(' ')' : flatten_app({app, '$1', [{none, element(2, '$2')}]}).
+expr -> expr '(' expr_list ')' : flatten_app({app, '$1', '$3'}).
+expr -> atom ':' var '(' ')' :
+  {app, {native, '$1', '$3', 0}, [{none, element(2, '$4')}]}.
 expr -> atom ':' var '(' expr_list ')' :
   {app, {native, '$1', '$3', num_args('$5')}, '$5'}.
 expr -> atom ':' var '/' int : {native, '$1', '$3', element(3, '$5')}.
@@ -229,3 +230,8 @@ Erlang code.
 num_args([]) -> 0;
 num_args([{none, _}]) -> 0;
 num_args(Args) -> length(Args).
+
+flatten_app({app, {app, _, _}=App, Args}) ->
+  {app, Expr, InitialArgs} = flatten_app(App),
+  {app, Expr, InitialArgs ++ Args};
+flatten_app(Node) -> Node.

@@ -1,5 +1,5 @@
 -module(interpreter).
--export([reload/1, execute/1]).
+-export([reload/1, run_file/2, run_prg/2, run_ast/2]).
 
 reload(Syntax) ->
   par:reload(Syntax),
@@ -8,7 +8,23 @@ reload(Syntax) ->
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE).
 
-execute(Ast) ->
+run_file(Name, Args) ->
+  {ok, Prg} = file:read_file(Name),
+  run_prg(binary_to_list(Prg), Args).
+
+run_prg(Prg, Args) ->
+  case par:infer_prg(Prg) of
+    {errors, Errs} ->
+      lists:foreach(fun({T1, T2, Line, From}) ->
+        io:format(
+          "[~p] in ~s~nexpected type ~s~ngot type      ~s~n~n",
+          [Line, From, par:pretty(T1), par:pretty(T2)]
+        )
+      end, Errs);
+    {ok, _, Ast} -> run_ast(Ast, Args)
+  end.
+
+run_ast(Ast, Args) ->
   ID = env_create_first(),
   lists:foreach(fun(Node) -> init(Node, ID) end, Ast),
 
@@ -20,7 +36,7 @@ execute(Ast) ->
     end
   end, Ast),
 
-  eval({app, {var, 0, "main"}, []}, ID).
+  apply(eval({var, 0, "main"}, ID), Args).
 
 init({global, {var, _, Name}, Expr}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
@@ -285,7 +301,6 @@ app(Fun, GivenVs) ->
     NumVs > Arity ->
       DirectVs = lists:sublist(Vs, Arity),
       FurtherVs = lists:sublist(Vs, Arity + 1, NumVs),
-      io:format("got dvs ~p fvs ~p arity ~p~n", [DirectVs, FurtherVs, Arity]),
       app(apply(Fun, DirectVs), FurtherVs)
   end.
 

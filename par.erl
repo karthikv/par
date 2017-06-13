@@ -86,28 +86,34 @@
 -endif.
 
 % TODO:
-% - TODOs in code (non-unification error cases)
+% - Simplify let/if-let type checking
+% - Simplify tuple access
+% - Rename compiler to code gen
+% - (code gen) File name attribute?
+% - (code gen) Remove util functions when they're unused
+% - (code gen) Use a bag instead of a set for constants?
+% - Simplify interpreter let/if-let and tuple access
+%
 % - Error messages
-% - Exhaustive pattern matching errors
+% - TODOs in code (non-unification error cases)
 % - Pattern matching records
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
-% - Concurrency
 % - Exceptions
-% - Code generation
+% - Exhaustive pattern matching errors
+% - Concurrency
 % - Update naming conventions
 %
 % From dogfooding:
 % - Syntax to prepend list element
 % - Operation: nth element of tuple? Rethink tuple access
-% - Underscore for arg name
 % - Character type and operations
 % - List error messages should include full List type
+% - Norm types for error messages
+% - Interpreter backtraces
+% - Detect basic infinite loop conditions
 %
-% - + instead of ++ and - instead of --?
-% - Make true/false capitalized?
 % - Syntax for lambda with no arg?
-% - Unit as valid expression?
 % - Force all block expressions except last to be type ()?
 % - List indexing?
 
@@ -493,6 +499,7 @@ infer({app, Expr, Args}, C) ->
 
 infer({native, {atom, Line, Module}, {var, _, Name}, Arity}, C) ->
   % TODO: handle case where this fails
+  ?LOG("Checking", {Module, Name, Arity}),
   true = erlang:function_exported(Module, list_to_atom(Name), Arity),
   T = if
     Arity == 0 -> {lam, none, tv_server:fresh(C#ctx.pid)};
@@ -740,6 +747,7 @@ param_type_to_list(T) -> [T].
 
 lookup(Name, C) ->
   % TODO: handle case where can't find variable
+  ?LOG("Looking up", Name),
   case maps:find(Name, C#ctx.env) of
     {ok, {add_dep, EnvTV, ID}} ->
       G = C#ctx.gnr,

@@ -1,9 +1,10 @@
--module(interpreter_test).
+-module(exec_test).
 -export([run/0, returns_fun/0]).
 -include_lib("eunit/include/eunit.hrl").
 
 run() ->
   interpreter:reload(false),
+  code_gen:reload(false),
 
   code:soft_purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
@@ -11,12 +12,13 @@ run() ->
 
   ?MODULE:test().
 
-execute(Prg) ->
+run(Prg) ->
   {ok, _, Ast} = par:infer_prg(Prg),
-  interpreter:execute(Ast).
+  code_gen:run_ast(Ast, code_gen_test).
+  %% interpreter:run_ast(Ast, []).
 
 expr(Expr) ->
-  execute("main() = " ++ Expr).
+  run("main() = " ++ Expr).
 
 expr_test_() ->
   [ ?_test(none = expr("()"))
@@ -60,7 +62,7 @@ expr_test_() ->
              expr("let and = |a, b, c| a && b && c in and(true, true, false)"))
   , ?_test([4, 3, 4, 2, 3] =
              expr("let a = [4], f(x) = a ++ x ++ [3] in f([]) ++ f([2])"))
-  , ?_test(15 = expr("let a = b + 5, b = 10 in a"))
+  , ?_test(15 = expr("let a = 10, b = a + 5 in b"))
   , ?_test(32 = expr(
       "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
       "  f(5, 1)"
@@ -148,21 +150,21 @@ returns_fun() ->
   fun(A, B) -> A + B end.
 
 prg_test_() ->
-  [ ?_test(3 = execute(
+  [ ?_test(3 = run(
      "main :: () -> Int\n"
      "main() = 3 :: Int"
     ))
-  , ?_test(6765 = execute(
+  , ?_test(6765 = run(
       "fib(n) = if n == 0 || n == 1 then n else fib(n - 1) + fib(n - 2)\n"
       "main() = fib(20)"
     ))
-  , ?_test([false, false, true] = execute(
+  , ?_test([false, false, true] = run(
       "cmp(f, g, x) = f(g(x))\n"
       "two(e) = [e, e]\n"
       "and_true(l) = l ++ [true]\n"
       "main() = cmp(and_true)(two, false)"
     ))
-  , ?_test(50 = execute(
+  , ?_test(50 = run(
       "f(x) = g(x - 10.0)\n"
       "g(x) = if x >= 0 then 10 + f(x) else 0\n"
       "main() = f(57)"
@@ -170,17 +172,17 @@ prg_test_() ->
   ].
 
 global_test_() ->
-  [ ?_test(3 = execute(
+  [ ?_test(3 = run(
       "foo = 3\n"
       "main() = foo"
     ))
-  , ?_test([false, true] = execute(
+  , ?_test([false, true] = run(
       "foo = baz && false\n"
       "bar = [foo] ++ [true]\n"
       "baz = true\n"
       "main() = bar"
     ))
-  , ?_test(7812.5 = execute(
+  , ?_test(7812.5 = run(
       "foo = |x| bar(x) / 2\n"
       "bar(x) = if x == 0 then 1 else foo(x - 1) * 10\n"
       "main() = foo(6)"
@@ -188,7 +190,7 @@ global_test_() ->
 
 
   % to ensure globals are evaluated strictly in order
-  , ?_test({ok, <<"bar">>} = execute(
+  , ?_test({ok, <<"bar">>} = run(
       "foo = @file:write_file(\"/tmp/par-foo\", \"bar\")\n"
       "main() = let result = @file:read_file(\"/tmp/par-foo\") in\n"
       "  { @file:delete(\"/tmp/par-foo\"); result }"
@@ -196,27 +198,27 @@ global_test_() ->
   ].
 
 enum_test_() ->
-  [ ?_test('Bar' = execute(
+  [ ?_test('Bar' = run(
       "enum Foo { Bar }\n"
       "main() = Bar"
     ))
-  , ?_test({'Other', 5} = execute(
+  , ?_test({'Other', 5} = run(
       "enum Foo { Bar, Other(Int) }\n"
       "main() = Other(5)"
     ))
-  , ?_test({'Bar', true, [<<"hello">>]} = (execute(
+  , ?_test({'Bar', true, [<<"hello">>]} = (run(
       "enum Foo { Bar(Bool, [String]) }\n"
       "main() = Bar(true)"
     ))([<<"hello">>]))
-  , ?_test('Bar' = execute(
+  , ?_test('Bar' = run(
       "enum Foo<A> { Bar }\n"
       "main() = Bar"
     ))
-  , ?_test({'Other', 3} = execute(
+  , ?_test({'Other', 3} = run(
       "enum Foo<A> { Bar, Other(A) }\n"
       "main() = Other(3)"
     ))
-  , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = execute(
+  , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = run(
       "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
       "main() = Cons(3, Cons(5.0, End))\n"
     ))
@@ -235,54 +237,54 @@ record_test_() ->
   , ?_test(true = expr("let f(x) = x.bar || false in f({ bar = true })"))
   , ?_test(hi = expr("let f(x) = x.bar in f({ bar = @hi, baz = 7 })"))
 
-  , ?_test({11, <<"oh, hi">>} = execute(
+  , ?_test({11, <<"oh, hi">>} = run(
       "f(x) = (x.bar + 4, x.foo ++ \"hi\")\n"
       "main() = f({ bar = 7, foo = \"oh, \" })"
     ))
 
   % named struct
-  , ?_assertEqual(#{bar => 3}, execute(
+  , ?_assertEqual(#{bar => 3}, run(
       "struct Foo { bar :: Int }\n"
       "main() = Foo(3)"
     ))
-  , ?_assertEqual(#{bar => 3}, execute(
+  , ?_assertEqual(#{bar => 3}, run(
       "struct Foo { bar :: Int }\n"
       "main() = Foo { bar = 3 }"
     ))
-  , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (execute(
+  , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (run(
       "struct Foo { bar :: Int, baz :: [String] }\n"
       "main() = Foo(3)"
     ))([<<"hello">>]))
-  , ?_assertEqual(#{baz => [first, second], bar => 15}, execute(
+  , ?_assertEqual(#{baz => [first, second], bar => 15}, run(
       "struct Foo { bar :: Int, baz :: [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
     ))
-  , ?_assertEqual(#{bar => hi, baz => true}, (execute(
+  , ?_assertEqual(#{bar => hi, baz => true}, (run(
       "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
       "main() = Foo(@hi)"
     ))(true))
-  , ?_assertEqual(#{bar => hi}, execute(
+  , ?_assertEqual(#{bar => hi}, run(
       "struct Foo<X> { bar :: X }\n"
       "main() = Foo { bar = @hi }"
     ))
   % Won't be able to create a valid Foo, but should still type check.
-  , ?_test(true = execute(
+  , ?_test(true = run(
       "struct Foo { baz :: Foo }\n"
       "main() = true"
     ))
-  , ?_assertEqual(#{bar => hi, baz => [#{bar => hello, baz => []}]}, execute(
+  , ?_assertEqual(#{bar => hi, baz => [#{bar => hello, baz => []}]}, run(
       "struct Foo { bar :: Atom, baz :: [Foo] }\n"
       "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
     ))
 
 
   % generalization cases
-  , ?_test({<<"hi">>, true} = execute(
+  , ?_test({<<"hi">>, true} = run(
       "struct Foo<A> { bar :: A }\n"
       "main() = let id(a) = a, f = Foo { bar = id } in\n"
       "  (f.bar(\"hi\"), f.bar(true))"
     ))
-  , ?_test(7.5 = execute(
+  , ?_test(7.5 = run(
       "f(x, y) = x.foo(y.bar)\n"
       "main() = f({ foo = |x| x.baz }, { bar = { baz = 7.5 } })"
     ))
@@ -297,7 +299,7 @@ pattern_test_() ->
       "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
       "}"
     ))
-  , ?_test(5 = execute(
+  , ?_test(5 = run(
       "enum Foo { Bar, Baz(Int) }\n"
       "main() = match Baz(5) { Bar => 1, Baz(x) => x }"
     ))
@@ -311,25 +313,25 @@ pattern_test_() ->
       "  (a, b) => (b, a / 2)\n"
       "}"
     ))
-  , ?_test(2.0 = expr(
-      "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
-      "  match x {\n"
-      "    [([h | t], _) | _] => h,\n"
-      "    [_, ([], _, c)] => c,\n"
-      "    [(_, _, c), ([x, y | []], _)] => c + x - y\n"
-      "  }"
-    ))
+  %% , ?_test(2.0 = expr(
+  %%     "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
+  %%     "  match x {\n"
+  %%     "    [([h | t], _) | _] => h,\n"
+  %%     "    [_, ([], _, c)] => c,\n"
+  %%     "    [(_, _, c), ([x, y | []], _)] => c + x - y\n"
+  %%     "  }"
+  %%   ))
   , ?_test([1, 2] = expr(
       "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
     ))
 
 
   , ?_test([] = expr("let 3 = 3 in []"))
-  , ?_test({5, 5.0} = expr(
-      "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 :: Int, x + 3.0)"
-    ))
-  , ?_test(7 = expr("let (*a, b, *a) = (3, 7, 3), [_, a] = [1, 3] in b"))
+  %% , ?_test({5, 5.0} = expr(
+  %%     "let [_, (x, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
+  %%     "  (x + 3 :: Int, x + 3.0)"
+  %%   ))
+  , ?_test(7 = expr("let [_, a] = [1, 3], (*a, b, *a) = (3, 7, 3) in b"))
 
 
   , ?_test(none = expr("if let a = 3.0 then a"))
@@ -338,8 +340,10 @@ pattern_test_() ->
     ))
   , ?_test(<<"hey">> = expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test(2.5 = expr(
-      "if let [f] = [|b| if b then f(!b) + 1 else 1.5]\n"
+      "if let f = |b| if b then f(!b) + 1 else 1.5\n"
       "then f(true)\n"
       "else 0"
     ))
+
+  %% , ?_test("" = expr("let x = let z = 3 in y, y = { @io:format(\"hi\"); 3 } in 4"))
   ].
