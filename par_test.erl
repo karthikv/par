@@ -26,8 +26,7 @@ ok_prg(Prg, Name) ->
   par:pretty(norm_prg(Prg, Name)).
 
 bad_prg(Prg, ExpErr) when not is_list(ExpErr) ->
-  {errors, Errs} = par:infer_prg(Prg),
-  [Err] = Errs,
+  {errors, [Err]} = par:infer_prg(Prg),
   check(Err, ExpErr);
 
 bad_prg(Prg, ExpErrs) ->
@@ -37,6 +36,10 @@ bad_prg(Prg, ExpErrs) ->
   lists:foreach(fun({Err, ExpErr}) ->
     check(Err, ExpErr)
   end, lists:zip(Errs, ExpErrs)).
+
+ctx_err_prg(Prg, ExpErr) ->
+  {errors, [Err]} = par:infer_prg(Prg),
+  Err = ExpErr.
 
 check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {ok, Pid} = tv_server:start_link(),
@@ -554,7 +557,6 @@ global_test_() ->
       "bar(x) = foo + x",
       "bar"
     ))
-  , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
 
 
   , ?_test(bad_prg(
@@ -985,4 +987,34 @@ pattern_test_() ->
       "if let (_, a) = [\"hello\", \"hi\"] then a else \"hey\"",
       {"(A, B)", "[String]", 1, ?FROM_IF_LET_PATTERN}
     ))
+  ].
+
+other_errors_test_() ->
+  [ ?_test(ctx_err_prg(
+      "foo = 3\n"
+      "foo = 4",
+      {?ERR_REDEF("foo"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo :: Int",
+      {?ERR_NO_DEF("foo"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo :: Int\n"
+      "bar = 3",
+      {?ERR_NO_DEF("foo"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo = 4\n"
+      "foo :: Int\n"
+      "bar = 3",
+      {?ERR_NO_DEF("foo"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo :: { a :: Int, a :: Float }\n"
+      "foo = { a = 3 }",
+      {?ERR_DUP_FIELD("a"), 1}
+    ))
+
+  %% , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
   ].

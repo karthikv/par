@@ -31,18 +31,18 @@ run_ast(Ast, Args) ->
   lists:foreach(fun(Node) ->
     case Node of
       % strictly evaluate all globals
-      {global, Var, _} -> eval(Var, ID);
+      {global, _, Var, _} -> eval(Var, ID);
       _ -> true
     end
   end, Ast),
 
   apply(eval({var, 0, "main"}, ID), Args).
 
-init({global, {var, _, Name}, Expr}, ID) ->
+init({global, _, {var, _, Name}, Expr}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
-init({{enum_token, _}, _, OptionTEs}, ID) ->
-  lists:foreach(fun({option, {con_token, _, Name}, ArgsTE}) ->
+init({enum_token, _, _, OptionTEs}, ID) ->
+  lists:foreach(fun({{con_token, _, Name}, ArgsTE}) ->
     Value = if
       length(ArgsTE) == 0 -> list_to_atom(Name);
       true ->
@@ -54,10 +54,10 @@ init({{enum_token, _}, _, OptionTEs}, ID) ->
     env_set(Name, Value, ID)
   end, OptionTEs);
 
-init({{struct_token, _}, StructTE, FieldTEs}, ID) ->
+init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
   StructName = case StructTE of
     {con_token, _, Name} -> Name;
-    {gen_te, {con_token, _, Name}, _} -> Name
+    {gen_te, _, {con_token, _, Name}, _} -> Name
   end,
 
   FieldAtoms = lists:map(fun({{var, _, FieldName}, _}) ->
@@ -69,9 +69,9 @@ init({{struct_token, _}, StructTE, FieldTEs}, ID) ->
 
   env_set(StructName, StructV, ID);
 
-init({sig, _, _}, _) -> true.
+init({sig, _, _, _}, _) -> true.
 
-eval({{fn, _}, Args, Expr}, ID) ->
+eval({fn, _, Args, Expr}, ID) ->
   make_fun(length(Args), fun(Vs) ->
     NewID = if
       length(Args) == 0 -> ID;
@@ -86,19 +86,19 @@ eval({{fn, _}, Args, Expr}, ID) ->
     eval(Expr, NewID)
   end);
 
-eval({{'::', _}, Expr, _}, ID) -> eval(Expr, ID);
+eval({'::', _, Expr, _}, ID) -> eval(Expr, ID);
 
 eval({none, _}, _) -> none;
 eval({N, _, V}, _)
   when N == int; N == float; N == bool; N == str; N == atom -> V;
 
-eval({{list, _}, Elems}, ID) ->
+eval({list, _, Elems}, ID) ->
   lists:map(fun(E) -> eval(E, ID) end, Elems);
 
-eval({{tuple, Line}, Elems}, ID) ->
-  list_to_tuple(eval({{list, Line}, Elems}, ID));
+eval({tuple, Line, Elems}, ID) ->
+  list_to_tuple(eval({list, Line, Elems}, ID));
 
-eval({{map, _}, Pairs}, ID) ->
+eval({map, _, Pairs}, ID) ->
   List = lists:map(fun({K, V}) ->
     {eval(K, ID), eval(V, ID)}
   end, Pairs),
@@ -115,28 +115,28 @@ eval({var, _, Name}, ID) ->
 
 eval({con_var, Line, Name}, ID) -> eval({var, Line, Name}, ID);
 
-eval({{record, _}, Inits}, ID) ->
+eval({record, _, Inits}, ID) ->
   Pairs = lists:map(fun({{var, _, Name}, Expr}) ->
     {list_to_atom(Name), eval(Expr, ID)}
   end, Inits),
   maps:from_list(Pairs);
 
-eval({{update_record, Line}, Expr, Inits}, C) ->
+eval({update_record, Line, Expr, Inits}, C) ->
   Record = eval(Expr, C),
-  maps:merge(Record, eval({{record, Line}, Inits}, C));
+  maps:merge(Record, eval({record, Line, Inits}, C));
 
-eval({{record, Line}, _, Inits}, ID) -> eval({{record, Line}, Inits}, ID);
+eval({record, Line, _, Inits}, ID) -> eval({record, Line, Inits}, ID);
 
-eval({field, {var, _, Name}}, _) ->
+eval({field, _, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),
   fun(Record) -> maps:get(Atom, Record) end;
 
-eval({field, Expr, Var}, ID) ->
+eval({field, Line, Expr, Var}, ID) ->
   Record = eval(Expr, ID),
-  Fun = eval({field, Var}, ID),
+  Fun = eval({field, Line, Var}, ID),
   Fun(Record);
 
-eval({app, Expr, Args}, ID) ->
+eval({app, _, Expr, Args}, ID) ->
   Fun = eval(Expr, ID),
   Vs = case length(Args) of
     0 -> [none];
@@ -144,11 +144,11 @@ eval({app, Expr, Args}, ID) ->
   end,
   code_gen_utils:'_@curry'(Fun, Vs, ?LINE);
 
-eval({native, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
+eval({native, _, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
   fun Module:Fn/Arity;
 
-eval({{'if', _}, Expr, Then, Else}, ID) ->
+eval({'if', _, Expr, Then, Else}, ID) ->
   V = case eval(Expr, ID) of
     true -> eval(Then, ID);
     false -> eval(Else, ID)
@@ -158,7 +158,7 @@ eval({{'if', _}, Expr, Then, Else}, ID) ->
     _ -> V
   end;
 
-eval({{'let', _}, Inits, Then}, ID) ->
+eval({'let', _, Inits, Then}, ID) ->
   ChildID = lists:foldl(fun({Pattern, Expr}, FoldID) ->
     case eval_pattern(Pattern, Expr, FoldID) of
       {{false, V}, _} -> error({badmatch, V, Pattern});
@@ -168,7 +168,7 @@ eval({{'let', _}, Inits, Then}, ID) ->
 
   eval(Then, ChildID);
 
-eval({{if_let, _}, {Pattern, Expr}, Then, Else}, ID) ->
+eval({if_let, _, {Pattern, Expr}, Then, Else}, ID) ->
   V = case eval_pattern(Pattern, Expr, ID) of
     {{false, _}, _} -> eval(Else, ID);
     {true, ChildID} -> eval(Then, ChildID)
@@ -179,14 +179,14 @@ eval({{if_let, _}, {Pattern, Expr}, Then, Else}, ID) ->
     _ -> V
   end;
 
-eval({{'match', _}, Expr, Cases}, ID) ->
+eval({'match', _, Expr, Cases}, ID) ->
   V = eval(Expr, ID),
   match_cases(V, Cases, ID);
 
-eval({{block, _}, Exprs}, ID) ->
+eval({block, _, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
 
-eval({{Op, _}, Left, Right}, ID) ->
+eval({Op, _, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
   RightV = eval(Right, ID),
 
@@ -227,7 +227,7 @@ eval({{Op, _}, Left, Right}, ID) ->
       end
   end;
 
-eval({{Op, _}, Expr}, ID) ->
+eval({Op, _, Expr}, ID) ->
   V = eval(Expr, ID),
 
   case Op of
@@ -237,7 +237,7 @@ eval({{Op, _}, Expr}, ID) ->
     'discard' -> none
   end.
 
-eval_pattern({var, _, Name}, {{fn, _}, _, _}=Expr, ID) ->
+eval_pattern({var, _, Name}, {fn, _, _, _}=Expr, ID) ->
   ChildID = env_create_child(ID),
   env_set(Name, eval(Expr, ChildID), ChildID),
   {true, ChildID};
@@ -309,15 +309,15 @@ match(V1, {con_var, _, Name}, ID) ->
     _ -> false
   end;
 
-match(V, {app, {con_var, Line, Name}, Args}, ID) ->
+match(V, {app, _, {con_var, Line, Name}, Args}, ID) ->
   Atom = list_to_atom(Name),
   if
     length(Args) == 0 -> V == Atom;
     true ->
-      match(tuple_to_list(V), {{list, Line}, [{atom, Line, Atom} | Args]}, ID)
+      match(tuple_to_list(V), {list, Line, [{atom, Line, Atom} | Args]}, ID)
   end;
 
-match(V, {{list, _}, List}, ID) ->
+match(V, {list, _, List}, ID) ->
   if
     length(V) /= length(List) -> false;
     true ->
@@ -329,20 +329,20 @@ match(V, {{list, _}, List}, ID) ->
       end, true, lists:zip(V, List))
   end;
 
-match(V, {{list, Line}, List, Rest}, ID) ->
+match(V, {list, Line, List, Rest}, ID) ->
   if
     length(V) < length(List) -> false;
     true ->
       SubV = lists:sublist(V, length(List)),
       RestV = lists:sublist(V, length(List) + 1, length(V)),
 
-      case match(SubV, {{list, Line}, List}, ID) of
+      case match(SubV, {list, Line, List}, ID) of
         false -> false;
         true -> match(RestV, Rest, ID)
       end
   end;
 
-match(V, {{tuple, _}, Elems}, ID) ->
+match(V, {tuple, _, Elems}, ID) ->
   if
     tuple_size(V) /= length(Elems) -> false;
     true ->

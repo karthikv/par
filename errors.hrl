@@ -25,4 +25,13 @@
 -define(FROM_MATCH_BODY, "match body").
 -define(FROM_OP(Op), ?FMT("~p operator", [Op])).
 
+-define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
+-define(
+  ERR_NO_DEF(Name),
+  ?FMT("expected ~s to be defined after its signature", [Name])
+).
+-define(ERR_DUP_FIELD(Name), ?FMT("duplicate field ~s in this record", [Name])).
+
+-define(LOC(Node), element(2, Node)).
+
 -endif.
