@@ -49,8 +49,8 @@
 %   v - the TV name to generalize
 %   env - see Env above
 %   csts - an array of constraints to solve before generalizing
-%   deps - an array of TV names corresponding to gnr records that need to
-%          solved before this record or, in the case of (mutual) recursion,
+%   deps - a set of TV names corresponding to gnr records that need to solved
+%          before this record or, in the case of (mutual) recursion,
 %          simultaneously with this record
 %   index / low_link / on_stack - bookkeeping for Tarjan's strongly connected
 %                                 components algorithm; see T below and [1]
@@ -88,7 +88,6 @@
 % TODO:
 % - (code gen) Compile file / File name attribute?
 % - (code gen) Remove util functions when they're unused
-% - Make deps a set
 %
 % - Error messages
 % - TODOs in code (non-unification error cases)
@@ -277,9 +276,8 @@ infer({'::', Line, Expr, Sig}, C) ->
   NormSigT = norm_sig_type(SigT, [], C2#ctx.pid),
   C3 = add_cst(TV, ExprT, ?LOC(Expr), ?FROM_EXPR_SIG, C2),
   C4 = add_cst(TV, NormSigT, Line, ?FROM_EXPR_SIG, C3),
-  C5 = finish_gnr(C4, G#gnr{deps=[ID | G#gnr.deps]}),
+  C5 = finish_gnr(C4, add_gnr_dep(ID, G)),
 
-  % TODO: make deps a set
   {{inst, TV}, C5};
 
 infer({lam_te, _, ArgTE, ReturnTE}, C) ->
@@ -473,7 +471,7 @@ infer({record, Line, {con_var, _, Name}, Inits}, C) ->
   From = ?FROM_RECORD_CREATE(Name),
   C2 = add_cst(TV, RecordT, Line, From, C1),
   C3 = add_cst(TV, NormSigT, Line, From, C2),
-  C4 = finish_gnr(C3, G#gnr{deps=[ID | G#gnr.deps]}),
+  C4 = finish_gnr(C3, add_gnr_dep(ID, G)),
   {{inst, TV}, C4};
 
 infer({field, _, {var, _, Name}}, C) ->
@@ -719,15 +717,16 @@ add_env(Name, Value, C) ->
 
 new_gnr(C) ->
   ID = tv_server:next_gnr_id(C#ctx.pid),
-  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=gb_sets:new()},
   C#ctx{gnr=G}.
 
 new_gnr({tv, V, _, _}, ID, C) ->
-  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=[]},
+  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=gb_sets:new()},
   C#ctx{gnr=G}.
 
-finish_gnr(C, OldG) ->
-  C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=OldG}.
+finish_gnr(C, OldG) -> C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=OldG}.
+
+add_gnr_dep(ID, G) -> G#gnr{deps=gb_sets:add(ID, G#gnr.deps)}.
 
 add_cst(T1, T2, Line, From, C) ->
   G = C#ctx.gnr,
@@ -754,13 +753,12 @@ lookup(Name, C) ->
   % TODO: handle case where can't find variable
   case maps:find(Name, C#ctx.env) of
     {ok, {add_dep, EnvTV, ID}} ->
-      G = C#ctx.gnr,
-      G1 = G#gnr{deps=[ID | G#gnr.deps]},
+      G = add_gnr_dep(ID, C#ctx.gnr),
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
-      {{inst, EnvTV}, C#ctx{gnr=G1}};
+      {{inst, EnvTV}, C#ctx{gnr=G}};
 
     {ok, {_, EnvTV}} -> {EnvTV, C}
   end.
@@ -788,7 +786,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
   Map1 = Map#{ID := G#gnr{index=NextIndex, low_link=NextIndex, on_stack=true}},
 
   T1 = #tarjan{stack=Stack1, map=Map1, next_index=NextIndex + 1, solver=S},
-  T2 = lists:foldl(fun(AdjID, FoldT) ->
+  T2 = gb_sets:fold(fun(AdjID, FoldT) ->
     #{AdjID := #gnr{index=AdjIndex, on_stack=AdjOnStack}} = FoldT#tarjan.map,
 
     if
