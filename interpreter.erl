@@ -4,6 +4,10 @@
 reload(Syntax) ->
   par:reload(Syntax),
 
+  code:soft_purge(code_gen_utils),
+  {ok, _} = compile:file(code_gen_utils),
+  code:load_file(code_gen_utils),
+
   code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE).

@@ -6,10 +6,6 @@ run() ->
   interpreter:reload(false),
   code_gen:reload(false),
 
-  code:soft_purge(code_gen_utils),
-  {ok, _} = compile:file(code_gen_utils),
-  code:load_file(code_gen_utils),
-
   code:soft_purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE),
