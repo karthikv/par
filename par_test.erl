@@ -37,9 +37,10 @@ bad_prg(Prg, ExpErrs) ->
     check(Err, ExpErr)
   end, lists:zip(Errs, ExpErrs)).
 
-ctx_err_prg(Prg, ExpErr) ->
-  {errors, [Err]} = par:infer_prg(Prg),
-  Err = ExpErr.
+ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
+  {errors, [{Msg, Line}]} = par:infer_prg(Prg),
+  ExpMsg = Msg,
+  ExpLine = Line.
 
 check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {ok, Pid} = tv_server:start_link(),
@@ -996,25 +997,117 @@ other_errors_test_() ->
       {?ERR_REDEF("foo"), 2}
     ))
   , ?_test(ctx_err_prg(
+      "enum Foo { Bar(Int) }\n"
+      "struct Bar { foo :: Float }",
+      {?ERR_REDEF("Bar"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Bar<A> { foo :: Float }\n"
+      "enum Foo<K, V> { Bar(Int) }",
+      {?ERR_REDEF("Bar"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Int { Zero }",
+      {?ERR_REDEF_TYPE("Int"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Bool<A> { Stuff(A) }",
+      {?ERR_REDEF_TYPE("Bool"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo { Bar }\n"
+      "struct Foo { baz :: String }",
+      {?ERR_REDEF_TYPE("Foo"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Foo<A, B> { baz :: String }\n"
+      "enum Foo<T> { Bar }",
+      {?ERR_REDEF_TYPE("Foo"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo<A, A> { Baz(A) }",
+      {?ERR_REDEF_TV("A"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Foo<A, A> { baz :: A }",
+      {?ERR_REDEF_TV("A"), 1}
+    ))
+  , ?_test(ctx_err_prg(
       "foo :: Int",
-      {?ERR_NO_DEF("foo"), 1}
+      {?ERR_SIG_NO_DEF("foo"), 1}
     ))
   , ?_test(ctx_err_prg(
       "foo :: Int\n"
       "bar = 3",
-      {?ERR_NO_DEF("foo"), 1}
+      {?ERR_SIG_NO_DEF("foo"), 1}
     ))
   , ?_test(ctx_err_prg(
       "foo = 4\n"
       "foo :: Int\n"
       "bar = 3",
-      {?ERR_NO_DEF("foo"), 2}
+      {?ERR_SIG_NO_DEF("foo"), 2}
     ))
   , ?_test(ctx_err_prg(
       "foo :: { a :: Int, a :: Float }\n"
       "foo = { a = 3 }",
       {?ERR_DUP_FIELD("a"), 1}
     ))
-
-  %% , ?_test("A: Num" = ok_prg("foo = 3 + foo", "foo"))
+  , ?_test(ctx_err_prg(
+      "\nfoo = { bar = 3, baz = 4, baz = \"hi\" }",
+      {?ERR_DUP_FIELD("baz"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "\n\nfoo = Bar { baz = 4 }",
+      {?ERR_NOT_DEF_TYPE("Bar"), 3}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo {\n"
+      "  Bar(\n"
+      "    [\n"
+      "      A\n"
+      "    ]\n"
+      "  )\n"
+      "}",
+      {?ERR_TV_SCOPE("A", "Foo"), 4}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Foo {\n"
+      "  bar ::\n"
+      "    [\n"
+      "      A\n"
+      "    ]\n"
+      "}",
+      {?ERR_TV_SCOPE("A", "Foo"), 4}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Foo<A> {\n"
+      "  bar :: A: Num\n"
+      "}",
+      {?ERR_TV_IFACE("A", "none", "Num"), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo :: A: Num -> A: Concatable\n"
+      "foo(a) = @io:printable_range()",
+      {?ERR_TV_IFACE("A", "Num", "Concatable"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "\n\n\nfoo = a\n",
+      {?ERR_NOT_DEF("a"), 4}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo = 3 + foo",
+      {?ERR_NOT_DEF("foo"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo = @io:printable_range() :: Bar",
+      {?ERR_NOT_DEF_TYPE("Bar"), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "\nfoo = @erlang:asdf(true)",
+      {?ERR_NATIVE_NOT_DEF(erlang, "asdf", 1), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "bar = @io:format()",
+      {?ERR_NATIVE_NOT_DEF(io, "format", 0), 1}
+    ))
   ].

@@ -26,11 +26,42 @@
 -define(FROM_OP(Op), ?FMT("~p operator", [Op])).
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
+-define(ERR_REDEF_TYPE(Con), ?FMT("type ~s is already defined", [Con])).
+-define(ERR_REDEF_TV(Con), ?FMT("type variable ~s is already defined", [Con])).
 -define(
-  ERR_NO_DEF(Name),
+  ERR_SIG_NO_DEF(Name),
   ?FMT("expected ~s to be defined after its signature", [Name])
 ).
 -define(ERR_DUP_FIELD(Name), ?FMT("duplicate field ~s in this record", [Name])).
+-define(
+  ERR_TV_SCOPE(V, Name),
+  ?FMT(
+    "type variable ~s isn't in scope; "
+    "it must be defined as a parameter to type ~s",
+    [V, Name]
+  )
+).
+-define(
+  ERR_TV_IFACE(V, Exp, Actual),
+  ?FMT(
+    "type variable ~s was previously given interface ~s, "
+    "but now has interface ~s; the two must be consistent",
+    [V, Exp, Actual]
+  )
+).
+-define(ERR_NOT_DEF(Name), ?FMT("variable ~s is not defined", [Name])).
+-define(ERR_NOT_DEF_TYPE(Con), ?FMT("type ~s is not defined", [Con])).
+-define(
+  ERR_TYPE_PARAMS(Con, Exp, Actual),
+  ?FMT(
+    "type ~s accepts ~p type parameters, but you gave it ~p",
+    [Con, Exp, Actual]
+  )
+).
+-define(
+  ERR_NATIVE_NOT_DEF(Mod, Name, Arity),
+  ?FMT("native function ~s:~s/~p is not defined", [Mod, Name, Arity])
+).
 
 -define(LOC(Node), element(2, Node)).
 

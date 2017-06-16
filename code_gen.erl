@@ -21,20 +21,21 @@ run_ast(Ast, Mod) ->
         Value = {{ets, list_to_atom(lists:concat([Mod, '|', Name]))}, badarity},
         FoldEnv#{Name => Value};
       {enum_token, _, _, OptionTEs} ->
-        lists:foldl(fun({{con_token, _, Name}, ArgsTE}, NestedEnv) ->
+        lists:foldl(fun({{con_token, _, Con}, ArgsTE}, NestedEnv) ->
+          Name = atom_to_list(Con),
           NumArgs = length(ArgsTE),
           case NumArgs of
-            0 -> NestedEnv#{Name => {{lit, list_to_atom(Name)}, badarity}};
+            0 -> NestedEnv#{Name => {{lit, Con}, badarity}};
             _ ->
-              Value = {{global_fn, list_to_atom(Name)}, NumArgs},
+              Value = {{global_fn, Con}, NumArgs},
               NestedEnv#{Name => Value}
           end
         end, FoldEnv, OptionTEs);
-      {struct_token, _, {con_token, _, Name}, {record_te, _, FieldTEs}} ->
-        FoldEnv#{Name => {{global_fn, list_to_atom(Name)}, length(FieldTEs)}};
-      {struct_token, _, {gen_te, _, {con_token, _, Name}, _},
+      {struct_token, _, {con_token, _, Con}, {record_te, _, FieldTEs}} ->
+        FoldEnv#{atom_to_list(Con) => {{global_fn, Con}, length(FieldTEs)}};
+      {struct_token, _, {gen_te, _, {con_token, _, Con}, _},
           {record_te, _, FieldTEs}} ->
-        FoldEnv#{Name => {{global_fn, list_to_atom(Name)}, length(FieldTEs)}};
+        FoldEnv#{atom_to_list(Con) => {{global_fn, Con}, length(FieldTEs)}};
       _ -> FoldEnv
     end
   end, #{}, Ast),
@@ -83,24 +84,22 @@ rep({enum_token, _, _, OptionTEs}, _) ->
     length(ArgsTE) > 0
   end, OptionTEs),
 
-  lists:map(fun({{con_token, Line, Name}, ArgsTE}) ->
+  lists:map(fun({{con_token, Line, Con}, ArgsTE}) ->
     ArgsRep = lists:map(fun(Num) ->
       Atom = list_to_atom(lists:concat(['_@', Num])),
       {var, Line, Atom}
     end, lists:seq(1, length(ArgsTE))),
 
-    Atom = list_to_atom(Name),
-    Body = [{tuple, Line, [{atom, Line, Atom} | ArgsRep]}],
+    Body = [{tuple, Line, [{atom, Line, Con} | ArgsRep]}],
     Clause = {clause, Line, ArgsRep, [], Body},
-    {function, Line, Atom, length(ArgsTE), [Clause]}
+    {function, Line, Con, length(ArgsTE), [Clause]}
   end, FnOptionTEs);
 
 rep({struct_token, _, StructTE, {record_te, _, FieldTEs}}, Env) ->
-  {Line, Name} = case StructTE of
-    {con_token, L, N} -> {L, N};
-    {gen_te, _, {con_token, L, N}, _} -> {L, N}
+  {Line, Con} = case StructTE of
+    {con_token, Line_, Con_} -> {Line_, Con_};
+    {gen_te, _, {con_token, Line_, Con_}, _} -> {Line_, Con_}
   end,
-  Atom = list_to_atom(Name),
 
   {ArgsRep, Env1} = lists:mapfoldl(fun({{var, _, FieldName}=Var, _}, FoldEnv) ->
     FoldEnv1 = bind(FieldName, unknown, FoldEnv),
@@ -113,7 +112,7 @@ rep({struct_token, _, StructTE, {record_te, _, FieldTEs}}, Env) ->
   Body = [rep({map, Line, Pairs}, Env1)],
 
   Clause = {clause, Line, ArgsRep, [], Body},
-  [{function, Line, Atom, length(FieldTEs), [Clause]}];
+  [{function, Line, Con, length(FieldTEs), [Clause]}];
 
 rep({sig, _, _, _}, _) -> [];
 

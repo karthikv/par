@@ -102,7 +102,7 @@ expr -> match expr start_match match_list '}' :
   {first('$1'), ?LOC('$1'), '$2', '$4'}.
 expr -> '{' semi_list '}' : {block, ?LOC('$1'), '$2'}.
 
-con_var -> con_token : setelement(1, '$1', con_var).
+con_var -> con_token : con_token_to_var('$1').
 
 expr_list -> expr : ['$1'].
 expr_list -> expr ',' expr_list : ['$1' | '$3'].
@@ -163,16 +163,16 @@ pattern_list -> pattern ',' pattern_list : ['$1' | '$3'].
 
 te -> '(' ')' : {none, ?LOC('$1')}.
 te -> con_token : '$1'.
-te -> tv_token : '$1'.
-te -> tv_token ':' con_token : {iface_te, ?LOC('$1'), '$1', '$3'}.
+te -> tv_token : tv_te('$1').
+te -> tv_token ':' con_token : tv_te('$1', '$3').
 te -> con_token '<' te_list '>' : {gen_te, ?LOC('$1'), '$1', '$3'}.
 te -> '[' te ']' :
-  {gen_te, ?LOC('$1'), {con_token, ?LOC('$1'), "List"}, ['$2']}.
+  {gen_te, ?LOC('$1'), {con_token, ?LOC('$1'), 'List'}, ['$2']}.
 te -> '(' te ',' te_list ')' : {tuple_te, ?LOC('$1'), ['$2' | '$4']}.
 te -> '(' te ')' : '$2'.
 te -> '{' field_list '}' : {record_te, ?LOC('$1'), '$2'}.
 te -> '{' tv_token '|' field_list '}' :
-  {iface_te, ?LOC('$1'), '$2', {record_te, ?LOC('$3'), '$4'}}.
+  {tv_te, ?LOC('$1'), element(3, '$2'), {record_te, ?LOC('$3'), '$4'}}.
 te -> te '->' te : {lam_te, ?LOC('$1'), '$1', '$3'}.
 
 te_list -> te : ['$1'].
@@ -200,8 +200,8 @@ field_list -> field ',' field_list : ['$1' | '$3'].
 
 field -> var '::' te : {'$1', '$3'}.
 
-tv_list -> tv_token : ['$1'].
-tv_list -> tv_token ',' tv_list : ['$1' | '$3'].
+tv_list -> tv_token : [tv_te('$1')].
+tv_list -> tv_token ',' tv_list : [tv_te('$1') | '$3'].
 
 Nonassoc 10 '='.
 Right 20 '->'.
@@ -237,3 +237,12 @@ flatten_app({app, _, {app, _, _, _}=App, Args}) ->
   {app, Line, Expr, InitialArgs} = flatten_app(App),
   {app, Line, Expr, InitialArgs ++ Args};
 flatten_app(Node) -> Node.
+
+con_token_to_var({con_token, Line, Con}) ->
+  {con_var, Line, atom_to_list(Con)}.
+
+tv_te({tv_token, Line, Name}) ->
+  {tv_te, Line, Name, {none, Line}}.
+
+tv_te({tv_token, Line, Name}, TE) ->
+  {tv_te, Line, Name, TE}.

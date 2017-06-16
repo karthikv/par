@@ -27,10 +27,21 @@
 %         below
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
-%   types - a Name => TypeInfo mapping of types in the environment
+%   types - a Name => Int (number of type params) map for types in the env
+%   structs - a Name => StructInfo map for structs in the env
+%   ifaces - a map of V => I for TV names in a signature to ensure consistency
 %   errs - an array of error messages, each of the form {Msg, Line}
 %   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {gnr, gnrs, env, types, errs, pid}).
+-record(ctx, {
+  gnr,
+  gnrs,
+  env,
+  types,
+  structs,
+  ifaces,
+  errs,
+  pid
+}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -38,11 +49,20 @@
 %   schemes - the schemes of env variables that have been solved for and
 %             generalized
 %   bound_vs - the set of TV names in the environment
-%   types - a Name => TypeInfo mapping of types in the environment
+%   structs - a Name => StructInfo map for structs in the env
 %   line - the line of the current constraint that's being unified
 %   from - a string describing where the current constraint is from
 %   pid - the process id of the TV server used to generated fresh TVs
--record(solver, {subs, errs, schemes, bound_vs, types, line, from, pid}).
+-record(solver, {
+  subs,
+  errs,
+  schemes,
+  bound_vs,
+  structs,
+  line,
+  from,
+  pid
+}).
 
 % G - a gnr record that represents a set of constraints to solve before
 %     generalizing a type variable:
@@ -86,17 +106,21 @@
 -endif.
 
 % TODO:
+% (2) Figure out what's necessary to write lexer
+%   key for enum type
+%   char operations?
+% (3) Write lexer in par
+%
 % - (code gen) Compile file / File name attribute?
 % - (code gen) Remove util functions when they're unused
 %
-% - Error messages
-% - TODOs in code (non-unification error cases)
 % - Pattern matching records
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
 % - Exhaustive pattern matching errors
 % - Concurrency
+% - Second pass for error messages (see TODOs in code)
 % - Update naming conventions
 %
 % From dogfooding:
@@ -142,7 +166,18 @@ infer_prg(Prg) ->
     gnr=undefined,
     gnrs=[],
     env=#{},
-    types=#{},
+    types=#{
+      'Int' => 0,
+      'Float' => 0,
+      'Bool' => 0,
+      'Atom' => 0,
+      'String' => 0,
+      'List' => 1,
+      'Set' => 1,
+      'Map' => 2
+    },
+    structs=#{},
+    ifaces=#{},
     errs=[],
     pid=Pid
   },
@@ -157,30 +192,36 @@ infer_prg(Prg) ->
             add_env(Name, {add_dep, TV, ID}, FoldC)
         end;
 
-      % TODO: register valid type for each enum/struct
+      {N, _, TE, _} when N == enum_token; N == struct_token ->
+        {Line, Con, NumParams} = case TE of
+          {con_token, Line_, Con_} -> {Line_, Con_, 0};
+          {gen_te, _, {con_token, Line_, Con_}, ParamTEs} ->
+            {Line_, Con_, length(ParamTEs)}
+        end,
+
+        Types = FoldC#ctx.types,
+        case maps:is_key(Con, Types) of
+          % TODO: distinguish builtin types vs. non-builtin in error messages;
+          % also add line numbers for where redef occurred
+          true -> add_ctx_err(?ERR_REDEF_TYPE(Con), Line, FoldC);
+          false ->
+            FoldC1 = FoldC#ctx{types=Types#{Con => NumParams}},
+            {_, FoldC2} = infer(Node, FoldC1),
+            FoldC2
+        end;
 
       _ -> FoldC
     end
   end, C, Ast),
 
-  C2 = lists:foldl(fun(Node, FoldC) ->
-    case Node of
-      {N, _, _, _} when N == enum_token; N == struct_token ->
-        {_, FoldC1} = infer(Node, FoldC),
-        FoldC1;
-
-      _ -> FoldC
-    end
-  end, C1, Ast),
-
-  {LastSig, C3} = lists:foldl(fun(Node, {Sig, FoldC}) ->
+  {LastSig, C2} = lists:foldl(fun(Node, {Sig, FoldC}) ->
     FoldC1 = if
       Sig == none -> FoldC;
       true ->
         {sig, _, {var, _, SigName}, _} = Sig,
         case Node of
           {global, _, {var, _, SigName}, _} -> FoldC;
-          _ -> add_ctx_err(?ERR_NO_DEF(SigName), ?LOC(Sig), FoldC)
+          _ -> add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(Sig), FoldC)
         end
     end,
 
@@ -210,25 +251,25 @@ infer_prg(Prg) ->
       % we've already processed enums/structs
       _ -> {none, FoldC1}
     end
-  end, {none, C2}, Ast),
+  end, {none, C1}, Ast),
 
-  C4 = case LastSig of
-    none -> C3;
+  C3 = case LastSig of
+    none -> C2;
     {sig, _, {var, _, SigName}, _} ->
-      add_ctx_err(?ERR_NO_DEF(SigName), ?LOC(LastSig), C3)
+      add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), C2)
   end,
 
   S = #solver{
     subs=#{},
-    errs=C4#ctx.errs,
+    errs=C3#ctx.errs,
     schemes=#{},
-    types=C4#ctx.types,
+    structs=C3#ctx.structs,
     line=undefined,
     from=undefined,
     pid=Pid
   },
 
-  Result = case solve(C4#ctx.gnrs, S) of
+  Result = case solve(C3#ctx.gnrs, S) of
     {ok, Schemes} ->
       SubbedEnv = maps:map(fun(_, Value) ->
         {tv, V, _, _} = case Value of
@@ -236,7 +277,7 @@ infer_prg(Prg) ->
           {add_dep, TV, _} -> TV
         end,
         inst(maps:get(V, Schemes), Pid)
-      end, C4#ctx.env),
+      end, C3#ctx.env),
       {ok, SubbedEnv, Ast};
     {errors, Errs} -> {errors, Errs}
   end,
@@ -263,7 +304,7 @@ infer({fn, _, Args, Expr}, C) ->
   {T, C2#ctx{env=C#ctx.env}};
 
 infer({sig, _, _, Sig}, C) ->
-  {SigT, C1} = infer(Sig, C),
+  {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
   {norm_sig_type(SigT, [], C#ctx.pid), C1};
 
 infer({'::', Line, Expr, Sig}, C) ->
@@ -271,7 +312,7 @@ infer({'::', Line, Expr, Sig}, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
 
   {ExprT, C1} = infer(Expr, new_gnr(TV, ID, C)),
-  {SigT, C2} = infer(Sig, C1),
+  {SigT, C2} = infer_sig(false, false, #{}, Sig, C1),
 
   NormSigT = norm_sig_type(SigT, [], C2#ctx.pid),
   C3 = add_cst(TV, ExprT, ?LOC(Expr), ?FROM_EXPR_SIG, C2),
@@ -280,83 +321,52 @@ infer({'::', Line, Expr, Sig}, C) ->
 
   {{inst, TV}, C5};
 
-infer({lam_te, _, ArgTE, ReturnTE}, C) ->
-  {ArgT, C1} = infer(ArgTE, C),
-  {ReturnT, C2} = infer(ReturnTE, C1),
-  {{lam, ArgT, ReturnT}, C2};
-infer({tuple_te, _, ElemTEs}, C) ->
-  {ElemTs, C1} = lists:mapfoldl(fun(TE, FoldC) ->
-    infer(TE, FoldC)
-  end, C, ElemTEs),
-  {{tuple, ElemTs}, C1};
-infer({iface_te, _, TVToken, TE}, C) ->
-  {{tv, V, none, Rigid}, C1} = infer(TVToken, C),
-  case infer(TE, C1) of
-    % TODO: ensure this is a valid iface
-    {{con, I}, C2} -> {{tv, V, I, Rigid}, C2};
-    {{record, _, FieldMap}, C2} -> {{tv, V, FieldMap, Rigid}, C2}
-  end;
-infer({gen_te, _, {con_token, _, Name}, ParamTEs}, C) ->
-  {ParamTs, C1} = lists:mapfoldl(fun(TE, FoldC) ->
-    infer(TE, FoldC)
-  end, C, ParamTEs),
-  {{gen, list_to_atom(Name), ParamTs}, C1};
-infer({tv_token, _, Name}, C) ->
-  % This TV should be rigid, but it'll be reset to flex in norm_sig_type.
-  % Hence, we don't set rigid here, but rather after renaming.
-  {{tv, Name, none, false}, C};
-% TODO: ensure these types are valid except when creating a new type
-infer({con_token, _, Name}, C) -> {{con, list_to_atom(Name)}, C};
-infer({record_te, _, Fields}, C) ->
-  % TODO: ensure no name conflicts
-  {FieldMap, C1} = lists:foldl(fun({Var, FieldTE}, {FoldMap, FoldC}) ->
-    {var, Line, Name} = Var,
-    {FieldT, FoldC1} = infer(FieldTE, FoldC),
-
-    case maps:is_key(Name, FoldMap) of
-      true -> {FoldMap, add_ctx_err(?ERR_DUP_FIELD(Name), Line, FoldC1)};
-      false -> {FoldMap#{Name => FieldT}, FoldC1}
-    end
-  end, {#{}, C}, Fields),
-
-  {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
-
 infer({enum_token, _, EnumTE, Options}, C) ->
-  {T, C1} = infer(EnumTE, C),
+  {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
   FVs = fvs(T),
 
-  C2 = lists:foldl(fun({{con_token, Line, Name}, ArgTEs}, FoldC) ->
-    {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, InnerC}) ->
-      {ArgT, InnerC1} = infer(ArgTE, InnerC),
-      {[ArgT | Ts], InnerC1}
+  C2 = lists:foldl(fun({{con_token, Line, Con}, ArgTEs}, FoldC) ->
+    {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, NestedC}) ->
+      {ArgT, NestedC1} = infer_sig(
+        {T, FVs},
+        false,
+        NestedC#ctx.ifaces,
+        ArgTE,
+        NestedC
+      ),
+      {[ArgT | Ts], NestedC1}
     end, {[], FoldC}, ArgTEs),
 
     OptionT = lists:foldl(fun(ArgT, LastT) ->
       {lam, ArgT, LastT}
     end, T, ArgTsRev),
 
-    % TODO: handle error
-    true = gb_sets:is_empty(gb_sets:difference(fvs(OptionT), FVs)),
-
     % don't need to exclude params; rigid(X) becomes X during inst
     NormOptionT = norm_sig_type(OptionT, [], C#ctx.pid),
 
-    % TODO: what if name already exists?
     {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
     FoldC2 = new_gnr(TV, ID, FoldC1),
     FoldC3 = add_cst(TV, NormOptionT, Line, ?FROM_ENUM_CTOR, FoldC2),
-    add_env(Name, {add_dep, TV, ID}, finish_gnr(FoldC3, FoldC1#ctx.gnr))
+    FoldC4 = finish_gnr(FoldC3, FoldC1#ctx.gnr),
+
+    Name = atom_to_list(Con),
+    case maps:is_key(Name, FoldC4#ctx.env) of
+      true -> add_ctx_err(?ERR_REDEF(Name), Line, FoldC4);
+      false -> add_env(Name, {add_dep, TV, ID}, FoldC4)
+    end
   end, C1, Options),
 
   {T, C2};
 
 infer({struct_token, Line, StructTE, {record_te, _, Fields}=RecordTE}, C) ->
-  {T, C1} = infer(StructTE, C),
-  {{record, _, RawFieldMap}, C2} = infer(RecordTE, C1),
-
-  FieldFVs = fvs({record, none, RawFieldMap}),
-  % TODO: handle error
-  true = gb_sets:is_empty(gb_sets:difference(FieldFVs, fvs(T))),
+  {T, C1} = infer_sig(false, true, #{}, StructTE, C),
+  {{record, _, RawFieldMap}, C2} = infer_sig(
+    {T, fvs(T)},
+    false,
+    C1#ctx.ifaces,
+    RecordTE,
+    C1
+  ),
 
   FnT = lists:foldr(fun({{var, _, Name}, _}, LastT) ->
     #{Name := FieldT} = RawFieldMap,
@@ -366,21 +376,26 @@ infer({struct_token, Line, StructTE, {record_te, _, Fields}=RecordTE}, C) ->
   % don't need to exclude params; rigid(x) becomes X during inst
   NormFnT = norm_sig_type(FnT, [], C2#ctx.pid),
 
-  % TODO: should we have a separate types map or just use env?
-  Types = C2#ctx.types,
-  {StructCon, Value} = case T of
-    {con, Con} -> {Con, {T, [], RawFieldMap}};
-    {gen, Con, ParamTs} ->
+  Structs = C2#ctx.structs,
+  {Con, ConLine, Value} = case {T, StructTE} of
+    {{con, Con_}, {con_token, ConLine_, _}} ->
+      {Con_, ConLine_, {T, [], RawFieldMap}};
+
+    {{gen, Con_, ParamTs}, {gen_te, _, {con_token, ConLine_, _}, _}} ->
       Vs = lists:map(fun({tv, V, none, _}) -> V end, ParamTs),
-      {Con, {T, Vs, RawFieldMap}}
+      {Con_, ConLine_, {T, Vs, RawFieldMap}}
   end,
 
-  % TODO: ensure reptitions of same tv have the same iface
-
   {TV, ID} = tv_server:fresh_gnr_id(C2#ctx.pid),
-  C3 = add_env(atom_to_list(StructCon), {add_dep, TV, ID}, C2),
+  Name = atom_to_list(Con),
+  C3 = case maps:is_key(Name, C2#ctx.env) of
+    true -> add_ctx_err(?ERR_REDEF(Name), ConLine, C2);
+    false ->
+      NewStructs = Structs#{Con => Value},
+      add_env(Name, {add_dep, TV, ID}, C2#ctx{structs=NewStructs})
+  end,
 
-  C4 = new_gnr(TV, ID, C3#ctx{types=Types#{StructCon => Value}}),
+  C4 = new_gnr(TV, ID, C3),
   C5 = add_cst(TV, NormFnT, Line, ?FROM_STRUCT_CTOR, C4),
   C6 = finish_gnr(C5, C3#ctx.gnr),
 
@@ -430,19 +445,35 @@ infer({map, _, Pairs}, C) ->
 
   {{gen, 'Map', [KeyTV, ValueTV]}, C1};
 
-infer({N, _, Name}, C) when N == var; N == con_var; N == var_value ->
-  {T, C1} = lookup(Name, C),
-  {T, C1};
+infer({N, Line, Name}, C) when N == var; N == con_var; N == var_value ->
+  case maps:find(Name, C#ctx.env) of
+    {ok, {add_dep, EnvTV, ID}} ->
+      G = add_gnr_dep(ID, C#ctx.gnr),
+
+      % We need to defer instantiation until we start solving constraints.
+      % Otherwise, we don't know the real types of these variables, and can't
+      % instantiate properly.
+      {{inst, EnvTV}, C#ctx{gnr=G}};
+
+    {ok, {_, EnvTV}} -> {EnvTV, C};
+
+    error ->
+      TV = tv_server:fresh(C#ctx.pid),
+      {TV, add_ctx_err(?ERR_NOT_DEF(Name), Line, C)}
+  end;
 
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
 infer({record, _, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
-    {{var, _, Name}, Expr} = Init,
+    {{var, Line, Name}, Expr} = Init,
     {T, FoldC1} = infer(Expr, FoldC),
-    % TODO: handle name conflicts
-    {Map#{Name => T}, FoldC1}
+
+    case maps:is_key(Name, Map) of
+      true -> {Map, add_ctx_err(?ERR_DUP_FIELD(Name), Line, FoldC1)};
+      false -> {Map#{Name => T}, FoldC1}
+    end
   end, {#{}, C}, Inits),
 
   {{record, tv_server:next_name(C#ctx.pid), FieldMap}, C1};
@@ -458,21 +489,24 @@ infer({update_record, Line, Expr, Inits}, C) ->
   C4 = add_cst(TV, RecordTV, Line, ?FROM_RECORD_UPDATE, C3),
   {TV, C4};
 
-infer({record, Line, {con_var, _, Name}, Inits}, C) ->
+infer({record, Line, {con_var, ConLine, Name}, Inits}, C) ->
   G = C#ctx.gnr,
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
   {RecordT, C1} = infer({record, Line, Inits}, new_gnr(TV, ID, C)),
 
-  % TODO: what if con isn't in map?
   Con = list_to_atom(Name),
-  #{Con := {StructT, Vs, _}} = C1#ctx.types,
-  NormSigT = norm_sig_type(StructT, Vs, C1#ctx.pid),
+  case maps:find(Con, C1#ctx.structs) of
+    {ok, {StructT, Vs, _}} ->
+      NormSigT = norm_sig_type(StructT, Vs, C1#ctx.pid),
+      From = ?FROM_RECORD_CREATE(Name),
 
-  From = ?FROM_RECORD_CREATE(Name),
-  C2 = add_cst(TV, RecordT, Line, From, C1),
-  C3 = add_cst(TV, NormSigT, Line, From, C2),
-  C4 = finish_gnr(C3, add_gnr_dep(ID, G)),
-  {{inst, TV}, C4};
+      C2 = add_cst(TV, RecordT, Line, From, C1),
+      C3 = add_cst(TV, NormSigT, Line, From, C2),
+      C4 = finish_gnr(C3, add_gnr_dep(ID, G)),
+      {{inst, TV}, C4};
+
+    error -> {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
+  end;
 
 infer({field, _, {var, _, Name}}, C) ->
   FieldTV = tv_server:fresh(C#ctx.pid),
@@ -507,18 +541,21 @@ infer({app, Line, Expr, Args}, C) ->
   C3 = add_cst(T, ExprT, Line, ?FROM_APP, C2),
   {TV, C3};
 
-infer({native, _, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
-  % TODO: handle case where this fails
-  true = erlang:function_exported(Module, list_to_atom(Name), Arity),
-  T = if
-    Arity == 0 -> {lam, none, tv_server:fresh(C#ctx.pid)};
-    true ->
-      lists:foldl(fun(_, LastT) ->
-        {lam, tv_server:fresh(C#ctx.pid), LastT}
-      end, tv_server:fresh(C#ctx.pid), lists:seq(1, Arity))
+infer({native, Line, {atom, _, Mod}, {var, _, Name}, Arity}, C) ->
+  C1 = case erlang:function_exported(Mod, list_to_atom(Name), Arity) of
+    true -> C;
+    false -> add_ctx_err(?ERR_NATIVE_NOT_DEF(Mod, Name, Arity), Line, C)
   end,
 
-  {T, C};
+  T = if
+    Arity == 0 -> {lam, none, tv_server:fresh(C1#ctx.pid)};
+    true ->
+      lists:foldl(fun(_, LastT) ->
+        {lam, tv_server:fresh(C1#ctx.pid), LastT}
+      end, tv_server:fresh(C1#ctx.pid), lists:seq(1, Arity))
+  end,
+
+  {T, C1};
 
 infer({'if', _, Expr, Then, Else}, C) ->
   {ExprT, C1} = infer(Expr, C),
@@ -536,7 +573,6 @@ infer({'if', _, Expr, Then, Else}, C) ->
   end;
 
 infer({'let', _, Inits, Then}, C) ->
-  % TODO: ensure no pattern name overlap!
   C1 = lists:foldl(fun({Pattern, Expr}, FoldC) ->
     infer_pattern(Pattern, Expr, ?FROM_LET, FoldC)
   end, C, Inits),
@@ -666,6 +702,78 @@ infer({Op, Line, Expr}, C) ->
   C2 = add_cst(T1, T2, Line, ?FROM_OP(Op), C1),
   {TV, C2}.
 
+infer_sig(RestrictVs, Unique, Ifaces, Sig, C) ->
+  C1 = C#ctx{ifaces=Ifaces},
+  infer_sig_helper(RestrictVs, Unique, Sig, C1).
+
+infer_sig_helper(RestrictVs, Unique, {lam_te, _, ArgTE, ReturnTE}, C) ->
+  {ArgT, C1} = infer_sig_helper(RestrictVs, Unique, ArgTE, C),
+  {ReturnT, C2} = infer_sig_helper(RestrictVs, Unique, ReturnTE, C1),
+  {{lam, ArgT, ReturnT}, C2};
+infer_sig_helper(RestrictVs, Unique, {tuple_te, _, ElemTEs}, C) ->
+  {ElemTs, C1} = lists:mapfoldl(fun(TE, FoldC) ->
+    infer_sig_helper(RestrictVs, Unique, TE, FoldC)
+  end, C, ElemTEs),
+  {{tuple, ElemTs}, C1};
+infer_sig_helper(RestrictVs, Unique, {gen_te, Line, ConToken, ParamTEs}, C) ->
+  {con_token, _, Con} = ConToken,
+  C1 = ensure_valid_type(Con, length(ParamTEs), Line, C),
+
+  {ParamTs, C2} = lists:mapfoldl(fun(TE, FoldC) ->
+    infer_sig_helper(RestrictVs, Unique, TE, FoldC)
+  end, C1, ParamTEs),
+  {{gen, Con, ParamTs}, C2};
+infer_sig_helper(RestrictVs, Unique, {tv_te, Line, V, TE}, C) ->
+  C1 = case RestrictVs of
+    false -> C;
+    {T, AllowedVs} ->
+      case gb_sets:is_member(V, AllowedVs) of
+        true -> C;
+        false -> add_ctx_err(?ERR_TV_SCOPE(V, element(2, T)), Line, C)
+      end
+  end,
+
+  {I, C2} = case TE of
+    % TODO: ensure this is a valid iface
+    {none, _} -> {none, C1};
+    {con_token, _, I_} -> {I_, C1};
+    {record_te, _, _} ->
+      {RecordT, CaseC} = infer_sig_helper(RestrictVs, Unique, TE, C1),
+      {record, _, FieldMap} = RecordT,
+      {FieldMap, CaseC}
+  end,
+
+  Ifaces = C2#ctx.ifaces,
+  C3 = case maps:find(V, Ifaces) of
+    {ok, ExpI} ->
+      case {Unique, ExpI} of
+        {true, _} -> add_ctx_err(?ERR_REDEF_TV(V), ?LOC(TE), C2);
+        {false, I} -> C2;
+        {false, _} ->
+          add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), ?LOC(TE), C2)
+      end;
+    error -> C2#ctx{ifaces=Ifaces#{V => I}}
+  end,
+
+  % This TV should be rigid in signatures, but it'll be reset to flex in
+  % norm_sig_type.  Hence, we don't set rigid here, but rather after renaming.
+  {{tv, V, I, false}, C3};
+infer_sig_helper(_, _, {con_token, Line, Con}, C) ->
+  {{con, Con}, ensure_valid_type(Con, 0, Line, C)};
+infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
+  {FieldMap, C1} = lists:foldl(fun({Var, FieldTE}, {FoldMap, FoldC}) ->
+    {var, Line, Name} = Var,
+    {FieldT, FoldC1} = infer_sig_helper(RestrictVs, Unique, FieldTE, FoldC),
+
+    case maps:is_key(Name, FoldMap) of
+      true -> {FoldMap, add_ctx_err(?ERR_DUP_FIELD(Name), Line, FoldC1)};
+      false -> {FoldMap#{Name => FieldT}, FoldC1}
+    end
+  end, {#{}, C}, Fields),
+
+  {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
+infer_sig_helper(_, _, {none, _}, C) -> {none, C}.
+
 infer_pattern({var, Line, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
   C1 = add_env(Name, {add_dep, TV, ID}, C),
@@ -733,6 +841,14 @@ add_cst(T1, T2, Line, From, C) ->
   G1 = G#gnr{csts=[{T1, T2, Line, From} | G#gnr.csts]},
   C#ctx{gnr=G1}.
 
+ensure_valid_type(Con, NumParams, Line, C) ->
+  case maps:find(Con, C#ctx.types) of
+    {ok, NumParams} -> C;
+    {ok, ActualNumParams} ->
+      add_ctx_err(?ERR_TYPE_PARAMS(Con, 0, ActualNumParams), Line, C);
+    error -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Line, C)
+  end.
+
 add_ctx_err(Msg, Line, C) ->
   C#ctx{errs=[{Msg, Line} | C#ctx.errs]}.
 
@@ -748,20 +864,6 @@ norm_sig_type(SigT, ExceptVs, Pid) ->
   end, #{}, fvs(SigT)),
 
   subs(SigT, Subs).
-
-lookup(Name, C) ->
-  % TODO: handle case where can't find variable
-  case maps:find(Name, C#ctx.env) of
-    {ok, {add_dep, EnvTV, ID}} ->
-      G = add_gnr_dep(ID, C#ctx.gnr),
-
-      % We need to defer instantiation until we start solving constraints.
-      % Otherwise, we don't know the real types of these variables, and can't
-      % instantiate properly.
-      {{inst, EnvTV}, C#ctx{gnr=G}};
-
-    {ok, {_, EnvTV}} -> {EnvTV, C}
-  end.
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
@@ -1115,12 +1217,12 @@ iface_unify(I1, I2, S) ->
   end.
 
 unalias({con, Con}, S) ->
-  case maps:find(Con, S#solver.types) of
+  case maps:find(Con, S#solver.structs) of
     {ok, {_, [], RawFieldMap}} -> {record, none, RawFieldMap};
     error -> {con, Con}
   end;
 unalias({gen, Con, ParamTs}, S) ->
-  case maps:find(Con, S#solver.types) of
+  case maps:find(Con, S#solver.structs) of
     {ok, {_, Vs, RawFieldMap}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       subs({record, none, RawFieldMap}, Subs);

@@ -65,7 +65,7 @@ struct : {token, {struct_token, TokenLine}}.
 \=\> : {token, {'=>', TokenLine}}.
 \# : {token, {'#', TokenLine}}.
 {TV} : {token, {tv_token, TokenLine, TokenChars}}.
-{CON} : {token, {con_token, TokenLine, TokenChars}}.
+{CON} : {token, {con_token, TokenLine, list_to_atom(TokenChars)}}.
 {WHITESPACE}+ : skip_token.
 {COMMENT} : skip_token.
 

@@ -46,22 +46,22 @@ init({global, _, {var, _, Name}, Expr}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
 init({enum_token, _, _, OptionTEs}, ID) ->
-  lists:foreach(fun({{con_token, _, Name}, ArgsTE}) ->
+  lists:foreach(fun({{con_token, _, Con}, ArgsTE}) ->
     Value = if
-      length(ArgsTE) == 0 -> list_to_atom(Name);
+      length(ArgsTE) == 0 -> Con;
       true ->
         make_fun(length(ArgsTE), fun(Vs) ->
-          list_to_tuple([list_to_atom(Name) | Vs])
+          list_to_tuple([Con | Vs])
         end)
     end,
 
-    env_set(Name, Value, ID)
+    env_set(atom_to_list(Con), Value, ID)
   end, OptionTEs);
 
 init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
-  StructName = case StructTE of
-    {con_token, _, Name} -> Name;
-    {gen_te, _, {con_token, _, Name}, _} -> Name
+  Con = case StructTE of
+    {con_token, _, Con_} -> Con_;
+    {gen_te, _, {con_token, _, Con_}, _} -> Con_
   end,
 
   FieldAtoms = lists:map(fun({{var, _, FieldName}, _}) ->
@@ -71,7 +71,7 @@ init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
     maps:from_list(lists:zip(FieldAtoms, Vs))
   end),
 
-  env_set(StructName, StructV, ID);
+  env_set(atom_to_list(Con), StructV, ID);
 
 init({sig, _, _, _}, _) -> true.
 
