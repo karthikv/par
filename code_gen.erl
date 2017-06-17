@@ -327,6 +327,9 @@ rep({'match', Line, Expr, Cases}, Env) ->
 rep({block, Line, Exprs}, Env) ->
   {block, Line, lists:map(fun(E) -> rep(E, Env) end, Exprs)};
 
+rep({cons, Line, Elem, List}, Env) ->
+  {cons, Line, rep(Elem, Env), rep(List, Env)};
+
 rep({Op, Line, Left, Right}, Env) ->
   LeftRep = rep(Left, Env),
   RightRep = rep(Right, Env),
@@ -343,12 +346,19 @@ rep({Op, Line, Left, Right}, Env) ->
       end;
     _ ->
       Atom = case Op of
+        '==' -> '==';
         '!=' -> '/=';
         '||' -> 'or';
         '&&' -> 'and';
+        '>' -> '>';
+        '<' -> '<';
+        '>=' -> '>=';
         '<=' -> '=<';
-        '%' -> 'rem';
-        Op -> Op
+        '+' -> '+';
+        '-' -> '-';
+        '*' -> '*';
+        '/' -> '/';
+        '%' -> 'rem'
       end,
       {op, Line, Atom, LeftRep, RightRep}
   end;

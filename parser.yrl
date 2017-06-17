@@ -74,6 +74,7 @@ expr -> expr '%' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '++' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '--' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '.' var : {field, ?LOC('$1'), '$1', '$3'}.
+expr -> '[' expr '|' expr ']' : {cons, ?LOC('$1'), '$2', '$4'}.
 expr -> '!' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> '#' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> '$' expr : {first('$1'), ?LOC('$1'), '$2'}.

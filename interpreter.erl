@@ -195,6 +195,9 @@ eval({'match', _, Expr, Cases}, ID) ->
 eval({block, _, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
 
+eval({cons, _, Left, Right}, ID) ->
+  [eval(Left, ID) | eval(Right, ID)];
+
 eval({Op, _, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
   RightV = eval(Right, ID),

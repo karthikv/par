@@ -221,6 +221,8 @@ expr_test_() ->
   , ?_test(bad_expr("7 - 12 / 5 % 6", {"Float", "Int", 1, ?FROM_OP('%')}))
 
   , ?_test("String" = ok_expr("\"hello \" ++ \"world\""))
+  , ?_test("[Float]" = ok_expr("[3.0 | []]"))
+  , ?_test("[Atom]" = ok_expr("[@a | [@b, @c]]"))
   , ?_test("[A: Num]" = ok_expr("[1, 2] ++ [3, 4, 5, 6]"))
   , ?_test("[Bool]" = ok_expr("[] ++ [true, false]"))
   , ?_test("[A]" = ok_expr("[] ++ []"))
@@ -228,6 +230,8 @@ expr_test_() ->
   , ?_test("Map<String, A: Num>" = ok_expr("{\"a\" => 3} ++ {}"))
   , ?_test("Set<A>" = ok_expr("#[] ++ #[]"))
   , ?_test("Set<Float>" = ok_expr("#[1, 2] ++ #[3.0]"))
+  , ?_test(bad_expr("[@a | [\"hi\"]]", {"Atom", "String", 1, ?FROM_CONS}))
+  , ?_test(bad_expr("[@a | @b]", {"Atom", "[Atom]", 1, ?FROM_CONS}))
   , ?_test(bad_expr(
       "30.0 ++ \"str\"",
       {"Float", "A: Concatable", 1, ?FROM_OP('++')}

@@ -24,6 +24,7 @@
 -define(FROM_MATCH_PATTERN, "match pattern").
 -define(FROM_MATCH_BODY, "match body").
 -define(FROM_OP(Op), ?FMT("~p operator", [Op])).
+-define(FROM_CONS, "list prepend operator '|'").
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
 -define(ERR_REDEF_TYPE(Con), ?FMT("type ~s is already defined", [Con])).

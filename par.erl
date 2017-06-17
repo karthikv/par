@@ -106,33 +106,30 @@
 -endif.
 
 % TODO:
+% - Module declaration? / code gen file name attribute?
 % (3) Write lexer in par
-%
 % - Escaped characters in strings
-% - (code gen) Compile file / File name attribute?
+%
 % - (code gen) Remove util functions when they're unused
 %
-% - Pattern matching records
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
+% - Pattern matching records
 % - Exhaustive pattern matching errors
 % - Concurrency
+% - Allow trailing commas
 % - Second pass for error messages (see TODOs in code)
 % - Update naming conventions
 %
 % From dogfooding:
-% - Syntax to prepend list element
-% - Character type and operations
 % - List error messages should include full List type
 % - Norm types for error messages
-% - Interpreter backtraces
+% - Interpreter backtraces?
 % - Detect basic infinite loop conditions
 %
-% - Syntax for lambda with no arg?
 % - Force all block expressions except last to be type ()?
 % - List indexing?
-% - Operation: nth element of tuple? Rethink tuple access
 
 reload(true) ->
   code:purge(lexer),
@@ -658,6 +655,13 @@ infer({block, _, Exprs}, C) ->
     infer(Expr, FoldC)
   end, {none, C}, Exprs),
   {T, C1};
+
+infer({cons, Line, Elem, List}, C) ->
+  {ElemT, C1} = infer(Elem, C),
+  {ListT, C2} = infer(List, C1),
+
+  C3 = add_cst({gen, 'List', [ElemT]}, ListT, Line, ?FROM_CONS, C2),
+  {ListT, C3};
 
 infer({Op, Line, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
