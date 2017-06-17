@@ -1114,4 +1114,33 @@ other_errors_test_() ->
       "bar = @io:format()",
       {?ERR_NATIVE_NOT_DEF(io, "format", 0), 1}
     ))
+  , ?_test(ctx_err_prg(
+      "enum Foo {\n"
+      "  Bar(Char),\n"
+      "  Baz @Bar\n"
+      "}",
+      {?ERR_DUP_KEY("Bar", "Bar", 2), 3}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo {\n"
+      "  Bar(Char) @Baz,\n"
+      "  Baz\n"
+      "}",
+      {?ERR_DUP_KEY("Baz", "Baz", 3), 2}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo {\n"
+      "  Bar(Char),\n"
+      "  Bar\n"
+      "}",
+      {?ERR_REDEF("Bar"), 3}
+    ))
+  , ?_test("Foo" = ok_prg(
+      "enum Foo {\n"
+      "  Bar(Char) @baz,\n"
+      "  Baz\n"
+      "}\n"
+      "expr = Bar('h')",
+      "expr"
+    ))
   ].

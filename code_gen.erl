@@ -21,11 +21,16 @@ run_ast(Ast, Mod) ->
         Value = {{ets, list_to_atom(lists:concat([Mod, '|', Name]))}, badarity},
         FoldEnv#{Name => Value};
       {enum_token, _, _, OptionTEs} ->
-        lists:foldl(fun({{con_token, _, Con}, ArgsTE}, NestedEnv) ->
+        lists:foldl(fun({{con_token, Line, Con}, ArgsTE, KeyNode}, NestedEnv) ->
           Name = atom_to_list(Con),
           NumArgs = length(ArgsTE),
+          LitNode = case KeyNode of
+            default -> {atom, Line, Con};
+            {atom, _, _} -> KeyNode
+          end,
+
           case NumArgs of
-            0 -> NestedEnv#{Name => {{lit, Con}, badarity}};
+            0 -> NestedEnv#{Name => {{lit, LitNode}, badarity}};
             _ ->
               Value = {{global_fn, Con}, NumArgs},
               NestedEnv#{Name => Value}
@@ -80,17 +85,22 @@ rep({global, Line, {var, _, Name}, Expr}, Env) ->
   end;
 
 rep({enum_token, _, _, OptionTEs}, _) ->
-  FnOptionTEs = lists:filter(fun({_, ArgsTE}) ->
+  FnOptionTEs = lists:filter(fun({_, ArgsTE, _}) ->
     length(ArgsTE) > 0
   end, OptionTEs),
 
-  lists:map(fun({{con_token, Line, Con}, ArgsTE}) ->
+  lists:map(fun({{con_token, Line, Con}, ArgsTE, KeyNode}) ->
     ArgsRep = lists:map(fun(Num) ->
       Atom = list_to_atom(lists:concat(['_@', Num])),
       {var, Line, Atom}
     end, lists:seq(1, length(ArgsTE))),
 
-    Body = [{tuple, Line, [{atom, Line, Con} | ArgsRep]}],
+    {AtomLine, Atom} = case KeyNode of
+      default -> {Line, Con};
+      {atom, AtomLine_, Atom_} -> {AtomLine_, Atom_}
+    end,
+
+    Body = [{tuple, Line, [{atom, AtomLine, Atom} | ArgsRep]}],
     Clause = {clause, Line, ArgsRep, [], Body},
     {function, Line, Con, length(ArgsTE), [Clause]}
   end, FnOptionTEs);
@@ -174,7 +184,7 @@ rep({N, Line, Name}, Env) when N == var; N == con_var; N == var_value ->
              {integer, Line, 2}]}
       end;
 
-    {{lit, Lit}, _} -> erl_parse:abstract(Lit);
+    {{lit, LitNode}, _} -> LitNode;
     {{global_fn, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {Atom, _} -> {var, Line, Atom}
   end;

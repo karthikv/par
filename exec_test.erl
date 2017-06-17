@@ -17,8 +17,7 @@ run(Prg) ->
   code_gen:run_ast(Ast, code_gen_test),
   interpreter:run_ast(Ast, []).
 
-expr(Expr) ->
-  run("main() = " ++ Expr).
+expr(Expr) -> run("main() = " ++ Expr).
 
 expr_test_() ->
   [ ?_test(none = expr("()"))
@@ -230,6 +229,18 @@ enum_test_() ->
   , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = run(
       "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
       "main() = Cons(3, Cons(5.0, End))\n"
+    ))
+  , ?_test(error = run(
+      "enum Result { Err @error }\n"
+      "main() = Err"
+    ))
+  , ?_test({ok, 5} = run(
+      "enum Result<T> { Ok(T) @ok }\n"
+      "main() = Ok(5)"
+    ))
+  , ?_test({'==', true, <<"hi">>} = run(
+      "enum Expr { Eq(Bool, String) @\"==\" }\n"
+      "main() = Eq(true, \"hi\")"
     ))
   ].
 

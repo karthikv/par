@@ -62,6 +62,10 @@
   ERR_NATIVE_NOT_DEF(Mod, Name, Arity),
   ?FMT("native function ~s:~s/~p is not defined", [Mod, Name, Arity])
 ).
+-define(
+  ERR_DUP_KEY(Key, Con, Line),
+  ?FMT("the key ~s is already used for option ~s on line ~p", [Key, Con, Line])
+).
 
 -define(LOC(Node), element(2, Node)).
 

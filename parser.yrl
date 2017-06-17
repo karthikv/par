@@ -188,8 +188,10 @@ enum -> enum_token con_token '<' tv_list '>' '{' option_list '}' :
 option_list -> option : ['$1'].
 option_list -> option ',' option_list : ['$1' | '$3'].
 
-option -> con_token : {'$1', []}.
-option -> con_token '(' te_list ')' : {'$1', '$3'}.
+option -> con_token : {'$1', [], default}.
+option -> con_token atom : {'$1', [], '$2'}.
+option -> con_token '(' te_list ')' : {'$1', '$3', default}.
+option -> con_token '(' te_list ')' atom : {'$1', '$3', '$5'}.
 
 struct -> struct_token con_token '{' field_list '}' :
   {first('$1'), ?LOC('$1'), '$2', {record_te, ?LOC('$3'), '$4'}}.

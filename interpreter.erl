@@ -46,12 +46,17 @@ init({global, _, {var, _, Name}, Expr}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
 init({enum_token, _, _, OptionTEs}, ID) ->
-  lists:foreach(fun({{con_token, _, Con}, ArgsTE}) ->
+  lists:foreach(fun({{con_token, _, Con}, ArgsTE, KeyNode}) ->
+    Atom = case KeyNode of
+      default -> Con;
+      {atom, _, Atom_} -> Atom_
+    end,
+
     Value = if
-      length(ArgsTE) == 0 -> Con;
+      length(ArgsTE) == 0 -> Atom;
       true ->
         make_fun(length(ArgsTE), fun(Vs) ->
-          list_to_tuple([Con | Vs])
+          list_to_tuple([Atom | Vs])
         end)
     end,
 

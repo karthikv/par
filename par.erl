@@ -106,9 +106,6 @@
 -endif.
 
 % TODO:
-% (2) Figure out what's necessary to write lexer
-%   key for enum type
-%   char operations?
 % (3) Write lexer in par
 %
 % - Escaped characters in strings
@@ -327,7 +324,8 @@ infer({enum_token, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
   FVs = fvs(T),
 
-  C2 = lists:foldl(fun({{con_token, Line, Con}, ArgTEs}, FoldC) ->
+  {_, C2} = lists:foldl(fun(Option, {Keys, FoldC}) ->
+    {{con_token, Line, Con}, ArgTEs, KeyNode} = Option,
     {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, NestedC}) ->
       {ArgT, NestedC1} = infer_sig(
         {T, FVs},
@@ -352,11 +350,44 @@ infer({enum_token, _, EnumTE, Options}, C) ->
     FoldC4 = finish_gnr(FoldC3, FoldC1#ctx.gnr),
 
     Name = atom_to_list(Con),
-    case maps:is_key(Name, FoldC4#ctx.env) of
+    FoldC5 = case maps:is_key(Name, FoldC4#ctx.env) of
       true -> add_ctx_err(?ERR_REDEF(Name), Line, FoldC4);
       false -> add_env(Name, {add_dep, TV, ID}, FoldC4)
+    end,
+
+    case KeyNode of
+      default ->
+        case maps:find(Con, Keys) of
+          {ok, {default, _, _}} ->
+            % we've already added an ERR_REDEF; no need to add another
+            {Keys, FoldC5};
+          {ok, {custom, _, CustomLine}} ->
+            FoldC6 = add_ctx_err(
+              ?ERR_DUP_KEY(Con, Con, Line),
+              CustomLine,
+              FoldC5
+            ),
+            {Keys, FoldC6};
+          error -> {Keys#{Con => {default, Con, Line}}, FoldC5}
+        end;
+
+      {atom, KeyLine, Key} ->
+        case maps:find(Key, Keys) of
+          {ok, {_, OtherCon, OtherLine}} ->
+            FoldC6 = add_ctx_err(
+              ?ERR_DUP_KEY(Key, OtherCon, OtherLine),
+              KeyLine,
+              FoldC5
+            ),
+
+            % In case the map contains a default, we go ahead and replace the
+            % value with a custom. This way, if another default comes up, we'll
+            % correctly report an error.
+            {Keys#{Key := {custom, Con, KeyLine}}, FoldC6};
+          error -> {Keys#{Key => {custom, Con, KeyLine}}, FoldC5}
+        end
     end
-  end, C1, Options),
+  end, {#{}, C1}, Options),
 
   {T, C2};
 
