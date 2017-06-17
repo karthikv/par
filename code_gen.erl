@@ -130,6 +130,9 @@ rep({none, Line}, _) -> erl_parse:abstract(none, Line);
 rep({N, Line, V}, _)
   when N == int; N == float; N == bool; N == str; N == atom ->
     erl_parse:abstract(V, Line);
+rep({char, Line, V}, _) ->
+  % special case; erl_parse:abstract will give us {integer, _, _}
+  {char, Line, V};
 
 % only occurs in patterns
 rep({'_', Line}, _) -> {var, Line, '_'};
@@ -346,6 +349,8 @@ rep({Op, Line, Expr}, Env) ->
   case Op of
     '!' -> {op, Line, 'not', ExprRep};
     '#' -> call(gb_sets, from_list, [ExprRep], Line);
+    % $ used by the type system to treat Char as Int, but they're the same
+    '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
     'discard' -> {block, Line, [ExprRep, {atom, Line, none}]}
   end.

@@ -94,7 +94,7 @@ eval({'::', _, Expr, _}, ID) -> eval(Expr, ID);
 
 eval({none, _}, _) -> none;
 eval({N, _, V}, _)
-  when N == int; N == float; N == bool; N == str; N == atom -> V;
+  when N == int; N == float; N == bool; N == char; N == str; N == atom -> V;
 
 eval({list, _, Elems}, ID) ->
   lists:map(fun(E) -> eval(E, ID) end, Elems);
@@ -237,6 +237,8 @@ eval({Op, _, Expr}, ID) ->
   case Op of
     '!' -> not V;
     '#' -> gb_sets:from_list(V);
+    % $ used by the type system to treat Char as Int, but they're the same
+    '$' -> V;
     '-' -> -V;
     'discard' -> none
   end.

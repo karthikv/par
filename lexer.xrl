@@ -3,6 +3,8 @@ Definitions.
 INT = [0-9]+
 FLOAT = {INT}+\.{INT}+
 BOOL = (true|false)
+HEX = [0-9a-f]
+CHAR = '(\\.|[^\\'])'
 STR = "(\\.|[^\\"])*"
 ATOM = @[a-zA-Z0-9_@]+
 WORD = [a-zA-Z0-9_]
@@ -41,6 +43,7 @@ Rules.
 \: : {token, {':', TokenLine}}.
 \-\> : {token, {'->', TokenLine}}.
 \; : {token, {';', TokenLine}}.
+\$ : {token, {'$', TokenLine}}.
 discard : {token, {discard, TokenLine}}.
 if : {token, {'if', TokenLine}}.
 then : {token, {then, TokenLine}}.
@@ -53,8 +56,9 @@ struct : {token, {struct_token, TokenLine}}.
 {INT} : {token, {int, TokenLine, list_to_integer(TokenChars)}}.
 {FLOAT} : {token, {float, TokenLine, list_to_float(TokenChars)}}.
 {BOOL} : {token, {bool, TokenLine, list_to_atom(TokenChars)}}.
-{STR} : {token, {str, TokenLine, list_to_binary(drop_quotes(TokenChars))}}.
-\@{STR} : {token, {atom, TokenLine, list_to_atom(drop_quotes(tl(TokenChars)))}}.
+{CHAR} : {token, {char, TokenLine, hd(to_str(TokenChars))}}.
+{STR} : {token, {str, TokenLine, list_to_binary(to_str(TokenChars))}}.
+\@{STR} : {token, {atom, TokenLine, list_to_atom(to_str(tl(TokenChars)))}}.
 {ATOM} : {token, {atom, TokenLine, list_to_atom(tl(TokenChars))}}.
 {VAR} : {token, {var, TokenLine, TokenChars}}.
 \_ : {token, {'_', TokenLine}}.
@@ -71,5 +75,25 @@ struct : {token, {struct_token, TokenLine}}.
 
 Erlang code.
 
+to_str(String) ->
+  unescape(drop_quotes(String)).
+
 drop_quotes(Str) ->
   lists:sublist(Str, 2, length(Str) - 2).
+
+unescape([$\\, Char | T]) ->
+  Unescaped = case Char of
+    $b -> $\b;
+    $f -> $\f;
+    $n -> $\n;
+    $r -> $\r;
+    $t -> $\t;
+    $e -> $\e;
+    $v -> $\v;
+    $s -> $\s;
+    $d -> $\d;
+    _ -> Char
+  end,
+  [Unescaped | unescape(T)];
+unescape([H | T]) -> [H | unescape(T)];
+unescape([]) -> [].

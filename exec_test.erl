@@ -25,7 +25,10 @@ expr_test_() ->
   , ?_test(1 = expr("1"))
   , ?_test(3.0 = expr("3.0"))
   , ?_test(true = expr("true"))
+  , ?_test($h = expr("'h'"))
+  , ?_test($\n = expr("'\\n'"))
   , ?_test(<<"hi">> = expr("\"hi\""))
+  , ?_test(<<"hi\n">> = expr("\"hi\\n\""))
   , ?_test(hi = expr("@hi"))
   , ?_test('hello world' = expr("@\"hello world\""))
   , ?_test([3.0, 5] = expr("[3.0, 5]"))
@@ -130,6 +133,7 @@ expr_test_() ->
   , ?_test(-78.5 = expr("-5 * 15.7"))
   , ?_test(false = expr("!true"))
   , ?_test(true = expr("!false && true"))
+  , ?_test($h = expr("$'h'"))
 
 
   , ?_test([4, 6] = expr("@lists:filter(|x| x > 3, [2, 4, 6])"))

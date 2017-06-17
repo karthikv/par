@@ -11,10 +11,10 @@ Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '|>' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/' '%'
-  '++' '--' '.' '|' '::' ':' '->' ';' 'discard'
+  '++' '--' '.' '|' '::' ':' '->' ';' '$' 'discard'
   if then else let in match
   enum_token struct_token
-  int float bool str atom var '_'
+  int float bool char str atom var '_'
   '[' ']' '{' '}' '=>' '#'
   tv_token con_token.
 
@@ -39,6 +39,7 @@ expr -> '(' ')' : {none, ?LOC('$1')}.
 expr -> int : '$1'.
 expr -> float : '$1'.
 expr -> bool : '$1'.
+expr -> char : '$1'.
 expr -> str : '$1'.
 expr -> atom : '$1'.
 expr -> var : '$1'.
@@ -75,6 +76,7 @@ expr -> expr '--' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '.' var : {field, ?LOC('$1'), '$1', '$3'}.
 expr -> '!' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> '#' expr : {first('$1'), ?LOC('$1'), '$2'}.
+expr -> '$' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> neg : '$1'.
 expr -> lam : '$1'.
 expr -> discard expr : {first('$1'), ?LOC('$1'), '$2'}.
@@ -213,7 +215,7 @@ Nonassoc 70 '==' '!=' '>' '<' '>=' '<='.
 Left 80 '+' '-' '++' '--'.
 Left 90 mul '/' '%'.
 Nonassoc 100 '::'.
-Unary 110 '!' '#' neg 'discard'.
+Unary 110 '!' '#' '$' neg 'discard'.
 Nonassoc 120 '('.
 Nonassoc 130 '.'.
 

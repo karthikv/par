@@ -111,6 +111,7 @@
 %   char operations?
 % (3) Write lexer in par
 %
+% - Escaped characters in strings
 % - (code gen) Compile file / File name attribute?
 % - (code gen) Remove util functions when they're unused
 %
@@ -171,6 +172,7 @@ infer_prg(Prg) ->
       'Float' => 0,
       'Bool' => 0,
       'Atom' => 0,
+      'Char' => 0,
       'String' => 0,
       'List' => 1,
       'Set' => 1,
@@ -406,6 +408,7 @@ infer({int, _, _}, C) ->
   {tv_server:fresh('Num', C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, 'Float'}, C};
 infer({bool, _, _}, C) -> {{con, 'Bool'}, C};
+infer({char, _, _}, C) -> {{con, 'Char'}, C};
 infer({str, _, _}, C) -> {{con, 'String'}, C};
 infer({atom, _, _}, C) -> {{con, 'Atom'}, C};
 
@@ -693,6 +696,7 @@ infer({Op, Line, Expr}, C) ->
     Op == '#' ->
       ElemT = tv_server:fresh(C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, {gen, 'List', [ElemT]}, {gen, 'Set', [ElemT]}}};
+    Op == '$' -> {{lam, ExprT, TV}, {lam, {con, 'Char'}, {con, 'Int'}}};
     Op == '-' ->
       NumT = tv_server:fresh('Num', C1#ctx.pid),
       {{lam, ExprT, TV}, {lam, NumT, NumT}};
