@@ -11,6 +11,11 @@ run() ->
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE),
 
+  code_gen:compile_file("lexer.par", par_lexer),
+  code:purge(par_lexer),
+  code:load_file(par_lexer),
+  par_lexer:init(),
+
   ?MODULE:test().
 
 norm_prg(Prg, Name) ->
@@ -66,8 +71,8 @@ check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   ExpLine = Line,
   ExpFrom = From.
 
-ok_expr(Expr) ->
-  par:pretty(norm_prg("expr = " ++ Expr, "expr")).
+%% ok_expr(Expr) ->
+%%   par:pretty(norm_prg("expr = " ++ Expr, "expr")).
 
 bad_expr(Expr, Err) ->
   bad_prg("expr = " ++ Expr, Err).
@@ -118,6 +123,24 @@ norm({record, A, FieldMap}, N) ->
   {{record, A, NewFieldMap}, N1};
 norm(none, N) -> {none, N}.
 
+ok_expr(Expr) ->
+  Prg = "expr = " ++ Expr,
+  {ok, Tokens, _} = lexer:string(Prg),
+  {ok, ParTokens} = (par_lexer:import(tokenize))(Prg),
+
+  NormParTokens = lists:map(fun(T) ->
+    setelement(2, T, maps:get(start_line, element(2, T)))
+  end, ParTokens),
+
+  lists:foreach(fun(Index) ->
+    ?assertEqual(
+       lists:nth(Index, Tokens),
+       lists:nth(Index, NormParTokens)
+    )
+  end, lists:seq(1, max(length(Tokens), length(ParTokens)))),
+
+  par:pretty(norm_prg("expr = " ++ Expr, "expr")).
+
 expr_test_() ->
   [ ?_test("()" = ok_expr("()"))
   , ?_test("A: Num" = ok_expr("1"))
@@ -129,7 +152,7 @@ expr_test_() ->
   , ?_test("Char" = ok_expr("\'a\'"))
   , ?_test("Char" = ok_expr("\'\\n\'"))
   , ?_test("String" = ok_expr("\"\""))
-  , ?_test("String" = ok_expr("\"some string\n\""))
+  , ?_test("String" = ok_expr("\"some string\\n\""))
   , ?_test("Atom" = ok_expr("@hello"))
   , ?_test("Atom" = ok_expr("@\"hello world\""))
 
@@ -223,6 +246,7 @@ expr_test_() ->
   , ?_test("String" = ok_expr("\"hello \" ++ \"world\""))
   , ?_test("[Float]" = ok_expr("[3.0 | []]"))
   , ?_test("[Atom]" = ok_expr("[@a | [@b, @c]]"))
+  , ?_test("[Char]" = ok_expr("['a', 'b' | ['c']]"))
   , ?_test("[A: Num]" = ok_expr("[1, 2] ++ [3, 4, 5, 6]"))
   , ?_test("[Bool]" = ok_expr("[] ++ [true, false]"))
   , ?_test("[A]" = ok_expr("[] ++ []"))
@@ -230,8 +254,12 @@ expr_test_() ->
   , ?_test("Map<String, A: Num>" = ok_expr("{\"a\" => 3} ++ {}"))
   , ?_test("Set<A>" = ok_expr("#[] ++ #[]"))
   , ?_test("Set<Float>" = ok_expr("#[1, 2] ++ #[3.0]"))
-  , ?_test(bad_expr("[@a | [\"hi\"]]", {"Atom", "String", 1, ?FROM_CONS}))
-  , ?_test(bad_expr("[@a | @b]", {"Atom", "[Atom]", 1, ?FROM_CONS}))
+  , ?_test(bad_expr("[@a | [\"hi\"]]", {"Atom", "String", 1, ?FROM_LIST_TAIL}))
+  , ?_test(bad_expr("[@a | @b]", {"Atom", "[Atom]", 1, ?FROM_LIST_TAIL}))
+  , ?_test(bad_expr(
+      "['a', 3 | ['c']]",
+      {"Char", "A: Num", 1, ?FROM_LIST_ELEM}
+    ))
   , ?_test(bad_expr(
       "30.0 ++ \"str\"",
       {"Float", "A: Concatable", 1, ?FROM_OP('++')}
@@ -875,6 +903,7 @@ record_test_() ->
 pattern_test_() ->
   [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
   , ?_test("A: Num" = ok_expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test("Atom" = ok_expr("match 'x' { 'y' => @hi, 'x' => @hello }"))
   , ?_test("Float" =
              ok_expr("match |x| x { id => let y = id(true) in id(5.0) }"))
   , ?_test("(Int, Float, Int, Float)" = ok_expr(

@@ -61,8 +61,13 @@ expr_test_() ->
              expr("if false || true && 3.5 < 4 then [true, false] else [true]"))
   , ?_test(none = expr("if true then @foo"))
   , ?_test(none = expr("if false then @io:nl() :: () else discard 3"))
+  % ensures that we handle conditions that aren't valid guard clauses
+  , ?_test($a = expr("let f = |x| x == 3 in if f(3) then 'a' else 'b'"))
 
   , ?_test(5 = expr("let x = 5 in x"))
+  % ensures that we generate a unique name for each variable; otherwise, we'll
+  % get a badmatch 4 <=> 5
+  , ?_test(5 = expr("let x = (let x = 4, y = 5 in y) in x"))
   , ?_test(true = expr("let x = 5, y = true in x == 4 || y"))
   , ?_test(false =
              expr("let and = |a, b, c| a && b && c in and(true, true, false)"))
@@ -110,7 +115,9 @@ expr_test_() ->
   , ?_test(2 = expr("17 % 3"))
   , ?_test(-3 = expr("-7 % 4"))
   , ?_test(30.0 = expr("3 + 5 * 7 - 4 / 2 + 38 % 6 - 8"))
+  , ?_test([$a] = expr("['a' | []]"))
   , ?_test([a, b, c] = expr("[@a | [@b, @c]]"))
+  , ?_test([3, 4, 5] = expr("[3, 4 | [5]]"))
   , ?_test([[]] = expr("[[] | []]"))
   , ?_test([1, 2, 3, 4] = expr("[1] ++ [2, 3, 4]"))
   , ?_test(<<"hello world">> = expr("\"hello \" ++ \"world\""))
@@ -144,9 +151,9 @@ expr_test_() ->
       gb_sets:from_list([1, 2, 3]),
       expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])")
     )
-  , ?_test(3 = expr("@interpreter_test:returns_fun()(1)(2)"))
-  , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1)(2)"))
-  , ?_test(3 = expr("@interpreter_test:returns_fun/0((), 1, 2)"))
+  , ?_test(3 = expr("@exec_test:returns_fun()(1)(2)"))
+  , ?_test(3 = expr("@exec_test:returns_fun/0((), 1)(2)"))
+  , ?_test(3 = expr("@exec_test:returns_fun/0((), 1, 2)"))
   , ?_test(true = expr("let foo(x) = x == () in foo()"))
   , ?_test(true = expr("let foo(x) = x == () in foo(())"))
 
@@ -200,10 +207,16 @@ global_test_() ->
 
 
   % to ensure globals are evaluated strictly in order
+  , ?_test("hi" = run(
+      "foo = to_list(\"hi\")\n"
+      "to_list = @erlang:binary_to_list/1\n"
+      "main() = foo"
+    ))
   , ?_test({ok, <<"bar">>} = run(
       "foo = @file:write_file(\"/tmp/par-foo\", \"bar\")\n"
-      "main() = let result = @file:read_file(\"/tmp/par-foo\") in\n"
+      "bar = let result = @file:read_file(\"/tmp/par-foo\") in\n"
       "  { @file:delete(\"/tmp/par-foo\"); result }"
+      "main() = bar"
     ))
   ].
 
@@ -315,6 +328,7 @@ record_test_() ->
 pattern_test_() ->
   [ ?_test(true = expr("match 3 { 3 => true, 4 => false }"))
   , ?_test(18 = expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test(hello = expr("match 'x' { 'y' => @hi, 'x' => @hello }"))
   , ?_test(5.0 = expr("match |x| x { id => let y = id(true) in id(5.0) }"))
   , ?_test({6, 6.0, 8, 8.0} = expr(
       "match (3, 4) {\n"
@@ -324,6 +338,11 @@ pattern_test_() ->
   , ?_test(5 = run(
       "enum Foo { Bar, Baz(Int) }\n"
       "main() = match Baz(5) { Bar => 1, Baz(x) => x }"
+    ))
+  , ?_test(-3 = run(
+      "enum Foo { Bar @a, Baz(Int) @hi }\n"
+      "main() = match (Bar) { Bar => 1, Baz(_) => 2 } +\n"
+      "  match Baz(4) { Bar => -3, Baz(x) => -x }"
     ))
   , ?_test([<<"hey">>] = expr(
       "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"

@@ -1,0 +1,391 @@
+struct Loc {
+  start_line :: Int,
+  start_col :: Int,
+  end_line :: Int,
+  end_col :: Int
+}
+
+enum Token {
+  Eq(Loc) @"==",
+  FatArrow(Loc) @"=>",
+  Assign(Loc) @"=",
+
+  NotEq(Loc) @"!=",
+  Not(Loc) @"!",
+
+  GtEq(Loc) @">=",
+  Gt(Loc) @">",
+  LtEq(Loc) @"<=",
+  Lt(Loc) @"<",
+
+  LParen(Loc) @"(",
+  RParen(Loc) @")",
+  LBracket(Loc) @"[",
+  RBracket(Loc) @"]",
+  LBrace(Loc) @"{",
+  RBrace(Loc) @"}",
+
+  Or(Loc) @"||",
+  Pipe(Loc) @"|>",
+  Bar(Loc) @"|",
+
+  Concat(Loc) @"++",
+  Add(Loc) @"+",
+
+  Separate(Loc) @"--",
+  Arrow(Loc) @"->",
+  Sub(Loc) @"-",
+
+  Comment(Loc, [Char]) @"//",
+  Div(Loc) @"/",
+
+  Sig(Loc) @"::",
+  Colon(Loc) @":",
+
+  And(Loc) @"&&",
+  Comma(Loc) @",",
+  Mul(Loc) @"*",
+  Mod(Loc) @"%",
+  Semi(Loc) @";",
+  Dollar(Loc) @"$",
+  Pound(Loc) @"#",
+
+  Discard(Loc) @discard,
+  If(Loc) @if,
+  Then(Loc) @then,
+  Else(Loc) @else,
+  Let(Loc) @let,
+  In(Loc) @in,
+  Match(Loc) @match,
+  Enum(Loc) @enum_token,
+  Struct(Loc) @struct_token,
+
+  LitBool(Loc, Bool) @bool,
+  LitChar(Loc, Char) @char,
+  LitStr(Loc, String) @str,
+  LitAtom(Loc, Atom) @atom,
+
+  Underscore(Loc) @"_",
+  Var(Loc, [Char]) @var,
+
+  TV(Loc, [Char]) @tv_token,
+  Con(Loc, Atom) @con_token,
+
+  Dot(Loc) @".",
+  LitInt(Loc, Int) @int,
+  LitFloat(Loc, Float) @float,
+
+  Whitespace(Loc, [Char]),
+  Unexpected(Loc, [Char], String)
+}
+
+enum Result<T, E> {
+  Ok(T) @ok,
+  Err(E) @error
+}
+
+tokenize(chs) =
+  let
+    tokens = tokenize_r(chs, 1, 1, []),
+    errs = filter(
+      |t| match t { Unexpected(_, _, _) => true, _ => false }, tokens)
+  in
+    if let [] = errs then
+      Ok(filter(|t| match t { Whitespace(_, _) => false, _ => true }, tokens))
+    else
+      Err(errs)
+
+tokenize_r(chs, line, col, tokens) =
+  if let [] = chs then
+    reverse(tokens)
+  else
+    let
+      loc = Loc {
+        start_line = line,
+        start_col = col,
+        end_line = line,
+        end_col = col
+      },
+      (token, left) = match chs {
+        ['=', '=' | t] => (Eq(inc(loc, 2)), t),
+        ['=', '>' | t] => (FatArrow(inc(loc, 2)), t),
+        ['=' | t] => (Assign(inc(loc, 1)), t),
+
+        ['!', '=' | t] => (NotEq(inc(loc, 2)), t),
+        ['!' | t] => (Not(inc(loc, 1)), t),
+
+        ['>', '=' | t] => (GtEq(inc(loc, 2)), t),
+        ['>' | t] => (Gt(inc(loc, 1)), t),
+        ['<', '=' | t] => (LtEq(inc(loc, 2)), t),
+        ['<' | t] => (Lt(inc(loc, 1)), t),
+
+        ['(' | t] => (LParen(inc(loc, 1)), t),
+        [')' | t] => (RParen(inc(loc, 1)), t),
+        ['[' | t] => (LBracket(inc(loc, 1)), t),
+        [']' | t] => (RBracket(inc(loc, 1)), t),
+        ['{' | t] => (LBrace(inc(loc, 1)), t),
+        ['}' | t] => (RBrace(inc(loc, 1)), t),
+
+        ['|', '|' | t] => (Or(inc(loc, 2)), t),
+        ['|', '>' | t] => (Pipe(inc(loc, 2)), t),
+        ['|' | t] => (Bar(inc(loc, 1)), t),
+
+        ['+', '+' | t] => (Concat(inc(loc, 2)), t),
+        ['+' | t] => (Add(inc(loc, 1)), t),
+
+        ['-', '-' | t] => (Separate(inc(loc, 2)), t),
+        ['-', '>' | t] => (Arrow(inc(loc, 2)), t),
+        ['-' | t] => (Sub(inc(loc, 1)), t),
+
+        ['/', '/' | t] =>
+          let (comment, len, t) = until_nl(t) in
+            (Comment(inc(loc, 2 + len), comment), t),
+        ['/' | t] => (Div(inc(loc, 1)), t),
+
+        [':', ':' | t] => (Sig(inc(loc, 2)), t),
+        [':' | t] => (Colon(inc(loc, 1)), t),
+
+        ['&', '&' | t] => (And(inc(loc, 2)), t),
+        [',' | t] => (Comma(inc(loc, 1)), t),
+        ['*' | t] => (Mul(inc(loc, 1)), t),
+        ['%' | t] => (Mod(inc(loc, 1)), t),
+        [';' | t] => (Semi(inc(loc, 1)), t),
+        ['$' | t] => (Dollar(inc(loc, 1)), t),
+        ['#' | t] => (Pound(inc(loc, 1)), t),
+
+        ['\'', ch, '\'' | t] => (LitChar(inc(loc, 3), ch), t),
+        ['\'', '\\', ch, '\'' | t] => (LitChar(inc(loc, 4), unesc(ch)), t),
+
+        ['"' | t] => tokenize_str(loc, ['"' | t]),
+
+        ['@', '"' | t] =>
+          let (LitStr(loc, str), t) = print(tokenize_str(loc, ['"' | t])) in
+            (LitAtom(inc(loc, 1), str_to_atom(str)), t),
+
+        ['@', h | t] =>
+          if is_lower(h) then
+            let (chs, len, t) = until_not(is_word, t) in
+              (LitAtom(inc(loc, 2 + len), to_atom([h | chs])), t)
+          else
+            let token = Unexpected(
+              inc(loc, 2),
+              ['@', h],
+              "Atom must start with lowercase letter."
+            ) in (token, t),
+
+        [h | t] =>
+          if h == '_' then
+            match t {
+              [] => (Underscore(inc(loc, 1)), t),
+              [next | t] =>
+                if is_lower(next) then
+                  let (chs, len, t) = until_not(is_word, t) in
+                    (Var(inc(loc, 2 + len), [h, next | chs]), t)
+                else
+                  (Underscore(inc(loc, 1)), [next | t])
+            }
+          else if is_upper(h) then
+            match t {
+              [] => (TV(inc(loc, 1), [h]), t),
+              [next | t] =>
+                if is_word(next) then
+                  let (chs, len, t) = until_not(is_word, t) in
+                    (Con(inc(loc, 2 + len), to_atom([h, next | chs])), t)
+                else
+                  (TV(inc(loc, 1), [h]), [next | t])
+            }
+          else if is_lower(h) then
+            let
+              (chs, len, t) = until_not(is_word, t),
+              token = get_value(
+                [h | chs],
+                chs_to_token_fn,
+                flip(Var, [h | chs]),
+                inc(loc, 1 + len)
+              )
+            in (token, t)
+          else if h == '.' then
+            match t {
+              [] => (Dot(inc(loc, 1)), t),
+              [next | t] =>
+                if is_digit(next) then
+                  // must prefix with 0 for to_float to work
+                  tokenize_num(loc, ['0', h, next | t])
+                else
+                  (Dot(inc(loc, 1)), [next | t])
+            }
+          else if is_digit(h) then
+            tokenize_num(loc, [h | t])
+          else if is_whitespace(h) then
+            tokenize_whitespace(loc, [h | t])
+          else
+            (Unexpected(inc(loc, 1), [h], "Unexpected character."), t)
+      },
+      next_loc = @erlang:element(2, token) :: Loc
+    in tokenize_r(left, next_loc.end_line, next_loc.end_col, [token | tokens])
+
+tokenize_num(loc, chs) = tokenize_num_r(loc, chs, false, [])
+tokenize_num_r(loc, chs, seen_dot, accum) = match chs {
+  [] => tokenize_num_finish(loc, seen_dot, accum, []),
+  [h | t] =>
+    if is_digit(h) then
+      tokenize_num_r(inc(loc, 1), t, seen_dot, [h | accum])
+    else if h == '.' then
+      if seen_dot then
+        let token = Unexpected(
+          inc(loc, 1),
+          reverse(accum),
+          "Can't have multiple dots in numeric literal."
+        ) in (token, t)
+      else
+        tokenize_num_r(inc(loc, 1), t, true, [h | accum])
+    else
+      tokenize_num_finish(loc, seen_dot, accum, [h | t])
+}
+tokenize_num_finish(loc, seen_dot, accum, left) =
+  if seen_dot then
+    (LitFloat(loc, to_float(reverse(accum))), left)
+  else
+    (LitInt(loc, to_int(reverse(accum))), left)
+
+tokenize_str(loc, chs) =
+  let ['"' | t] = chs in tokenize_str_r(loc, t, [])
+tokenize_str_r(loc, chs, accum) = match chs {
+  ['\\', h | t] =>
+    let next_loc = match h {
+      '\n' => next_line(loc),
+      _ => inc(loc, 2)
+    } in tokenize_str_r(next_loc, t, [unesc(h) | accum]),
+  ['"' | t] => (LitStr(inc(loc, 1), to_str(reverse(accum))), t),
+  ['\n' | t] =>
+    let token = Unexpected(
+      next_line(loc),
+      reverse(['\n' | accum]),
+      "Unterminated string literal. You can use \n for a newline character " ++
+      "or use \ at the end of a line to continue the string literal on the " ++
+      "next line. Note that the latter also inserts a newline character. If " ++
+      "you want to concat multiple strings, use the ++ operator."
+    ) in (token, t),
+  [h | t] => tokenize_str_r(inc(loc, 1), t, [h | accum]),
+  [] =>
+    let token = Unexpected(
+      loc,
+      reverse(accum),
+      "Unterminated string literal."
+    ) in (token, [])
+}
+
+tokenize_whitespace(loc, chs) = tokenize_whitespace_r(loc, chs, [])
+tokenize_whitespace_r(loc, chs, accum) = match chs {
+  ['\n' | t] => tokenize_whitespace_r(
+    { loc | end_line = loc.end_line + 1, end_col = 1 },
+    t,
+    ['\n' | accum]
+  ),
+  [h | t] =>
+    if is_whitespace(h) then
+      tokenize_whitespace_r(inc(loc, 1), t, [h | accum])
+    else
+      (Whitespace(loc, reverse(accum)), [h | t]),
+  [] => (Whitespace(loc, reverse(accum)), [])
+}
+
+chs_to_token_fn = {
+  to_list("discard") => Discard,
+  to_list("if") => If,
+  to_list("then") => Then,
+  to_list("else") => Else,
+  to_list("let") => Let,
+  to_list("in") => In,
+  to_list("match") => Match,
+  to_list("enum") => Enum,
+  to_list("struct") => Struct,
+  to_list("true") => flip(LitBool, true),
+  to_list("false") => flip(LitBool, false)
+}
+
+get_value :: A -> Map<A, B> -> B -> B
+get_value = @maps:get/3
+
+is_key :: A -> Map<A, B> -> Bool
+is_key = @maps:is_key/2
+
+until_nl(chs) = until_nl_r(chs, [], 0)
+until_nl_r(chs, accum, len) = match chs {
+  ['\n' | t] => (reverse(['\n' | accum]), len + 1, t),
+  [h | t] => until_nl_r(t, [h | accum], len + 1),
+  [] => (reverse(accum), len, [])
+}
+
+until_unesc(ch, chs) = until_unesc_r(ch, chs, [], 0)
+until_unesc_r(ch, chs, accum, len) = match chs {
+  ['\\', h | t] => until_unesc_r(ch, t, [unesc(h) | accum], len + 2),
+  [*ch | t] => (reverse(accum), len, [ch | t]),
+  [h | t] => until_unesc_r(ch, t, [h | accum], len + 1),
+  [] => (reverse(accum), len, [])
+}
+
+until_not(cb, chs) = until_not_r(cb, chs, [], 0)
+until_not_r(cb, chs, accum, len) = match chs {
+  [] => (reverse(accum), len, []),
+  [h | t] =>
+    if cb(h) then
+      until_not_r(cb, t, [h | accum], len + 1)
+    else
+      (reverse(accum), len, [h | t])
+}
+
+is_lower(ch) = $ch >= $'a' && $ch <= $'z'
+is_upper(ch) = $ch >= $'A' && $ch <= $'Z'
+is_digit(ch) = $ch >= $'0' && $ch <= $'9'
+is_whitespace(ch) = ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+is_word(ch) = is_lower(ch) || is_upper(ch) || is_digit(ch) || ch == '_'
+
+inc(loc, amount) = { loc | end_col = loc.end_col + amount }
+next_line(loc) = { loc | end_line = loc.end_line + 1, end_col = 1 }
+
+unesc(ch) = match ch {
+  'b' => '\b',
+  'f' => '\f',
+  'n' => '\n',
+  'r' => '\r',
+  't' => '\t',
+  'e' => '\e',
+  'v' => '\v',
+  's' => '\s',
+  'd' => '\d',
+  _ => ch
+}
+
+filter :: (A -> Bool) -> [A] -> [A]
+filter = @lists:filter/2
+
+flip :: (A -> B -> C) -> B -> A -> C
+flip(f, b, a) = f(a, b)
+
+length :: [A] -> Int
+length = @erlang:length/1
+
+to_str :: [Char] -> String
+to_str = @erlang:list_to_binary/1
+
+to_atom :: [Char] -> Atom
+to_atom = @erlang:list_to_atom/1
+
+str_to_atom :: String -> Atom
+str_to_atom = flip(@erlang:binary_to_atom/2, @latin1)
+
+to_int :: [Char] -> Int
+to_int = @erlang:list_to_integer/1
+
+to_float :: [Char] -> Float
+to_float = @erlang:list_to_float/1
+
+to_list :: String -> [Char]
+to_list = @erlang:binary_to_list/1
+
+reverse :: [A] -> [A]
+reverse = @lists:reverse/1
+
+print :: A -> A
+print(a) = { @io:format("~p~n", [a]); a }

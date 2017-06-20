@@ -1,5 +1,5 @@
 -module(par).
--export([reload/1, infer_prg/1, pretty/1, pattern_names/1]).
+-export([reload/1, infer_prg/1, report_errors/1, pretty/1, pattern_names/1]).
 -include("errors.hrl").
 
 % Naming conventions:
@@ -123,10 +123,19 @@
 % - Update naming conventions
 %
 % From dogfooding:
+% - Change fat arrow to regular arrow?
+% - if-let condition and other condition (or maybe when statement?)
 % - List error messages should include full List type
 % - Norm types for error messages
 % - Interpreter backtraces?
 % - Detect basic infinite loop conditions
+% - Name conflicts with erlang bifs?
+% - String concat on multiple lines
+% - Parsing issue for match Con { ... }
+% - Either explicitly disallow pattern matching w/ struct Con(...) fn, or don't
+% - Map/Set operations?
+% - Newlines instead of commas to separate match conditions, let vars, etc?
+% - Represent struct as tuple?
 %
 % - Force all block expressions except last to be type ()?
 % - List indexing?
@@ -153,8 +162,9 @@ reload(false) ->
 
 infer_prg(Prg) ->
   {ok, Tokens, _} = lexer:string(Prg),
+  %% {ok, Tokens} = (par_lexer:import(tokenize))(Prg),
   {ok, Ast} = parser:parse(Tokens),
-  ?LOG("AST", Ast),
+  %% ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
   C = #ctx{
@@ -223,7 +233,7 @@ infer_prg(Prg) ->
 
     case Node of
       {global, Line, {var, _, Name}, Expr} ->
-        #{Name := {add_dep, TV, ID}} = FoldC#ctx.env,
+        #{Name := {add_dep, TV, ID}} = FoldC1#ctx.env,
         FoldC2 = case Expr of
           {fn, _, _, _} -> FoldC1;
           _ -> FoldC1#ctx{env=maps:remove(Name, FoldC1#ctx.env)}
@@ -275,12 +285,24 @@ infer_prg(Prg) ->
         inst(maps:get(V, Schemes), Pid)
       end, C3#ctx.env),
       {ok, SubbedEnv, Ast};
+
     {errors, Errs} -> {errors, Errs}
   end,
 
   % TODO: how to require that main is defined?
   ok = tv_server:stop(Pid),
   Result.
+
+report_errors(Errs) ->
+  lists:foreach(fun
+    ({T1, T2, Line, From}) ->
+      io:format(
+        "[~p] in ~s~nexpected type ~s~ngot type      ~s~n~n",
+        [Line, From, par:pretty(T1), par:pretty(T2)]
+      );
+
+    ({Msg, Line}) -> io:format("[~p] ~s~n", [Line, Msg])
+  end, Errs).
 
 infer({fn, _, Args, Expr}, C) ->
   {ArgTsRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
@@ -450,8 +472,7 @@ infer({list, _, Elems}, C) ->
 
   {{gen, 'List', [TV]}, C1};
 
-% only occurs when pattern matching to destructure list into head/tail
-infer({list, Line, Elems, Tail}, C) ->
+infer({cons, Line, Elems, Tail}, C) ->
   {T, C1} = infer({list, Line, Elems}, C),
   {TailT, C2} = infer(Tail, C1),
   C3 = add_cst(T, TailT, ?LOC(Tail), ?FROM_LIST_TAIL, C2),
@@ -656,13 +677,6 @@ infer({block, _, Exprs}, C) ->
   end, {none, C}, Exprs),
   {T, C1};
 
-infer({cons, Line, Elem, List}, C) ->
-  {ElemT, C1} = infer(Elem, C),
-  {ListT, C2} = infer(List, C1),
-
-  C3 = add_cst({gen, 'List', [ElemT]}, ListT, Line, ?FROM_CONS, C2),
-  {ListT, C3};
-
 infer({Op, Line, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
   {RightT, C2} = infer(Right, C1),
@@ -842,15 +856,15 @@ with_pattern_env(Pattern, C) ->
 pattern_names([]) -> gb_sets:new();
 pattern_names([Node | Rest]) ->
   gb_sets:union(pattern_names(Node), pattern_names(Rest));
-pattern_names({N, _, _}) when N == int; N == float; N == bool; N == str;
-    N == atom; N == var_value; N == con_var ->
+pattern_names({N, _, _}) when N == int; N == float; N == bool; N == char;
+    N == str; N == atom; N == var_value; N == con_var ->
   gb_sets:new();
 pattern_names({var, _, Name}) -> gb_sets:singleton(Name);
 pattern_names({'_', _}) -> gb_sets:new();
 pattern_names({app, _, ConVar, Args}) ->
   gb_sets:union(pattern_names(ConVar), pattern_names(Args));
 pattern_names({list, _, Elems}) -> pattern_names(Elems);
-pattern_names({list, _, Elems, Tail}) ->
+pattern_names({cons, _, Elems, Tail}) ->
   gb_sets:union(pattern_names(Elems), pattern_names(Tail));
 pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 
@@ -906,7 +920,7 @@ norm_sig_type(SigT, ExceptVs, Pid) ->
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
-  ?LOG("Gs", lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)),
+  %% ?LOG("Gs", lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)),
 
   T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
     #{ID := #gnr{index=Index}} = FoldT#tarjan.map,
@@ -966,14 +980,14 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         FoldMap#{SolID := SolG#gnr{on_stack=false}}
       end, Map2, SolvableIDs),
 
-      ?LOG("Solvable IDs", SolvableIDs),
+      %% ?LOG("Solvable IDs", SolvableIDs),
 
       S3 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
         unify_csts(SolG, FoldS)
       end, S2, SolvableIDs),
 
-      ?LOG("Subs", maps:map(fun(_, T) -> pretty(T) end, S3#solver.subs)),
+      %% ?LOG("Subs", maps:map(fun(_, T) -> pretty(T) end, S3#solver.subs)),
 
       S4 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,

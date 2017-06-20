@@ -74,7 +74,7 @@ expr -> expr '%' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '++' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '--' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '.' var : {field, ?LOC('$1'), '$1', '$3'}.
-expr -> '[' expr '|' expr ']' : {cons, ?LOC('$1'), '$2', '$4'}.
+expr -> '[' expr_list '|' expr ']' : {cons, ?LOC('$1'), '$2', '$4'}.
 expr -> '!' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> '#' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> '$' expr : {first('$1'), ?LOC('$1'), '$2'}.
@@ -146,6 +146,7 @@ semi_list -> expr ';' semi_list : ['$1' | '$3'].
 pattern -> int : '$1'.
 pattern -> float : '$1'.
 pattern -> bool : '$1'.
+pattern -> char : '$1'.
 pattern -> str : '$1'.
 pattern -> atom : '$1'.
 pattern -> var : '$1'.
@@ -156,7 +157,7 @@ pattern -> con_var '(' pattern_list ')' : {app, ?LOC('$1'), '$1', '$3'}.
 pattern -> '[' ']' : {list, ?LOC('$1'), []}.
 pattern -> '[' pattern_list ']' : {list, ?LOC('$1'), '$2'}.
 pattern -> '[' pattern_list '|' pattern ']' :
-  {list, ?LOC('$1'), '$2', '$4'}.
+  {cons, ?LOC('$1'), '$2', '$4'}.
 pattern -> '(' pattern ',' pattern_list ')' :
   {tuple, ?LOC('$1'), ['$2' | '$4']}.
 pattern -> '(' pattern ')' : '$2'.

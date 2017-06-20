@@ -18,13 +18,7 @@ run_file(Name, Args) ->
 
 run_prg(Prg, Args) ->
   case par:infer_prg(Prg) of
-    {errors, Errs} ->
-      lists:foreach(fun({T1, T2, Line, From}) ->
-        io:format(
-          "[~p] in ~s~nexpected type ~s~ngot type      ~s~n~n",
-          [Line, From, par:pretty(T1), par:pretty(T2)]
-        )
-      end, Errs);
+    {errors, Errs} -> par:report_errors(Errs);
     {ok, _, Ast} -> run_ast(Ast, Args)
   end.
 
@@ -47,20 +41,20 @@ init({global, _, {var, _, Name}, Expr}, ID) ->
 
 init({enum_token, _, _, OptionTEs}, ID) ->
   lists:foreach(fun({{con_token, _, Con}, ArgsTE, KeyNode}) ->
-    Atom = case KeyNode of
+    Key = case KeyNode of
       default -> Con;
-      {atom, _, Atom_} -> Atom_
+      {atom, _, Key_} -> Key_
     end,
 
-    Value = if
-      length(ArgsTE) == 0 -> Atom;
+    V = if
+      length(ArgsTE) == 0 -> Key;
       true ->
         make_fun(length(ArgsTE), fun(Vs) ->
-          list_to_tuple([Atom | Vs])
+          list_to_tuple([Key | Vs])
         end)
     end,
 
-    env_set(atom_to_list(Con), Value, ID)
+    env_set(atom_to_list(Con), {option, Key, V}, ID)
   end, OptionTEs);
 
 init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
@@ -104,6 +98,12 @@ eval({N, _, V}, _)
 eval({list, _, Elems}, ID) ->
   lists:map(fun(E) -> eval(E, ID) end, Elems);
 
+eval({cons, Line, Elems, List}, ID) ->
+  ToPrepend = eval({list, Line, Elems}, ID),
+  lists:foldr(fun(V, FoldList) ->
+    [V | FoldList]
+  end, eval(List, ID), ToPrepend);
+
 eval({tuple, Line, Elems}, ID) ->
   list_to_tuple(eval({list, Line, Elems}, ID));
 
@@ -119,6 +119,7 @@ eval({var, _, Name}, ID) ->
       V = eval(Expr, ID),
       env_update(Name, V, ID),
       V;
+    {option, _, V} -> V;
     V -> V
   end;
 
@@ -194,9 +195,6 @@ eval({'match', _, Expr, Cases}, ID) ->
 
 eval({block, _, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
-
-eval({cons, _, Left, Right}, ID) ->
-  [eval(Left, ID) | eval(Right, ID)];
 
 eval({Op, _, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
@@ -302,8 +300,9 @@ match_cases(V, [{Pattern, Expr} | Rest], ID) ->
     false -> match_cases(V, Rest, ID)
   end.
 
-match(V1, {N, _, V2}, _)
-  when N == int; N == float; N == bool; N == str; N == atom -> V1 == V2;
+match(V1, {N, _, V2}, _) when N == int; N == float; N == bool; N == char;
+    N == str; N == atom ->
+  V1 == V2;
 
 match(V1, {var, _, Name}, ID) ->
   case env_get(Name, ID) of
@@ -318,17 +317,16 @@ match(_, {'_', _}, _) -> true;
 
 match(V1, {con_var, _, Name}, ID) ->
   case env_get(Name, ID) of
-    % can't match functions
-    V2 when not is_function(V2) -> V1 == V2;
-    _ -> false
+    {option, _, V2} -> V1 == V2;
+    V2 -> V1 == V2
   end;
 
 match(V, {app, _, {con_var, Line, Name}, Args}, ID) ->
-  Atom = list_to_atom(Name),
+  {option, Key, _} = env_get(Name, ID),
   if
-    length(Args) == 0 -> V == Atom;
+    length(Args) == 0 -> V == Key;
     true ->
-      match(tuple_to_list(V), {list, Line, [{atom, Line, Atom} | Args]}, ID)
+      match(tuple_to_list(V), {list, Line, [{atom, Line, Key} | Args]}, ID)
   end;
 
 match(V, {list, _, List}, ID) ->
@@ -343,7 +341,7 @@ match(V, {list, _, List}, ID) ->
       end, true, lists:zip(V, List))
   end;
 
-match(V, {list, Line, List, Rest}, ID) ->
+match(V, {cons, Line, List, Rest}, ID) ->
   if
     length(V) < length(List) -> false;
     true ->

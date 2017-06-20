@@ -15,7 +15,10 @@
 
 '_@ets_lookup_or_insert'(Atom, Fun) ->
   case ets:lookup(constants, Atom) of
-    [] -> ets:insert(constants, {Atom, Fun()});
+    [] ->
+      Value = Fun(),
+      ets:insert(constants, {Atom, Value}),
+      Value;
     [{_, Value}] -> Value
   end.
 
@@ -60,7 +63,8 @@
 
       case length(RestArgs) of
         0 -> apply(Fun, ImmArgs);
-        _ -> '_@curry'(apply(Fun, ImmArgs), RestArgs, Line)
+        _ ->
+          '_@curry'(apply(Fun, ImmArgs), RestArgs, Line)
       end
   end.
 

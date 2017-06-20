@@ -1,5 +1,6 @@
 -module(code_gen).
--export([reload/1, run_ast/2]).
+-export([reload/1, compile_file/2, compile_ast/2, run_ast/2]).
+-include("errors.hrl").
 
 reload(Syntax) ->
   par:reload(Syntax),
@@ -12,27 +13,38 @@ reload(Syntax) ->
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE).
 
-run_ast(Ast, Mod) ->
+compile_file(Name, Mod) ->
+  {ok, Prg} = file:read_file(Name),
+  case par:infer_prg(binary_to_list(Prg)) of
+    {errors, Errs} ->
+      par:report_errors(Errs),
+      errors;
+    {ok, _, Ast} -> compile_ast(Ast, Mod)
+  end.
+
+compile_ast(Ast, Mod) ->
+  counter_init(),
+
   Env = lists:foldl(fun(Node, FoldEnv) ->
     case Node of
       {global, _, {var, _, Name}, {fn, _, Args, _}} ->
         FoldEnv#{Name => {{global_fn, list_to_atom(Name)}, length(Args)}};
       {global, _, {var, _, Name}, _} ->
-        Value = {{ets, list_to_atom(lists:concat([Mod, '|', Name]))}, badarity},
+        Value = {{ets, list_to_atom(lists:concat([Mod, '|', Name]))}, unknown},
         FoldEnv#{Name => Value};
       {enum_token, _, _, OptionTEs} ->
-        lists:foldl(fun({{con_token, Line, Con}, ArgsTE, KeyNode}, NestedEnv) ->
+        lists:foldl(fun({{con_token, _, Con}, ArgsTE, KeyNode}, NestedEnv) ->
           Name = atom_to_list(Con),
           NumArgs = length(ArgsTE),
-          LitNode = case KeyNode of
-            default -> {atom, Line, Con};
-            {atom, _, _} -> KeyNode
+          Key = case KeyNode of
+            default -> Con;
+            {atom, _, Key_} -> Key_
           end,
 
           case NumArgs of
-            0 -> NestedEnv#{Name => {{lit, LitNode}, badarity}};
+            0 -> NestedEnv#{Name => {{option, Key}, badarity}};
             _ ->
-              Value = {{global_fn, Con}, NumArgs},
+              Value = {{option, Key, Con}, NumArgs},
               NestedEnv#{Name => Value}
           end
         end, FoldEnv, OptionTEs);
@@ -53,14 +65,16 @@ run_ast(Ast, Mod) ->
   Forms = [
     {attribute, 1, module, Mod},
     {attribute, 1, export, [{init, 0}, {import, 1}]},
-    rep_init_fn(Env),
+    rep_init_fn(Ast, Env),
     rep_import_fn(Env) |
     Utils ++ Reps
   ],
 
   {ok, Mod, Binary} = compile:forms(Forms),
-  ok = file:write_file(lists:concat([Mod, '.beam']), Binary),
+  ok = file:write_file(lists:concat([Mod, '.beam']), Binary).
 
+run_ast(Ast, Mod) ->
+  compile_ast(Ast, Mod),
   code:purge(Mod),
   code:load_file(Mod),
   Mod:init(),
@@ -95,12 +109,12 @@ rep({enum_token, _, _, OptionTEs}, _) ->
       {var, Line, Atom}
     end, lists:seq(1, length(ArgsTE))),
 
-    {AtomLine, Atom} = case KeyNode of
+    {KeyLine, Key} = case KeyNode of
       default -> {Line, Con};
-      {atom, AtomLine_, Atom_} -> {AtomLine_, Atom_}
+      {atom, KeyLine_, Key_} -> {KeyLine_, Key_}
     end,
 
-    Body = [{tuple, Line, [{atom, AtomLine, Atom} | ArgsRep]}],
+    Body = [{tuple, Line, [{atom, KeyLine, Key} | ArgsRep]}],
     Clause = {clause, Line, ArgsRep, [], Body},
     {function, Line, Con, length(ArgsTE), [Clause]}
   end, FnOptionTEs);
@@ -153,8 +167,7 @@ rep({list, Line, Elems}, Env) ->
     {cons, element(2, ERep), ERep, FoldRep}
   end, {nil, Line}, Elems);
 
-% only occurs in patterns
-rep({list, _, Elems, Tail}, Env) ->
+rep({cons, _, Elems, Tail}, Env) ->
   lists:foldr(fun(E, FoldRep) ->
     ERep = rep(E, Env),
     {cons, element(2, ERep), ERep, FoldRep}
@@ -184,7 +197,8 @@ rep({N, Line, Name}, Env) when N == var; N == con_var; N == var_value ->
              {integer, Line, 2}]}
       end;
 
-    {{lit, LitNode}, _} -> LitNode;
+    {{option, Key}, _} -> {atom, Line, Key};
+    {{option, _, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {{global_fn, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {Atom, _} -> {var, Line, Atom}
   end;
@@ -212,12 +226,13 @@ rep({field, _, Expr, {var, Line, Name}}, Env) ->
   call(maps, get, [{atom, Line, Atom}, rep(Expr, Env)], Line);
 
 rep({app, _, {con_var, Line, Name}, Args}, #{'*in_pattern' := true}=Env) ->
+  #{Name := {{option, Key, _}, _}} = Env,
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, Env) end, Args),
   % It's possible that this is actually a partial application, but we can't
   % successfully pattern match a newly generated function anyway, so as long as
   % our pattern fails (which it will, because a function won't match a tuple),
   % we're good.
-  {tuple, Line, [{atom, Line, list_to_atom(Name)} | ArgsRep]};
+  {tuple, Line, [{atom, Line, Key} | ArgsRep]};
 
 rep({app, _, Expr, RawArgs}, Env) ->
   ExprRep = rep(Expr, Env),
@@ -284,9 +299,15 @@ rep({'if', Line, Cond, Then, Else}, Env) ->
     _ -> [rep(Then, Env)]
   end,
 
+  % must factor out cond into its own variable, since it might not be a valid
+  % guard clause; TODO: optimize by not doing this if valid guard
+  CondLine = element(2, Cond),
+  CondVar = {var, CondLine, unique("_@Cond")},
+  Match = {match, CondLine, CondVar, rep(Cond, Env)},
+
   ElseClause = {clause, Line, [], [[{atom, Line, true}]], [rep(Else, Env)]},
-  Clauses = [{clause, Line, [], [[rep(Cond, Env)]], ThenBody}, ElseClause],
-  {'if', Line, Clauses};
+  Clauses = [{clause, Line, [], [[CondVar]], ThenBody}, ElseClause],
+  {block, Line, [Match, {'if', Line, Clauses}]};
 
 rep({'let', Line, Inits, Then}, Env) ->
   {InitsRep, Env1} = lists:mapfoldl(fun({Pattern, Expr}, FoldEnv) ->
@@ -326,9 +347,6 @@ rep({'match', Line, Expr, Cases}, Env) ->
 
 rep({block, Line, Exprs}, Env) ->
   {block, Line, lists:map(fun(E) -> rep(E, Env) end, Exprs)};
-
-rep({cons, Line, Elem, List}, Env) ->
-  {cons, Line, rep(Elem, Env), rep(List, Env)};
 
 rep({Op, Line, Left, Right}, Env) ->
   LeftRep = rep(Left, Env),
@@ -391,12 +409,18 @@ rep_pattern(Pattern, Expr, Env) ->
   end, Env, par:pattern_names(Pattern)),
   {rep(Pattern, Env1#{'*in_pattern' => true}), rep(Expr, Env), Env1}.
 
-rep_init_fn(Env) ->
+rep_init_fn(Ast, Env) ->
   CreateTableCall = {call, 1, {atom, 1, '_@ets_create_table'},
     [{atom, 1, constants}]},
 
-  {ResetCalls, PopulateCalls} = maps:fold(fun(Name, Value, Memo) ->
-    {Reset, Populate} = Memo,
+  GlobalVarNames = lists:filtermap(fun
+    ({global, _, _, {fn, _, _, _}}) -> false;
+    ({global, _, {var, _, Name}, _}) -> {true, Name};
+    (_) -> false
+  end, Ast),
+
+  {ResetCalls, PopulateCalls} = lists:foldl(fun(Name, {Reset, Populate}) ->
+    #{Name := Value} = Env,
     case Value of
       {{ets, Atom}, _} ->
         ResetArgsRep = [{atom, 1, constants}, {atom, 1, Atom}],
@@ -405,9 +429,9 @@ rep_init_fn(Env) ->
         {NewReset, NewPopulate};
       _ -> {Reset, Populate}
     end
-  end, {[], []}, Env),
+  end, {[], []}, GlobalVarNames),
 
-  Body = [CreateTableCall] ++ ResetCalls ++ PopulateCalls,
+  Body = lists:reverse(PopulateCalls ++ ResetCalls ++ [CreateTableCall]),
   Clause = {clause, 1, [], [], Body},
   {function, 1, 'init', 0, [Clause]}.
 
@@ -464,15 +488,19 @@ call(Mod, Fn, ArgsRep, Line) ->
 
 bind([H | T]=Name, Arity, Env) ->
   CapName = string:to_upper([H]) ++ T,
-  Atom = case maps:find(Name, Env) of
-    error -> list_to_atom(CapName);
-    {ok, {{ets, _}, _}} -> list_to_atom(lists:concat([CapName, '@', 1]));
-    {ok, {A, _}} ->
-      Num = case string:substr(atom_to_list(A), length(CapName) + 1) of
-        [] -> 1;
-        [$@ | NumStr] -> list_to_integer(NumStr) + 1
-      end,
-      list_to_atom(lists:concat([CapName, '@', Num]))
-  end,
+  Env#{Name => {unique(CapName), Arity}}.
 
-  Env#{Name => {Atom, Arity}}.
+unique(Prefix) ->
+  list_to_atom(lists:concat([Prefix, '@', counter_next()])).
+
+counter_init() ->
+  case ets:info(code_gen_counter) of
+    undefined -> ets:new(code_gen_counter, [set, named_table]);
+    _ -> true
+  end,
+  ets:insert(code_gen_counter, [{next, 1}]).
+
+counter_next() ->
+  Next = ets:lookup_element(code_gen_counter, next, 2),
+  ets:insert(code_gen_counter, [{next, Next + 1}]),
+  Next.
