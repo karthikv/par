@@ -1,5 +1,5 @@
 -module(par).
--export([reload/1, infer_prg/1, report_errors/1, pretty/1, pattern_names/1]).
+-export([reload/1, infer_prg/2, report_errors/1, pretty/1, pattern_names/1]).
 -include("errors.hrl").
 
 % Naming conventions:
@@ -107,15 +107,14 @@
 
 % TODO:
 % - Module declaration? / code gen file name attribute?
-% (3) Write lexer in par
-% - Escaped characters in strings
-%
 % - (code gen) Remove util functions when they're unused
+% - Columns + display code in error message reporting
 %
 % - Imports
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
 % - Pattern matching records
+%   - Disallow pattern matching w/ struct Con(...) fn?
 % - Exhaustive pattern matching errors
 % - Concurrency
 % - Allow trailing commas
@@ -123,6 +122,7 @@
 % - Update naming conventions
 %
 % From dogfooding:
+% - ebin for .beam files
 % - Change fat arrow to regular arrow?
 % - if-let condition and other condition (or maybe when statement?)
 % - List error messages should include full List type
@@ -130,22 +130,19 @@
 % - Interpreter backtraces?
 % - Detect basic infinite loop conditions
 % - Name conflicts with erlang bifs?
-% - String concat on multiple lines
 % - Parsing issue for match Con { ... }
-% - Either explicitly disallow pattern matching w/ struct Con(...) fn, or don't
 % - Map/Set operations?
 % - Newlines instead of commas to separate match conditions, let vars, etc?
-% - Represent struct as tuple?
+%   - Can we do string concat on multiple lines?
+% - Type aliases?
+% - Hex escaped characters \xff or \x{...} in strings
+% - Using EUnit from par?
+% - Export keyword?
 %
 % - Force all block expressions except last to be type ()?
 % - List indexing?
 
 reload(true) ->
-  code:purge(lexer),
-  {ok, _} = leex:file(lexer),
-  {ok, _} = compile:file(lexer),
-  code:load_file(lexer),
-
   code:purge(parser),
   {ok, _} = yecc:file(parser),
   {ok, _} = compile:file(parser),
@@ -154,16 +151,28 @@ reload(true) ->
   reload(false);
 
 reload(false) ->
+  code_gen:compile_file("lexer.par", new_lexer),
+  code:purge(new_lexer),
+  code:load_file(new_lexer),
+
+  code:purge(lexer),
+  code:load_file(lexer),
+
   tv_server:reload(),
 
   code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE).
 
-infer_prg(Prg) ->
-  {ok, Tokens, _} = lexer:string(Prg),
-  %% {ok, Tokens} = (par_lexer:import(tokenize))(Prg),
-  {ok, Ast} = parser:parse(Tokens),
+infer_prg(Prg, Stable) ->
+  {ok, Tokens} = case Stable of
+    true -> lexer:tokenize(Prg);
+    _ -> new_lexer:tokenize(Prg)
+  end,
+  NormTokens = lists:map(fun(T) ->
+    setelement(2, T, maps:get(start_line, element(2, T)))
+  end, Tokens),
+  {ok, Ast} = parser:parse(NormTokens),
   %% ?LOG("AST", Ast),
   {ok, Pid} = tv_server:start_link(),
 
@@ -1402,9 +1411,9 @@ occurs(V, {record, _, FieldMap}) ->
   end, false, FieldMap);
 occurs(_, none) -> false.
 
-pretty_csts([]) -> [];
-pretty_csts([{T1, T2, Line, From} | Rest]) ->
-  [{pretty(T1), pretty(T2), Line, From} | pretty_csts(Rest)].
+%% pretty_csts([]) -> [];
+%% pretty_csts([{T1, T2, Line, From} | Rest]) ->
+%%   [{pretty(T1), pretty(T2), Line, From} | pretty_csts(Rest)].
 
 pretty({lam, ArgT, ReturnT}) ->
   Format = case ArgT of

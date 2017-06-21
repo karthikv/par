@@ -1,11 +1,13 @@
 -module(code_gen).
--export([reload/1, compile_file/2, compile_ast/2, run_ast/2]).
+-export([reload/1, compile_file/2, compile_ast/2, run_ast/2, counter_run/1]).
+
 -include("errors.hrl").
+-define(COUNTER_NAME, code_gen_counter).
 
 reload(Syntax) ->
   par:reload(Syntax),
 
-  code:soft_purge(code_gen_utils),
+  code:purge(code_gen_utils),
   {ok, _} = compile:file(code_gen_utils),
   code:load_file(code_gen_utils),
 
@@ -15,7 +17,7 @@ reload(Syntax) ->
 
 compile_file(Name, Mod) ->
   {ok, Prg} = file:read_file(Name),
-  case par:infer_prg(binary_to_list(Prg)) of
+  case par:infer_prg(binary_to_list(Prg), true) of
     {errors, Errs} ->
       par:report_errors(Errs),
       errors;
@@ -23,15 +25,15 @@ compile_file(Name, Mod) ->
   end.
 
 compile_ast(Ast, Mod) ->
-  counter_init(),
+  counter_spawn(),
 
+  Gm = list_to_atom(lists:concat([Mod, '_gm'])),
   Env = lists:foldl(fun(Node, FoldEnv) ->
     case Node of
       {global, _, {var, _, Name}, {fn, _, Args, _}} ->
         FoldEnv#{Name => {{global_fn, list_to_atom(Name)}, length(Args)}};
       {global, _, {var, _, Name}, _} ->
-        Value = {{ets, list_to_atom(lists:concat([Mod, '|', Name]))}, unknown},
-        FoldEnv#{Name => Value};
+        FoldEnv#{Name => {{global, list_to_atom(Name)}, unknown}};
       {enum_token, _, _, OptionTEs} ->
         lists:foldl(fun({{con_token, _, Con}, ArgsTE, KeyNode}, NestedEnv) ->
           Name = atom_to_list(Con),
@@ -55,7 +57,7 @@ compile_ast(Ast, Mod) ->
         FoldEnv#{atom_to_list(Con) => {{global_fn, Con}, length(FieldTEs)}};
       _ -> FoldEnv
     end
-  end, #{}, Ast),
+  end, #{'*gm' => Gm}, Ast),
 
   {ok, Parsed} = epp:parse_file('code_gen_utils.erl', []),
   % remove attributes and eof
@@ -64,9 +66,9 @@ compile_ast(Ast, Mod) ->
   Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Ast),
   Forms = [
     {attribute, 1, module, Mod},
-    {attribute, 1, export, [{init, 0}, {import, 1}]},
-    rep_init_fn(Ast, Env),
-    rep_import_fn(Env) |
+    {attribute, 1, compile, export_all},
+    {attribute, 1, on_load, {'_@on_load', 0}},
+    rep_on_load_fn(Gm, Ast) |
     Utils ++ Reps
   ],
 
@@ -77,8 +79,7 @@ run_ast(Ast, Mod) ->
   compile_ast(Ast, Mod),
   code:purge(Mod),
   code:load_file(Mod),
-  Mod:init(),
-  (Mod:import(main))().
+  Mod:main().
 
 rep({global, Line, {var, _, Name}, Expr}, Env) ->
   case Expr of
@@ -87,13 +88,13 @@ rep({global, Line, {var, _, Name}, Expr}, Env) ->
       [{function, Line, list_to_atom(Name), length(Args), Clauses}];
 
     _ ->
-      Env1 = Env#{'*call_constant_fns' => true},
+      Env1 = Env#{'*populating_gm' => true},
       % TODO: don't need to create an extra fun here
       Fun = rep({fn, Line, [], Expr}, Env1),
 
-      #{Name := {{ets, Atom}, _}} = Env1,
-      Call = {call, Line, {atom, Line, '_@ets_lookup_or_insert'},
-        [{atom, Line, Atom}, Fun]},
+      #{Name := {{global, Atom}, _}, '*gm' := Gm} = Env1,
+      Call = {call, Line, {atom, Line, '_@gm_maybe_set'},
+        [{atom, Line, Gm}, {atom, Line, Atom}, Fun]},
       Clause = {clause, Line, [], [], [Call]},
       [{function, Line, list_to_atom(Name), 0, [Clause]}]
   end;
@@ -104,10 +105,10 @@ rep({enum_token, _, _, OptionTEs}, _) ->
   end, OptionTEs),
 
   lists:map(fun({{con_token, Line, Con}, ArgsTE, KeyNode}) ->
-    ArgsRep = lists:map(fun(Num) ->
-      Atom = list_to_atom(lists:concat(['_@', Num])),
+    ArgsRep = lists:map(fun(_) ->
+      Atom = unique("_@Arg"),
       {var, Line, Atom}
-    end, lists:seq(1, length(ArgsTE))),
+    end, ArgsTE),
 
     {KeyLine, Key} = case KeyNode of
       default -> {Line, Con};
@@ -186,15 +187,14 @@ rep({map, Line, Pairs}, Env) ->
 
 rep({N, Line, Name}, Env) when N == var; N == con_var; N == var_value ->
   case maps:get(Name, Env) of
-    % global constant in ETS
-    {{ets, Atom}, _} ->
-      case maps:find('*call_constant_fns', Env) of
-        {ok, true} -> {call, Line, {atom, Line, list_to_atom(Name)}, []};
+    % global variable handled by the global manager
+    {{global, Atom}, _} ->
+      #{'*gm' := Gm} = Env,
+      case maps:find('*populating_gm', Env) of
+        {ok, true} -> {call, Line, {atom, Line, Atom}, []};
         _ ->
-          {call, Line,
-            {remote, Line, {atom, Line, ets}, {atom, Line, lookup_element}},
-            [{atom, Line, constants}, {atom, Line, Atom},
-             {integer, Line, 2}]}
+          {call, Line, {atom, Line, '_@gm_get'},
+            [{atom, Line, Gm}, {atom, Line, Atom}]}
       end;
 
     {{option, Key}, _} -> {atom, Line, Key};
@@ -254,8 +254,8 @@ rep({app, _, Expr, RawArgs}, Env) ->
         [ExprRep, ArgsListRep, {integer, Line, Line}]};
 
     NumArgs < Arity ->
-      NewArgsRep = lists:map(fun(Num) ->
-        {var, Line, list_to_atom(lists:concat(['_@', Num]))}
+      NewArgsRep = lists:map(fun(_) ->
+        {var, Line, unique("_@Arg")}
       end, lists:seq(NumArgs + 1, Arity)),
 
       ArgsListRep = rep({list, Line, Args}, Env),
@@ -409,9 +409,8 @@ rep_pattern(Pattern, Expr, Env) ->
   end, Env, par:pattern_names(Pattern)),
   {rep(Pattern, Env1#{'*in_pattern' => true}), rep(Expr, Env), Env1}.
 
-rep_init_fn(Ast, Env) ->
-  CreateTableCall = {call, 1, {atom, 1, '_@ets_create_table'},
-    [{atom, 1, constants}]},
+rep_on_load_fn(Gm, Ast) ->
+  StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, Gm}]},
 
   GlobalVarNames = lists:filtermap(fun
     ({global, _, _, {fn, _, _, _}}) -> false;
@@ -419,32 +418,13 @@ rep_init_fn(Ast, Env) ->
     (_) -> false
   end, Ast),
 
-  {ResetCalls, PopulateCalls} = lists:foldl(fun(Name, {Reset, Populate}) ->
-    #{Name := Value} = Env,
-    case Value of
-      {{ets, Atom}, _} ->
-        ResetArgsRep = [{atom, 1, constants}, {atom, 1, Atom}],
-        NewReset = [call(ets, delete, ResetArgsRep, 1) | Reset],
-        NewPopulate = [{call, 1, {atom, 1, list_to_atom(Name)}, []} | Populate],
-        {NewReset, NewPopulate};
-      _ -> {Reset, Populate}
-    end
-  end, {[], []}, GlobalVarNames),
+  Calls = lists:map(fun(Name) ->
+    {call, 1, {atom, 1, list_to_atom(Name)}, []}
+  end, GlobalVarNames),
 
-  Body = lists:reverse(PopulateCalls ++ ResetCalls ++ [CreateTableCall]),
-  Clause = {clause, 1, [], [], Body},
-  {function, 1, 'init', 0, [Clause]}.
-
-rep_import_fn(Env) ->
-  ImportVar = {var, 1, 'Import'},
-  CaseClauses = maps:fold(fun(Name, _, Clauses) ->
-    VarRep = rep({var, 1, Name}, Env),
-    [{clause, 1, [{atom, 1, list_to_atom(Name)}], [], [VarRep]} | Clauses]
-  end, [], Env),
-  Case = {'case', 1, ImportVar, CaseClauses},
-
-  FnClause = {clause, 1, [ImportVar], [], [Case]},
-  {function, 1, 'import', 1, [FnClause]}.
+  % must return ok for module load to succeed
+  Clause = {clause, 1, [], [], [StartGm | Calls] ++ [{atom, 1, ok}]},
+  {function, 1, '_@on_load', 0, [Clause]}.
 
 arity({fn, _, Args, _}, _) -> length(Args);
 arity({'::', _, Expr, _}, Env) -> arity(Expr, Env);
@@ -493,14 +473,42 @@ bind([H | T]=Name, Arity, Env) ->
 unique(Prefix) ->
   list_to_atom(lists:concat([Prefix, '@', counter_next()])).
 
-counter_init() ->
-  case ets:info(code_gen_counter) of
-    undefined -> ets:new(code_gen_counter, [set, named_table]);
-    _ -> true
-  end,
-  ets:insert(code_gen_counter, [{next, 1}]).
+counter_spawn() ->
+  case whereis(?COUNTER_NAME) of
+    undefined ->
+      Pid = spawn(?MODULE, counter_run, [1]),
+      register(?COUNTER_NAME, Pid);
+
+    Pid ->
+      Pid ! {self(), reset},
+      receive
+        reset_ok -> true;
+        Unexpected ->
+          error({"unexpected reset response", Unexpected})
+      after 1000 ->
+        error("couldn't reset count")
+      end
+  end.
+
+counter_run(Count) ->
+  receive
+    {Pid, reset} ->
+      Pid ! reset_ok,
+      counter_run(1);
+    {Pid, next} ->
+      Pid ! {next_ok, Count},
+      counter_run(Count + 1);
+    Unexpected ->
+      io:format("unexpected counter message ~p~n", [Unexpected]),
+      counter_run(Count)
+  end.
 
 counter_next() ->
-  Next = ets:lookup_element(code_gen_counter, next, 2),
-  ets:insert(code_gen_counter, [{next, Next + 1}]),
-  Next.
+  ?COUNTER_NAME ! {self(), next},
+  receive
+    {next_ok, Next} -> Next;
+    Unexpected ->
+      error({"unexpected next response", Unexpected})
+  after 1000 ->
+    error("couldn't get next count")
+  end.

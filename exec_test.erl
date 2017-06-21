@@ -6,14 +6,14 @@ run() ->
   interpreter:reload(false),
   code_gen:reload(false),
 
-  code:soft_purge(?MODULE),
+  code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE),
 
   ?MODULE:test().
 
 run(Prg) ->
-  {ok, _, Ast} = par:infer_prg(Prg),
+  {ok, _, Ast} = par:infer_prg(Prg, true),
   code_gen:run_ast(Ast, code_gen_test),
   interpreter:run_ast(Ast, []).
 
@@ -203,6 +203,13 @@ global_test_() ->
       "foo = |x| bar(x) / 2\n"
       "bar(x) = if x == 0 then 1 else foo(x - 1) * 10\n"
       "main() = foo(6)"
+    ))
+  % to ensure no warnings from arg shadowing b/c of currying
+  , ?_test({{<<"hi">>, $d}, 3, 4} = run(
+      "bar(a, b, c) = (a('d'), b, c)\n"
+      "baz(a, b) = (a, b)\n"
+      "foo = bar(baz(\"hi\"))\n"
+      "main() = foo(3, 4)"
     ))
 
 

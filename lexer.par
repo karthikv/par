@@ -36,7 +36,7 @@ enum Token {
   Arrow(Loc) @"->",
   Sub(Loc) @"-",
 
-  Comment(Loc, [Char]) @"//",
+  Comment(Loc, [Char]),
   Div(Loc) @"/",
 
   Sig(Loc) @"::",
@@ -91,7 +91,11 @@ tokenize(chs) =
       |t| match t { Unexpected(_, _, _) => true, _ => false }, tokens)
   in
     if let [] = errs then
-      Ok(filter(|t| match t { Whitespace(_, _) => false, _ => true }, tokens))
+      Ok(filter(|t| match t {
+        Comment(_, _) => false,
+        Whitespace(_, _) => false,
+        _ => true
+      }, tokens))
     else
       Err(errs)
 
@@ -153,24 +157,24 @@ tokenize_r(chs, line, col, tokens) =
         ['$' | t] => (Dollar(inc(loc, 1)), t),
         ['#' | t] => (Pound(inc(loc, 1)), t),
 
-        ['\'', ch, '\'' | t] => (LitChar(inc(loc, 3), ch), t),
         ['\'', '\\', ch, '\'' | t] => (LitChar(inc(loc, 4), unesc(ch)), t),
+        ['\'', ch, '\'' | t] => (LitChar(inc(loc, 3), ch), t),
 
         ['"' | t] => tokenize_str(loc, ['"' | t]),
 
         ['@', '"' | t] =>
-          let (LitStr(loc, str), t) = print(tokenize_str(loc, ['"' | t])) in
+          let (LitStr(loc, str), t) = tokenize_str(loc, ['"' | t]) in
             (LitAtom(inc(loc, 1), str_to_atom(str)), t),
 
         ['@', h | t] =>
-          if is_lower(h) then
+          if is_word(h) then
             let (chs, len, t) = until_not(is_word, t) in
               (LitAtom(inc(loc, 2 + len), to_atom([h | chs])), t)
           else
             let token = Unexpected(
               inc(loc, 2),
               ['@', h],
-              "Atom must start with lowercase letter."
+              "Atom must start with a letter, digit, or underscore."
             ) in (token, t),
 
         [h | t] =>

@@ -1,25 +1,81 @@
 -module(code_gen_utils).
 -export([
-  '_@ets_create_table'/1,
-  '_@ets_lookup_or_insert'/2,
+  '_@gm_spawn'/1,
+  '_@gm_run'/1,
+  '_@gm_maybe_set'/3,
+  '_@gm_get'/2,
   '_@curry'/3,
   '_@concat'/2,
   '_@separate'/2
 ]).
 
-'_@ets_create_table'(Atom) ->
-  case ets:info(Atom, name) of
-    undefined -> ets:new(Atom, [set, named_table]);
-    Tab -> Tab
+'_@gm_spawn'(Gm) ->
+  case whereis(Gm) of
+    undefined ->
+      Pid = spawn(fun() -> '_@gm_run'(#{}) end),
+      register(Gm, Pid);
+
+    Pid ->
+      Pid ! {self(), reset},
+      receive
+        reset_ok -> true;
+        Unexpected ->
+          error({"unexpected reset response", Gm, Unexpected})
+      after 1000 ->
+        error({"couldn't reset globals", Gm})
+      end
   end.
 
-'_@ets_lookup_or_insert'(Atom, Fun) ->
-  case ets:lookup(constants, Atom) of
-    [] ->
+'_@gm_run'(Globals) ->
+  receive
+    {Pid, reset} ->
+      Pid ! reset_ok,
+      '_@gm_run'(#{});
+    {Pid, get, Atom} ->
+      Pid ! {get_ok, maps:get(Atom, Globals)},
+      '_@gm_run'(Globals);
+    {Pid, find, Atom} ->
+      Pid ! {find_ok, maps:find(Atom, Globals)},
+      '_@gm_run'(Globals);
+    {Pid, set, Atom, Value} ->
+      Pid ! set_ok,
+      '_@gm_run'(Globals#{Atom => Value});
+    Unexpected ->
+      io:format("unexpected gm message ~p~n", [Unexpected]),
+      '_@gm_run'(Globals)
+  end.
+
+'_@gm_maybe_set'(Gm, Atom, Fun) ->
+  Gm ! {self(), find, Atom},
+  receive
+    {find_ok, {ok, Value}} -> Value;
+
+    {find_ok, error} ->
       Value = Fun(),
-      ets:insert(constants, {Atom, Value}),
-      Value;
-    [{_, Value}] -> Value
+      Gm ! {self(), set, Atom, Value},
+      receive
+        set_ok -> Value;
+
+        Unexpected ->
+          error({"unexpected set response", Gm, Atom, Value, Unexpected})
+      after 1000 ->
+        error({"couldn't set global", Gm, Atom, Value})
+      end;
+
+    Unexpected ->
+      error({"unexpected find response", Gm, Atom, Unexpected})
+  after 1000 ->
+    error({"couldn't find global", Gm, Atom})
+  end.
+
+'_@gm_get'(Gm, Atom) ->
+  Gm ! {self(), get, Atom},
+  receive
+    {get_ok, Value} -> Value;
+    Unexpected ->
+      error({"unexpected get response", Gm, Atom, Unexpected})
+  after 1000 ->
+    error({"couldn't get global", Gm, Atom})
   end.
 
 '_@curry'(Fun, RawArgs, Line) ->

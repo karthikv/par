@@ -1,12 +1,10 @@
 -module(interpreter).
--export([reload/1, run_file/2, run_prg/2, run_ast/2]).
+-export([reload/1, run_file/2, run_prg/2, run_ast/2, env_run/2]).
+
+-define(ENV_NAME, interpreter_env).
 
 reload(Syntax) ->
   par:reload(Syntax),
-
-  code:soft_purge(code_gen_utils),
-  {ok, _} = compile:file(code_gen_utils),
-  code:load_file(code_gen_utils),
 
   code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
@@ -23,7 +21,7 @@ run_prg(Prg, Args) ->
   end.
 
 run_ast(Ast, Args) ->
-  ID = env_create_first(),
+  ID = env_spawn(),
   lists:foreach(fun(Node) -> init(Node, ID) end, Ast),
 
   lists:foreach(fun(Node) ->
@@ -79,7 +77,7 @@ eval({fn, _, Args, Expr}, ID) ->
     NewID = if
       length(Args) == 0 -> ID;
       true ->
-        ChildID = env_create_child(ID),
+        ChildID = env_child(ID),
         lists:foreach(fun({{var, _, Name}, V}) ->
           env_set(Name, V, ChildID)
         end, lists:zip(Args, Vs)),
@@ -250,13 +248,13 @@ eval({Op, _, Expr}, ID) ->
   end.
 
 eval_pattern({var, _, Name}, {fn, _, _, _}=Expr, ID) ->
-  ChildID = env_create_child(ID),
+  ChildID = env_child(ID),
   env_set(Name, eval(Expr, ChildID), ChildID),
   {true, ChildID};
 
 eval_pattern(Pattern, Expr, ID) ->
   V = eval(Expr, ID),
-  ChildID = env_create_child(ID),
+  ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, {}, ChildID)
   end, gb_sets:to_list(par:pattern_names(Pattern))),
@@ -290,7 +288,7 @@ make_fun(Arity, Callback) ->
 
 match_cases(V, [], _) -> error({badmatch, V});
 match_cases(V, [{Pattern, Expr} | Rest], ID) ->
-  ChildID = env_create_child(ID),
+  ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, {}, ChildID)
   end, gb_sets:to_list(par:pattern_names(Pattern))),
@@ -368,42 +366,85 @@ match(V, {tuple, _, Elems}, ID) ->
       Matched
   end.
 
-env_create_first() ->
-  case ets:info(envs) of
-    undefined -> true;
-    _ -> ets:delete(envs)
-  end,
-  ets:new(envs, [set, named_table]),
-  ets:insert(envs, [{next_id, 2}, {1, #{}, undefined}]),
-  1.
+env_spawn() ->
+  case whereis(?ENV_NAME) of
+    undefined ->
+      Pid = spawn_link(?MODULE, env_run, [2, #{1 => {#{}, undefined}}]),
+      register(?ENV_NAME, Pid),
+      1;
 
-env_create_child(ParentID) ->
-  ID = ets:lookup_element(envs, next_id, 2),
-  ets:insert(envs, [{next_id, ID + 1}, {ID, #{}, ParentID}]),
-  ID.
-
-env_get(Name, ID) ->
-  [{_, Env, ParentID}] = ets:lookup(envs, ID),
-  case maps:find(Name, Env) of
-    {ok, Value} -> Value;
-    error ->
-      case ParentID of
-        undefined -> error({badkey, Name});
-        _ -> env_get(Name, ParentID)
+    Pid ->
+      Pid ! {self(), reset},
+      receive
+        reset_ok -> 1;
+        Unexpected ->
+          error({"unexpected reset response", Unexpected})
+      after 1000 ->
+        error("couldn't reset env")
       end
   end.
 
-env_set(Name, Value, ID) ->
-  [{_, Env, ParentID}] = ets:lookup(envs, ID),
-  ets:insert(envs, {ID, Env#{Name => Value}, ParentID}).
+env_run(NextID, Env) ->
+  receive
+    {Pid, reset} ->
+      Pid ! reset_ok,
+      env_run(2, #{1 => {#{}, undefined}});
+    {Pid, child, ParentID} ->
+      Pid ! {child_ok, NextID},
+      env_run(NextID + 1, Env#{NextID => {#{}, ParentID}});
+    {Pid, find, Name, ID} ->
+      #{ID := {Bindings, ParentID}} = Env,
+      Pid ! {find_ok, maps:find(Name, Bindings), ParentID},
+      env_run(NextID, Env);
+    {Pid, set, Name, V, ID} ->
+      #{ID := {Bindings, ParentID}} = Env,
+      Pid ! set_ok,
+      env_run(NextID, Env#{ID := {Bindings#{Name => V}, ParentID}});
+    Unexpected ->
+      io:format("unexpected env message ~p~n", [Unexpected]),
+      env_run(NextID, Env)
+  end.
 
-env_update(Name, Value, ID) ->
-  [{_, Env, ParentID}] = ets:lookup(envs, ID),
-  case maps:find(Name, Env) of
-    {ok, _} -> ets:insert(envs, {ID, Env#{Name => Value}, ParentID});
-    error ->
-      case ParentID of
-        undefined -> error({badkey, Name});
-        _ -> env_update(Name, Value, ParentID)
-      end
+env_child(ParentID) ->
+  ?ENV_NAME ! {self(), child, ParentID},
+  receive
+    {child_ok, NextID} -> NextID;
+    Unexpected ->
+      error({"unexpected child response", Unexpected})
+  after 1000 ->
+    error({"couldn't make child env", ParentID})
+  end.
+
+env_get(Name, ID) ->
+  ?ENV_NAME ! {self(), find, Name, ID},
+  receive
+    {find_ok, {ok, V}, _} -> V;
+    {find_ok, error, undefined} -> error({badkey, Name});
+    {find_ok, error, ParentID} -> env_get(Name, ParentID);
+    Unexpected ->
+      error({"unexpected find response", Name, ID, Unexpected})
+  after 1000 ->
+    error({"couldn't get env", Name, ID})
+  end.
+
+env_set(Name, V, ID) ->
+  ?ENV_NAME ! {self(), set, Name, V, ID},
+  receive
+    set_ok -> ok;
+    Unexpected ->
+      error({"unexpected set response", Name, V, ID, Unexpected})
+  after 1000 ->
+    error({"couldn't set env", Name, V, ID})
+  end.
+
+env_update(Name, V, ID) ->
+  ?ENV_NAME ! {self(), find, Name, ID},
+  receive
+    {find_ok, {ok, _}, _} -> env_set(Name, V, ID);
+    {find_ok, error, undefined} -> error({badkey, Name});
+    {find_ok, error, ParentID} -> env_update(Name, V, ParentID);
+    Unexpected ->
+      error({"unexpected find response", Name, V, ID, Unexpected})
+  after 1000 ->
+    error({"couldn't update env", Name, V, ID})
   end.

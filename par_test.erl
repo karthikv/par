@@ -7,19 +7,14 @@
 run() ->
   par:reload(false),
 
-  code:soft_purge(?MODULE),
+  code:purge(?MODULE),
   {ok, _} = compile:file(?MODULE),
   code:load_file(?MODULE),
-
-  code_gen:compile_file("lexer.par", par_lexer),
-  code:purge(par_lexer),
-  code:load_file(par_lexer),
-  par_lexer:init(),
 
   ?MODULE:test().
 
 norm_prg(Prg, Name) ->
-  {ok, Env, _} = par:infer_prg(Prg),
+  {ok, Env, _} = par:infer_prg(Prg, false),
   #{Name := T} = Env,
 
   {ok, Pid} = tv_server:start_link(),
@@ -31,11 +26,11 @@ ok_prg(Prg, Name) ->
   par:pretty(norm_prg(Prg, Name)).
 
 bad_prg(Prg, ExpErr) when not is_list(ExpErr) ->
-  {errors, [Err]} = par:infer_prg(Prg),
+  {errors, [Err]} = par:infer_prg(Prg, false),
   check(Err, ExpErr);
 
 bad_prg(Prg, ExpErrs) ->
-  {errors, Errs} = par:infer_prg(Prg),
+  {errors, Errs} = par:infer_prg(Prg, false),
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, ExpErr}) ->
@@ -43,7 +38,7 @@ bad_prg(Prg, ExpErrs) ->
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, Line}]} = par:infer_prg(Prg),
+  {errors, [{Msg, Line}]} = par:infer_prg(Prg, false),
   ExpMsg = Msg,
   ExpLine = Line.
 
@@ -71,8 +66,8 @@ check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   ExpLine = Line,
   ExpFrom = From.
 
-%% ok_expr(Expr) ->
-%%   par:pretty(norm_prg("expr = " ++ Expr, "expr")).
+ok_expr(Expr) ->
+  par:pretty(norm_prg("expr = " ++ Expr, "expr")).
 
 bad_expr(Expr, Err) ->
   bad_prg("expr = " ++ Expr, Err).
@@ -122,24 +117,6 @@ norm({record, A, FieldMap}, N) ->
   end, {#{}, N}, FieldMap),
   {{record, A, NewFieldMap}, N1};
 norm(none, N) -> {none, N}.
-
-ok_expr(Expr) ->
-  Prg = "expr = " ++ Expr,
-  {ok, Tokens, _} = lexer:string(Prg),
-  {ok, ParTokens} = (par_lexer:import(tokenize))(Prg),
-
-  NormParTokens = lists:map(fun(T) ->
-    setelement(2, T, maps:get(start_line, element(2, T)))
-  end, ParTokens),
-
-  lists:foreach(fun(Index) ->
-    ?assertEqual(
-       lists:nth(Index, Tokens),
-       lists:nth(Index, NormParTokens)
-    )
-  end, lists:seq(1, max(length(Tokens), length(ParTokens)))),
-
-  par:pretty(norm_prg("expr = " ++ Expr, "expr")).
 
 expr_test_() ->
   [ ?_test("()" = ok_expr("()"))
