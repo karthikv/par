@@ -201,7 +201,7 @@ tokenize_r(chs, line, col, tokens) =
           else if is_lower(h) then
             let
               (chs, len, t) = until_not(is_word, t),
-              token = get_value(
+              token = get(
                 [h | chs],
                 chs_to_token_fn,
                 flip(Var, [h | chs]),
@@ -308,8 +308,8 @@ chs_to_token_fn = {
   to_list("false") => flip(LitBool, false)
 }
 
-get_value :: A -> Map<A, B> -> B -> B
-get_value = @maps:get/3
+get :: A -> Map<A, B> -> B -> B
+get = @maps:get/3
 
 is_key :: A -> Map<A, B> -> Bool
 is_key = @maps:is_key/2

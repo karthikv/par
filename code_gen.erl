@@ -61,12 +61,15 @@ compile_ast(Ast, Mod) ->
 
   {ok, Parsed} = epp:parse_file('code_gen_utils.erl', []),
   % remove attributes and eof
-  Utils = lists:sublist(Parsed, 4, length(Parsed) - 4),
+  Utils = lists:dropwhile(fun
+    (Node) when element(1, Node) == function -> false;
+    (_) -> true
+  end, lists:droplast(Parsed)),
 
   Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Ast),
   Forms = [
     {attribute, 1, module, Mod},
-    {attribute, 1, compile, export_all},
+    {attribute, 1, compile, [export_all, no_auto_import]},
     {attribute, 1, on_load, {'_@on_load', 0}},
     rep_on_load_fn(Gm, Ast) |
     Utils ++ Reps
@@ -263,7 +266,8 @@ rep({app, _, Expr, RawArgs}, Env) ->
         {cons, Line, ArgRep, ListRep}
       end, {nil, Line}, NewArgsRep),
 
-      Body = [{call, Line, {atom, Line, apply},
+      Body = [{call, Line,
+        {remote, Line, {atom, Line, erlang}, {atom, Line, apply}},
         [ExprRep, {op, Line, '++', ArgsListRep, NewArgsListRep}]}],
       Clause = {clause, Line, NewArgsRep, [], Body},
       {'fun', Line, {clauses, [Clause]}};

@@ -8,21 +8,22 @@
   '_@concat'/2,
   '_@separate'/2
 ]).
+-compile(no_auto_import).
 
 '_@gm_spawn'(Gm) ->
-  case whereis(Gm) of
+  case erlang:whereis(Gm) of
     undefined ->
-      Pid = spawn(fun() -> '_@gm_run'(#{}) end),
-      register(Gm, Pid);
+      Pid = erlang:spawn(fun() -> '_@gm_run'(#{}) end),
+      erlang:register(Gm, Pid);
 
     Pid ->
-      Pid ! {self(), reset},
+      Pid ! {erlang:self(), reset},
       receive
         reset_ok -> true;
         Unexpected ->
-          error({"unexpected reset response", Gm, Unexpected})
+          erlang:error({"unexpected reset response", Gm, Unexpected})
       after 1000 ->
-        error({"couldn't reset globals", Gm})
+        erlang:error({"couldn't reset globals", Gm})
       end
   end.
 
@@ -46,36 +47,36 @@
   end.
 
 '_@gm_maybe_set'(Gm, Atom, Fun) ->
-  Gm ! {self(), find, Atom},
+  Gm ! {erlang:self(), find, Atom},
   receive
     {find_ok, {ok, Value}} -> Value;
 
     {find_ok, error} ->
       Value = Fun(),
-      Gm ! {self(), set, Atom, Value},
+      Gm ! {erlang:self(), set, Atom, Value},
       receive
         set_ok -> Value;
 
         Unexpected ->
-          error({"unexpected set response", Gm, Atom, Value, Unexpected})
+          erlang:error({"unexpected set response", Gm, Atom, Value, Unexpected})
       after 1000 ->
-        error({"couldn't set global", Gm, Atom, Value})
+        erlang:error({"couldn't set global", Gm, Atom, Value})
       end;
 
     Unexpected ->
-      error({"unexpected find response", Gm, Atom, Unexpected})
+      erlang:error({"unexpected find response", Gm, Atom, Unexpected})
   after 1000 ->
-    error({"couldn't find global", Gm, Atom})
+    erlang:error({"couldn't find global", Gm, Atom})
   end.
 
 '_@gm_get'(Gm, Atom) ->
-  Gm ! {self(), get, Atom},
+  Gm ! {erlang:self(), get, Atom},
   receive
     {get_ok, Value} -> Value;
     Unexpected ->
-      error({"unexpected get response", Gm, Atom, Unexpected})
+      erlang:error({"unexpected get response", Gm, Atom, Unexpected})
   after 1000 ->
-    error({"couldn't get global", Gm, Atom})
+    erlang:error({"couldn't get global", Gm, Atom})
   end.
 
 '_@curry'(Fun, RawArgs, Line) ->
@@ -83,16 +84,16 @@
 
   Args = case Arity of
     0 ->
-      none = hd(RawArgs),
-      tl(RawArgs);
+      none = erlang:hd(RawArgs),
+      erlang:tl(RawArgs);
     _ -> RawArgs
   end,
-  NumArgs = length(Args),
+  NumArgs = erlang:length(Args),
 
   if
     NumArgs < Arity ->
       NewArgsRep = lists:map(fun(Num) ->
-        {var, Line, list_to_atom(lists:concat(['_@', Num]))}
+        {var, Line, erlang:list_to_atom(lists:concat(['_@', Num]))}
       end, lists:seq(NumArgs + 1, Arity)),
       NewArgsListRep = lists:foldr(fun(FoldArgRep, FoldListRep) ->
         {cons, Line, FoldArgRep, FoldListRep}
@@ -101,7 +102,8 @@
       FunVar = {var, Line, '_@Fun'},
       ArgsVar = {var, Line, '_@Args'},
 
-      Body = [{call, Line, {atom, Line, apply},
+      Body = [{call, Line,
+        {remote, Line, {atom, Line, erlang}, {atom, Line, apply}},
         [FunVar, {op, Line, '++', ArgsVar, NewArgsListRep}]}],
       Clause = {clause, Line, NewArgsRep, [], Body},
       Expr = {'fun', Line, {clauses, [Clause]}},
@@ -117,18 +119,18 @@
       ImmArgs = lists:sublist(Args, Arity),
       RestArgs = lists:sublist(Args, Arity + 1, NumArgs),
 
-      case length(RestArgs) of
-        0 -> apply(Fun, ImmArgs);
+      case erlang:length(RestArgs) of
+        0 -> erlang:apply(Fun, ImmArgs);
         _ ->
-          '_@curry'(apply(Fun, ImmArgs), RestArgs, Line)
+          '_@curry'(erlang:apply(Fun, ImmArgs), RestArgs, Line)
       end
   end.
 
 '_@concat'(Left, Right) ->
   if
-    is_binary(Left) -> <<Left/binary, Right/binary>>;
-    is_list(Left) -> Left ++ Right;
-    is_map(Left) -> maps:merge(Left, Right);
+    erlang:is_binary(Left) -> <<Left/binary, Right/binary>>;
+    erlang:is_list(Left) -> Left ++ Right;
+    erlang:is_map(Left) -> maps:merge(Left, Right);
     true ->
       true = gb_sets:is_set(Left),
       gb_sets:union(Left, Right)
@@ -136,7 +138,7 @@
 
 '_@separate'(Left, Right) ->
   if
-    is_list(Left) ->
+    erlang:is_list(Left) ->
       Set = gb_sets:from_list(Right),
       lists:filter(fun(Elem) ->
         not gb_sets:is_member(Elem, Set)

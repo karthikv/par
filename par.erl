@@ -106,41 +106,43 @@
 -endif.
 
 % TODO:
-% - Module declaration? / code gen file name attribute?
 % - (code gen) Remove util functions when they're unused
 % - Columns + display code in error message reporting
+% - ebin for .beam files
 %
 % - Imports
+%   - Module declaration? / code gen file name attribute?
+%   - Export keyword
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
 % - Pattern matching records
 %   - Disallow pattern matching w/ struct Con(...) fn?
 % - Exhaustive pattern matching errors
+% - Stdlib
+%   - Map/Set operations?
 % - Concurrency
-% - Allow trailing commas
 % - Second pass for error messages (see TODOs in code)
+%   - Write parser in par
+%   - Parsing issue for match Con { ... }
+%   - List error messages should include full List type
+%   - Norm types for error messages
+%   - Detect basic infinite loop conditions
 % - Update naming conventions
 %
-% From dogfooding:
-% - ebin for .beam files
-% - Change fat arrow to regular arrow?
-% - if-let condition and other condition (or maybe when statement?)
-% - List error messages should include full List type
-% - Norm types for error messages
-% - Interpreter backtraces?
-% - Detect basic infinite loop conditions
-% - Name conflicts with erlang bifs?
-% - Parsing issue for match Con { ... }
-% - Map/Set operations?
+% Defer
 % - Newlines instead of commas to separate match conditions, let vars, etc?
+%   - Allow trailing commas
 %   - Can we do string concat on multiple lines?
-% - Type aliases?
+% - Using EUnit from par
+% - if-let condition and other condition (or maybe when statement?)
 % - Hex escaped characters \xff or \x{...} in strings
-% - Using EUnit from par?
-% - Export keyword?
 %
+% Uncertain
+% - Interpreter backtraces?
 % - Force all block expressions except last to be type ()?
 % - List indexing?
+% - Change fat arrow to regular arrow?
+% - Type aliases?
 
 reload(true) ->
   code:purge(parser),
