@@ -1,8 +1,16 @@
 -module(code_gen).
--export([reload/1, compile_file/2, compile_ast/2, run_ast/2, counter_run/1]).
+-export([
+  reload/1,
+  compile_file/2,
+  compile_ast/2,
+  run_ast/2,
+  counter_run/1,
+  excluder_run/1
+]).
 
 -include("errors.hrl").
 -define(COUNTER_NAME, code_gen_counter).
+-define(EXCLUDER_NAME, code_gen_excluder).
 
 reload(Syntax) ->
   par:reload(Syntax),
@@ -26,6 +34,7 @@ compile_file(Name, Mod) ->
 
 compile_ast(Ast, Mod) ->
   counter_spawn(),
+  excluder_spawn(gb_sets:from_list(['_@curry', '_@concat', '_@separate'])),
 
   Gm = list_to_atom(lists:concat([Mod, '_gm'])),
   Env = lists:foldl(fun(Node, FoldEnv) ->
@@ -59,14 +68,16 @@ compile_ast(Ast, Mod) ->
     end
   end, #{'*gm' => Gm}, Ast),
 
+  Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Ast),
+  Excluded = excluder_all(),
+
   {ok, Parsed} = epp:parse_file('code_gen_utils.erl', []),
   % remove attributes and eof
-  Utils = lists:dropwhile(fun
-    (Node) when element(1, Node) == function -> false;
-    (_) -> true
+  Utils = lists:filter(fun
+    ({function, _, Atom, _, _}) -> not gb_sets:is_member(Atom, Excluded);
+    (_) -> false
   end, lists:droplast(Parsed)),
 
-  Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Ast),
   Forms = [
     {attribute, 1, module, Mod},
     {attribute, 1, compile, [export_all, no_auto_import]},
@@ -253,6 +264,7 @@ rep({app, _, Expr, RawArgs}, Env) ->
   if
     Arity == unknown ->
       ArgsListRep = rep({list, Line, Args}, Env),
+      excluder_remove('_@curry'),
       {call, Line, {atom, Line, '_@curry'},
         [ExprRep, ArgsListRep, {integer, Line, Line}]};
 
@@ -287,6 +299,7 @@ rep({app, _, Expr, RawArgs}, Env) ->
         true ->
           RestArgs = lists:sublist(Args, Arity + 1, NumArgs),
           RestArgsListRep = rep({list, Line, RestArgs}, Env),
+          excluder_remove('_@curry'),
           {call, Line, {atom, Line, '_@curry'},
             [Call, RestArgsListRep, {integer, Line, Line}]}
       end
@@ -358,8 +371,10 @@ rep({Op, Line, Left, Right}, Env) ->
 
   case Op of
     '++' ->
+      excluder_remove('_@concat'),
       {call, Line, {atom, Line, '_@concat'}, [LeftRep, RightRep]};
     '--' ->
+      excluder_remove('_@separate'),
       {call, Line, {atom, Line, '_@separate'}, [LeftRep, RightRep]};
     '|>' ->
       case Right of
@@ -515,4 +530,57 @@ counter_next() ->
       error({"unexpected next response", Unexpected})
   after 1000 ->
     error("couldn't get next count")
+  end.
+
+excluder_spawn(Excluded) ->
+  case whereis(?EXCLUDER_NAME) of
+    undefined ->
+      Pid = spawn(?MODULE, excluder_run, [Excluded]),
+      register(?EXCLUDER_NAME, Pid);
+
+    Pid ->
+      Pid ! {self(), reset, Excluded},
+      receive
+        reset_ok -> true;
+        Unexpected ->
+          error({"unexpected reset response", Unexpected})
+      after 1000 ->
+        error("couldn't reset excluder")
+      end
+  end.
+
+excluder_run(Excluded) ->
+  receive
+    {Pid, reset, NewExcluded} ->
+      Pid ! reset_ok,
+      excluder_run(NewExcluded);
+    {Pid, remove, Element} ->
+      Pid ! remove_ok,
+      excluder_run(gb_sets:del_element(Element, Excluded));
+    {Pid, all} ->
+      Pid ! {all_ok, Excluded},
+      excluder_run(Excluded);
+    Unexpected ->
+      io:format("unexpected excluder message ~p~n", [Unexpected]),
+      excluder_run(Excluded)
+  end.
+
+excluder_remove(Element) ->
+  ?EXCLUDER_NAME ! {self(), remove, Element},
+  receive
+    remove_ok -> ok;
+    Unexpected ->
+      error({"unexpected remove response", Unexpected})
+  after 1000 ->
+    error("couldn't remove element from excluder")
+  end.
+
+excluder_all() ->
+  ?EXCLUDER_NAME ! {self(), all},
+  receive
+    {all_ok, Excluded} -> Excluded;
+    Unexpected ->
+      error({"unexpected all response", Unexpected})
+  after 1000 ->
+    error("couldn't get all excluded elements")
   end.

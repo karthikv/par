@@ -106,9 +106,9 @@
 -endif.
 
 % TODO:
-% - (code gen) Remove util functions when they're unused
 % - Columns + display code in error message reporting
 % - ebin for .beam files
+% - Stop spawned processes
 %
 % - Imports
 %   - Module declaration? / code gen file name attribute?
@@ -145,6 +145,10 @@
 % - Type aliases?
 
 reload(true) ->
+  code_gen:compile_file("lexer.par", new_lexer),
+  code:purge(new_lexer),
+  code:load_file(new_lexer),
+
   code:purge(parser),
   {ok, _} = yecc:file(parser),
   {ok, _} = compile:file(parser),
@@ -153,10 +157,6 @@ reload(true) ->
   reload(false);
 
 reload(false) ->
-  code_gen:compile_file("lexer.par", new_lexer),
-  code:purge(new_lexer),
-  code:load_file(new_lexer),
-
   code:purge(lexer),
   code:load_file(lexer),
 

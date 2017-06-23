@@ -266,7 +266,7 @@ tokenize_str_r(loc, chs, accum) = match chs {
       next_line(loc),
       reverse(['\n' | accum]),
       "Unterminated string literal. You can use \n for a newline character " ++
-      "or use \ at the end of a line to continue the string literal on the " ++
+      "or use \\ at the end of a line to continue the string literal on the " ++
       "next line. Note that the latter also inserts a newline character. If " ++
       "you want to concat multiple strings, use the ++ operator."
     ) in (token, t),
@@ -295,7 +295,6 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
 }
 
 chs_to_token_fn = {
-  to_list("discard") => Discard,
   to_list("if") => If,
   to_list("then") => Then,
   to_list("else") => Else,
@@ -305,7 +304,8 @@ chs_to_token_fn = {
   to_list("enum") => Enum,
   to_list("struct") => Struct,
   to_list("true") => flip(LitBool, true),
-  to_list("false") => flip(LitBool, false)
+  to_list("false") => flip(LitBool, false),
+  to_list("discard") => Discard
 }
 
 get :: A -> Map<A, B> -> B -> B
