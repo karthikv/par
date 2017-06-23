@@ -1,7 +1,6 @@
 -module(tv_server).
 -behavior(gen_server).
 -export([
-  reload/0,
   start_link/0,
   next_name/1,
   next_gnr_id/1,
@@ -16,11 +15,6 @@
   terminate/2,
   code_change/3
 ]).
-
-reload() ->
-  code:purge(?MODULE),
-  {ok, _} = compile:file(?MODULE),
-  code:load_file(?MODULE).
 
 start_link() -> gen_server:start_link(?MODULE, {1, 0}, []).
 next_name(Pid) -> gen_server:call(Pid, next_name).

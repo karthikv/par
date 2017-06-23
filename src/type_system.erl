@@ -1,5 +1,5 @@
--module(par).
--export([reload/1, infer_prg/2, report_errors/1, pretty/1, pattern_names/1]).
+-module(type_system).
+-export([infer_prg/2, report_errors/1, pretty/1, pattern_names/1]).
 -include("errors.hrl").
 
 % Naming conventions:
@@ -108,7 +108,6 @@
 % TODO:
 % - Columns + display code in error message reporting
 % - ebin for .beam files
-% - Stop spawned processes
 %
 % - Imports
 %   - Module declaration? / code gen file name attribute?
@@ -144,32 +143,10 @@
 % - Change fat arrow to regular arrow?
 % - Type aliases?
 
-reload(true) ->
-  code_gen:compile_file("lexer.par", new_lexer),
-  code:purge(new_lexer),
-  code:load_file(new_lexer),
-
-  code:purge(parser),
-  {ok, _} = yecc:file(parser),
-  {ok, _} = compile:file(parser),
-  code:load_file(parser),
-
-  reload(false);
-
-reload(false) ->
-  code:purge(lexer),
-  code:load_file(lexer),
-
-  tv_server:reload(),
-
-  code:purge(?MODULE),
-  {ok, _} = compile:file(?MODULE),
-  code:load_file(?MODULE).
-
 infer_prg(Prg, Stable) ->
   {ok, Tokens} = case Stable of
     true -> lexer:tokenize(Prg);
-    _ -> new_lexer:tokenize(Prg)
+    _ -> lexer:tokenize(Prg)
   end,
   NormTokens = lists:map(fun(T) ->
     setelement(2, T, maps:get(start_line, element(2, T)))
@@ -308,11 +285,12 @@ report_errors(Errs) ->
   lists:foreach(fun
     ({T1, T2, Line, From}) ->
       io:format(
+        standard_error,
         "[~p] in ~s~nexpected type ~s~ngot type      ~s~n~n",
-        [Line, From, par:pretty(T1), par:pretty(T2)]
+        [Line, From, pretty(T1), pretty(T2)]
       );
 
-    ({Msg, Line}) -> io:format("[~p] ~s~n", [Line, Msg])
+    ({Msg, Line}) -> io:format(standard_error, "[~p] ~s~n", [Line, Msg])
   end, Errs).
 
 infer({fn, _, Args, Expr}, C) ->

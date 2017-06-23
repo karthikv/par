@@ -1,20 +1,9 @@
 -module(par_test).
--export([run/0]).
-
 -include_lib("eunit/include/eunit.hrl").
--include("errors.hrl").
-
-run() ->
-  par:reload(false),
-
-  code:purge(?MODULE),
-  {ok, _} = compile:file(?MODULE),
-  code:load_file(?MODULE),
-
-  ?MODULE:test().
+-include("../src/errors.hrl").
 
 norm_prg(Prg, Name) ->
-  {ok, Env, _} = par:infer_prg(Prg, false),
+  {ok, Env, _} = type_system:infer_prg(Prg, false),
   #{Name := T} = Env,
 
   {ok, Pid} = tv_server:start_link(),
@@ -23,14 +12,14 @@ norm_prg(Prg, Name) ->
   NormT.
 
 ok_prg(Prg, Name) ->
-  par:pretty(norm_prg(Prg, Name)).
+  type_system:pretty(norm_prg(Prg, Name)).
 
 bad_prg(Prg, ExpErr) when not is_list(ExpErr) ->
-  {errors, [Err]} = par:infer_prg(Prg, false),
+  {errors, [Err]} = type_system:infer_prg(Prg, false),
   check(Err, ExpErr);
 
 bad_prg(Prg, ExpErrs) ->
-  {errors, Errs} = par:infer_prg(Prg, false),
+  {errors, Errs} = type_system:infer_prg(Prg, false),
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, ExpErr}) ->
@@ -38,7 +27,7 @@ bad_prg(Prg, ExpErrs) ->
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, Line}]} = par:infer_prg(Prg, false),
+  {errors, [{Msg, Line}]} = type_system:infer_prg(Prg, false),
   ExpMsg = Msg,
   ExpLine = Line.
 
@@ -48,7 +37,7 @@ check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {NormT2, _} = norm(T2, N),
   ok = tv_server:stop(Pid),
 
-  case {par:pretty(NormT1), par:pretty(NormT2)} of
+  case {type_system:pretty(NormT1), type_system:pretty(NormT2)} of
     {Exp1, Exp2} -> true;
     {Exp2, Exp1} -> true;
     _ ->
@@ -57,7 +46,7 @@ check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
       {FlipNormT1, _} = norm(T1, FlipN),
       ok = tv_server:stop(FlipPid),
 
-      case {par:pretty(FlipNormT1), par:pretty(FlipNormT2)} of
+      case {type_system:pretty(FlipNormT1), type_system:pretty(FlipNormT2)} of
         {Exp1, Exp2} -> true;
         {Exp2, Exp1} -> true
       end
@@ -67,14 +56,14 @@ check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   ExpFrom = From.
 
 ok_expr(Expr) ->
-  par:pretty(norm_prg("expr = " ++ Expr, "expr")).
+  type_system:pretty(norm_prg("expr = " ++ Expr, "expr")).
 
 bad_expr(Expr, Err) ->
   bad_prg("expr = " ++ Expr, Err).
 
-% We don't use par:fvs() and par:subs() to implement this because it'll
-% normalize variables in an arbitrary order (e.g. C -> D could become B ->
-% A instead of A -> B). By doing it ourselves, we always guarantee
+% We don't use type_system:fvs() and type_system:subs() to implement this
+% because it'll normalize variables in an arbitrary order (e.g. C -> D could
+% become B -> A instead of A -> B). By doing it ourselves, we always guarantee
 % a left-to-right normalization.
 norm({lam, ArgT, ReturnT}, N) ->
   {NormArgT, N1} = norm(ArgT, N),

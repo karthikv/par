@@ -1,19 +1,9 @@
 -module(exec_test).
--export([run/0, returns_fun/0]).
+-export([returns_fun/0]).
 -include_lib("eunit/include/eunit.hrl").
 
-run() ->
-  interpreter:reload(false),
-  code_gen:reload(false),
-
-  code:purge(?MODULE),
-  {ok, _} = compile:file(?MODULE),
-  code:load_file(?MODULE),
-
-  ?MODULE:test().
-
 run(Prg) ->
-  {ok, _, Ast} = par:infer_prg(Prg, true),
+  {ok, _, Ast} = type_system:infer_prg(Prg, true),
   code_gen:run_ast(Ast, code_gen_test),
   interpreter:run_ast(Ast, []).
 
@@ -171,9 +161,9 @@ prg_test_() ->
      "main :: () -> Int\n"
      "main() = 3 :: Int"
     ))
-  , ?_test(6765 = run(
+  , ?_test(8 = run(
       "fib(n) = if n == 0 || n == 1 then n else fib(n - 1) + fib(n - 2)\n"
-      "main() = fib(20)"
+      "main() = fib(6)"
     ))
   , ?_test([false, false, true] = run(
       "cmp(f, g, x) = f(g(x))\n"

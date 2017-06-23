@@ -1,6 +1,5 @@
 -module(code_gen).
 -export([
-  reload/1,
   compile_file/2,
   compile_ast/2,
   run_ast/2,
@@ -12,22 +11,11 @@
 -define(COUNTER_NAME, code_gen_counter).
 -define(EXCLUDER_NAME, code_gen_excluder).
 
-reload(Syntax) ->
-  par:reload(Syntax),
-
-  code:purge(code_gen_utils),
-  {ok, _} = compile:file(code_gen_utils),
-  code:load_file(code_gen_utils),
-
-  code:purge(?MODULE),
-  {ok, _} = compile:file(?MODULE),
-  code:load_file(?MODULE).
-
 compile_file(Name, Mod) ->
   {ok, Prg} = file:read_file(Name),
-  case par:infer_prg(binary_to_list(Prg), true) of
+  case type_system:infer_prg(binary_to_list(Prg), true) of
     {errors, Errs} ->
-      par:report_errors(Errs),
+      type_system:report_errors(Errs),
       errors;
     {ok, _, Ast} -> compile_ast(Ast, Mod)
   end.
@@ -71,7 +59,8 @@ compile_ast(Ast, Mod) ->
   Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Ast),
   Excluded = excluder_all(),
 
-  {ok, Parsed} = epp:parse_file('code_gen_utils.erl', []),
+  Path = filename:join(filename:dirname(?FILE), "code_gen_utils.erl"),
+  {ok, Parsed} = epp:parse_file(Path, []),
   % remove attributes and eof
   Utils = lists:filter(fun
     ({function, _, Atom, _, _}) -> not gb_sets:is_member(Atom, Excluded);
@@ -87,12 +76,12 @@ compile_ast(Ast, Mod) ->
   ],
 
   {ok, Mod, Binary} = compile:forms(Forms),
-  ok = file:write_file(lists:concat([Mod, '.beam']), Binary).
+  {Mod, Binary}.
 
 run_ast(Ast, Mod) ->
-  compile_ast(Ast, Mod),
+  {_, Binary} = compile_ast(Ast, Mod),
   code:purge(Mod),
-  code:load_file(Mod),
+  code:load_binary(Mod, "", Binary),
   Mod:main().
 
 rep({global, Line, {var, _, Name}, Expr}, Env) ->
@@ -353,7 +342,7 @@ rep({'match', Line, Expr, Cases}, Env) ->
     % TODO: use arity(Expr) in case of simple pattern?
     Env1 = gb_sets:fold(fun(Name, FoldEnv) ->
       bind(Name, unknown, FoldEnv)
-    end, Env, par:pattern_names(Pattern)),
+    end, Env, type_system:pattern_names(Pattern)),
 
     PatternRep = rep(Pattern, Env1#{'*in_pattern' => true}),
     Body = [rep(Then, Env1)],
@@ -425,7 +414,7 @@ rep_pattern(Pattern, Expr, Env) ->
   % TODO arity(Expr) for simple patterns
   Env1 = gb_sets:fold(fun(Name, NestedEnv) ->
     bind(Name, unknown, NestedEnv)
-  end, Env, par:pattern_names(Pattern)),
+  end, Env, type_system:pattern_names(Pattern)),
   {rep(Pattern, Env1#{'*in_pattern' => true}), rep(Expr, Env), Env1}.
 
 rep_on_load_fn(Gm, Ast) ->

@@ -1,22 +1,15 @@
 -module(interpreter).
--export([reload/1, run_file/2, run_prg/2, run_ast/2, env_run/2]).
+-export([run_file/2, run_prg/2, run_ast/2, env_run/2]).
 
 -define(ENV_NAME, interpreter_env).
-
-reload(Syntax) ->
-  par:reload(Syntax),
-
-  code:purge(?MODULE),
-  {ok, _} = compile:file(?MODULE),
-  code:load_file(?MODULE).
 
 run_file(Name, Args) ->
   {ok, Prg} = file:read_file(Name),
   run_prg(binary_to_list(Prg), Args).
 
 run_prg(Prg, Args) ->
-  case par:infer_prg(Prg) of
-    {errors, Errs} -> par:report_errors(Errs);
+  case type_system:infer_prg(Prg) of
+    {errors, Errs} -> type_system:report_errors(Errs);
     {ok, _, Ast} -> run_ast(Ast, Args)
   end.
 
@@ -257,7 +250,7 @@ eval_pattern(Pattern, Expr, ID) ->
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, {}, ChildID)
-  end, gb_sets:to_list(par:pattern_names(Pattern))),
+  end, gb_sets:to_list(type_system:pattern_names(Pattern))),
 
   case match(V, Pattern, ChildID) of
     false -> {{false, V}, ChildID};
@@ -291,7 +284,7 @@ match_cases(V, [{Pattern, Expr} | Rest], ID) ->
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, {}, ChildID)
-  end, gb_sets:to_list(par:pattern_names(Pattern))),
+  end, gb_sets:to_list(type_system:pattern_names(Pattern))),
 
   case match(V, Pattern, ChildID) of
     true -> eval(Expr, ChildID);

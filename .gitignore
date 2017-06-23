@@ -1,4 +1,3 @@
-*.beam
-lexer.erl
-parser.erl
-tmp/
+_build/
+ebin/
+src/parser.erl
