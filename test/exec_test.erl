@@ -3,8 +3,9 @@
 -include_lib("eunit/include/eunit.hrl").
 
 run(Prg) ->
-  {ok, _, Ast} = type_system:infer_prg(Prg, true),
-  code_gen:run_ast(Ast, code_gen_test),
+  FullPrg = "module ExecTest " ++ Prg,
+  {ok, _, Ast} = type_system:infer_prg(FullPrg),
+  code_gen:run_ast(Ast),
   interpreter:run_ast(Ast, []).
 
 expr(Expr) -> run("main() = " ++ Expr).

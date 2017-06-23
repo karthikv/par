@@ -1,8 +1,7 @@
 -module(code_gen).
 -export([
-  compile_file/2,
-  compile_ast/2,
-  run_ast/2,
+  compile_ast/1,
+  run_ast/1,
   counter_run/1,
   excluder_run/1
 ]).
@@ -11,20 +10,13 @@
 -define(COUNTER_NAME, code_gen_counter).
 -define(EXCLUDER_NAME, code_gen_excluder).
 
-compile_file(Name, Mod) ->
-  {ok, Prg} = file:read_file(Name),
-  case type_system:infer_prg(binary_to_list(Prg), true) of
-    {errors, Errs} ->
-      type_system:report_errors(Errs),
-      errors;
-    {ok, _, Ast} -> compile_ast(Ast, Mod)
-  end.
-
-compile_ast(Ast, Mod) ->
+compile_ast(Ast) ->
   counter_spawn(),
   excluder_spawn(gb_sets:from_list(['_@curry', '_@concat', '_@separate'])),
 
+  {module, _, {con_token, _, Mod}, Defs} = Ast,
   Gm = list_to_atom(lists:concat([Mod, '_gm'])),
+
   Env = lists:foldl(fun(Node, FoldEnv) ->
     case Node of
       {global, _, {var, _, Name}, {fn, _, Args, _}} ->
@@ -54,9 +46,9 @@ compile_ast(Ast, Mod) ->
         FoldEnv#{atom_to_list(Con) => {{global_fn, Con}, length(FieldTEs)}};
       _ -> FoldEnv
     end
-  end, #{'*gm' => Gm}, Ast),
+  end, #{'*gm' => Gm}, Defs),
 
-  Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Ast),
+  Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Defs),
   Excluded = excluder_all(),
 
   Path = filename:join(filename:dirname(?FILE), "code_gen_utils.erl"),
@@ -71,15 +63,15 @@ compile_ast(Ast, Mod) ->
     {attribute, 1, module, Mod},
     {attribute, 1, compile, [export_all, no_auto_import]},
     {attribute, 1, on_load, {'_@on_load', 0}},
-    rep_on_load_fn(Gm, Ast) |
+    rep_on_load_fn(Gm, Defs) |
     Utils ++ Reps
   ],
 
   {ok, Mod, Binary} = compile:forms(Forms),
   {Mod, Binary}.
 
-run_ast(Ast, Mod) ->
-  {_, Binary} = compile_ast(Ast, Mod),
+run_ast(Ast) ->
+  {Mod, Binary} = compile_ast(Ast),
   code:purge(Mod),
   code:load_binary(Mod, "", Binary),
   Mod:main().

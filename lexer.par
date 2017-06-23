@@ -1,3 +1,5 @@
+module Lexer
+
 struct Loc {
   start_line :: Int,
   start_col :: Int,
@@ -50,15 +52,17 @@ enum Token {
   Dollar(Loc) @"$",
   Pound(Loc) @"#",
 
-  Discard(Loc) @discard,
+  Module(Loc) @module_token,
+  Enum(Loc) @enum_token,
+  Struct(Loc) @struct_token,
+
   If(Loc) @if,
   Then(Loc) @then,
   Else(Loc) @else,
   Let(Loc) @let,
   In(Loc) @in,
   Match(Loc) @match,
-  Enum(Loc) @enum_token,
-  Struct(Loc) @struct_token,
+  Discard(Loc) @discard,
 
   LitBool(Loc, Bool) @bool,
   LitChar(Loc, Char) @char,
@@ -295,14 +299,16 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
 }
 
 chs_to_token_fn = {
+  to_list("module") => Module,
+  to_list("enum") => Enum,
+  to_list("struct") => Struct,
+
   to_list("if") => If,
   to_list("then") => Then,
   to_list("else") => Else,
   to_list("let") => Let,
   to_list("in") => In,
   to_list("match") => Match,
-  to_list("enum") => Enum,
-  to_list("struct") => Struct,
   to_list("true") => flip(LitBool, true),
   to_list("false") => flip(LitBool, false),
   to_list("discard") => Discard

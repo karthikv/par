@@ -1,9 +1,13 @@
--module(par_test).
+-module(type_system_test).
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/errors.hrl").
 
+type_check(Prg) ->
+  FullPrg = "module Mod " ++ Prg,
+  type_system:infer_prg(FullPrg).
+
 norm_prg(Prg, Name) ->
-  {ok, Env, _} = type_system:infer_prg(Prg, false),
+  {ok, Env, _} = type_check(Prg),
   #{Name := T} = Env,
 
   {ok, Pid} = tv_server:start_link(),
@@ -15,23 +19,23 @@ ok_prg(Prg, Name) ->
   type_system:pretty(norm_prg(Prg, Name)).
 
 bad_prg(Prg, ExpErr) when not is_list(ExpErr) ->
-  {errors, [Err]} = type_system:infer_prg(Prg, false),
-  check(Err, ExpErr);
+  {errors, [Err]} = type_check(Prg),
+  ensure_equal(Err, ExpErr);
 
 bad_prg(Prg, ExpErrs) ->
-  {errors, Errs} = type_system:infer_prg(Prg, false),
+  {errors, Errs} = type_check(Prg),
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, ExpErr}) ->
-    check(Err, ExpErr)
+    ensure_equal(Err, ExpErr)
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, Line}]} = type_system:infer_prg(Prg, false),
+  {errors, [{Msg, Line}]} = type_check(Prg),
   ExpMsg = Msg,
   ExpLine = Line.
 
-check({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
+ensure_equal({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {#{}, Pid}),
   {NormT2, _} = norm(T2, N),

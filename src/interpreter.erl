@@ -1,29 +1,20 @@
 -module(interpreter).
--export([run_file/2, run_prg/2, run_ast/2, env_run/2]).
+-export([run_ast/2, env_run/2]).
 
 -define(ENV_NAME, interpreter_env).
 
-run_file(Name, Args) ->
-  {ok, Prg} = file:read_file(Name),
-  run_prg(binary_to_list(Prg), Args).
-
-run_prg(Prg, Args) ->
-  case type_system:infer_prg(Prg) of
-    {errors, Errs} -> type_system:report_errors(Errs);
-    {ok, _, Ast} -> run_ast(Ast, Args)
-  end.
-
 run_ast(Ast, Args) ->
   ID = env_spawn(),
-  lists:foreach(fun(Node) -> init(Node, ID) end, Ast),
+  {module, _, _, Defs} = Ast,
 
+  lists:foreach(fun(Node) -> init(Node, ID) end, Defs),
   lists:foreach(fun(Node) ->
     case Node of
       % strictly evaluate all globals
       {global, _, Var, _} -> eval(Var, ID);
       _ -> true
     end
-  end, Ast),
+  end, Defs),
 
   apply(eval({var, 0, "main"}, ID), Args).
 

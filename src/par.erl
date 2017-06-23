@@ -36,11 +36,11 @@ main(Args) ->
       end,
       {ok, Prg} = file:read_file(Path),
 
-      case type_system:infer_prg(binary_to_list(Prg), true) of
+      case type_system:infer_prg(binary_to_list(Prg)) of
         {errors, Errs} -> type_system:report_errors(Errs);
 
         {ok, _, Ast} ->
-          {Time, {Mod, Binary}} = timer:tc(code_gen, compile_ast, [Ast, my_mod]),
+          {Time, {Mod, Binary}} = timer:tc(code_gen, compile_ast, [Ast]),
           {out_dir, Dir} = lists:keyfind(out_dir, 1, Opts),
           Filename = lists:concat([Mod, '.beam']),
 

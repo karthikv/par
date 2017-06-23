@@ -1,5 +1,5 @@
 -module(type_system).
--export([infer_prg/2, report_errors/1, pretty/1, pattern_names/1]).
+-export([infer_prg/1, report_errors/1, pretty/1, pattern_names/1]).
 -include("errors.hrl").
 
 % Naming conventions:
@@ -106,8 +106,11 @@
 -endif.
 
 % TODO:
+% - Compile parser.yrl
+% - Precompile code_gen_utils and have it available as a file
+% - module declaration, Compile lexer.beam
+%
 % - Columns + display code in error message reporting
-% - ebin for .beam files
 %
 % - Imports
 %   - Module declaration? / code gen file name attribute?
@@ -143,16 +146,16 @@
 % - Change fat arrow to regular arrow?
 % - Type aliases?
 
-infer_prg(Prg, Stable) ->
-  {ok, Tokens} = case Stable of
-    true -> lexer:tokenize(Prg);
-    _ -> lexer:tokenize(Prg)
-  end,
+infer_prg(Prg) ->
+  {ok, Tokens} = 'Lexer':tokenize(Prg),
   NormTokens = lists:map(fun(T) ->
     setelement(2, T, maps:get(start_line, element(2, T)))
   end, Tokens),
+
   {ok, Ast} = parser:parse(NormTokens),
+  {module, _, _, Defs} = Ast,
   %% ?LOG("AST", Ast),
+
   {ok, Pid} = tv_server:start_link(),
 
   C = #ctx{
@@ -206,7 +209,7 @@ infer_prg(Prg, Stable) ->
 
       _ -> FoldC
     end
-  end, C, Ast),
+  end, C, Defs),
 
   {LastSig, C2} = lists:foldl(fun(Node, {Sig, FoldC}) ->
     FoldC1 = if
@@ -245,7 +248,7 @@ infer_prg(Prg, Stable) ->
       % we've already processed enums/structs
       _ -> {none, FoldC1}
     end
-  end, {none, C1}, Ast),
+  end, {none, C1}, Defs),
 
   C3 = case LastSig of
     none -> C2;

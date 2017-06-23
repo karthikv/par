@@ -1,5 +1,5 @@
 Nonterminals
-  prg global var_list
+  prg defs global var_list
   expr con_var expr_list
   kv_list start_record init_list mul neg lam
   let_list let_init start_match match_list semi_list
@@ -11,20 +11,22 @@ Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '|>' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/' '%'
-  '++' '--' '.' '|' '::' ':' '->' ';' '$' 'discard'
-  if then else let in match
-  enum_token struct_token
+  '++' '--' '.' '|' '::' ':' '->' ';' '$'
+  module_token enum_token struct_token
+  if then else let in match discard
   int float bool char str atom var '_'
   '[' ']' '{' '}' '=>' '#'
   tv_token con_token.
 
 Rootsymbol prg.
 
-prg -> '$empty' : [].
-prg -> global prg : ['$1' | '$2'].
-prg -> var '::' te prg : [{sig, ?LOC('$1'), '$1', '$3'} | '$4'].
-prg -> enum prg : ['$1' | '$2'].
-prg -> struct prg : ['$1' | '$2'].
+prg -> module_token con_token defs : {module, ?LOC('$1'), '$2', '$3'}.
+
+defs -> '$empty' : [].
+defs -> global defs : ['$1' | '$2'].
+defs -> var '::' te defs : [{sig, ?LOC('$1'), '$1', '$3'} | '$4'].
+defs -> enum defs : ['$1' | '$2'].
+defs -> struct defs : ['$1' | '$2'].
 
 global -> var '=' expr : {global, ?LOC('$1'), '$1', '$3'}.
 global -> var '(' ')' '=' expr :

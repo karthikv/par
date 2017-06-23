@@ -1,0 +1,6 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+rebar3 as escript escriptize
+cp _build/escript/bin/par bin/
