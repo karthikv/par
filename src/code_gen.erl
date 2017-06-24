@@ -1,7 +1,7 @@
 -module(code_gen).
 -export([
-  compile_ast/1,
-  run_ast/1,
+  compile_ast/2,
+  run_ast/2,
   counter_run/1,
   excluder_run/1
 ]).
@@ -10,7 +10,7 @@
 -define(COUNTER_NAME, code_gen_counter).
 -define(EXCLUDER_NAME, code_gen_excluder).
 
-compile_ast(Ast) ->
+compile_ast(Ast, Path) ->
   counter_spawn(),
   excluder_spawn(gb_sets:from_list(['_@curry', '_@concat', '_@separate'])),
 
@@ -57,19 +57,21 @@ compile_ast(Ast) ->
     (_) -> false
   end, code_gen_utils_parsed:forms()),
 
-  Forms = [
+  LibForms = [
+    {attribute, 1, file, {"[par-compiler]", 1}},
     {attribute, 1, module, Mod},
     {attribute, 1, compile, [export_all, no_auto_import]},
     {attribute, 1, on_load, {'_@on_load', 0}},
     rep_on_load_fn(Gm, Defs) |
-    Utils ++ Reps
+    Utils
   ],
+  CodeForms = [{attribute, 1, file, {Path, 1}} | Reps],
 
-  {ok, Mod, Binary} = compile:forms(Forms),
+  {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms),
   {Mod, Binary}.
 
-run_ast(Ast) ->
-  {Mod, Binary} = compile_ast(Ast),
+run_ast(Ast, Path) ->
+  {Mod, Binary} = compile_ast(Ast, Path),
   code:purge(Mod),
   code:load_binary(Mod, "", Binary),
   Mod:main().

@@ -5,7 +5,7 @@
 run(Prg) ->
   FullPrg = "module ExecTest " ++ Prg,
   {ok, _, Ast} = type_system:infer_prg(FullPrg),
-  code_gen:run_ast(Ast),
+  code_gen:run_ast(Ast, "[exec-test]"),
   interpreter:run_ast(Ast, []).
 
 expr(Expr) -> run("main() = " ++ Expr).

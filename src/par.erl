@@ -5,7 +5,6 @@
 % TODO:
 % - Columns + display code in error message reporting
 % - Imports
-%   - Module declaration? / code gen file name attribute?
 %   - Export keyword
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
@@ -65,7 +64,7 @@ main(Args) ->
           getopt:usage(OptSpecs, "par"),
           halt(1);
 
-        {source_file, Path_} -> Path_
+        {source_file, Path_} -> filename:absname(Path_)
       end,
       {ok, Prg} = file:read_file(Path),
 
@@ -73,7 +72,7 @@ main(Args) ->
         {errors, Errs} -> type_system:report_errors(Errs);
 
         {ok, _, Ast} ->
-          {Time, {Mod, Binary}} = timer:tc(code_gen, compile_ast, [Ast]),
+          {Time, {Mod, Binary}} = timer:tc(code_gen, compile_ast, [Ast, Path]),
           {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
           Filename = lists:concat([Mod, '.beam']),
 
