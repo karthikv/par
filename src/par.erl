@@ -1,8 +1,42 @@
 -module(par).
 -export([main/1]).
+-include("errors.hrl").
 
--define(ERR(Str), io:format(standard_error, Str, [])).
--define(ERR(Str, Args), io:format(standard_error, Str, Args)).
+% TODO:
+% - Columns + display code in error message reporting
+% - Imports
+%   - Module declaration? / code gen file name attribute?
+%   - Export keyword
+% - Typeclasses + generics w/o concrete types (HKTs)
+% - Exceptions
+% - Pattern matching records
+%   - Disallow pattern matching w/ struct Con(...) fn?
+% - Exhaustive pattern matching errors
+% - Stdlib
+%   - Map/Set operations?
+% - Concurrency
+% - Second pass for error messages (see TODOs in code)
+%   - Write parser in par
+%   - Parsing issue for match Con { ... }
+%   - List error messages should include full List type
+%   - Norm types for error messages
+%   - Detect basic infinite loop conditions
+% - Update naming conventions
+%
+% Defer
+% - Newlines instead of commas to separate match conditions, let vars, etc?
+%   - Allow trailing commas
+%   - Can we do string concat on multiple lines?
+% - Using EUnit from par
+% - if-let condition and other condition (or maybe when statement?)
+% - Hex escaped characters \xff or \x{...} in strings
+%
+% Uncertain
+% - Interpreter backtraces?
+% - Force all block expressions except last to be type ()?
+% - List indexing?
+% - Change fat arrow to regular arrow?
+% - Type aliases?
 
 main(Args) ->
   {ok, Dir} = file:get_cwd(),
@@ -15,7 +49,6 @@ main(Args) ->
 
   case getopt:parse(OptSpecs, Args) of
     {error, {Reason, Data}} ->
-      % TODO: exit code?
       ?ERR("Error: ~s (~p)~n", [Reason, Data]),
       getopt:usage(OptSpecs, "par"),
       halt(1);
@@ -41,10 +74,10 @@ main(Args) ->
 
         {ok, _, Ast} ->
           {Time, {Mod, Binary}} = timer:tc(code_gen, compile_ast, [Ast]),
-          {out_dir, Dir} = lists:keyfind(out_dir, 1, Opts),
+          {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
           Filename = lists:concat([Mod, '.beam']),
 
-          file:write_file(filename:join([Dir, Filename]), Binary),
+          file:write_file(filename:join([OutDir, Filename]), Binary),
           io:format(standard_error, "~s ~pms~n", [Filename, Time div 1000])
       end
   end.

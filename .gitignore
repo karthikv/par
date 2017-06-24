@@ -1,3 +1,4 @@
 _build/
 ebin/
 src/parser.erl
+src/code_gen_utils_parsed.erl

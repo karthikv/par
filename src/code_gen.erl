@@ -51,13 +51,11 @@ compile_ast(Ast) ->
   Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Defs),
   Excluded = excluder_all(),
 
-  Path = filename:join(filename:dirname(?FILE), "code_gen_utils.erl"),
-  {ok, Parsed} = epp:parse_file(Path, []),
-  % remove attributes and eof
+  % remove everything except necessary functions
   Utils = lists:filter(fun
     ({function, _, Atom, _, _}) -> not gb_sets:is_member(Atom, Excluded);
     (_) -> false
-  end, lists:droplast(Parsed)),
+  end, code_gen_utils_parsed:forms()),
 
   Forms = [
     {attribute, 1, module, Mod},

@@ -1,7 +1,10 @@
 -ifndef(ERRORS_HRL_).
 -define(ERRORS_HRL_, 1).
 
+-define(FMT(Str), lists:flatten(io_lib:format(Str, []))).
 -define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
+-define(ERR(Str), io:format(standard_error, Str, [])).
+-define(ERR(Str, Args), io:format(standard_error, Str, Args)).
 
 -define(FROM_GLOBAL_DEF, "global definition").
 -define(FROM_GLOBAL_SIG, "global type signature").

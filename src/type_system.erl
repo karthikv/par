@@ -96,55 +96,14 @@
 % [1] https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
 -record(tarjan, {stack, map, next_index, solver}).
 
--ifdef(release).
-  -define(LOG(Prefix, Value), true).
--else.
+-ifdef(TEST).
   -define(
     LOG(Prefix, Value),
     io:format("~n(~p:~p) ~s:~n~p~n", [?MODULE, ?LINE, Prefix, Value])
   ).
+-else.
+  -define(LOG(Prefix, Value), true).
 -endif.
-
-% TODO:
-% - Compile parser.yrl
-% - Precompile code_gen_utils and have it available as a file
-% - module declaration, Compile lexer.beam
-%
-% - Columns + display code in error message reporting
-%
-% - Imports
-%   - Module declaration? / code gen file name attribute?
-%   - Export keyword
-% - Typeclasses + generics w/o concrete types (HKTs)
-% - Exceptions
-% - Pattern matching records
-%   - Disallow pattern matching w/ struct Con(...) fn?
-% - Exhaustive pattern matching errors
-% - Stdlib
-%   - Map/Set operations?
-% - Concurrency
-% - Second pass for error messages (see TODOs in code)
-%   - Write parser in par
-%   - Parsing issue for match Con { ... }
-%   - List error messages should include full List type
-%   - Norm types for error messages
-%   - Detect basic infinite loop conditions
-% - Update naming conventions
-%
-% Defer
-% - Newlines instead of commas to separate match conditions, let vars, etc?
-%   - Allow trailing commas
-%   - Can we do string concat on multiple lines?
-% - Using EUnit from par
-% - if-let condition and other condition (or maybe when statement?)
-% - Hex escaped characters \xff or \x{...} in strings
-%
-% Uncertain
-% - Interpreter backtraces?
-% - Force all block expressions except last to be type ()?
-% - List indexing?
-% - Change fat arrow to regular arrow?
-% - Type aliases?
 
 infer_prg(Prg) ->
   {ok, Tokens} = 'Lexer':tokenize(Prg),

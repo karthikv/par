@@ -3,4 +3,19 @@ set -euo pipefail
 IFS=$'\n\t'
 
 rebar3 as escript escriptize
-cp _build/escript/bin/par bin/
+mv bin/par bin/par-saved
+mv _build/escript/bin/par bin/
+
+set +e
+rebar3 eunit
+succeeded=$?
+set -e
+
+if [ $succeeded -eq 0 ]; then
+  echo "Success!"
+  rm bin/par-saved
+else
+  echo -n "Failed; rolling back... "
+  mv bin/par-saved bin/par
+  echo "done"
+fi
