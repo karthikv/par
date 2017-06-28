@@ -2,8 +2,8 @@
 -export([
   '_@gm_spawn'/1,
   '_@gm_run'/1,
-  '_@gm_maybe_set'/3,
-  '_@gm_get'/2,
+  '_@gm_find'/2,
+  '_@gm_set'/3,
   '_@curry'/3,
   '_@concat'/2,
   '_@separate'/2
@@ -46,37 +46,24 @@
       '_@gm_run'(Globals)
   end.
 
-'_@gm_maybe_set'(Gm, Atom, Fun) ->
+'_@gm_find'(Gm, Atom) ->
   Gm ! {erlang:self(), find, Atom},
   receive
-    {find_ok, {ok, Value}} -> Value;
-
-    {find_ok, error} ->
-      Value = Fun(),
-      Gm ! {erlang:self(), set, Atom, Value},
-      receive
-        set_ok -> Value;
-
-        Unexpected ->
-          erlang:error({"unexpected set response", Gm, Atom, Value, Unexpected})
-      after 1000 ->
-        erlang:error({"couldn't set global", Gm, Atom, Value})
-      end;
-
+    {find_ok, Result} -> Result;
     Unexpected ->
       erlang:error({"unexpected find response", Gm, Atom, Unexpected})
   after 1000 ->
     erlang:error({"couldn't find global", Gm, Atom})
   end.
 
-'_@gm_get'(Gm, Atom) ->
-  Gm ! {erlang:self(), get, Atom},
+'_@gm_set'(Gm, Atom, Value) ->
+  Gm ! {erlang:self(), set, Atom, Value},
   receive
-    {get_ok, Value} -> Value;
+    set_ok -> Value;
     Unexpected ->
-      erlang:error({"unexpected get response", Gm, Atom, Unexpected})
+      erlang:error({"unexpected set response", Gm, Atom, Value, Unexpected})
   after 1000 ->
-    erlang:error({"couldn't get global", Gm, Atom})
+    erlang:error({"couldn't set global", Gm, Atom, Value})
   end.
 
 '_@curry'(Fun, RawArgs, Line) ->

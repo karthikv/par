@@ -1,10 +1,10 @@
 Nonterminals
-  prg defs global var_list
-  expr con_var expr_list
+  prg imports defs global var_list
+  expr expr_list
   kv_list start_record init_list mul neg lam
   let_list let_init start_match match_list semi_list
-  pattern pattern_list
-  te te_list enum option_list option
+  pattern pattern_con pattern_list
+  te te_con te_list enum option_list option
   struct field_list field tv_list.
 
 Terminals
@@ -12,7 +12,7 @@ Terminals
   '==' '!=' '||' '&&' '|>' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/' '%'
   '++' '--' '.' '|' '::' ':' '->' ';' '$'
-  module_token enum_token struct_token
+  module import enum_token struct_token
   if then else let in match discard
   int float bool char str atom var '_'
   '[' ']' '{' '}' '=>' '#'
@@ -20,7 +20,10 @@ Terminals
 
 Rootsymbol prg.
 
-prg -> module_token con_token defs : {module, ?LOC('$1'), '$2', '$3'}.
+prg -> module con_token imports defs : {module, ?LOC('$1'), '$2', '$3', '$4'}.
+
+imports -> '$empty' : [].
+imports -> import str imports : [{import, ?LOC('$1'), '$2'} | '$3'].
 
 defs -> '$empty' : [].
 defs -> global defs : ['$1' | '$2'].
@@ -46,7 +49,7 @@ expr -> str : '$1'.
 expr -> atom : '$1'.
 expr -> var : '$1'.
 expr -> '.' var : {field, ?LOC('$1'), '$2'}.
-expr -> con_var : '$1'.
+expr -> con_token : '$1'.
 expr -> '[' ']' : {list, ?LOC('$1'), []}.
 expr -> '[' expr_list ']' : {list, ?LOC('$1'), '$2'}.
 expr -> '(' expr ',' expr_list ')' :
@@ -57,7 +60,8 @@ expr -> '{' kv_list '}' : {map, ?LOC('$1'), '$2'}.
 expr -> '{' init_list '}' : {record, ?LOC('$1'), '$2'}.
 expr -> '{' expr '|' init_list '}' :
   {update_record, ?LOC('$1'), '$2', '$4'}.
-expr -> con_var start_record init_list '}' :
+% TODO: allow con_token . con_token in updated parser
+expr -> con_token start_record init_list '}' :
   {record, ?LOC('$1'), '$1', '$3'}.
 expr -> expr '==' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '!=' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
@@ -76,6 +80,7 @@ expr -> expr '%' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '++' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '--' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '.' var : {field, ?LOC('$1'), '$1', '$3'}.
+expr -> expr '.' con_token : {field, ?LOC('$1'), '$1', '$3'}.
 expr -> '[' expr_list '|' expr ']' : {cons, ?LOC('$1'), '$2', '$4'}.
 expr -> '!' expr : {first('$1'), ?LOC('$1'), '$2'}.
 expr -> '#' expr : {first('$1'), ?LOC('$1'), '$2'}.
@@ -106,8 +111,6 @@ expr -> if let let_init then expr else expr :
 expr -> match expr start_match match_list '}' :
   {first('$1'), ?LOC('$1'), '$2', '$4'}.
 expr -> '{' semi_list '}' : {block, ?LOC('$1'), '$2'}.
-
-con_var -> con_token : con_token_to_var('$1').
 
 expr_list -> expr : ['$1'].
 expr_list -> expr ',' expr_list : ['$1' | '$3'].
@@ -154,8 +157,8 @@ pattern -> atom : '$1'.
 pattern -> var : '$1'.
 pattern -> '*' var : setelement(1, '$2', var_value).
 pattern -> '_' : '$1'.
-pattern -> con_var : '$1'.
-pattern -> con_var '(' pattern_list ')' : {app, ?LOC('$1'), '$1', '$3'}.
+pattern -> pattern_con : '$1'.
+pattern -> pattern_con '(' pattern_list ')' : {app, ?LOC('$1'), '$1', '$3'}.
 pattern -> '[' ']' : {list, ?LOC('$1'), []}.
 pattern -> '[' pattern_list ']' : {list, ?LOC('$1'), '$2'}.
 pattern -> '[' pattern_list '|' pattern ']' :
@@ -164,22 +167,28 @@ pattern -> '(' pattern ',' pattern_list ')' :
   {tuple, ?LOC('$1'), ['$2' | '$4']}.
 pattern -> '(' pattern ')' : '$2'.
 
+pattern_con -> con_token : '$1'.
+pattern_con -> con_token '.' con_token : {field, ?LOC('$1'), '$1', '$3'}.
+
 pattern_list -> pattern : ['$1'].
 pattern_list -> pattern ',' pattern_list : ['$1' | '$3'].
 
 te -> '(' ')' : {none, ?LOC('$1')}.
-te -> con_token : '$1'.
+te -> te_con : '$1'.
 te -> tv_token : tv_te('$1').
-te -> tv_token ':' con_token : tv_te('$1', '$3').
-te -> con_token '<' te_list '>' : {gen_te, ?LOC('$1'), '$1', '$3'}.
+te -> tv_token ':' te_con : tv_te('$1', '$3').
+te -> te_con '<' te_list '>' : {gen_te, ?LOC('$1'), '$1', '$3'}.
 te -> '[' te ']' :
-  {gen_te, ?LOC('$1'), {con_token, ?LOC('$1'), 'List'}, ['$2']}.
+  {gen_te, ?LOC('$1'), {con_token, ?LOC('$1'), "List"}, ['$2']}.
 te -> '(' te ',' te_list ')' : {tuple_te, ?LOC('$1'), ['$2' | '$4']}.
 te -> '(' te ')' : '$2'.
 te -> '{' field_list '}' : {record_te, ?LOC('$1'), '$2'}.
 te -> '{' tv_token '|' field_list '}' :
   {tv_te, ?LOC('$1'), element(3, '$2'), {record_te, ?LOC('$3'), '$4'}}.
 te -> te '->' te : {lam_te, ?LOC('$1'), '$1', '$3'}.
+
+te_con -> con_token : '$1'.
+te_con -> con_token '.' con_token : qualify('$1', '$3').
 
 te_list -> te : ['$1'].
 te_list -> te ',' te_list : ['$1' | '$3'].
@@ -246,11 +255,11 @@ flatten_app({app, _, {app, _, _, _}=App, Args}) ->
   {app, Line, Expr, InitialArgs ++ Args};
 flatten_app(Node) -> Node.
 
-con_token_to_var({con_token, Line, Con}) ->
-  {con_var, Line, atom_to_list(Con)}.
-
 tv_te({tv_token, Line, Name}) ->
   {tv_te, Line, Name, {none, Line}}.
 
 tv_te({tv_token, Line, Name}, TE) ->
   {tv_te, Line, Name, TE}.
+
+qualify({con_token, Line, Mod}, {con_token, _, Con}) ->
+  {con_token, Line, lists:concat([Mod, '.', Con])}.

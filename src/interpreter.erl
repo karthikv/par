@@ -5,7 +5,7 @@
 
 run_ast(Ast, Args) ->
   ID = env_spawn(),
-  {module, _, _, Defs} = Ast,
+  {module, _, _, _, Defs} = Ast,
 
   lists:foreach(fun(Node) -> init(Node, ID) end, Defs),
   lists:foreach(fun(Node) ->
@@ -24,7 +24,7 @@ init({global, _, {var, _, Name}, Expr}, ID) ->
 init({enum_token, _, _, OptionTEs}, ID) ->
   lists:foreach(fun({{con_token, _, Con}, ArgsTE, KeyNode}) ->
     Key = case KeyNode of
-      default -> Con;
+      default -> list_to_atom(Con);
       {atom, _, Key_} -> Key_
     end,
 
@@ -36,7 +36,7 @@ init({enum_token, _, _, OptionTEs}, ID) ->
         end)
     end,
 
-    env_set(atom_to_list(Con), {option, Key, V}, ID)
+    env_set(Con, {option, Key, V}, ID)
   end, OptionTEs);
 
 init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
@@ -52,7 +52,7 @@ init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
     maps:from_list(lists:zip(FieldAtoms, Vs))
   end),
 
-  env_set(atom_to_list(Con), StructV, ID);
+  env_set(Con, StructV, ID);
 
 init({sig, _, _, _}, _) -> true.
 
@@ -95,7 +95,7 @@ eval({map, _, Pairs}, ID) ->
   end, Pairs),
   maps:from_list(List);
 
-eval({var, _, Name}, ID) ->
+eval({N, _, Name}, ID) when N == var; N == con_token ->
   case env_get(Name, ID) of
     {lazy, Expr} ->
       V = eval(Expr, ID),
@@ -104,8 +104,6 @@ eval({var, _, Name}, ID) ->
     {option, _, V} -> V;
     V -> V
   end;
-
-eval({con_var, Line, Name}, ID) -> eval({var, Line, Name}, ID);
 
 eval({record, _, Inits}, ID) ->
   Pairs = lists:map(fun({{var, _, Name}, Expr}) ->
@@ -297,13 +295,13 @@ match(V1, {var, _, Name}, ID) ->
 match(V1, {var_value, Line, Name}, ID) -> V1 == eval({var, Line, Name}, ID);
 match(_, {'_', _}, _) -> true;
 
-match(V1, {con_var, _, Name}, ID) ->
+match(V1, {con_token, _, Name}, ID) ->
   case env_get(Name, ID) of
     {option, _, V2} -> V1 == V2;
     V2 -> V1 == V2
   end;
 
-match(V, {app, _, {con_var, Line, Name}, Args}, ID) ->
+match(V, {app, _, {con_token, Line, Name}, Args}, ID) ->
   {option, Key, _} = env_get(Name, ID),
   if
     length(Args) == 0 -> V == Key;

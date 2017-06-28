@@ -6,6 +6,9 @@
 % - Columns + display code in error message reporting
 % - Imports
 %   - Export keyword
+% - Write parser in par
+% - Struct literal test when parser supports it
+% - Test lexer errors
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
 % - Pattern matching records
@@ -13,9 +16,10 @@
 % - Exhaustive pattern matching errors
 % - Stdlib
 %   - Map/Set operations?
+% - Ensure embedded mode?
+% - REPL
 % - Concurrency
 % - Second pass for error messages (see TODOs in code)
-%   - Write parser in par
 %   - Parsing issue for match Con { ... }
 %   - List error messages should include full List type
 %   - Norm types for error messages
@@ -64,7 +68,7 @@ main(Args) ->
           getopt:usage(OptSpecs, "par"),
           halt(1);
 
-        {source_file, Path_} -> filename:absname(Path_)
+        {source_file, Path_} -> utils:absolute(Path_)
       end,
       {ok, Prg} = file:read_file(Path),
 

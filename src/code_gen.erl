@@ -1,57 +1,59 @@
 -module(code_gen).
--export([
-  compile_ast/2,
-  run_ast/2,
-  counter_run/1,
-  excluder_run/1
-]).
+-export([compile_comps/1, counter_run/1, excluder_run/1]).
 
 -include("errors.hrl").
 -define(COUNTER_NAME, code_gen_counter).
 -define(EXCLUDER_NAME, code_gen_excluder).
 
-compile_ast(Ast, Path) ->
+compile_comps(Comps) ->
+  FullEnv = lists:foldl(fun({Module, {module, _, _, _, Defs}, _, _}, FoldEnv) ->
+    lists:foldl(fun(Node, ModuleEnv) ->
+      case Node of
+        {global, _, {var, _, Name}, {fn, _, Args, _}} ->
+          Value = {{global_fn, list_to_atom(Name)}, length(Args)},
+          env_set(Name, Value, ModuleEnv);
+        {global, _, {var, _, Name}, _} ->
+          env_set(Name, {{global, list_to_atom(Name)}, unknown}, ModuleEnv);
+        {enum_token, _, _, OptionTEs} ->
+          lists:foldl(fun({{con_token, _, Con}, ArgsTE, KeyNode}, NestedEnv) ->
+            NumArgs = length(ArgsTE),
+            ConAtom = list_to_atom(Con),
+            Key = case KeyNode of
+              default -> ConAtom;
+              {atom, _, Key_} -> Key_
+            end,
+
+            case NumArgs of
+              0 -> env_set(Con, {{option, Key}, badarity}, NestedEnv);
+              _ ->
+                Value = {{option, Key, ConAtom}, NumArgs},
+                env_set(Con, Value, NestedEnv)
+            end
+          end, ModuleEnv, OptionTEs);
+        {struct_token, _, {con_token, _, Con}, {record_te, _, FieldTEs}} ->
+          Value = {{global_fn, list_to_atom(Con)}, length(FieldTEs)},
+          env_set(Con, Value, ModuleEnv);
+        {struct_token, _, {gen_te, _, {con_token, _, Con}, _},
+            {record_te, _, FieldTEs}} ->
+          Value = {{global_fn, list_to_atom(Con)}, length(FieldTEs)},
+          env_set(Con, Value, ModuleEnv);
+        _ -> ModuleEnv
+      end
+    end, FoldEnv#{'*module' => Module}, Defs)
+  end, #{}, Comps),
+
+  lists:map(fun(Comp) -> compile_ast(Comp, FullEnv) end, Comps).
+
+compile_ast({Module, Ast, _, Path}=Comp, Env) ->
   counter_spawn(),
   excluder_spawn(gb_sets:from_list(['_@curry', '_@concat', '_@separate'])),
 
-  {module, _, {con_token, _, Mod}, Defs} = Ast,
-  Gm = list_to_atom(lists:concat([Mod, '_gm'])),
-
-  Env = lists:foldl(fun(Node, FoldEnv) ->
-    case Node of
-      {global, _, {var, _, Name}, {fn, _, Args, _}} ->
-        FoldEnv#{Name => {{global_fn, list_to_atom(Name)}, length(Args)}};
-      {global, _, {var, _, Name}, _} ->
-        FoldEnv#{Name => {{global, list_to_atom(Name)}, unknown}};
-      {enum_token, _, _, OptionTEs} ->
-        lists:foldl(fun({{con_token, _, Con}, ArgsTE, KeyNode}, NestedEnv) ->
-          Name = atom_to_list(Con),
-          NumArgs = length(ArgsTE),
-          Key = case KeyNode of
-            default -> Con;
-            {atom, _, Key_} -> Key_
-          end,
-
-          case NumArgs of
-            0 -> NestedEnv#{Name => {{option, Key}, badarity}};
-            _ ->
-              Value = {{option, Key, Con}, NumArgs},
-              NestedEnv#{Name => Value}
-          end
-        end, FoldEnv, OptionTEs);
-      {struct_token, _, {con_token, _, Con}, {record_te, _, FieldTEs}} ->
-        FoldEnv#{atom_to_list(Con) => {{global_fn, Con}, length(FieldTEs)}};
-      {struct_token, _, {gen_te, _, {con_token, _, Con}, _},
-          {record_te, _, FieldTEs}} ->
-        FoldEnv#{atom_to_list(Con) => {{global_fn, Con}, length(FieldTEs)}};
-      _ -> FoldEnv
-    end
-  end, #{'*gm' => Gm}, Defs),
-
-  Reps = lists:flatmap(fun(Node) -> rep(Node, Env) end, Defs),
-  Excluded = excluder_all(),
+  {module, _, _, _, Defs} = Ast,
+  ModuleEnv = Env#{'*module' => Module},
+  Reps = lists:flatmap(fun(Node) -> rep(Node, ModuleEnv) end, Defs),
 
   % remove everything except necessary functions
+  Excluded = excluder_all(),
   Utils = lists:filter(fun
     ({function, _, Atom, _, _}) -> not gb_sets:is_member(Atom, Excluded);
     (_) -> false
@@ -59,22 +61,15 @@ compile_ast(Ast, Path) ->
 
   LibForms = [
     {attribute, 1, file, {"[par-compiler]", 1}},
-    {attribute, 1, module, Mod},
+    {attribute, 1, module, list_to_atom(Module)},
     {attribute, 1, compile, [export_all, no_auto_import]},
-    {attribute, 1, on_load, {'_@on_load', 0}},
-    rep_on_load_fn(Gm, Defs) |
+    rep_init_fn(Comp) |
     Utils
   ],
   CodeForms = [{attribute, 1, file, {Path, 1}} | Reps],
 
   {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms),
   {Mod, Binary}.
-
-run_ast(Ast, Path) ->
-  {Mod, Binary} = compile_ast(Ast, Path),
-  code:purge(Mod),
-  code:load_binary(Mod, "", Binary),
-  Mod:main().
 
 rep({global, Line, {var, _, Name}, Expr}, Env) ->
   case Expr of
@@ -83,14 +78,20 @@ rep({global, Line, {var, _, Name}, Expr}, Env) ->
       [{function, Line, list_to_atom(Name), length(Args), Clauses}];
 
     _ ->
-      Env1 = Env#{'*populating_gm' => true},
-      % TODO: don't need to create an extra fun here
-      Fun = rep({fn, Line, [], Expr}, Env1),
+      {{global, Atom}, _} = env_get(Name, Env),
+      Gm = gm(module(Env)),
 
-      #{Name := {{global, Atom}, _}, '*gm' := Gm} = Env1,
-      Call = {call, Line, {atom, Line, '_@gm_maybe_set'},
-        [{atom, Line, Gm}, {atom, Line, Atom}, Fun]},
-      Clause = {clause, Line, [], [], [Call]},
+      FindCall = {call, Line, {atom, Line, '_@gm_find'},
+        [{atom, Line, Gm}, {atom, Line, Atom}]},
+      SetCall = {call, Line, {atom, Line, '_@gm_set'},
+        [{atom, Line, Gm}, {atom, Line, Atom}, rep(Expr, Env)]},
+
+      Var = {var, Line, unique("_@Value")},
+      Case = {'case', Line, FindCall, [
+        {clause, Line, [{tuple, Line, [{atom, Line, ok}, Var]}], [], [Var]},
+        {clause, Line, [{atom, Line, error}], [], [SetCall]}
+      ]},
+      Clause = {clause, Line, [], [], [Case]},
       [{function, Line, list_to_atom(Name), 0, [Clause]}]
   end;
 
@@ -105,14 +106,15 @@ rep({enum_token, _, _, OptionTEs}, _) ->
       {var, Line, Atom}
     end, ArgsTE),
 
+    ConAtom = list_to_atom(Con),
     {KeyLine, Key} = case KeyNode of
-      default -> {Line, Con};
+      default -> {Line, ConAtom};
       {atom, KeyLine_, Key_} -> {KeyLine_, Key_}
     end,
 
     Body = [{tuple, Line, [{atom, KeyLine, Key} | ArgsRep]}],
     Clause = {clause, Line, ArgsRep, [], Body},
-    {function, Line, Con, length(ArgsTE), [Clause]}
+    {function, Line, ConAtom, length(ArgsTE), [Clause]}
   end, FnOptionTEs);
 
 rep({struct_token, _, StructTE, {record_te, _, FieldTEs}}, Env) ->
@@ -132,7 +134,7 @@ rep({struct_token, _, StructTE, {record_te, _, FieldTEs}}, Env) ->
   Body = [rep({map, Line, Pairs}, Env1)],
 
   Clause = {clause, Line, ArgsRep, [], Body},
-  [{function, Line, Con, length(FieldTEs), [Clause]}];
+  [{function, Line, list_to_atom(Con), length(FieldTEs), [Clause]}];
 
 rep({sig, _, _, _}, _) -> [];
 
@@ -180,18 +182,10 @@ rep({map, Line, Pairs}, Env) ->
   end, Pairs),
   {map, Line, PairsRep};
 
-rep({N, Line, Name}, Env) when N == var; N == con_var; N == var_value ->
-  case maps:get(Name, Env) of
+rep({N, Line, Name}, Env) when N == var; N == con_token; N == var_value ->
+  case env_get(Name, Env) of
     % global variable handled by the global manager
-    {{global, Atom}, _} ->
-      #{'*gm' := Gm} = Env,
-      case maps:find('*populating_gm', Env) of
-        {ok, true} -> {call, Line, {atom, Line, Atom}, []};
-        _ ->
-          {call, Line, {atom, Line, '_@gm_get'},
-            [{atom, Line, Gm}, {atom, Line, Atom}]}
-      end;
-
+    {{global, Atom}, _} -> {call, Line, {atom, Line, Atom}, []};
     {{option, Key}, _} -> {atom, Line, Key};
     {{option, _, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {{global_fn, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
@@ -216,12 +210,39 @@ rep({field, _, {var, Line, Name}}, _) ->
   Clause = {clause, Line, [RecordVar], [], Body},
   {'fun', Line, {clauses, [Clause]}};
 
-rep({field, _, Expr, {var, Line, Name}}, Env) ->
-  Atom = list_to_atom(Name),
-  call(maps, get, [{atom, Line, Atom}, rep(Expr, Env)], Line);
+rep({field, Line, Expr, {N, _, Name}}, Env) when N == var; N == con_token ->
+  case Expr of
+    {con_token, _, Module} ->
+      Mod = list_to_atom(Module),
+      case maps:get({Module, Name}, Env) of
+        % global variable handled by the global manager
+        {{global, Atom}, _} -> call(Mod, Atom, [], Line);
+        {{option, Key}, _} -> {atom, Line, Key};
+        {{option, _, Atom}, Arity} ->
+          {'fun', Line,
+            {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)}};
+        {{global_fn, Atom}, Arity} ->
+          {'fun', Line,
+            {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)}}
+      end;
 
-rep({app, _, {con_var, Line, Name}, Args}, #{'*in_pattern' := true}=Env) ->
-  #{Name := {{option, Key, _}, _}} = Env,
+    _ ->
+      Atom = list_to_atom(Name),
+      call(maps, get, [{atom, Line, Atom}, rep(Expr, Env)], Line)
+  end;
+
+rep({app, _, {con_token, Line, Name}, Args}, #{'*in_pattern' := true}=Env) ->
+  {{option, Key, _}, _} = env_get(Name, Env),
+  ArgsRep = lists:map(fun(Arg) -> rep(Arg, Env) end, Args),
+  % It's possible that this is actually a partial application, but we can't
+  % successfully pattern match a newly generated function anyway, so as long as
+  % our pattern fails (which it will, because a function won't match a tuple),
+  % we're good.
+  {tuple, Line, [{atom, Line, Key} | ArgsRep]};
+
+rep({app, _, {field, Line, {con_token, _, Module}, {con_token, _, Name}}, Args},
+    #{'*in_pattern' := true}=Env) ->
+  {{option, Key, _}, _} = maps:get({Module, Name}, Env),
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, Env) end, Args),
   % It's possible that this is actually a partial application, but we can't
   % successfully pattern match a newly generated function anyway, so as long as
@@ -328,7 +349,7 @@ rep({if_let, Line, {Pattern, Expr}, Then, Else}, Env) ->
   ],
   {'case', Line, ExprRep, CaseClauses};
 
-rep({'match', Line, Expr, Cases}, Env) ->
+rep({match, Line, Expr, Cases}, Env) ->
   ExprRep = rep(Expr, Env),
   CaseClauses = lists:map(fun({Pattern, Then}) ->
     % TODO: use arity(Expr) in case of simple pattern?
@@ -409,31 +430,60 @@ rep_pattern(Pattern, Expr, Env) ->
   end, Env, type_system:pattern_names(Pattern)),
   {rep(Pattern, Env1#{'*in_pattern' => true}), rep(Expr, Env), Env1}.
 
-rep_on_load_fn(Gm, Ast) ->
-  StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, Gm}]},
+rep_init_fn({Module, {module, _, _, _, Defs}, Deps, _}) ->
+  ArgVar = {var, 1, unique("_@Arg")},
+  ModuleRep = eabs(Module, 1),
+  IsMemberCall = call(gb_sets, is_member, [ModuleRep, ArgVar], 1),
+
+  InitSetVar = {var, 1, unique("_@InitSet")},
+  MatchAddCall = {match, 1, InitSetVar,
+    call(gb_sets, add, [ModuleRep, ArgVar], 1)},
+
+  StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, gm(Module)}]},
+  InitCalls = lists:map(fun(Dep) ->
+    call(list_to_atom(Dep), '_@init', [InitSetVar], 1)
+  end, Deps),
 
   GlobalVarNames = lists:filtermap(fun
     ({global, _, _, {fn, _, _, _}}) -> false;
     ({global, _, {var, _, Name}, _}) -> {true, Name};
     (_) -> false
-  end, Ast),
-
-  Calls = lists:map(fun(Name) ->
+  end, Defs),
+  GlobalCalls = lists:map(fun(Name) ->
     {call, 1, {atom, 1, list_to_atom(Name)}, []}
   end, GlobalVarNames),
 
+  Body = lists:append([
+    [MatchAddCall, StartGm],
+    InitCalls,
+    GlobalCalls,
+    [{atom, 1, ok}]
+  ]),
+  Case = {'case', 1, IsMemberCall, [
+    {clause, 1, [{atom, 1, true}], [], [{atom, 1, ok}]},
+    {clause, 1, [{atom, 1, false}], [], Body}
+  ]},
+
   % must return ok for module load to succeed
-  Clause = {clause, 1, [], [], [StartGm | Calls] ++ [{atom, 1, ok}]},
-  {function, 1, '_@on_load', 0, [Clause]}.
+  Clause = {clause, 1, [ArgVar], [], [Case]},
+  {function, 1, '_@init', 1, [Clause]}.
+
+eabs(Lit, Line) -> erl_parse:abstract(Lit, Line).
+module(Env) -> maps:get('*module', Env).
+gm(Module) -> list_to_atom(Module ++ "_gm").
+
+env_set(Name, Value, Env) -> Env#{{module(Env), Name} => Value}.
+env_get(Name, Env) -> maps:get({module(Env), Name}, Env).
 
 arity({fn, _, Args, _}, _) -> length(Args);
 arity({'::', _, Expr, _}, Env) -> arity(Expr, Env);
-arity({N, _, Name}, Env) when N == var; N == con_var ->
-  #{Name := {_, Arity}} = Env,
+arity({N, _, Name}, Env) when N == var; N == con_token ->
+  {_, Arity} = env_get(Name, Env),
   Arity;
 arity({field, _, _}, _) -> 1;
 % TODO: we can figure this out in some cases from typing info or analysis
 arity({field, _, _, _}, _) -> unknown;
+% TODO: field for module access!!
 arity({app, _, Expr, Args}, Env) ->
   case arity(Expr, Env) of
     unknown -> unknown;
@@ -454,7 +504,7 @@ arity({N, _, _, Then, Else}, Env) when N == 'if'; N == if_let ->
     end
   end;
 arity({'let', _, _, Then}, Env) -> arity(Then, Env);
-arity({'match', _, _, Cases}, Env) ->
+arity({match, _, _, Cases}, Env) ->
   lists:foldl(fun({_, Expr}, Arity) ->
     case Arity of
       unknown -> arity(Expr, Env);
@@ -468,7 +518,7 @@ call(Mod, Fn, ArgsRep, Line) ->
 
 bind([H | T]=Name, Arity, Env) ->
   CapName = string:to_upper([H]) ++ T,
-  Env#{Name => {unique(CapName), Arity}}.
+  env_set(Name, {unique(CapName), Arity}, Env).
 
 unique(Prefix) ->
   list_to_atom(lists:concat([Prefix, '@', counter_next()])).

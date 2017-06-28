@@ -1,6 +1,10 @@
 -module(type_system_test).
+-export([type_check/1, type_check_many/3]).
+
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/errors.hrl").
+
+-define(TMP_MANY_DIR, "/tmp/type-system-test-many").
 
 type_check(Prg) ->
   FullPrg = "module Mod " ++ Prg,
@@ -8,7 +12,8 @@ type_check(Prg) ->
 
 norm_prg(Prg, Name) ->
   {ok, Env, _} = type_check(Prg),
-  #{Name := T} = Env,
+  Key = {"Mod", Name},
+  #{Key := T} = Env,
 
   {ok, Pid} = tv_server:start_link(),
   {NormT, _} = norm(T, {#{}, Pid}),
@@ -18,24 +23,62 @@ norm_prg(Prg, Name) ->
 ok_prg(Prg, Name) ->
   type_system:pretty(norm_prg(Prg, Name)).
 
-bad_prg(Prg, ExpErr) when not is_list(ExpErr) ->
+bad_prg(Prg, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {errors, [Err]} = type_check(Prg),
-  ensure_equal(Err, ExpErr);
+  ensure_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom});
 
-bad_prg(Prg, ExpErrs) ->
+bad_prg(Prg, ExpErrs) when is_list(ExpErrs) ->
   {errors, Errs} = type_check(Prg),
 
   % for simplicitly, we assume errors are in the same order
-  lists:foreach(fun({Err, ExpErr}) ->
-    ensure_equal(Err, ExpErr)
+  lists:foreach(fun({Err, {Exp1, Exp2, ExpLine, ExpFrom}}) ->
+    ensure_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom})
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, Line}]} = type_check(Prg),
-  ExpMsg = Msg,
-  ExpLine = Line.
+  {errors, [{Msg, {"Mod", Line}}]} = type_check(Prg),
+  ?assertEqual(ExpMsg, Msg),
+  ?assertEqual(ExpLine, Line).
 
-ensure_equal({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
+ok_expr(Expr) ->
+  type_system:pretty(norm_prg("expr = " ++ Expr, "expr")).
+
+bad_expr(Expr, Err) ->
+  bad_prg("expr = " ++ Expr, Err).
+
+type_check_many(Dir, PathPrgs, TargetPath) ->
+  ok = filelib:ensure_dir(Dir),
+  os:cmd(["rm -rf ",  Dir]),
+
+  lists:foreach(fun({Path, Prg}) ->
+    AbsPath = filename:join(Dir, Path ++ ".par"),
+    ok = filelib:ensure_dir(AbsPath),
+    ok = file:write_file(AbsPath, Prg)
+  end, PathPrgs),
+
+  AbsTargetPath = filename:join(Dir, TargetPath ++ ".par"),
+  type_system:infer_file(AbsTargetPath).
+
+ok_many(PathPrgs, TargetPath, Name) ->
+  {ok, Env, Comps} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  {Module, _, _, _} = hd(Comps),
+  T = maps:get({Module, Name}, Env),
+
+  {ok, Pid} = tv_server:start_link(),
+  {NormT, _} = norm(T, {#{}, Pid}),
+  ok = tv_server:stop(Pid),
+  type_system:pretty(NormT).
+
+bad_many(PathPrgs, TargetPath, ExpErr) ->
+  {errors, [Err]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  ensure_equal(Err, ExpErr).
+
+ctx_err_many(PathPrgs, TargetPath, {ExpMsg, ExpLoc}) ->
+  {errors, [{Msg, Loc}]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  ?assertEqual(ExpMsg, Msg),
+  ?assertEqual(ExpLoc, Loc).
+
+ensure_equal({T1, T2, Loc, From}, {Exp1, Exp2, ExpLoc, ExpFrom}) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {#{}, Pid}),
   {NormT2, _} = norm(T2, N),
@@ -56,14 +99,8 @@ ensure_equal({T1, T2, Line, From}, {Exp1, Exp2, ExpLine, ExpFrom}) ->
       end
   end,
 
-  ExpLine = Line,
-  ExpFrom = From.
-
-ok_expr(Expr) ->
-  type_system:pretty(norm_prg("expr = " ++ Expr, "expr")).
-
-bad_expr(Expr, Err) ->
-  bad_prg("expr = " ++ Expr, Err).
+  ?assertEqual(ExpLoc, Loc),
+  ?assertEqual(ExpFrom, From).
 
 % We don't use type_system:fvs() and type_system:subs() to implement this
 % because it'll normalize variables in an arbitrary order (e.g. C -> D could
@@ -417,13 +454,13 @@ recur_test_() ->
       {"A: Num", "Bool", 2, ?FROM_APP}
     ))
   , ?_test(bad_prg(
-      "f(x) = f(x) == 3\n"
+      "f(x) = g(x) == 3\n"
       "g(x) = f(x)",
-      {"A: Num", "Bool", 1, ?FROM_GLOBAL_DEF}
+      {"A: Num", "Bool", 1, ?FROM_GLOBAL_DEF("f")}
     ))
   , ?_test(bad_prg(
       "f(n) = if n > 0 then f(n - 1) == 1 else true",
-      {"Bool", "A: Num", 1, ?FROM_GLOBAL_DEF}
+      {"Bool", "A: Num", 1, ?FROM_GLOBAL_DEF("f")}
     ))
   ].
 
@@ -1015,11 +1052,11 @@ other_errors_test_() ->
     ))
   , ?_test(ctx_err_prg(
       "enum Int { Zero }",
-      {?ERR_REDEF_TYPE("Int"), 1}
+      {?ERR_REDEF_BUILTIN_TYPE("Int"), 1}
     ))
   , ?_test(ctx_err_prg(
       "enum Bool<A> { Stuff(A) }",
-      {?ERR_REDEF_TYPE("Bool"), 1}
+      {?ERR_REDEF_BUILTIN_TYPE("Bool"), 1}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo { Bar }\n"
@@ -1039,6 +1076,10 @@ other_errors_test_() ->
       "struct Foo<A, A> { baz :: A }",
       {?ERR_REDEF_TV("A"), 1}
     ))
+  , ?_test(ctx_err_many([
+      {"foo", "\nmodule Foo"},
+      {"bar", "module Foo import \"./foo\""}
+    ], "bar", {?ERR_REDEF_MODULE("Foo"), {"Foo", 2}}))
   , ?_test(ctx_err_prg(
       "foo :: Int",
       {?ERR_SIG_NO_DEF("foo"), 1}
@@ -1097,25 +1138,40 @@ other_errors_test_() ->
       "foo(a) = @io:printable_range()",
       {?ERR_TV_IFACE("A", "Num", "Concatable"), 1}
     ))
-  , ?_test(ctx_err_prg(
-      "\n\n\nfoo = a\n",
-      {?ERR_NOT_DEF("a"), 4}
-    ))
-  , ?_test(ctx_err_prg(
-      "foo = 3 + foo",
-      {?ERR_NOT_DEF("foo"), 1}
-    ))
-  , ?_test(ctx_err_prg(
-      "foo = @io:printable_range() :: Bar",
-      {?ERR_NOT_DEF_TYPE("Bar"), 1}
-    ))
+  , ?_test(ctx_err_prg("\n\n\nfoo = a\n", {?ERR_NOT_DEF("a"), 4}))
+  , ?_test(ctx_err_prg("foo = 3 + foo", {?ERR_NOT_DEF("foo"), 1}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo"},
+      {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
+    ], "bar", {?ERR_NOT_DEF("x", "Foo"), {"Bar", 3}}))
+  , ?_test(ctx_err_prg("foo = \"hi\" :: Bar", {?ERR_NOT_DEF_TYPE("Bar"), 1}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo"},
+      {"bar", "module Bar\nimport \"./foo\"\ny = 3 :: Foo.FooType"}
+    ], "bar", {?ERR_NOT_DEF_TYPE("FooType"), {"Bar", 3}}))
   , ?_test(ctx_err_prg(
       "\nfoo = @erlang:asdf(true)",
-      {?ERR_NATIVE_NOT_DEF(erlang, "asdf", 1), 2}
+      {?ERR_NOT_DEF_NATIVE(erlang, "asdf", 1), 2}
     ))
   , ?_test(ctx_err_prg(
       "bar = @io:format()",
-      {?ERR_NATIVE_NOT_DEF(io, "format", 0), 1}
+      {?ERR_NOT_DEF_NATIVE(io, "format", 0), 1}
+    ))
+  , ?_test(ctx_err_prg("expr = Foo.hi", {?ERR_NOT_DEF_MODULE("Foo"), 1}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo x = 3"},
+      {"bar", "module Bar\nimport \"./foo\"\ny = @a"},
+      {"baz", "module Baz\nimport \"./bar\"\nz = Foo.x"}
+    ], "baz", {?ERR_NOT_DEF_MODULE("Foo"), {"Baz", 3}}))
+  , ?_test(ctx_err_prg(
+      "foo :: Map<K>\n"
+      "foo = {}",
+      {?ERR_TYPE_PARAMS("Map", 2, 1), 1}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "foo = 'a' :: Foo",
+      {?ERR_TYPE_PARAMS("Foo", 1, 0), 2}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
@@ -1146,4 +1202,94 @@ other_errors_test_() ->
       "expr = Bar('h')",
       "expr"
     ))
+  ].
+
+import_test_() ->
+  [ ?_test("A: Num" = ok_many([
+      {"foo", "module Foo x = 3"},
+      {"bar", "module Bar import \"./foo\" y = Foo.x + 4"}
+    ], "bar", "y"))
+  , ?_test("A: Num" = ok_many([
+      {"foo", "module Foo x = 3"},
+      {"bar", "module Bar import \"./foo.par\" y = Foo.x + 4"}
+    ], "bar", "y"))
+  , ?_test("String" = ok_many([
+      {"foo", "module Foo x = 3"},
+      {"bar", "module Bar import \"./foo\" x = \"hi\""}
+    ], "bar", "x"))
+  , ?_test("Bool" = ok_many([
+      {"foo", "module Foo x = 3.0"},
+      {"a/bar", "module Bar import \"../foo\" x = Foo.x == 3.0"},
+      {"b/baz", "module Baz import \"../a/bar\" x = Bar.x || false"}
+    ], "b/baz", "x"))
+  , ?_test("[Atom]" = ok_many([
+      {"foo", "module Foo x = [@a] twice(x) = [x, x]"},
+      {"a/bar",
+        "module Bar\n"
+        "import \"../foo\"\n"
+        "import \"../b/baz\"\n"
+        "y = Foo.x ++ Baz.z"},
+      {"b/baz",
+        "module Baz\n"
+        "import \"../foo\"\n"
+        "z = Foo.twice(@b)"}
+    ], "a/bar", "y"))
+  , ?_test("Float -> A: Num" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "import \"./bar\"\n"
+        "f(x) = Bar.g(x - 10.0)"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
+    ], "foo", "f"))
+  , ?_test("Baz" = ok_many([
+      {"foo", "module Foo enum Baz { BazInt(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "x :: Foo.Baz\n"
+        "x = Foo.BazInt(3)"}
+    ], "bar", "x"))
+  , ?_test("Baz" = ok_many([
+      {"foo", "module Foo struct Baz { a :: Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "x :: Foo.Baz\n"
+        "x = Foo.Baz(3)"}
+    ], "bar", "x"))
+  , ?_test("Foo" = ok_many([
+      {"foo", "module Foo enum Foo { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "x :: Foo.Foo\n"
+        "x = Foo.Foo(3)"}
+    ], "bar", "x"))
+  , ?_test("Int" = ok_many([
+      {"foo", "module Foo enum Foo { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "x = match Foo.Foo(7) { Foo.Foo(n) => n }"}
+    ], "bar", "x"))
+  , ?_test("Baz" = ok_many([
+      {"foo", "module Foo struct Baz { a :: Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "enum Baz { Baz(Foo.Baz) }\n"
+        "x :: Baz\n"
+        "x = Baz(Foo.Baz(3))"}
+    ], "bar", "x"))
+  , ?_test(bad_many([
+      {"foo", "module Foo x = @hello"},
+      {"bar", "module Bar import \"./foo\" y = Foo.x + 4"}
+    ], "bar", {"Atom", "A: Num", {"Bar", 1}, ?FROM_OP('+')}))
+  , ?_test(bad_many([
+      {"foo", "module Foo\nimport \"./bar\"\nf(x) = Bar.g(x) == 3"},
+      {"bar", "module Bar\nimport \"./foo\"\ng(x) = Foo.f(x)"}
+    ], "foo", {"A: Num", "Bool", {"Foo", 3}, ?FROM_GLOBAL_DEF("f")}))
   ].

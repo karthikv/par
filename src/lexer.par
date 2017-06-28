@@ -52,7 +52,8 @@ enum Token {
   Dollar(Loc) @"$",
   Pound(Loc) @"#",
 
-  Module(Loc) @module_token,
+  Module(Loc) @module,
+  Import(Loc) @import,
   Enum(Loc) @enum_token,
   Struct(Loc) @struct_token,
 
@@ -73,7 +74,7 @@ enum Token {
   Var(Loc, [Char]) @var,
 
   TV(Loc, [Char]) @tv_token,
-  Con(Loc, Atom) @con_token,
+  Con(Loc, [Char]) @con_token,
 
   Dot(Loc) @".",
   LitInt(Loc, Int) @int,
@@ -198,7 +199,7 @@ tokenize_r(chs, line, col, tokens) =
               [next | t] =>
                 if is_word(next) then
                   let (chs, len, t) = until_not(is_word, t) in
-                    (Con(inc(loc, 2 + len), to_atom([h, next | chs])), t)
+                    (Con(inc(loc, 2 + len), [h, next | chs]), t)
                 else
                   (TV(inc(loc, 1), [h]), [next | t])
             }
@@ -300,6 +301,7 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
 
 chs_to_token_fn = {
   to_list("module") => Module,
+  to_list("import") => Import,
   to_list("enum") => Enum,
   to_list("struct") => Struct,
 
