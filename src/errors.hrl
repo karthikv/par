@@ -97,6 +97,11 @@
     [Key, utils:unqualify(Con), Line]
   )
 ).
+-define(
+  ERR_NOT_EXPORTED(Name, Module),
+  ?FMT("variable ~s is not exported from module ~s", [Name, Module])
+).
+
 
 -define(LOC(Node), element(2, Node)).
 

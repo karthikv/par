@@ -11,14 +11,14 @@ run_ast(Ast, Args) ->
   lists:foreach(fun(Node) ->
     case Node of
       % strictly evaluate all globals
-      {global, _, Var, _} -> eval(Var, ID);
+      {global, _, Var, _, _} -> eval(Var, ID);
       _ -> true
     end
   end, Defs),
 
   apply(eval({var, 0, "main"}, ID), Args).
 
-init({global, _, {var, _, Name}, Expr}, ID) ->
+init({global, _, {var, _, Name}, Expr, _}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
 init({enum_token, _, _, OptionTEs}, ID) ->

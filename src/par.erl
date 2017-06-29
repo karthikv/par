@@ -5,7 +5,6 @@
 % TODO:
 % - Columns + display code in error message reporting
 % - Imports
-%   - Export keyword
 % - Write parser in par
 % - Struct literal test when parser supports it
 % - Test lexer errors
@@ -18,12 +17,14 @@
 %   - Map/Set operations?
 % - Ensure embedded mode?
 % - REPL
+%   - Interpreter import implementation
 % - Concurrency
 % - Second pass for error messages (see TODOs in code)
 %   - Parsing issue for match Con { ... }
 %   - List error messages should include full List type
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
+%   - Helpful message if main() not exported
 % - Update naming conventions
 %
 % Defer

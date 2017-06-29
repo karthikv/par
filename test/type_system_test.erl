@@ -13,7 +13,7 @@ type_check(Prg) ->
 norm_prg(Prg, Name) ->
   {ok, Env, _} = type_check(Prg),
   Key = {"Mod", Name},
-  #{Key := T} = Env,
+  #{Key := {T, _}} = Env,
 
   {ok, Pid} = tv_server:start_link(),
   {NormT, _} = norm(T, {#{}, Pid}),
@@ -62,7 +62,7 @@ type_check_many(Dir, PathPrgs, TargetPath) ->
 ok_many(PathPrgs, TargetPath, Name) ->
   {ok, Env, Comps} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
   {Module, _, _, _} = hd(Comps),
-  T = maps:get({Module, Name}, Env),
+  {T, _} = maps:get({Module, Name}, Env),
 
   {ok, Pid} = tv_server:start_link(),
   {NormT, _} = norm(T, {#{}, Pid}),
@@ -1160,9 +1160,8 @@ other_errors_test_() ->
   , ?_test(ctx_err_prg("expr = Foo.hi", {?ERR_NOT_DEF_MODULE("Foo"), 1}))
   , ?_test(ctx_err_many([
       {"foo", "module Foo x = 3"},
-      {"bar", "module Bar\nimport \"./foo\"\ny = @a"},
-      {"baz", "module Baz\nimport \"./bar\"\nz = Foo.x"}
-    ], "baz", {?ERR_NOT_DEF_MODULE("Foo"), {"Baz", 3}}))
+      {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
+    ], "bar", {?ERR_NOT_EXPORTED("x", "Foo"), {"Bar", 3}}))
   , ?_test(ctx_err_prg(
       "foo :: Map<K>\n"
       "foo = {}",
@@ -1206,11 +1205,11 @@ other_errors_test_() ->
 
 import_test_() ->
   [ ?_test("A: Num" = ok_many([
-      {"foo", "module Foo x = 3"},
+      {"foo", "module Foo export x = 3"},
       {"bar", "module Bar import \"./foo\" y = Foo.x + 4"}
     ], "bar", "y"))
   , ?_test("A: Num" = ok_many([
-      {"foo", "module Foo x = 3"},
+      {"foo", "module Foo export x = 3"},
       {"bar", "module Bar import \"./foo.par\" y = Foo.x + 4"}
     ], "bar", "y"))
   , ?_test("String" = ok_many([
@@ -1218,12 +1217,12 @@ import_test_() ->
       {"bar", "module Bar import \"./foo\" x = \"hi\""}
     ], "bar", "x"))
   , ?_test("Bool" = ok_many([
-      {"foo", "module Foo x = 3.0"},
-      {"a/bar", "module Bar import \"../foo\" x = Foo.x == 3.0"},
-      {"b/baz", "module Baz import \"../a/bar\" x = Bar.x || false"}
+      {"foo", "module Foo export x = 3.0"},
+      {"a/bar", "module Bar import \"../foo\" export x = Foo.x == 3.0"},
+      {"b/baz", "module Baz import \"../a/bar\" export x = Bar.x || false"}
     ], "b/baz", "x"))
   , ?_test("[Atom]" = ok_many([
-      {"foo", "module Foo x = [@a] twice(x) = [x, x]"},
+      {"foo", "module Foo export x = [@a] export twice(x) = [x, x]"},
       {"a/bar",
         "module Bar\n"
         "import \"../foo\"\n"
@@ -1232,17 +1231,17 @@ import_test_() ->
       {"b/baz",
         "module Baz\n"
         "import \"../foo\"\n"
-        "z = Foo.twice(@b)"}
+        "export z = Foo.twice(@b)"}
     ], "a/bar", "y"))
   , ?_test("Float -> A: Num" = ok_many([
       {"foo",
         "module Foo\n"
         "import \"./bar\"\n"
-        "f(x) = Bar.g(x - 10.0)"},
+        "export f(x) = Bar.g(x - 10.0)"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
+        "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
     ], "foo", "f"))
   , ?_test("Baz" = ok_many([
       {"foo", "module Foo enum Baz { BazInt(Int) }"},
@@ -1285,11 +1284,11 @@ import_test_() ->
         "x = Baz(Foo.Baz(3))"}
     ], "bar", "x"))
   , ?_test(bad_many([
-      {"foo", "module Foo x = @hello"},
+      {"foo", "module Foo export x = @hello"},
       {"bar", "module Bar import \"./foo\" y = Foo.x + 4"}
     ], "bar", {"Atom", "A: Num", {"Bar", 1}, ?FROM_OP('+')}))
   , ?_test(bad_many([
-      {"foo", "module Foo\nimport \"./bar\"\nf(x) = Bar.g(x) == 3"},
-      {"bar", "module Bar\nimport \"./foo\"\ng(x) = Foo.f(x)"}
+      {"foo", "module Foo\nimport \"./bar\"\nexport f(x) = Bar.g(x) == 3"},
+      {"bar", "module Bar\nimport \"./foo\"\nexport g(x) = Foo.f(x)"}
     ], "foo", {"A: Num", "Bool", {"Foo", 3}, ?FROM_GLOBAL_DEF("f")}))
   ].

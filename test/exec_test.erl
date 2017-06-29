@@ -442,13 +442,14 @@ test_pattern(Expr, Run) ->
   ].
 
 code_gen_import_test_() -> test_import(fun many_code_gen/2).
+% TODO: defer interpreter import until we work on REPL
 test_import(Many) ->
   [ ?_test(7 = Many([
-      {"foo", "module Foo x = 3"},
+      {"foo", "module Foo export x = 3"},
       {"bar", "module Bar import \"./foo\" main() = Foo.x + 4"}
     ], "bar"))
   , ?_test(7 = Many([
-      {"foo", "module Foo x = 3"},
+      {"foo", "module Foo export x = 3"},
       {"bar", "module Bar import \"./foo.par\" main() = Foo.x + 4"}
     ], "bar"))
   , ?_test(<<"hi">> = Many([
@@ -456,12 +457,12 @@ test_import(Many) ->
       {"bar", "module Bar import \"./foo\" main() = \"hi\""}
     ], "bar"))
   , ?_test(true = Many([
-      {"foo", "module Foo x = 3.0"},
-      {"a/bar", "module Bar import \"../foo\" x = Foo.x == 3.0"},
+      {"foo", "module Foo export x = 3.0"},
+      {"a/bar", "module Bar import \"../foo\" export x = Foo.x == 3.0"},
       {"b/baz", "module Baz import \"../a/bar\" main() = Bar.x || false"}
     ], "b/baz"))
   , ?_test([a, b, b] = Many([
-      {"foo", "module Foo x = [@a] twice(x) = [x, x]"},
+      {"foo", "module Foo export x = [@a] export twice(x) = [x, x]"},
       {"a/bar",
         "module Bar\n"
         "import \"../foo\"\n"
@@ -470,18 +471,18 @@ test_import(Many) ->
       {"b/baz",
         "module Baz\n"
         "import \"../foo\"\n"
-        "z = Foo.twice(@b)"}
+        "export z = Foo.twice(@b)"}
     ], "a/bar"))
   , ?_test(100 = Many([
       {"foo",
         "module Foo\n"
         "import \"./bar\"\n"
-        "f(x) = Bar.g(x - 10.0)\n"
+        "export f(x) = Bar.g(x - 10.0)\n"
         "main() = f(27)"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
+        "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
     ], "foo"))
   , ?_test({'BazInt', 3} = Many([
       {"foo", "module Foo enum Baz { BazInt(Int) }"},
@@ -538,12 +539,12 @@ test_import(Many) ->
       {"foo",
         "module Foo\n"
         "import \"./bar\"\n"
-        "a = Bar.b\n"
-        "c(x) = x + 1\n"
+        "export a = Bar.b\n"
+        "export c(x) = x + 1\n"
         "main() = a"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "b = Foo.c(3)"}
+        "export b = Foo.c(3)"}
     ], "foo"))
   ].

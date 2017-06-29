@@ -196,12 +196,12 @@ infer_comps(Comps) ->
   C1 = lists:foldl(fun({Module, {module, _, _, _, Defs}, _, _}, FoldC) ->
     lists:foldl(fun(Node, ModuleC) ->
       case Node of
-        {global, Line, {var, _, Name}, _} ->
+        {global, Line, {var, _, Name}, _, Exported} ->
           case env_exists(Name, ModuleC) of
             true -> add_ctx_err(?ERR_REDEF(Name), Line, ModuleC);
             false ->
               {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
-              env_add(Name, {add_dep, TV, ID}, ModuleC)
+              env_add(Name, {add_dep, TV, ID}, Exported, ModuleC)
           end;
 
         {N, _, TE, _} when N == enum_token; N == struct_token ->
@@ -257,13 +257,13 @@ infer_comps(Comps) ->
         true ->
           {sig, _, {var, _, SigName}, _} = Sig,
           case Node of
-            {global, _, {var, _, SigName}, _} -> ModuleC;
+            {global, _, {var, _, SigName}, _, _} -> ModuleC;
             _ -> add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(Sig), ModuleC)
           end
       end,
 
       case Node of
-        {global, Line, {var, _, Name}, Expr} ->
+        {global, Line, {var, _, Name}, Expr, _} ->
           {add_dep, TV, ID} = env_get(Name, ModuleC1),
           ModuleC2 = case Expr of
             {fn, _, _, _} -> ModuleC1;
@@ -300,12 +300,12 @@ infer_comps(Comps) ->
   S = #solver{errs=C3#ctx.errs, structs=C3#ctx.structs, pid=Pid},
   Result = case solve(C3#ctx.gnrs, S) of
     {ok, Schemes} ->
-      SubbedEnv = maps:map(fun(_, Value) ->
+      SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
         {tv, V, _, _} = case Value of
           {no_dep, TV} -> TV;
           {add_dep, TV, _} -> TV
         end,
-        inst(maps:get(V, Schemes), Pid)
+        {inst(maps:get(V, Schemes), Pid), Exported}
       end, C3#ctx.env),
       {ok, SubbedEnv};
 
@@ -330,7 +330,7 @@ report_errors(Errs) ->
 infer({fn, _, Args, Expr}, C) ->
   {ArgTsRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
     ArgTV = tv_server:fresh(FoldC#ctx.pid),
-    {[ArgTV | Ts], env_add(ArgName, {no_dep, ArgTV}, FoldC)}
+    {[ArgTV | Ts], env_add(ArgName, {no_dep, ArgTV}, false, FoldC)}
   end, {[], C}, Args),
 
   {ReturnT, C2} = infer(Expr, C1),
@@ -394,7 +394,7 @@ infer({enum_token, _, EnumTE, Options}, C) ->
     Name = utils:unqualify(Con),
     FoldC5 = case env_exists(Name, FoldC4) of
       true -> add_ctx_err(?ERR_REDEF(Name), Line, FoldC4);
-      false -> env_add(Name, {add_dep, TV, ID}, FoldC4)
+      false -> env_add(Name, {add_dep, TV, ID}, true, FoldC4)
     end,
 
     case KeyNode of
@@ -467,7 +467,7 @@ infer({struct_token, Line, StructTE, {record_te, _, Fields}=RecordTE}, C) ->
     true -> add_ctx_err(?ERR_REDEF(Name), ConLine, C2);
     false ->
       NewStructs = (C2#ctx.structs)#{Con => Value},
-      env_add(Name, {add_dep, TV, ID}, C2#ctx{structs=NewStructs})
+      env_add(Name, {add_dep, TV, ID}, true, C2#ctx{structs=NewStructs})
   end,
 
   C4 = new_gnr(TV, ID, C3),
@@ -891,7 +891,7 @@ qualify(RawCon, C) ->
 
 infer_pattern({var, Line, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
-  C1 = env_add(Name, {add_dep, TV, ID}, C),
+  C1 = env_add(Name, {add_dep, TV, ID}, false, C),
   {PatternT, C2} = infer(Pattern, new_gnr(TV, ID, C1)),
   {ExprT, C3} = infer(Expr, C2),
   C4 = add_cst(PatternT, ExprT, Line, From, C3),
@@ -910,7 +910,7 @@ with_pattern_env(Pattern, C) ->
   {Vs, C1} = gb_sets:fold(fun(Name, {FoldVs, FoldC}) ->
     TV = tv_server:fresh(C#ctx.pid),
     {tv, V, _, _} = TV,
-    {[V | FoldVs], env_add(Name, {add_dep, TV, ID}, FoldC)}
+    {[V | FoldVs], env_add(Name, {add_dep, TV, ID}, false, FoldC)}
   end, {[], C}, Names),
 
   C1#ctx{gnr=C1#ctx.gnr#gnr{vs=Vs}}.
@@ -934,8 +934,14 @@ pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 
 lookup(Module, Name, Line, C) ->
   Key = {Module, Name},
+  External = C#ctx.module /= Module,
+
   case maps:find(Key, C#ctx.env) of
-    {ok, {add_dep, EnvTV, ID}} ->
+    {ok, {_, false}} when External ->
+      TV = tv_server:fresh(C#ctx.pid),
+      {TV, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Line, C)};
+
+    {ok, {{add_dep, EnvTV, ID}, _}} ->
       G = add_gnr_dep(ID, C#ctx.gnr),
 
       % We need to defer instantiation until we start solving constraints.
@@ -943,13 +949,13 @@ lookup(Module, Name, Line, C) ->
       % instantiate properly.
       {{inst, EnvTV}, C#ctx{gnr=G}};
 
-    {ok, {_, EnvTV}} -> {EnvTV, C};
+    {ok, {{_, EnvTV}, _}} -> {EnvTV, C};
 
     error ->
       TV = tv_server:fresh(C#ctx.pid),
       C1 = if
-        C#ctx.module == Module -> add_ctx_err(?ERR_NOT_DEF(Name), Line, C);
-        true -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Line, C)
+        External -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Line, C);
+        true -> add_ctx_err(?ERR_NOT_DEF(Name), Line, C)
       end,
       {TV, C1}
   end.
@@ -960,16 +966,17 @@ env_exists(Name, C) ->
 
 env_get(Name, C) ->
   Key = {C#ctx.module, Name},
-  maps:get(Key, C#ctx.env).
+  {Value, _} = maps:get(Key, C#ctx.env),
+  Value.
 
-env_add(Name, Value, C) ->
+env_add(Name, Value, Exported, C) ->
   % just a sanity assertion that Value is in the right format
   case Value of
     {add_dep, {tv, _, _, _}, _} -> true;
     {no_dep, {tv, _, _, _}} -> true
   end,
   Key = {C#ctx.module, Name},
-  C#ctx{env=(C#ctx.env)#{Key => Value}}.
+  C#ctx{env=(C#ctx.env)#{Key => {Value, Exported}}}.
 
 env_remove(Name, C) ->
   Key = {C#ctx.module, Name},
@@ -1443,7 +1450,7 @@ subs(none, _) -> none.
 
 bound_vs(Env, S) ->
   #solver{subs=Subs, schemes=Schemes} = S,
-  maps:fold(fun(_, Value, FoldVs) ->
+  maps:fold(fun(_, {Value, _}, FoldVs) ->
     case Value of
       {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs)));
 

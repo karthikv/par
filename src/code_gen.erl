@@ -4,49 +4,90 @@
 -include("errors.hrl").
 -define(COUNTER_NAME, code_gen_counter).
 -define(EXCLUDER_NAME, code_gen_excluder).
+-define(INIT_FN_ATOM, '_@init').
 
 compile_comps(Comps) ->
-  FullEnv = lists:foldl(fun({Module, {module, _, _, _, Defs}, _, _}, FoldEnv) ->
-    lists:foldl(fun(Node, ModuleEnv) ->
+  {AllExports, FullEnv} = lists:mapfoldl(fun(Comp, FoldEnv) ->
+    {Module, {module, _, _, _, Defs}, _, _} = Comp,
+
+    {Exports, FoldEnv1} = lists:mapfoldl(fun(Node, ModuleEnv) ->
       case Node of
-        {global, _, {var, _, Name}, {fn, _, Args, _}} ->
-          Value = {{global_fn, list_to_atom(Name)}, length(Args)},
-          env_set(Name, Value, ModuleEnv);
-        {global, _, {var, _, Name}, _} ->
-          env_set(Name, {{global, list_to_atom(Name)}, unknown}, ModuleEnv);
+        {global, _, {var, _, Name}, {fn, _, Args, _}, Exported} ->
+          Atom = list_to_atom(Name),
+          Arity = length(Args),
+          Value = {{global_fn, Atom}, Arity},
+
+          ModuleEnv1 = env_set(Name, Value, ModuleEnv),
+          if
+            Exported or ((Name == "main") and (Arity == 0)) ->
+              {[{Atom, Arity}], ModuleEnv1};
+            true -> {[], ModuleEnv1}
+          end;
+
+        {global, _, {var, _, Name}, _, Exported} ->
+          Atom = list_to_atom(Name),
+          Value = {{global, Atom}, unknown},
+
+          ModuleEnv1 = env_set(Name, Value, ModuleEnv),
+          case Exported of
+            true -> {[{Atom, 0}], ModuleEnv1};
+            false -> {[], ModuleEnv1}
+          end;
+
         {enum_token, _, _, OptionTEs} ->
-          lists:foldl(fun({{con_token, _, Con}, ArgsTE, KeyNode}, NestedEnv) ->
-            NumArgs = length(ArgsTE),
-            ConAtom = list_to_atom(Con),
+          {EnumExports, ModuleEnv1} = lists:mapfoldl(fun(OptionTE, NestedEnv) ->
+            {{con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
+
+            Atom = list_to_atom(Con),
+            Arity = length(ArgsTE),
             Key = case KeyNode of
-              default -> ConAtom;
+              default -> Atom;
               {atom, _, Key_} -> Key_
             end,
 
-            case NumArgs of
-              0 -> env_set(Con, {{option, Key}, badarity}, NestedEnv);
+            case Arity of
+              0 -> {[], env_set(Con, {{option, Key}, badarity}, NestedEnv)};
               _ ->
-                Value = {{option, Key, ConAtom}, NumArgs},
-                env_set(Con, Value, NestedEnv)
+                Value = {{option, Key, Atom}, Arity},
+                {[{Atom, Arity}], env_set(Con, Value, NestedEnv)}
             end
-          end, ModuleEnv, OptionTEs);
+          end, ModuleEnv, OptionTEs),
+
+          {lists:append(EnumExports), ModuleEnv1};
+
         {struct_token, _, {con_token, _, Con}, {record_te, _, FieldTEs}} ->
-          Value = {{global_fn, list_to_atom(Con)}, length(FieldTEs)},
-          env_set(Con, Value, ModuleEnv);
+          Atom = list_to_atom(Con),
+          Arity = length(FieldTEs),
+          Value = {{global_fn, Atom}, Arity},
+          {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
+
         {struct_token, _, {gen_te, _, {con_token, _, Con}, _},
             {record_te, _, FieldTEs}} ->
-          Value = {{global_fn, list_to_atom(Con)}, length(FieldTEs)},
-          env_set(Con, Value, ModuleEnv);
-        _ -> ModuleEnv
+          Atom = list_to_atom(Con),
+          Arity = length(FieldTEs),
+          Value = {{global_fn, Atom}, Arity},
+          {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
+
+        _ -> {[], ModuleEnv}
       end
-    end, FoldEnv#{'*module' => Module}, Defs)
+    end, FoldEnv#{'*module' => Module}, Defs),
+
+    {lists:append(Exports), FoldEnv1}
   end, #{}, Comps),
 
-  lists:map(fun(Comp) -> compile_ast(Comp, FullEnv) end, Comps).
+  lists:map(fun({Comp, Exports}) ->
+    compile_ast(Comp, Exports, FullEnv)
+  end, lists:zip(Comps, AllExports)).
 
-compile_ast({Module, Ast, _, Path}=Comp, Env) ->
+compile_ast({Module, Ast, _, Path}=Comp, Exports, Env) ->
   counter_spawn(),
-  excluder_spawn(gb_sets:from_list(['_@curry', '_@concat', '_@separate'])),
+  excluder_spawn(gb_sets:from_list([
+    '_@curry',
+    '_@concat',
+    '_@separate',
+    '_@gm_find',
+    '_@gm_set'
+  ])),
 
   {module, _, _, _, Defs} = Ast,
   ModuleEnv = Env#{'*module' => Module},
@@ -59,11 +100,13 @@ compile_ast({Module, Ast, _, Path}=Comp, Env) ->
     (_) -> false
   end, code_gen_utils_parsed:forms()),
 
+  {function, _, InitAtom, InitArity, _}=InitRep = rep_init_fn(Comp),
+
   LibForms = [
     {attribute, 1, file, {"[par-compiler]", 1}},
     {attribute, 1, module, list_to_atom(Module)},
-    {attribute, 1, compile, [export_all, no_auto_import]},
-    rep_init_fn(Comp) |
+    {attribute, 1, export, [{InitAtom, InitArity} | Exports]},
+    InitRep |
     Utils
   ],
   CodeForms = [{attribute, 1, file, {Path, 1}} | Reps],
@@ -71,7 +114,7 @@ compile_ast({Module, Ast, _, Path}=Comp, Env) ->
   {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms),
   {Mod, Binary}.
 
-rep({global, Line, {var, _, Name}, Expr}, Env) ->
+rep({global, Line, {var, _, Name}, Expr, _}, Env) ->
   case Expr of
     {fn, _, Args, _} ->
       {'fun', _, {clauses, Clauses}} = rep(Expr, Env),
@@ -80,6 +123,9 @@ rep({global, Line, {var, _, Name}, Expr}, Env) ->
     _ ->
       {{global, Atom}, _} = env_get(Name, Env),
       Gm = gm(module(Env)),
+
+      excluder_remove('_@gm_find'),
+      excluder_remove('_@gm_set'),
 
       FindCall = {call, Line, {atom, Line, '_@gm_find'},
         [{atom, Line, Gm}, {atom, Line, Atom}]},
@@ -445,8 +491,8 @@ rep_init_fn({Module, {module, _, _, _, Defs}, Deps, _}) ->
   end, Deps),
 
   GlobalVarNames = lists:filtermap(fun
-    ({global, _, _, {fn, _, _, _}}) -> false;
-    ({global, _, {var, _, Name}, _}) -> {true, Name};
+    ({global, _, _, {fn, _, _, _}, _}) -> false;
+    ({global, _, {var, _, Name}, _, _}) -> {true, Name};
     (_) -> false
   end, Defs),
   GlobalCalls = lists:map(fun(Name) ->

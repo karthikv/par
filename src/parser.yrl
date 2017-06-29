@@ -12,7 +12,7 @@ Terminals
   '==' '!=' '||' '&&' '|>' '!' '>' '<' '>=' '<='
   '+' '-' '*' '/' '%'
   '++' '--' '.' '|' '::' ':' '->' ';' '$'
-  module import enum_token struct_token
+  module import export enum_token struct_token
   if then else let in match discard
   int float bool char str atom var '_'
   '[' ']' '{' '}' '=>' '#'
@@ -31,11 +31,12 @@ defs -> var '::' te defs : [{sig, ?LOC('$1'), '$1', '$3'} | '$4'].
 defs -> enum defs : ['$1' | '$2'].
 defs -> struct defs : ['$1' | '$2'].
 
-global -> var '=' expr : {global, ?LOC('$1'), '$1', '$3'}.
+global -> var '=' expr : {global, ?LOC('$1'), '$1', '$3', false}.
 global -> var '(' ')' '=' expr :
-  {global, ?LOC('$1'), '$1', {fn, ?LOC('$1'), [], '$5'}}.
+  {global, ?LOC('$1'), '$1', {fn, ?LOC('$1'), [], '$5'}, false}.
 global -> var '(' var_list ')' '=' expr :
-  {global, ?LOC('$1'), '$1', {fn, ?LOC('$1'), '$3', '$6'}}.
+  {global, ?LOC('$1'), '$1', {fn, ?LOC('$1'), '$3', '$6'}, false}.
+global -> export global : setelement(5, '$2', true).
 
 var_list -> var : ['$1'].
 var_list -> var ',' var_list : ['$1' | '$3'].
