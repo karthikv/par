@@ -76,12 +76,16 @@ main(Args) ->
       case type_system:infer_prg(binary_to_list(Prg)) of
         {errors, Errs} -> type_system:report_errors(Errs);
 
-        {ok, _, Ast} ->
-          {Time, {Mod, Binary}} = timer:tc(code_gen, compile_ast, [Ast, Path]),
+        {ok, _, Comps} ->
+          {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps]),
           {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
-          Filename = lists:concat([Mod, '.beam']),
 
-          file:write_file(filename:join([OutDir, Filename]), Binary),
-          io:format(standard_error, "~s ~pms~n", [Filename, Time div 1000])
+          lists:foreach(fun({Mod, Binary}) ->
+            Filename = lists:concat([Mod, ".beam"]),
+            file:write_file(filename:join(OutDir, Filename), Binary),
+            io:format(standard_error, "~s~n", [Filename])
+          end, Compiled),
+
+          io:format(standard_error, "~pms~n", [Time div 1000])
       end
   end.

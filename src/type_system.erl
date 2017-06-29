@@ -6,6 +6,7 @@
   pretty/1,
   pattern_names/1
 ]).
+-on_load(load/0).
 -include("errors.hrl").
 
 % Naming conventions:
@@ -123,6 +124,8 @@
   -define(LOG(Prefix, Value), true).
 -endif.
 
+load() -> 'Lexer':'_@init'(gb_sets:new()).
+
 infer_file(Path) ->
   {_, Comps, _} = parse_file(Path, #{}),
   case infer_comps(Comps) of
@@ -176,8 +179,9 @@ infer_prg(Prg) ->
   {module, _, {con_token, _, Module}, [], _} = Ast,
   %% ?LOG("Ast", Ast),
 
-  case infer_comps([{Module, Ast, [], ""}]) of
-    {ok, Env} -> {ok, Env, Ast};
+  Comps = [{Module, Ast, [], ""}],
+  case infer_comps(Comps) of
+    {ok, Env} -> {ok, Env, Comps};
     {errors, _}=Errors -> Errors
   end.
 

@@ -90,7 +90,7 @@ enum Result<T, E> {
   Err(E) @error
 }
 
-tokenize(chs) =
+export tokenize(chs) =
   let
     tokens = tokenize_r(chs, 1, 1, []),
     errs = filter(
@@ -328,14 +328,6 @@ until_nl(chs) = until_nl_r(chs, [], 0)
 until_nl_r(chs, accum, len) = match chs {
   ['\n' | t] => (reverse(['\n' | accum]), len + 1, t),
   [h | t] => until_nl_r(t, [h | accum], len + 1),
-  [] => (reverse(accum), len, [])
-}
-
-until_unesc(ch, chs) = until_unesc_r(ch, chs, [], 0)
-until_unesc_r(ch, chs, accum, len) = match chs {
-  ['\\', h | t] => until_unesc_r(ch, t, [unesc(h) | accum], len + 2),
-  [*ch | t] => (reverse(accum), len, [ch | t]),
-  [h | t] => until_unesc_r(ch, t, [h | accum], len + 1),
   [] => (reverse(accum), len, [])
 }
 

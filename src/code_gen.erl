@@ -105,6 +105,7 @@ compile_ast({Module, Ast, _, Path}=Comp, Exports, Env) ->
   LibForms = [
     {attribute, 1, file, {"[par-compiler]", 1}},
     {attribute, 1, module, list_to_atom(Module)},
+    {attribute, 1, compile, [no_auto_import]},
     {attribute, 1, export, [{InitAtom, InitArity} | Exports]},
     InitRep |
     Utils

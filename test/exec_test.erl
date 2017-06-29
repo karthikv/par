@@ -5,8 +5,8 @@
 -define(TMP_MANY_DIR, "/tmp/exec-test-many").
 
 run_code_gen(Prg) ->
-  {ok, _, Ast} = type_system_test:type_check(Prg),
-  [{Mod, Binary}] = code_gen:compile_comps([{"Mod", Ast, [], "[exec-test]"}]),
+  {ok, _, Comps} = type_system_test:type_check(Prg),
+  [{Mod, Binary}] = code_gen:compile_comps(Comps),
 
   remove(Mod),
   code:load_binary(Mod, "", Binary),
@@ -15,7 +15,7 @@ run_code_gen(Prg) ->
   Mod:main().
 
 run_interpreter(Prg) ->
-  {ok, _, Ast} = type_system_test:type_check(Prg),
+  {ok, _, [{_, Ast, _, _}]} = type_system_test:type_check(Prg),
   interpreter:run_ast(Ast, []).
 
 expr_code_gen(Expr) -> run_code_gen("main() = " ++ Expr).

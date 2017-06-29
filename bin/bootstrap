@@ -2,20 +2,51 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-rebar3 as escript escriptize
-mv bin/par bin/par-saved
-mv _build/escript/bin/par bin/
+PAR_PATH="bin/par"
+OLD_PAR_PATH="bin/par-saved"
 
-set +e
-rebar3 eunit
-succeeded=$?
-set -e
+print_help() {
+  echo "Usage: $0 [start|stop|finish]"
+}
 
-if [ $succeeded -eq 0 ]; then
-  echo "Success!"
-  rm bin/par-saved
+if [ $# -ne 1 ]; then
+  print_help
+  exit 1
+fi
+
+if [ "$1" == "start" ]; then
+  echo "Compiling new par..."
+  rebar3 as escript escriptize
+  mv "$PAR_PATH" "$OLD_PAR_PATH"
+  mv _build/escript/bin/par "$PAR_PATH"
+  echo "Done"
+elif [ "$1" == "stop" ]; then
+  if [ -f $OLD_PAR_PATH ]; then
+    echo -n "Reverting to old par... "
+    mv "$OLD_PAR_PATH" "$PAR_PATH"
+    echo "done"
+  else
+    echo "Not bootstrapped"
+  fi
+elif [ "$1" == "finish" ]; then
+  if [ -f $OLD_PAR_PATH ]; then
+    set +e
+    # this builds any par files with the new compiler
+    rebar3 eunit
+    succeeded=$?
+    set -e
+
+    if [ $succeeded -eq 0 ]; then
+      echo "Success!"
+      rm "$OLD_PAR_PATH"
+    else
+      echo -n "Failed; still bootstrapped."
+      exit 1
+    fi
+  else
+    echo "Not bootstrapped"
+  fi
 else
-  echo -n "Failed; rolling back... "
-  mv bin/par-saved bin/par
-  echo "done"
+  print_help
+  exit 1
 fi
