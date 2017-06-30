@@ -1,6 +1,6 @@
 Nonterminals
-  prg imports defs global var_list
-  expr expr_list
+  prg import_list def def_list
+  global var_list expr expr_list
   kv_list start_record init_list mul neg lam
   let_list let_init start_match match_list semi_list
   pattern pattern_con pattern_list
@@ -20,16 +20,20 @@ Terminals
 
 Rootsymbol prg.
 
-prg -> module con_token imports defs : {module, ?LOC('$1'), '$2', '$3', '$4'}.
+prg -> module con_token import_list def_list :
+  {module, ?LOC('$1'), '$2', '$3', '$4'}.
 
-imports -> '$empty' : [].
-imports -> import str imports : [{import, ?LOC('$1'), '$2'} | '$3'].
+import_list -> '$empty' : [].
+import_list -> import str import_list :
+  [{import, ?LOC('$1'), '$2'} | '$3'].
 
-defs -> '$empty' : [].
-defs -> global defs : ['$1' | '$2'].
-defs -> var '::' te defs : [{sig, ?LOC('$1'), '$1', '$3'} | '$4'].
-defs -> enum defs : ['$1' | '$2'].
-defs -> struct defs : ['$1' | '$2'].
+def -> global : '$1'.
+def -> var '::' te : {sig, ?LOC('$1'), '$1', '$3'}.
+def -> enum : '$1'.
+def -> struct : '$1'.
+
+def_list -> '$empty' : [].
+def_list -> def def_list : ['$1' | '$2'].
 
 global -> var '=' expr : {global, ?LOC('$1'), '$1', '$3', false}.
 global -> var '(' ')' '=' expr :
