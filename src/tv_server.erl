@@ -16,7 +16,7 @@
   code_change/3
 ]).
 
-start_link() -> gen_server:start_link(?MODULE, {1, 0}, []).
+start_link() -> gen_server:start_link(?MODULE, {0, 0}, []).
 next_name(Pid) -> gen_server:call(Pid, next_name).
 next_gnr_id(Pid) -> gen_server:call(Pid, next_gnr_id).
 fresh(Pid) -> {tv, next_name(Pid), none, false}.
@@ -41,5 +41,8 @@ handle_info(Msg, State) ->
 terminate(normal, _) -> ok.
 code_change(_, State, _) -> {ok, State}.
 
-gen_name(0) -> [];
-gen_name(Count) -> [$A - 1 + Count rem 26 | gen_name(trunc(Count / 26))].
+gen_name(Count) ->
+  case trunc(Count / 26) of
+    0 -> [$A + Count];
+    Next -> [$A + Count rem 26 | gen_name(Next)]
+  end.

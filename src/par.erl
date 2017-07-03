@@ -4,13 +4,17 @@
 
 % TODO:
 % - Columns + display code in error message reporting
-% - Imports
+% - Direct imports
 % - Write parser in par
+% - Lexer doesn't account for newlines in comments
 % - Struct literal test when parser supports it
 % - Test lexer errors
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
-% - Pattern matching records
+% - Move gm start into on_load?
+% - Better pattern matching
+%   - Record types
+%   - Function args with definite type
 %   - Disallow pattern matching w/ struct Con(...) fn?
 % - Exhaustive pattern matching errors
 % - Stdlib
@@ -71,9 +75,8 @@ main(Args) ->
 
         {source_file, Path_} -> utils:absolute(Path_)
       end,
-      {ok, Prg} = file:read_file(Path),
 
-      case type_system:infer_prg(binary_to_list(Prg)) of
+      case type_system:infer_file(Path) of
         {errors, Errs} -> type_system:report_errors(Errs);
 
         {ok, _, Comps} ->

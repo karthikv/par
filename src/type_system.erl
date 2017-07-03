@@ -555,13 +555,15 @@ infer({update_record, Line, Expr, Inits}, C) ->
   {TV, C4};
 
 infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
-  G = C#ctx.gnr,
-  {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
-  {RecordT, C1} = infer({record, Line, Inits}, new_gnr(TV, ID, C)),
-
-  Con = qualify(Name, C1),
-  case maps:find(Con, C1#ctx.structs) of
+  Con = qualify(Name, C),
+  case maps:find(Con, C#ctx.structs) of
     {ok, {StructT, _, _}} ->
+      G = C#ctx.gnr,
+
+      % TODO: do we need to generalize at all here? there are no rigid vs
+      {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
+      {RecordT, C1} = infer({record, Line, Inits}, new_gnr(TV, ID, C)),
+
       NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_CREATE(Name),
 
@@ -570,7 +572,9 @@ infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
       C4 = finish_gnr(C3, add_gnr_dep(ID, G)),
       {{inst, TV}, C4};
 
-    error -> {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
+    error ->
+      {RecordT, C1} = infer({record, Line, Inits}, C),
+      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
   end;
 
 infer({field, _, {var, _, Name}}, C) ->

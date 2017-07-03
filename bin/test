@@ -1,0 +1,14 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+bin/par -o ebin src/parser.par
+bin/parse_utils
+
+if [ $# -eq 0 ]; then
+  rebar3 eunit
+elif [ $# -eq 1 ]; then
+  rebar3 eunit --module "$1"
+else
+  rebar3 eunit "$@"
+fi

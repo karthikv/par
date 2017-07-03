@@ -1,0 +1,225 @@
+module NewParser
+
+import "./lexer"
+
+enum Node {
+  Module(Lexer.Loc, Node, [Node], [Node]) @module,
+  Global(Lexer.Loc, Node, Node) @global,
+
+  Unit(Lexer.Loc) @none,
+  LitInt(Lexer.Loc, Int) @int,
+  LitFloat(Lexer.Loc, Float) @float,
+  LitBool(Lexer.Loc, Bool) @bool,
+  LitChar(Lexer.Loc, Char) @char,
+  LitStr(Lexer.Loc, String) @str,
+  LitAtom(Lexer.Loc, Atom) @atom,
+
+  BinaryExpr(Lexer.Loc, BinaryOpAtom, Node, Node) @binary_op,
+  UnaryExpr(Lexer.Loc, UnaryOpAtom, Node) @unary_op,
+
+  Con(Lexer.Loc, [Char]) @con_token,
+  Var(Lexer.Loc, [Char]) @var
+}
+
+enum NodeOp {
+  Node(Node),
+  BinaryOp(BinaryOpAtom),
+  UnaryOp(Lexer.Loc, UnaryOpAtom)
+}
+
+enum BinaryOpAtom {
+  Add @"+",
+  Sub @"-",
+  Mul @"*",
+  Div @"/"
+}
+
+enum UnaryOpAtom {
+  Neg @"-"
+}
+
+enum OpAtom {
+  Bin(BinaryOpAtom),
+  Un(UnaryOpAtom)
+}
+
+enum Maybe<T> {
+  Some(T),
+  None
+}
+
+enum Result<T> {
+  Ok(T) @ok,
+  Err([(Maybe<Lexer.Loc>, String)]) @error
+}
+
+enum State {
+  Start,
+  AcceptOp
+}
+
+parse :: [Lexer.Token] -> Result<Node>
+export parse(tokens) = match tokens {
+  // TODO: should module start/end be the start/end of the file?
+  [Lexer.Module(s), Lexer.Con(e, con) | t] =>
+    many(def, t) |> rmap(Module(range(s, e), Con(e, con), [])),
+  [Lexer.Module(_) | t] =>
+    chain_errs(
+      many(def, tokens),
+      head_loc(t),
+      "expected module name to follow module keyword"
+    ),
+  _ =>
+    chain_errs(
+      many(def, tokens),
+      head_loc(tokens),
+      "expected module name to follow module keyword"
+    )
+}
+
+def :: [Lexer.Token] -> Result<(Node, [Lexer.Token])>
+def(tokens) = match tokens {
+  [Lexer.Var(s, name), Lexer.Assign(_) | t] =>
+    expr(t, Start, []) |>
+      rmap(|et| match et {
+        (e, t) => (Global(range(s, node_loc(e)), Var(s, name), e), t)
+      }),
+
+  [Lexer.Var(_, _) | t] =>
+    an_err(head_loc(t), "expected = to follow var in global definition"),
+
+  // TODO: better error message here
+  _ => an_err(head_loc(tokens), "expected definition")
+}
+
+expr :: [Lexer.Token] -> State -> [NodeOp] -> Result<(Node, [Lexer.Token])>
+expr(tokens, state, stack) = match state {
+  Start => match tokens {
+    [Lexer.LParen(s), Lexer.RParen(e) | t] =>
+      accept_op(Unit(range(s, e)), t, stack),
+    [Lexer.LitInt(l, int) | t] => accept_op(LitInt(l, int), t, stack),
+    [Lexer.LitFloat(l, float) | t] => accept_op(LitFloat(l, float), t, stack),
+    [Lexer.LitBool(l, bool) | t] => accept_op(LitBool(l, bool), t, stack),
+    [Lexer.LitChar(l, char) | t] => accept_op(LitChar(l, char), t, stack),
+    [Lexer.LitStr(l, str) | t] => accept_op(LitStr(l, str), t, stack),
+    [Lexer.LitAtom(l, atom) | t] => accept_op(LitAtom(l, atom), t, stack),
+    [Lexer.Sub(l) | t] => expr(t, Start, [UnaryOp(l, Neg) | stack]),
+    _ => an_err(head_loc(tokens), "expected an expression")
+  },
+
+  AcceptOp => match tokens {
+    [Lexer.Add(_) | t] => shunt(Add, t, stack),
+    [Lexer.Sub(_) | t] => shunt(Sub, t, stack),
+    [Lexer.Mul(_) | t] => shunt(Mul, t, stack),
+    [Lexer.Div(_) | t] => shunt(Div, t, stack),
+    _ => let [Node(node)] = reduce(0, stack) in Ok((node, tokens))
+  }
+}
+
+accept_op :: Node -> [Lexer.Token] -> [NodeOp] -> Result<(Node, [Lexer.Token])>
+accept_op(node, t, stack) = expr(t, AcceptOp, [Node(node) | stack])
+
+shunt :: BinaryOpAtom -> [Lexer.Token] -> [NodeOp] ->
+  Result<(Node, [Lexer.Token])>
+shunt(bopa, tokens, stack) =
+  let op = BinaryOp(bopa), next_prec = get(Bin(bopa), opa_prec) in
+    expr(tokens, Start, [op | reduce(next_prec, stack)])
+
+reduce :: Int -> [NodeOp] -> [NodeOp]
+reduce(next_prec, stack) =
+  match last_op(stack) {
+    Some(BinaryOp(bopa)) =>
+      if next_prec <= get(Bin(bopa), opa_prec) then
+        let
+          [Node(right), BinaryOp(*bopa), Node(left) | t] = stack,
+          loc = range(node_loc(left), node_loc(right))
+        in
+          reduce(next_prec, [Node(BinaryExpr(loc, bopa, left, right)) | t])
+      else
+        stack,
+
+    Some(UnaryOp(s, uopa)) =>
+      if next_prec <= get(Un(uopa), opa_prec) then
+        let
+          [Node(right), UnaryOp(*s, *uopa) | t] = stack,
+          loc = range(s, node_loc(right))
+        in
+          reduce(next_prec, [Node(UnaryExpr(loc, uopa, right)) | t])
+      else
+        stack,
+
+    None => stack
+  }
+
+last_op :: [NodeOp] -> Maybe<NodeOp>
+last_op(stack) = match stack {
+  [BinaryOp(opa) | _] => Some(BinaryOp(opa)),
+  [UnaryOp(l, opa) | _] => Some(UnaryOp(l, opa)),
+  [_ | t] => last_op(t),
+  [] => None
+}
+
+get :: K -> Map<K, V> -> V
+get = @maps:get/2
+
+opa_prec :: Map<OpAtom, Int>
+opa_prec =
+  let pairs = map_index(|opas, i| map(|opa| (opa, i), opas), opa_prec_list) in
+    @maps:from_list(@lists:append(pairs))
+
+opa_prec_list :: [[OpAtom]]
+opa_prec_list = [
+  [Bin(Add), Bin(Sub)],
+  [Bin(Mul), Bin(Div)],
+  [Un(Neg)]
+]
+
+map_index :: (A -> Int -> B) -> [A] -> [B]
+map_index(f, l) =
+  let (mapped, _) = @lists:mapfoldl(|a, i| (f(a, i), i + 1), 0, l) in mapped
+
+map :: (A -> B) -> [A] -> [B]
+map = @lists:map/2
+
+head_loc :: [Lexer.Token] -> Maybe<Lexer.Loc>
+head_loc(tokens) =
+  if let [t | _] = tokens then
+    Some(@erlang:element(2, t))
+  else
+    None
+
+node_loc :: Node -> Lexer.Loc
+node_loc(node) = @erlang:element(2, node)
+
+range :: Lexer.Loc -> Lexer.Loc -> Lexer.Loc
+range(start, end) = {
+  start_line = start.start_line,
+  start_col = start.start_col,
+  end_line = end.end_line,
+  end_col = end.end_col
+}
+
+chain_errs :: Result<A> -> Maybe<Lexer.Loc> -> String -> Result<B>
+chain_errs(r, mloc, str) =
+  let errs = match r { Ok(_) => [], Err(errs) => errs } in
+    Err([(mloc, str) | errs])
+
+many :: ([Lexer.Token] -> Result<(T, [Lexer.Token])>) -> [Lexer.Token] ->
+  Result<[T]>
+many(f, tokens) = match f(tokens) {
+  Ok((node, [])) => Ok([node]),
+  Ok((node, rest)) => match many(f, rest) {
+    Ok(nodes) => Ok([node | nodes]),
+    err => err
+  },
+  Err(errs) => Err(errs)
+}
+
+rmap :: (A -> B) -> Result<A> -> Result<B>
+rmap(f, r) = match r {
+  Ok(a) => Ok(f(a)),
+  Err(errs) => Err(errs)
+}
+
+an_err :: Maybe<Lexer.Loc> -> String -> Result<A>
+an_err(mloc, str) = Err([(mloc, str)])

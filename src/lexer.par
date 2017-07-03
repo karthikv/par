@@ -259,7 +259,7 @@ tokenize_num_finish(loc, seen_dot, accum, left) =
     (LitInt(loc, to_int(reverse(accum))), left)
 
 tokenize_str(loc, chs) =
-  let ['"' | t] = chs in tokenize_str_r(loc, t, [])
+  let ['"' | t] = chs in tokenize_str_r(inc(loc, 1), t, [])
 tokenize_str_r(loc, chs, accum) = match chs {
   ['\\', h | t] =>
     let next_loc = match h {
@@ -326,7 +326,7 @@ is_key = @maps:is_key/2
 
 until_nl(chs) = until_nl_r(chs, [], 0)
 until_nl_r(chs, accum, len) = match chs {
-  ['\n' | t] => (reverse(['\n' | accum]), len + 1, t),
+  ['\n' | t] => (reverse(accum), len + 1, ['\n' | t]),
   [h | t] => until_nl_r(t, [h | accum], len + 1),
   [] => (reverse(accum), len, [])
 }
