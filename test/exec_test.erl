@@ -318,6 +318,13 @@ test_record(Expr, Run) ->
   , ?_assertEqual(#{bar => 3, baz => true}, Expr("{ bar = 3, baz = true }"))
   , ?_test(8 = Expr("{ bar = |x| x + 5 }.bar(3)"))
   , ?_assertEqual(#{bar => 4.0}, Expr("{ { bar = 3 } | bar = 4.0 }"))
+  , ?_assertEqual(#{bar => true}, Expr("{ { bar = 3 } | bar := true }"))
+  , ?_assertEqual(#{bar => true, baz => hey}, Expr(
+      "{ { bar = 3, baz = @hi } | bar := true, baz = @hey }"
+    ))
+  , ?_assertEqual(#{bar => true, baz => 3.0}, Expr(
+      "{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }"
+    ))
 
   , ?_test(false = Expr("{ bar = 3 } == { bar = 5 }"))
   , ?_test(true = Expr("{ bar = 3 } == { bar = 3 }"))

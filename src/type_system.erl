@@ -1327,6 +1327,18 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
     {NewFoldExt1, NewFoldExt2, NewFoldS}
   end, {Ext1, Ext2, S}, CommonKeys),
 
+  % Note: At this point, for a successful type check, BaseT1 and BaseT2 must be
+  % TVs. If they are full records or record_exts, they would have been
+  % consolidated. It's possible they are invalid non-record types, at which
+  % point they would've generated errors in the past, since each time we create
+  % a record_ext type, we ensure the base is a record with the keys in ext.
+  %
+  % Consequently, if no keys differ between the extensions, we don't need to do
+  % anything further; BaseT1 *should not* be unified with BaseT2, since they're
+  % allowed to be different types without their extensions.
+  %
+  % If keys are included in one ext, but not the other, we must ensure they're
+  % present in the opposite base.
   S2 = case maps:size(RelaxedExt2) of
     0 -> S1;
     _ ->
@@ -1449,7 +1461,7 @@ add_sub(V, Sub, S) ->
       S1#solver{bound_vs=NewBoundVs}
   end.
 
-add_sub_anchor(A1, A2, S) when A1 == none; A2 == none -> S;
+add_sub_anchor(A1, A2, S) when A1 == none; A2 == none; A1 == A2 -> S;
 add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
 
 add_err(T1, T2, S) ->

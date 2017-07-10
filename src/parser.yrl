@@ -132,7 +132,7 @@ init_list -> var '=' expr : [{'$1', '$3'}].
 init_list -> var '=' expr ',' init_list : [{'$1', '$3'} | '$5'].
 
 init_ext_list -> init_ext : ['$1'].
-init_ext_list -> init_ext ',' init_ext_list : ['$1' | '$2'].
+init_ext_list -> init_ext ',' init_ext_list : ['$1' | '$3'].
 
 init_ext -> var '=' expr : {{'$1', '$3'}, false}.
 init_ext -> var ':=' expr : {{'$1', '$3'}, true}.

@@ -677,6 +677,10 @@ record_test_() ->
   , ?_test("Atom" = ok_expr("{ bar = @hi }.bar"))
   , ?_test("{ bar :: Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
   , ?_test("{ bar :: Bool }" = ok_expr("{ { bar = 3 } | bar := true }"))
+  , ?_test("{ bar :: Bool, baz :: Atom }" =
+             ok_expr("{ { bar = 3, baz = @hi } | bar := true, baz = @hey }"))
+  , ?_test("{ bar :: Bool, baz :: Float }" =
+             ok_expr("{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }"))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
       {"{ foo :: Atom }", "{ A | bar :: B }", 1, ?FROM_FIELD_ACCESS("bar")}
@@ -684,6 +688,10 @@ record_test_() ->
   , ?_test(bad_expr(
       "{ { bar = 3 } | bar = true }",
       {"A: Num", "Bool", 1, ?FROM_RECORD_UPDATE}
+    ))
+  , ?_test(bad_expr(
+      "{ { bar = 3, baz = @hi } | bar := true, baz = 3.0 }",
+      {"Atom", "Float", 1, ?FROM_RECORD_UPDATE}
     ))
   , ?_test(bad_expr(
       "{ { bar = 3 } | foo = 4.0 }",
@@ -698,6 +706,10 @@ record_test_() ->
 
   % record <=> record unification
   , ?_test("Bool" = ok_expr("{ bar = 3 } == { bar = 5 }"))
+  % to avoid infinite loops from subbing anchors
+  , ?_test("(Bool, Bool)" = ok_expr(
+      "let x = { bar = 3 }, y = x in (x == y, x == y)"
+    ))
   , ?_test(bad_expr(
       "{ bar = 3 } == { bar = \"hi\" }",
       {"A: Num", "String", 1, ?FROM_OP('==')}
@@ -855,6 +867,9 @@ record_test_() ->
       "f(x, y) = x.foo(y.bar)",
       "f"
     ))
+  , ?_test("(Bool, Bool)" = ok_expr(
+      "let x = { a = 3 } in (x == { a = 5.0 }, x == { a = 5 })"
+    ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"
       "expr = Foo(\"hi\").bar && true",
@@ -874,6 +889,15 @@ record_test_() ->
       "expr = let id(a) = a in\n"
       "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
       {"String", "Bool", 3, ?FROM_APP}
+    ))
+  % We purposely sacrifice generalization power here in favor of safety. If
+  % x unifies with Foo at any point in time, we expect that x really should be
+  % of type Foo everywhere. The user can choose to override us by using the :=
+  % operator to change a field's type.
+  , ?_test(bad_prg(
+      "struct Foo { a :: Int }\n"
+      "expr = let x = { a = 3 } in (x == Foo { a = 5 }, { x | a = 3.0 })",
+      {"Int", "Float", 2, ?FROM_RECORD_UPDATE}
     ))
 
 
