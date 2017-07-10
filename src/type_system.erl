@@ -541,18 +541,21 @@ infer({record, _, Inits}, C) ->
     end
   end, {#{}, C}, Inits),
 
-  {{record, tv_server:next_name(C#ctx.pid), FieldMap}, C1};
+  {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
 
 infer({update_record, Line, Expr, Inits}, C) ->
   {ExprT, C1} = infer(Expr, C),
-  {{record, _, FieldMap}, C2} = infer({record, Line, Inits}, C1),
+  {{record, A, FieldMap}, C2} = infer({record, Line, Inits}, C1),
 
-  RecordTV = tv_server:fresh(FieldMap, C2#ctx.pid),
-  TV = tv_server:fresh(C2#ctx.pid),
+  % ExprT needs to have every field in the field map, but the types can be
+  % different because we're updating the record
+  RelaxedFieldMap = maps:map(fun(_, _) ->
+    tv_server:fresh(C2#ctx.pid)
+  end, FieldMap),
 
-  C3 = add_cst(TV, ExprT, Line, ?FROM_RECORD_UPDATE, C2),
-  C4 = add_cst(TV, RecordTV, Line, ?FROM_RECORD_UPDATE, C3),
-  {TV, C4};
+  RecordExtT = {record_ext, A, tv_server:fresh(C2#ctx.pid), RelaxedFieldMap},
+  C3 = add_cst(ExprT, RecordExtT, Line, ?FROM_RECORD_UPDATE, C2),
+  {{record_ext, tv_server:next_name(C3#ctx.pid), ExprT, FieldMap}, C3};
 
 infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
   Con = qualify(Name, C),
@@ -579,8 +582,10 @@ infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
 
 infer({field, _, {var, _, Name}}, C) ->
   FieldTV = tv_server:fresh(C#ctx.pid),
-  TV = tv_server:fresh(#{Name => FieldTV}, C#ctx.pid),
-  {{lam, TV, FieldTV}, C};
+  BaseTV = tv_server:fresh(C#ctx.pid),
+  A = tv_server:next_name(C#ctx.pid),
+  RecordExtT = {record_ext, A, BaseTV, #{Name => FieldTV}},
+  {{lam, RecordExtT, FieldTV}, C};
 
 % TODO: ensure this is parsed correctly or add error cases (e.g. when var is
 % a con_token, expr must be a con_token)
@@ -883,6 +888,15 @@ infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
   end, {#{}, C}, Fields),
 
   {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
+infer_sig_helper(RestrictVs, Unique, {record_ext_te, Line, BaseTE, Fields}, C) ->
+  {BaseT, C1} = infer_sig_helper(RestrictVs, Unique, BaseTE, C),
+  {{record, A, FieldMap}, C2} = infer_sig_helper(
+    RestrictVs,
+    Unique,
+    {record_te, Line, Fields},
+    C1
+  ),
+  {{record_ext, A, BaseT, FieldMap}, C2};
 infer_sig_helper(_, _, {none, _}, C) -> {none, C}.
 
 qualify(RawCon, C) ->
@@ -1035,11 +1049,15 @@ norm_sig_type(SigT, RigidVs, Pid) ->
     end
   end, #{}, fvs(SigT)),
 
-  subs(SigT, Subs).
+  % user can't input a type signature that needs record consolidation
+  subs(SigT, Subs, #{}).
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
-  %% ?LOG("Gs", lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)),
+  %% ?LOG(
+  %%   "Generalizations",
+  %%   lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)
+  %% ),
 
   T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
     #{ID := #gnr{index=Index}} = FoldT#tarjan.map,
@@ -1106,16 +1124,23 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         unify_csts(SolG, FoldS)
       end, S2, SolvableIDs),
 
-      %% ?LOG("Subs", maps:map(fun(_, T) -> pretty(T) end, S3#solver.subs)),
+      %% PrettySubs = maps:map(
+      %%   fun
+      %%     (_, {anchor, A}) -> ?FMT("anchor(~s)", [A]);
+      %%     (_, T) -> pretty(T)
+      %%   end,
+      %%   S3#solver.subs
+      %% ),
+      %% ?LOG("Subs", PrettySubs),
 
       S4 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
         BoundVs = bound_vs(SolG#gnr.env, FoldS),
 
         lists:foldl(fun(SolV, NestedS) ->
-          #solver{subs=Subs, schemes=Schemes} = NestedS,
+          #solver{subs=Subs, structs=Structs, schemes=Schemes} = NestedS,
           SolTV = {tv, SolV, none, false},
-          T = subs(SolTV, Subs),
+          T = subs(SolTV, Subs, Structs),
           GVs = gb_sets:subtract(fvs(T), BoundVs),
           Schemes1 = Schemes#{SolV => {GVs, T}},
           NestedS#solver{schemes=Schemes1}
@@ -1136,21 +1161,22 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   OrderedCsts = lists:reverse(Csts),
   BoundVs = bound_vs(Env, S),
   lists:foldl(fun({T1, T2, Loc, From}, FoldS) ->
-    FoldS1 = FoldS#solver{loc=Loc, from=From},
-    unify(resolve(T1, FoldS), resolve(T2, FoldS), FoldS1)
+    ResolvedT1 = resolve(T1, FoldS),
+    ResolvedT2 = resolve(T2, FoldS),
+    #solver{subs=Subs, structs=Structs} = FoldS,
+
+    unify(
+      shallow_subs(ResolvedT1, Subs, Structs),
+      shallow_subs(ResolvedT2, Subs, Structs),
+      FoldS#solver{loc=Loc, from=From}
+    )
   end, S#solver{bound_vs=BoundVs}, OrderedCsts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, ElemTs}, S) ->
   {tuple, lists:map(fun(T) -> resolve(T, S) end, ElemTs)};
-resolve({tv, V, I, Rigid}, S) ->
-  if
-    is_map(I) ->
-      NewI = maps:map(fun(_, T) -> resolve(T, S) end, I),
-      {tv, V, NewI, Rigid};
-    true -> {tv, V, I, Rigid}
-  end;
+resolve({tv, V, I, Rigid}, _) -> {tv, V, I, Rigid};
 resolve({con, Con}, _) -> {con, Con};
 resolve({gen, Con, ParamTs}, S) ->
   {gen, Con, lists:map(fun(T) -> resolve(T, S) end, ParamTs)};
@@ -1163,20 +1189,24 @@ resolve({inst, TV}, S) ->
   resolve(ResolvedT, S);
 resolve({record, A, FieldMap}, S) ->
   {record, A, maps:map(fun(_, T) -> resolve(T, S) end, FieldMap)};
+resolve({record_ext, A, BaseT, Ext}, S) ->
+  ResolvedExt = maps:map(fun(_, T) -> resolve(T, S) end, Ext),
+  {record_ext, A, resolve(BaseT, S), ResolvedExt};
 resolve(none, _) -> none.
 
 inst({GVs, T}, Pid) ->
   Subs = gb_sets:fold(fun(V, FoldSubs) ->
     FoldSubs#{V => tv_server:next_name(Pid)}
   end, #{}, GVs),
-  subs(T, Subs).
+  % consolidation already happened when finalizing scheme
+  subs(T, Subs, #{}).
 
 unify(T1, T2, S) when T1 == T2 -> S;
 
 unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
-  S1 = unify(ArgT1, ArgT2, S),
+  S1 = sub_unify(ArgT1, ArgT2, S),
   % TODO: should we short-circuit this unification if args failed?
-  unify(ReturnT1, ReturnT2, S1);
+  sub_unify(ReturnT1, ReturnT2, S1);
 
 unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   if
@@ -1185,102 +1215,135 @@ unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
 
     true ->
       lists:foldl(fun({T1, T2}, FoldS) ->
-        unify(T1, T2, FoldS)
+        sub_unify(T1, T2, FoldS)
       end, S, lists:zip(ElemTs1, ElemTs2))
   end;
 
-unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
+unify({record, A1, FieldMap1}=T1, {record, A2, FieldMap2}=T2, S) ->
   Keys1 = gb_sets:from_list(maps:keys(FieldMap1)),
   Keys2 = gb_sets:from_list(maps:keys(FieldMap2)),
 
   if
-    Keys1 /= Keys2 ->
-      add_err({record, A1, FieldMap1}, {record, A2, FieldMap2}, S);
-
+    Keys1 /= Keys2 -> add_err(T1, T2, S);
     true ->
       S1 = gb_sets:fold(fun(Key, FoldS) ->
-        #{Key := T1} = FieldMap1,
-        #{Key := T2} = FieldMap2,
-        unify(T1, T2, FoldS)
+        sub_unify(maps:get(Key, FieldMap1), maps:get(Key, FieldMap2), FoldS)
       end, S, Keys1),
 
-      if
-        (A1 == none) or (A2 == none) -> S1;
-        length(S#solver.errs) == length(S1#solver.errs) ->
-          add_sub(A1, {record, A2, FieldMap2}, S1);
-        true -> S1
+      case no_errs(S, S1) of
+        true -> add_sub_anchor(A1, A2, S1);
+        _ -> S1
       end
+  end;
+
+unify({record, A1, FieldMap}=T1, {record_ext, A2, BaseT, Ext}=T2, S) ->
+  Keys = gb_sets:from_list(maps:keys(FieldMap)),
+  KeysExt = gb_sets:from_list(maps:keys(Ext)),
+
+  case gb_sets:is_subset(KeysExt, Keys) of
+    true ->
+      S1 = gb_sets:fold(fun(Key, FoldS) ->
+        sub_unify(maps:get(Key, FieldMap), maps:get(Key, Ext), FoldS)
+      end, S, KeysExt),
+
+      RelaxedFieldMap = gb_sets:fold(fun(Key, FoldFieldMap) ->
+        TV = tv_server:fresh(S#solver.pid),
+        FoldFieldMap#{Key => TV}
+      end, FieldMap, KeysExt),
+
+      NewA = tv_server:next_name(S1#solver.pid),
+      S2 = sub_unify(BaseT, {record, NewA, RelaxedFieldMap}, S1),
+
+      case no_errs(S, S2) of
+        true -> add_sub_anchor(A1, A2, S2);
+        _ -> S2
+      end;
+
+    false -> add_err(T1, T2, S)
+  end;
+unify({record_ext, _, _, _}=T1, {record, _, _}=T2, S) ->
+  sub_unify(T2, T1, S);
+
+unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
+  Keys1 = gb_sets:from_list(maps:keys(Ext1)),
+  Keys2 = gb_sets:from_list(maps:keys(Ext2)),
+  CommonKeys = gb_sets:intersection(Keys1, Keys2),
+
+  {RelaxedExt1, RelaxedExt2, S1} = gb_sets:fold(fun(Key, Memo) ->
+    {FoldExt1, FoldExt2, FoldS} = Memo,
+    NewFoldExt1 = maps:remove(Key, FoldExt1),
+    NewFoldExt2 = maps:remove(Key, FoldExt2),
+
+    NewFoldS = sub_unify(maps:get(Key, Ext1), maps:get(Key, Ext2), FoldS),
+    {NewFoldExt1, NewFoldExt2, NewFoldS}
+  end, {Ext1, Ext2, S}, CommonKeys),
+
+  S2 = case maps:size(RelaxedExt2) of
+    0 -> S1;
+    _ ->
+      NewA1 = tv_server:next_name(S#solver.pid),
+      TV1 = tv_server:fresh(S#solver.pid),
+      sub_unify(BaseT1, {record_ext, NewA1, TV1, RelaxedExt2}, S1)
+  end,
+
+  S3 = case maps:size(RelaxedExt1) of
+    0 -> S2;
+    _ ->
+      NewA2 = tv_server:next_name(S#solver.pid),
+      TV2 = tv_server:fresh(S#solver.pid),
+      sub_unify(BaseT2, {record_ext, NewA2, TV2, RelaxedExt1}, S2)
+  end,
+
+  case no_errs(S, S3) of
+    true -> add_sub_anchor(A1, A2, S3);
+    _ -> S3
   end;
 
 unify({tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}, S) ->
   TV1 = {tv, V1, I1, Rigid1},
   TV2 = {tv, V2, I2, Rigid2},
 
-  case {subs(TV1, S#solver.subs), subs(TV2, S#solver.subs)} of
-    {TV1, TV2} ->
-      Bound1 = gb_sets:is_member(V1, S#solver.bound_vs),
-      Bound2 = gb_sets:is_member(V2, S#solver.bound_vs),
-      Occurs = occurs(V1, TV2) or occurs(V2, TV1),
+  Bound1 = gb_sets:is_member(V1, S#solver.bound_vs),
+  Bound2 = gb_sets:is_member(V2, S#solver.bound_vs),
+  Occurs = occurs(V1, TV2, S) or occurs(V2, TV1, S),
 
+  if
+    Occurs -> add_err(TV1, TV2, S);
+
+    not Rigid1, not Bound1, Rigid2 ->
       if
-        Occurs -> add_err(TV1, TV2, S);
-
-        not Rigid1, not Bound1, Rigid2 ->
-          case iface_lte(I1, I2, S) of
-            false -> add_err(TV1, TV2, S);
-            S1 -> add_sub(V1, TV2, S1)
-          end;
-
-        not Rigid2, not Bound2, Rigid1 ->
-          case iface_lte(I2, I1, S) of
-            false -> add_err(TV1, TV2, S);
-            S1 -> add_sub(V2, TV1, S1)
-         end;
-
-        not Rigid1, not Rigid2 ->
-          case iface_unify(I1, I2, S) of
-            {I2, S1} -> add_sub(V1, TV2, S1);
-            {I1, S1} -> add_sub(V2, TV1, S1);
-            {NewI, S1} ->
-              add_sub(V2, {set_iface, NewI}, add_sub(V1, TV2, S1));
-            _ -> add_err(TV1, TV2, S)
-          end;
-
+        I1 == none; I1 == I2 -> add_sub(V1, TV2, S);
         true -> add_err(TV1, TV2, S)
       end;
 
-    {NewT1, NewT2} -> unify(NewT1, NewT2, S)
-  end;
-unify({tv, V, I, Rigid}, T, S) ->
-  TV = {tv, V, I, Rigid},
-  case {subs(TV, S#solver.subs), subs(T, S#solver.subs)} of
-    {TV, T} ->
-      Occurs = occurs(V, T),
-      Instance = (I == none) or instance(T, I),
-      Bound = gb_sets:is_member(V, S#solver.bound_vs),
-      WouldEscape = Bound and occurs(true, T),
-
+    not Rigid2, not Bound2, Rigid1 ->
       if
-        Occurs -> add_err(TV, T, S);
-        Rigid or WouldEscape -> add_err(TV, T, S);
-
-        Instance -> add_sub(V, T, S);
-        is_map(I) ->
-          case unalias(T, S) of
-            {record, _, FieldMap} ->
-              case iface_lte(I, FieldMap, S) of
-                false -> add_err(TV, T, S);
-                S1 -> add_sub(V, T, S1)
-              end;
-            T -> add_err(TV, T, S)
-          end;
-
-        true -> add_err(TV, T, S)
+        I2 == none; I1 == I2 -> add_sub(V2, TV1, S);
+        true -> add_err(TV1, TV2, S)
       end;
 
-    {NewT1, NewT2} -> unify(NewT1, NewT2, S)
+    not Rigid1, not Rigid2 ->
+      if
+        I1 == none; I1 == I2 -> add_sub(V1, TV2, S);
+        I2 == none -> add_sub(V2, TV1, S);
+        true -> add_err(TV1, TV2, S)
+      end;
+
+    true -> add_err(TV1, TV2, S)
   end;
-unify(T, {tv, V, I, Rigid}, S) -> unify({tv, V, I, Rigid}, T, S);
+unify({tv, V, I, Rigid}=TV, T, S) ->
+  Occurs = occurs(V, T, S),
+  Instance = (I == none) or instance(T, I),
+  Bound = gb_sets:is_member(V, S#solver.bound_vs),
+  WouldEscape = Bound and occurs(true, T, S),
+
+  if
+    Occurs -> add_err(TV, T, S);
+    Rigid or WouldEscape -> add_err(TV, T, S);
+    Instance -> add_sub(V, T, S);
+    true -> add_err(TV, T, S)
+  end;
+unify(T, {tv, V, I, Rigid}, S) -> sub_unify({tv, V, I, Rigid}, T, S);
 
 unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
   if
@@ -1289,29 +1352,34 @@ unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
 
     true ->
       lists:foldl(fun({T1, T2}, FoldS) ->
-        unify(T1, T2, FoldS)
+        sub_unify(T1, T2, FoldS)
       end, S, lists:zip(ParamTs1, ParamTs2))
   end;
 
-unify(T, {record, A, FieldMap}, S) ->
-  RecordT = {record, A, FieldMap},
-  case unalias(T, S) of
-    T -> add_err(T, RecordT, S);
-    NewT ->
-      S1 = unify(NewT, RecordT, S),
+unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
+  case unalias(T1, S#solver.structs) of
+    T1 -> add_err(T1, T2, S);
+    NewT1 ->
+      S1 = sub_unify(NewT1, T2, S),
       if
-        length(S#solver.errs) == length(S1#solver.errs) -> add_sub(A, T, S1);
+        length(S#solver.errs) == length(S1#solver.errs) ->
+          add_sub(element(2, T2), T1, S1);
         true -> S1
       end
   end;
-unify({record, A, FieldMap}, T, S) -> unify(T, {record, A, FieldMap}, S);
+unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
+  sub_unify(T2, T1, S);
 
 unify(T1, T2, S) ->
-  case {unalias(T1, S), unalias(T2, S)} of
+  case {unalias(T1, S#solver.structs), unalias(T2, S#solver.structs)} of
+    % if only T1 or T2 needs to be unaliased, we've accounted for it above
     {T1, _} -> add_err(T1, T2, S);
     {_, T2} -> add_err(T1, T2, S);
-    {NewT1, NewT2} -> unify(NewT1, NewT2, S)
+    {NewT1, NewT2} -> sub_unify(NewT1, NewT2, S)
   end.
+
+sub_unify(T1, T2, #solver{subs=Subs, structs=Structs}=S) ->
+  unify(shallow_subs(T1, Subs, Structs), shallow_subs(T2, Subs, Structs), S).
 
 add_sub(V, Sub, S) ->
   S1 = case maps:find(V, S#solver.subs) of
@@ -1332,72 +1400,27 @@ add_sub(V, Sub, S) ->
       S1#solver{bound_vs=NewBoundVs}
   end.
 
+add_sub_anchor(A1, A2, S) when A1 == none; A2 == none -> S;
+add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
+
 add_err(T1, T2, S) ->
-  #solver{subs=Subs, loc=Loc, from=From} = S,
-  Err = {subs(T1, Subs), subs(T2, Subs), Loc, From},
+  #solver{subs=Subs, structs=Structs, loc=Loc, from=From} = S,
+  Err = {subs(T1, Subs, Structs), subs(T2, Subs, Structs), Loc, From},
   S#solver{errs=[Err | S#solver.errs]}.
 
-iface_lte(I1, I2, S) ->
-  if
-    I1 == none; I1 == I2 -> S;
-    true ->
-      case {I1, I2} of
-        _ when is_map(I1) and is_map(I2) ->
-          Keys1 = gb_sets:from_list(maps:keys(I1)),
-          Keys2 = gb_sets:from_list(maps:keys(I2)),
+no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
-          case gb_sets:is_subset(Keys1, Keys2) of
-            true ->
-              gb_sets:fold(fun(Key, FoldS) ->
-                #{Key := T1} = I1,
-                #{Key := T2} = I2,
-                unify(T1, T2, FoldS)
-              end, S, Keys1);
-            false -> false
-          end;
-        _ -> false
-      end
-  end.
-
-iface_unify(I1, I2, S) ->
-  if
-    I1 == none -> {I2, S};
-    I2 == none -> {I1, S};
-    I1 == I2 -> {I1, S};
-    true ->
-      case {I1, I2} of
-        _ when is_map(I1) and is_map(I2) ->
-          {NewMap, S1} = maps:fold(fun(Name, T1, {FoldMap, FoldS}) ->
-            FoldS1 = case maps:find(Name, I2) of
-              {ok, T2} -> unify(T1, T2, FoldS);
-              error -> FoldS
-            end,
-            {FoldMap#{Name => T1}, FoldS1}
-          end, {#{}, S}, I1),
-
-          {NewI, S2} = maps:fold(fun(Name, T2, {FoldMap, FoldS}) ->
-            FoldS1 = case maps:find(Name, I1) of
-              {ok, T1} -> unify(T1, T2, FoldS);
-              error -> FoldS
-            end,
-            {FoldMap#{Name => T2}, FoldS1}
-          end, {NewMap, S1}, I2),
-
-          {NewI, S2};
-        _ -> false
-      end
-  end.
-
-unalias({con, Con}, S) ->
-  case maps:find(Con, S#solver.structs) of
-    {ok, {_, [], RawFieldMap}} -> {record, none, RawFieldMap};
+unalias({con, Con}, Structs) ->
+  case maps:find(Con, Structs) of
+    {ok, {_, [], RawFieldMap}} ->
+      {record, none, RawFieldMap};
     error -> {con, Con}
   end;
-unalias({gen, Con, ParamTs}, S) ->
-  case maps:find(Con, S#solver.structs) of
+unalias({gen, Con, ParamTs}, Structs) ->
+  case maps:find(Con, Structs) of
     {ok, {_, Vs, RawFieldMap}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
-      subs({record, none, RawFieldMap}, Subs);
+      subs({record, none, RawFieldMap}, Subs, Structs);
     error -> {gen, Con, ParamTs}
   end;
 unalias(T, _) -> T.
@@ -1412,55 +1435,89 @@ instance({gen, "List", _}, "Separable") -> true;
 instance({gen, "Set", _}, "Separable") -> true;
 instance(_, _) -> false.
 
-subs({lam, ArgT, ReturnT}, Subs) ->
-  {lam, subs(ArgT, Subs), subs(ReturnT, Subs)};
-subs({tuple, ElemTs}, Subs) ->
-  {tuple, lists:map(fun(T) -> subs(T, Subs) end, ElemTs)};
-subs({tv, V, I, Rigid}, Subs) ->
-  SubI = if
-    is_map(I) -> element(3, subs({record, none, I}, Subs));
-    true -> I
-  end,
+subs({lam, ArgT, ReturnT}, Subs, Structs) ->
+  {lam, subs(ArgT, Subs, Structs), subs(ReturnT, Subs, Structs)};
+subs({tuple, ElemTs}, Subs, Structs) ->
+  {tuple, lists:map(fun(T) -> subs(T, Subs, Structs) end, ElemTs)};
+subs({tv, _, _, _}=TV, Subs, Structs) ->
+  case shallow_subs(TV, Subs, Structs) of
+    TV -> TV;
+    NewT -> subs(NewT, Subs, Structs)
+  end;
+subs({con, Con}, _, _) -> {con, Con};
+subs({gen, Con, ParamTs}, Subs, Structs) ->
+  {gen, Con, lists:map(fun(T) -> subs(T, Subs, Structs) end, ParamTs)};
+subs({record, A, FieldMap}, Subs, Structs) ->
+  case maps:find(A, Subs) of
+    error ->
+      NewFieldMap = maps:map(fun(_, T) ->
+        subs(T, Subs, Structs)
+      end, FieldMap),
+      {record, A, NewFieldMap};
+    {ok, {anchor, NewA}} -> subs({record, NewA, FieldMap}, Subs, Structs);
+    {ok, T} -> subs(T, Subs, Structs)
+  end;
+subs({record_ext, A, BaseT, Ext}, Subs, Structs) ->
+  case maps:find(A, Subs) of
+    error ->
+      NewBase = subs(BaseT, Subs, Structs),
+      NewExt = maps:map(fun(_, T) -> subs(T, Subs, Structs) end, Ext),
+      consolidate({record_ext, A, NewBase, NewExt}, Structs);
+    {ok, {anchor, NewA}} ->
+      subs({record_ext, NewA, BaseT, Ext}, Subs, Structs);
+    {ok, T} -> subs(T, Subs, Structs)
+  end;
+subs(none, _, _) -> none.
 
+shallow_subs({tv, V, I, Rigid}, Subs, Structs) ->
   case maps:find(V, Subs) of
-    error -> {tv, V, SubI, Rigid};
-    {ok, {rigid, V1}} -> {tv, V1, SubI, true};
+    error -> {tv, V, I, Rigid};
+    {ok, {rigid, V1}} -> {tv, V1, I, true};
 
     {ok, {set_iface, I1}} ->
       false = Rigid,
-      if
-        is_map(I1) ->
-          SubI1 = element(3, subs({record, none, I1}, Subs)),
-          {tv, V, SubI1, Rigid};
-        true -> {tv, V, I1, Rigid}
-      end;
+      {tv, V, I1, Rigid};
 
     {ok, Value} ->
       Sub = if
         % Replacing with a new type entirely
         is_tuple(Value) or (Value == none) -> Value;
         % Instantiation, so rigid resets to false
-        true -> {tv, Value, SubI, false}
+        true -> {tv, Value, I, false}
       end,
-      subs(Sub, Subs)
+      shallow_subs(Sub, Subs, Structs)
   end;
-subs({con, Con}, _) -> {con, Con};
-subs({gen, Con, ParamTs}, Subs) ->
-  {gen, Con, lists:map(fun(T) -> subs(T, Subs) end, ParamTs)};
-subs({record, A, FieldMap}, Subs) ->
+shallow_subs({record, A, FieldMap}=T, Subs, Structs) ->
   case maps:find(A, Subs) of
-    error ->
-      NewFieldMap = maps:map(fun(_, T) -> subs(T, Subs) end, FieldMap),
-      {record, A, NewFieldMap};
-    {ok, T} -> subs(T, Subs)
+    error -> T;
+    {ok, {anchor, NewA}} ->
+      shallow_subs({record, NewA, FieldMap}, Subs, Structs);
+    {ok, NewT} -> shallow_subs(NewT, Subs, Structs)
   end;
-subs(none, _) -> none.
+shallow_subs({record_ext, A, BaseT, Ext}=T, Subs, Structs) ->
+  case maps:find(A, Subs) of
+    error -> consolidate(T, Structs);
+    {ok, {anchor, NewA}} ->
+      shallow_subs({record_ext, NewA, BaseT, Ext}, Subs, Structs);
+    {ok, NewT} -> shallow_subs(NewT, Subs, Structs)
+  end;
+shallow_subs(T, _, _) -> T.
 
-bound_vs(Env, S) ->
-  #solver{subs=Subs, schemes=Schemes} = S,
+consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Structs) ->
+  consolidate({record_ext, A, BaseT, maps:merge(Ext1, Ext2)}, Structs);
+consolidate({record_ext, A, {record, _, FieldMap}, Ext}, _) ->
+  {record, A, maps:merge(FieldMap, Ext)};
+consolidate({record_ext, A, BaseT, Ext}, Structs) ->
+  case unalias(BaseT, Structs) of
+    % invalid base; just return as is
+    BaseT -> {record_ext, A, BaseT, Ext};
+    NewBaseT -> consolidate({record_ext, A, NewBaseT, Ext}, Structs)
+  end.
+
+bound_vs(Env, #solver{subs=Subs, structs=Structs, schemes=Schemes}) ->
   maps:fold(fun(_, {Value, _}, FoldVs) ->
     case Value of
-      {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs)));
+      {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs, Structs)));
 
       % 1) If a given other binding has been fully generalized already,
       %    we'll add the bound type variables from its scheme.
@@ -1480,11 +1537,7 @@ fvs({tuple, ElemTs}) ->
   lists:foldl(fun(T, FVs) ->
     gb_sets:union(FVs, fvs(T))
   end, gb_sets:new(), ElemTs);
-fvs({tv, V, I, _}) ->
-  if
-    is_map(I) -> gb_sets:add(V, fvs({record, none, I}));
-    true -> gb_sets:singleton(V)
-  end;
+fvs({tv, V, _, _}) -> gb_sets:singleton(V);
 fvs({con, _}) -> gb_sets:new();
 fvs({gen, _, ParamTs}) ->
   lists:foldl(fun(T, FVs) ->
@@ -1495,7 +1548,12 @@ fvs({record, _, FieldMap}) ->
   maps:fold(fun(_, T, S) ->
     gb_sets:union(S, fvs(T))
   end, gb_sets:new(), FieldMap);
+fvs({record_ext, _, BaseT, Ext}) ->
+  gb_sets:union(fvs(BaseT), fvs({record, none, Ext}));
 fvs(none) -> gb_sets:new().
+
+occurs(V, T, #solver{subs=Subs, structs=Structs}) ->
+  occurs(V, subs(T, Subs, Structs)).
 
 occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
@@ -1503,12 +1561,7 @@ occurs(V, {tuple, ElemTs}) ->
   lists:foldl(fun(T, Occurs) ->
     Occurs or occurs(V, T)
   end, false, ElemTs);
-occurs(V, {tv, V1, I, Rigid}) ->
-  OccursI = if
-    is_map(I) -> occurs(V, {record, none, I});
-    true -> false
-  end,
-  OccursI or (V == Rigid) or (V == V1);
+occurs(V, {tv, V1, _, Rigid}) -> (V == Rigid) or (V == V1);
 occurs(_, {con, _}) -> false;
 occurs(V, {gen, _, ParamTs}) ->
   lists:foldl(fun(T, Occurs) ->
@@ -1519,6 +1572,8 @@ occurs(V, {record, _, FieldMap}) ->
   maps:fold(fun(_, T, Occurs) ->
     Occurs or occurs(V, T)
   end, false, FieldMap);
+occurs(V, {record_ext, _, BaseT, Ext}) ->
+  occurs(V, BaseT) or occurs(V, {record, none, Ext});
 occurs(_, none) -> false.
 
 %% pretty_csts([]) -> [];
@@ -1537,7 +1592,6 @@ pretty({tuple, ElemTs}) ->
 pretty({tv, V, I, Rigid}) ->
   Str = if
     I == none -> tl(V);
-    is_map(I) -> ?FMT("{ ~s | ~s }", [tl(V), pretty_field_map(I)]);
     true -> ?FMT("~s: ~s", [tl(V), I])
   end,
 
@@ -1545,23 +1599,17 @@ pretty({tv, V, I, Rigid}) ->
     false -> Str;
     true -> ?FMT("rigid(~s)", [Str])
   end;
-pretty({set_iface, I}) ->
-  Str = if
-    is_map(I) -> pretty_field_map(I);
-    true -> I
-  end,
-  ?FMT("I = ~s", [Str]);
+pretty({set_iface, I}) -> ?FMT("I = ~s", [I]);
 % TODO: keep qualified when ambiguous
 pretty({con, Con}) -> utils:unqualify(Con);
-pretty({gen, "List", [ElemT]}) ->
-  ?FMT("[~s]", [pretty(ElemT)]);
+pretty({gen, "List", [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
 pretty({gen, Con, ParamTs}) ->
   PrettyParamTs = lists:map(fun(T) -> pretty(T) end, ParamTs),
   ?FMT("~s<~s>", [utils:unqualify(Con), string:join(PrettyParamTs, ", ")]);
-pretty({inst, TV}) ->
-  ?FMT("inst(~s)", [pretty(TV)]);
-pretty({record, _, FieldMap}) ->
-  ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
+pretty({inst, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
+pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
+pretty({record_ext, _, BaseT, Ext}) ->
+  ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
 pretty(none) -> "()".
 
 pretty_field_map(FieldMap) ->

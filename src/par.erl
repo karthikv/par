@@ -6,6 +6,7 @@
 % - Columns + display code in error message reporting
 % - Direct imports
 % - Write parser in par
+% - Update record can change record type
 % - Lexer doesn't account for newlines in comments
 % - Struct literal test when parser supports it
 % - Test lexer errors
@@ -24,6 +25,7 @@
 %   - Interpreter import implementation
 % - Concurrency
 % - Second pass for error messages (see TODOs in code)
+%   - Context surrounding add_err cases rather than just two types
 %   - Parsing issue for match Con { ... }
 %   - List error messages should include full List type
 %   - Norm types for error messages
@@ -77,7 +79,9 @@ main(Args) ->
       end,
 
       case type_system:infer_file(Path) of
-        {errors, Errs} -> type_system:report_errors(Errs);
+        {errors, Errs} ->
+          type_system:report_errors(Errs),
+          halt(1);
 
         {ok, _, Comps} ->
           {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps]),

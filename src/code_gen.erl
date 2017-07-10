@@ -112,7 +112,7 @@ compile_ast({Module, Ast, _, Path}=Comp, Exports, Env) ->
   ],
   CodeForms = [{attribute, 1, file, {Path, 1}} | Reps],
 
-  {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms),
+  {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms, debug_info),
   {Mod, Binary}.
 
 rep({global, Line, {var, _, Name}, Expr, _}, Env) ->

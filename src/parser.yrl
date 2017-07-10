@@ -189,7 +189,7 @@ te -> '(' te ',' te_list ')' : {tuple_te, ?LOC('$1'), ['$2' | '$4']}.
 te -> '(' te ')' : '$2'.
 te -> '{' field_list '}' : {record_te, ?LOC('$1'), '$2'}.
 te -> '{' tv_token '|' field_list '}' :
-  {tv_te, ?LOC('$1'), element(3, '$2'), {record_te, ?LOC('$3'), '$4'}}.
+  {record_ext_te, ?LOC('$1'), tv_te('$2'), '$4'}.
 te -> te '->' te : {lam_te, ?LOC('$1'), '$1', '$3'}.
 
 te_con -> con_token : '$1'.

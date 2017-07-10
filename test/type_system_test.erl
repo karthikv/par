@@ -1,5 +1,5 @@
 -module(type_system_test).
--export([type_check/1, type_check_many/3]).
+-export([type_check/1, type_check_many/3, bad_expr/2]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/errors.hrl").
@@ -146,6 +146,10 @@ norm({record, A, FieldMap}, N) ->
     {FoldMap#{Name => NormT}, FoldN1}
   end, {#{}, N}, FieldMap),
   {{record, A, NewFieldMap}, N1};
+norm({record_ext, A, BaseT, Ext}, N) ->
+  {NormBaseT, N1} = norm(BaseT, N),
+  {{record, _, NewExt}, N2} = norm({record, none, Ext}, N1),
+  {{record_ext, A, NormBaseT, NewExt}, N2};
 norm(none, N) -> {none, N}.
 
 expr_test_() ->
@@ -673,17 +677,14 @@ record_test_() ->
   , ?_test("{ A | bar :: B } -> B" = ok_expr(".bar"))
   , ?_test("Atom" = ok_expr("{ bar = @hi }.bar"))
   , ?_test("{ bar :: Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
+  , ?_test("{ bar :: Bool }" = ok_expr("{ { bar = 3 } | bar = true }"))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
       {"{ foo :: Atom }", "{ A | bar :: B }", 1, ?FROM_FIELD_ACCESS("bar")}
     ))
   , ?_test(bad_expr(
       "{ { bar = 3 } | foo = 4.0 }",
-      {"{ bar :: A: Num }", "{ B | foo :: Float }", 1, ?FROM_RECORD_UPDATE}
-    ))
-  , ?_test(bad_expr(
-      "{ { bar = 3 } | bar = true }",
-      {"A: Num", "Bool", 1, ?FROM_RECORD_UPDATE}
+      {"{ bar :: A: Num }", "{ B | foo :: C }", 1, ?FROM_RECORD_UPDATE}
     ))
 
 
@@ -794,6 +795,26 @@ record_test_() ->
       "struct Foo<A> { bar :: A, baz :: A }\n"
       "expr = Foo(3, true)",
       {"A: Num", "Bool", 2, ?FROM_APP}
+    ))
+
+
+  % update that changes named struct type
+  %% , ?_test("Foo<Bool>" = ok_prg(
+  %%     "struct Foo<T> { a :: T }\n"
+  %%     "foo = Foo { a = 3 }\n"
+  %%     "bar = { foo | a = true }",
+  %%     "bar"
+  %%   ))
+  %% , ?_test(bad_prg(
+  %%     "struct Foo<T> { a :: Map<T, String>, b :: [(T, Int)] }\n"
+  %%     "foo = Foo { a = { @a => \"hi\" }, b = [(@b, 3)] }\n"
+  %%     "bar = { foo | a = true }",
+  %%     {"Foo<Atom>", "Foo<Bool>", 3, ?FROM_RECORD_UPDATE}
+  %%   ))
+  , ?_test("Foo -> { bar :: A: Num, baz :: [String] }" = ok_prg(
+      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "f(x) = { x :: Foo | bar = 7 }",
+      "f"
     ))
 
 
