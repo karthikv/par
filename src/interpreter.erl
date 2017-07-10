@@ -111,11 +111,15 @@ eval({record, _, Inits}, ID) ->
   end, Inits),
   maps:from_list(Pairs);
 
-eval({update_record, Line, Expr, Inits}, C) ->
+eval({update_record, Line, Expr, AllInits}, C) ->
   Record = eval(Expr, C),
+  Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
   maps:merge(Record, eval({record, Line, Inits}, C));
 
 eval({record, Line, _, Inits}, ID) -> eval({record, Line, Inits}, ID);
+
+eval({update_record, Line, _, Expr, AllInits}, ID) ->
+  eval({update_record, Line, Expr, AllInits}, ID);
 
 eval({field, _, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),

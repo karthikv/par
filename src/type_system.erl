@@ -543,40 +543,81 @@ infer({record, _, Inits}, C) ->
 
   {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
 
-infer({update_record, Line, Expr, Inits}, C) ->
+infer({update_record, Line, Expr, AllInits}, C) ->
   {ExprT, C1} = infer(Expr, C),
-  {{record, A, FieldMap}, C2} = infer({record, Line, Inits}, C1),
+  {Inits, ExtInits} = lists:foldl(fun({Init, IsExt}, Memo) ->
+    {FoldInits, FoldExtInits} = Memo,
+    case IsExt of
+      true -> {FoldInits, [Init | FoldExtInits]};
+      false -> {[Init | FoldInits], FoldExtInits}
+    end
+  end, {[], []}, AllInits),
 
-  % ExprT needs to have every field in the field map, but the types can be
-  % different because we're updating the record
-  RelaxedFieldMap = maps:map(fun(_, _) ->
-    tv_server:fresh(C2#ctx.pid)
-  end, FieldMap),
+  C3 = if
+    length(Inits) == 0 -> C1;
+    true ->
+      {{record, A, FieldMap}, C2} = infer({record, Line, Inits}, C1),
+      add_cst(
+        ExprT,
+        {record_ext, A, tv_server:fresh(C2#ctx.pid), FieldMap},
+        Line,
+        ?FROM_RECORD_UPDATE,
+        C2
+      )
+  end,
 
-  RecordExtT = {record_ext, A, tv_server:fresh(C2#ctx.pid), RelaxedFieldMap},
-  C3 = add_cst(ExprT, RecordExtT, Line, ?FROM_RECORD_UPDATE, C2),
-  {{record_ext, tv_server:next_name(C3#ctx.pid), ExprT, FieldMap}, C3};
+  if
+    length(ExtInits) == 0 -> {ExprT, C3};
+    true ->
+      {{record, ExtA, Ext}, C4} = infer({record, Line, ExtInits}, C3),
+      % ExprT needs to have every field in ext, but the types can be different
+      % because it's a record extension.
+      RelaxedExt = maps:map(fun(_, _) -> tv_server:fresh(C4#ctx.pid) end, Ext),
+
+      C5 = add_cst(
+        ExprT,
+        {record_ext, ExtA, tv_server:fresh(C4#ctx.pid), RelaxedExt},
+        Line,
+        ?FROM_RECORD_UPDATE,
+        C4
+      ),
+
+      {{record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext}, C5}
+  end;
 
 infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
   Con = qualify(Name, C),
   case maps:find(Con, C#ctx.structs) of
     {ok, {StructT, _, _}} ->
-      G = C#ctx.gnr,
-
-      % TODO: do we need to generalize at all here? there are no rigid vs
-      {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
-      {RecordT, C1} = infer({record, Line, Inits}, new_gnr(TV, ID, C)),
-
+      {RecordT, C1} = infer({record, Line, Inits}, C),
       NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_CREATE(Name),
 
+      TV = tv_server:fresh(C1#ctx.pid),
       C2 = add_cst(TV, RecordT, Line, From, C1),
       C3 = add_cst(TV, NormSigT, Line, From, C2),
-      C4 = finish_gnr(C3, add_gnr_dep(ID, G)),
-      {{inst, TV}, C4};
+      {TV, C3};
 
     error ->
       {RecordT, C1} = infer({record, Line, Inits}, C),
+      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
+  end;
+
+infer({update_record, Line, {con_token, ConLine, Name}, Expr, AllInits}, C) ->
+  Con = qualify(Name, C),
+  case maps:find(Con, C#ctx.structs) of
+    {ok, {StructT, _, _}} ->
+      {RecordT, C1} = infer({update_record, Line, Expr, AllInits}, C),
+      NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
+      From = ?FROM_RECORD_UPDATE,
+
+      TV = tv_server:fresh(C1#ctx.pid),
+      C2 = add_cst(TV, RecordT, Line, From, C1),
+      C3 = add_cst(TV, NormSigT, Line, From, C2),
+      {TV, C3};
+
+    error ->
+      {RecordT, C1} = infer({update_record, Line, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
   end;
 
@@ -1068,7 +1109,15 @@ solve(Gs, S) ->
   end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
 
   case T#tarjan.solver of
-    #solver{errs=Errs} when length(Errs) > 0 -> {errors, Errs};
+    #solver{errs=Errs, subs=Subs, structs=Structs} when length(Errs) > 0 ->
+      SubbedErrs = lists:map(fun
+        ({T1, T2, Line, From}) ->
+          {subs(T1, Subs, Structs), subs(T2, Subs, Structs), Line, From};
+        ({_, _}=Err) -> Err
+      end, Errs),
+
+      {errors, SubbedErrs};
+
     #solver{schemes=Schemes} -> {ok, Schemes}
   end.
 
@@ -1404,8 +1453,8 @@ add_sub_anchor(A1, A2, S) when A1 == none; A2 == none -> S;
 add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
 
 add_err(T1, T2, S) ->
-  #solver{subs=Subs, structs=Structs, loc=Loc, from=From} = S,
-  Err = {subs(T1, Subs, Structs), subs(T2, Subs, Structs), Loc, From},
+  #solver{loc=Loc, from=From} = S,
+  Err = {T1, T2, Loc, From},
   S#solver{errs=[Err | S#solver.errs]}.
 
 no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).

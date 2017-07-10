@@ -236,7 +236,7 @@ expr_test_() ->
   , ?_test("A: Num" = ok_expr("100 - 50"))
   , ?_test("Float" = ok_expr("100.1 - 50.23"))
   , ?_test("Float" = ok_expr("100.1 - 50"))
-  , ?_test(bad_expr("true - 30.0", {"Bool", "A: Num", 1, ?FROM_OP('-')}))
+  , ?_test(bad_expr("true - 30.0", {"Bool", "Float", 1, ?FROM_OP('-')}))
 
   , ?_test("A: Num" = ok_expr("100 * 50"))
   , ?_test("Float" = ok_expr("100.1 * 50.23"))
@@ -273,7 +273,7 @@ expr_test_() ->
     ))
   , ?_test(bad_expr(
       "30.0 ++ \"str\"",
-      {"Float", "A: Concatable", 1, ?FROM_OP('++')}
+      {"Float", "String", 1, ?FROM_OP('++')}
     ))
   , ?_test(bad_expr("[true] ++ [1, 2]", {"Bool", "A: Num", 1, ?FROM_OP('++')}))
 
@@ -283,7 +283,7 @@ expr_test_() ->
   , ?_test("[Float]" = ok_expr("[3.0, 5.7, 6.8] -- [3.0]"))
   , ?_test(bad_expr(
       "\"hi\" -- []",
-      {"String", "A: Separable", 1, ?FROM_OP('--')}
+      {"String", "[A]", 1, ?FROM_OP('--')}
     ))
   , ?_test(bad_expr(
       "[1] -- #[2, 3]",
@@ -545,9 +545,8 @@ sig_test_() ->
       {"rigid(A)", "rigid(B)", 1, ?FROM_GLOBAL_SIG}
     ))
   , ?_test(bad_prg(
-      "inc :: A: Num -> A: Num\n"
       "inc(x) = x :: B: Num + 1 :: A: Num",
-      {"A", "rigid(B: Num)", 2, ?FROM_EXPR_SIG}
+      {"A: Num", "rigid(B: Num)", 1, ?FROM_EXPR_SIG}
     ))
   , ?_test(bad_prg(
       "foo :: Int -> Int\n"
@@ -677,13 +676,22 @@ record_test_() ->
   , ?_test("{ A | bar :: B } -> B" = ok_expr(".bar"))
   , ?_test("Atom" = ok_expr("{ bar = @hi }.bar"))
   , ?_test("{ bar :: Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
-  , ?_test("{ bar :: Bool }" = ok_expr("{ { bar = 3 } | bar = true }"))
+  , ?_test("{ bar :: Bool }" = ok_expr("{ { bar = 3 } | bar := true }"))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
       {"{ foo :: Atom }", "{ A | bar :: B }", 1, ?FROM_FIELD_ACCESS("bar")}
     ))
   , ?_test(bad_expr(
+      "{ { bar = 3 } | bar = true }",
+      {"A: Num", "Bool", 1, ?FROM_RECORD_UPDATE}
+    ))
+  , ?_test(bad_expr(
       "{ { bar = 3 } | foo = 4.0 }",
+      {"{ bar :: A: Num }", "{ B | foo :: Float }", 1, ?FROM_RECORD_UPDATE}
+    ))
+  , ?_test(bad_expr(
+      "{ { bar = 3 } | foo := 4.0 }",
+      % record just has to contain a field foo, not necessarily of type float
       {"{ bar :: A: Num }", "{ B | foo :: C }", 1, ?FROM_RECORD_UPDATE}
     ))
 
@@ -735,7 +743,7 @@ record_test_() ->
   % record fvs
   , ?_test(bad_prg(
       "f(x) = let a() = x.a in (true && a(), a() ++ \"hi\")",
-      {"Bool", "A: Concatable", 1, ?FROM_OP('++')}
+      {"Bool", "String", 1, ?FROM_OP('++')}
     ))
 
 
@@ -798,23 +806,41 @@ record_test_() ->
     ))
 
 
-  % update that changes named struct type
-  %% , ?_test("Foo<Bool>" = ok_prg(
-  %%     "struct Foo<T> { a :: T }\n"
-  %%     "foo = Foo { a = 3 }\n"
-  %%     "bar = { foo | a = true }",
-  %%     "bar"
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<T> { a :: Map<T, String>, b :: [(T, Int)] }\n"
-  %%     "foo = Foo { a = { @a => \"hi\" }, b = [(@b, 3)] }\n"
-  %%     "bar = { foo | a = true }",
-  %%     {"Foo<Atom>", "Foo<Bool>", 3, ?FROM_RECORD_UPDATE}
-  %%   ))
-  , ?_test("Foo -> { bar :: A: Num, baz :: [String] }" = ok_prg(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
+  % named struct updates
+  , ?_test("Foo -> Foo" = ok_prg(
+      "struct Foo { bar :: Int }\n"
       "f(x) = { x :: Foo | bar = 7 }",
       "f"
+    ))
+  , ?_test("{ bar :: Bool }" = ok_prg(
+      "struct Foo { bar :: Int }\n"
+      "foo = Foo { bar = 3 }\n"
+      "baz = { foo | bar := true }",
+      "baz"
+    ))
+  , ?_test("{ bar :: Bool, baz :: [String] }" = ok_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
+      "baz = { foo | bar := true }",
+      "baz"
+    ))
+  , ?_test("Foo<Bool>" = ok_prg(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
+      "baz = Foo { foo | bar := true }",
+      "baz"
+    ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: Int }\n"
+      "foo = Foo { bar = 3 }\n"
+      "baz = Foo { foo | bar := true }",
+      {"Bool", "Int", 3, ?FROM_RECORD_UPDATE}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<T> { a :: Map<T, String>, b :: [(T, Int)] }\n"
+      "foo = Foo { a = { @a => \"hi\" }, b = [(@b, 3)] }\n"
+      "bar = Foo { foo | a = { true => \"hi\" } }",
+      {"Bool", "Atom", 3, ?FROM_RECORD_UPDATE}
     ))
 
 
@@ -837,7 +863,7 @@ record_test_() ->
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"
       "f(x) = (x.bar && true, x.bar ++ \"hi\")",
-      {"Bool", "A: Concatable", 2, ?FROM_OP('++')}
+      {"Bool", "String", 2, ?FROM_OP('++')}
     ))
   , ?_test(bad_prg(
       "f(x) = (x.bar(\"hi\"), x.bar(true))",

@@ -42,6 +42,7 @@ enum Token {
   Div(Loc) @"/",
 
   Sig(Loc) @"::",
+  Extend(Loc) @":=",
   Colon(Loc) @":",
 
   And(Loc) @"&&",
@@ -153,6 +154,7 @@ tokenize_r(chs, line, col, tokens) =
         ['/' | t] => (Div(inc(loc, 1)), t),
 
         [':', ':' | t] => (Sig(inc(loc, 2)), t),
+        [':', '=' | t] => (Extend(inc(loc, 2)), t),
         [':' | t] => (Colon(inc(loc, 1)), t),
 
         ['&', '&' | t] => (And(inc(loc, 2)), t),

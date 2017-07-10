@@ -1,8 +1,9 @@
 Nonterminals
   prg import_list def def_list
-  global var_list expr expr_list
-  kv_list start_record init_list mul neg lam
-  let_list let_init start_match match_list semi_list
+  global var_list expr expr_list kv_list
+  start_record init_list init_ext_list init_ext
+  mul neg lam let_list let_init
+  start_match match_list semi_list
   pattern pattern_con pattern_list
   te te_con te_list enum option_list option
   struct field_list field tv_list.
@@ -10,8 +11,8 @@ Nonterminals
 Terminals
   '=' '(' ')' ','
   '==' '!=' '||' '&&' '|>' '!' '>' '<' '>=' '<='
-  '+' '-' '*' '/' '%'
-  '++' '--' '.' '|' '::' ':' '->' ';' '$'
+  '+' '-' '*' '/' '%' '++' '--'
+  '.' '|' '::' ':=' ':' '->' ';' '$'
   module import export enum_token struct_token
   if then else let in match discard
   int float bool char str atom var '_'
@@ -63,11 +64,13 @@ expr -> '(' expr ')' : '$2'.
 expr -> '{' '}' : {map, ?LOC('$1'), []}.
 expr -> '{' kv_list '}' : {map, ?LOC('$1'), '$2'}.
 expr -> '{' init_list '}' : {record, ?LOC('$1'), '$2'}.
-expr -> '{' expr '|' init_list '}' :
-  {update_record, ?LOC('$1'), '$2', '$4'}.
-% TODO: allow con_token . con_token in updated parser
 expr -> con_token start_record init_list '}' :
   {record, ?LOC('$1'), '$1', '$3'}.
+expr -> '{' expr '|' init_ext_list '}' :
+  {update_record, ?LOC('$1'), '$2', '$4'}.
+% TODO: allow con_token . con_token in updated parser
+expr -> con_token start_record expr '|' init_ext_list '}' :
+  {update_record, ?LOC('$1'), '$1', '$3', '$5'}.
 expr -> expr '==' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '!=' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
 expr -> expr '||' expr : {first('$2'), ?LOC('$1'), '$1', '$3'}.
@@ -127,6 +130,12 @@ start_record -> '{' : '$1'.
 
 init_list -> var '=' expr : [{'$1', '$3'}].
 init_list -> var '=' expr ',' init_list : [{'$1', '$3'} | '$5'].
+
+init_ext_list -> init_ext : ['$1'].
+init_ext_list -> init_ext ',' init_ext_list : ['$1' | '$2'].
+
+init_ext -> var '=' expr : {{'$1', '$3'}, false}.
+init_ext -> var ':=' expr : {{'$1', '$3'}, true}.
 
 % * also used in pattern matching for different purpose, so we factor this out
 % to avoid precendence leaking

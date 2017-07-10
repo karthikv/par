@@ -245,10 +245,14 @@ rep({record, Line, Inits}, Env) ->
   end, Inits),
   rep({map, Line, Pairs}, Env);
 
-rep({update_record, Line, Expr, Inits}, Env) ->
+rep({update_record, Line, Expr, AllInits}, Env) ->
+  Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
   call(maps, merge, [rep(Expr, Env), rep({record, Line, Inits}, Env)], Line);
 
 rep({record, Line, _, Inits}, Env) -> rep({record, Line, Inits}, Env);
+
+rep({update_record, Line, _, Expr, AllInits}, Env) ->
+  rep({update_record, Line, Expr, AllInits}, Env);
 
 rep({field, _, {var, Line, Name}}, _) ->
   RecordVar = {var, Line, 'Record'},

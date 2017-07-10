@@ -16,8 +16,8 @@
 -define(FROM_MAP_KEY, "key in map literal").
 -define(FROM_MAP_VALUE, "value in map literal").
 -define(FROM_RECORD_UPDATE, "updating record").
--define(FROM_RECORD_CREATE(Name), ?FMT("creating ~s record", [Name])).
--define(FROM_FIELD_ACCESS(Name), ?FMT("accessing ~s field", [Name])).
+-define(FROM_RECORD_CREATE(Name), ?FMT("creating record ~s", [Name])).
+-define(FROM_FIELD_ACCESS(Name), ?FMT("accessing field ~s", [Name])).
 -define(FROM_APP, "function call").
 -define(FROM_IF_COND, "if condition").
 -define(FROM_IF_BODY, "if/else body").

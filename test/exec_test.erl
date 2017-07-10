@@ -367,6 +367,29 @@ test_record(Expr, Run) ->
     ))
 
 
+  % named struct updates
+  , ?_assertEqual(#{bar => 7}, Run(
+      "struct Foo { bar :: Int }\n"
+      "f(x) = { x :: Foo | bar = 7 }\n"
+      "main() = f({ bar = 3 })"
+    ))
+  , ?_assertEqual(#{bar => true}, Run(
+      "struct Foo { bar :: Int }\n"
+      "foo = Foo { bar = 3 }\n"
+      "main() = { foo | bar := true }"
+    ))
+  , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
+      "main() = { foo | bar := true }"
+    ))
+  , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
+      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
+      "main() = Foo { foo | bar := true }"
+    ))
+
+
   % generalization cases
   , ?_test({<<"hi">>, true} = Run(
       "struct Foo<A> { bar :: A }\n"
