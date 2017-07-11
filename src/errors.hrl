@@ -7,7 +7,7 @@
 -define(ERR(Str, Args), io:format(standard_error, Str, Args)).
 
 -define(FROM_GLOBAL_DEF(Name), ?FMT("global definition of ~s", [Name])).
--define(FROM_GLOBAL_SIG, "global type signature").
+-define(FROM_GLOBAL_SIG(Name), ?FMT("global type signature of ~s", [Name])).
 -define(FROM_EXPR_SIG, "expression type signature").
 -define(FROM_ENUM_CTOR, "enum constructor").
 -define(FROM_STRUCT_CTOR, "struct constructor").
@@ -20,13 +20,17 @@
 -define(FROM_FIELD_ACCESS(Name), ?FMT("accessing field ~s", [Name])).
 -define(FROM_APP, "function call").
 -define(FROM_IF_COND, "if condition").
--define(FROM_IF_BODY, "if/else body").
+-define(FROM_THEN_BODY, "if then body").
+-define(FROM_ELSE_BODY, "else body").
 -define(FROM_LET, "let pattern").
 -define(FROM_IF_LET_PATTERN, "if-let pattern").
 -define(FROM_IF_LET_BODY, "if-let/else body").
 -define(FROM_MATCH_PATTERN, "match pattern").
 -define(FROM_MATCH_BODY, "match body").
--define(FROM_OP(Op), ?FMT("~p operator", [Op])).
+-define(FROM_UNARY_OP(Op), ?FMT("unary ~p operator", [Op])).
+-define(FROM_OP_LHS(Op), ?FMT("left-hand side of ~p operator", [Op])).
+-define(FROM_OP_RHS(Op), ?FMT("right-hand side of ~p operator", [Op])).
+-define(FROM_OP_RESULT(Op), ?FMT("result of ~p operation", [Op])).
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
 -define(

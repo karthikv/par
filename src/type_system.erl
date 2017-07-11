@@ -276,14 +276,27 @@ infer_comps(Comps) ->
 
           ModuleC3 = new_gnr(TV, ID, ModuleC2),
           {T, ModuleC4} = infer(Expr, ModuleC3),
-          ModuleC5 = add_cst(TV, T, Line, ?FROM_GLOBAL_DEF(Name), ModuleC4),
+          ExprCst = make_cst(TV, T, Line, ?FROM_GLOBAL_DEF(Name), ModuleC4),
 
-          ModuleC7 = if
-            Sig == none -> ModuleC5;
+          {InitCsts, ModuleC6} = if
+            Sig == none -> {[ExprCst], ModuleC4};
             true ->
-              {SigT, ModuleC6} = infer(Sig, ModuleC5),
-              add_cst(TV, SigT, ?LOC(Sig), ?FROM_GLOBAL_SIG, ModuleC6)
+              {SigT, ModuleC5} = infer(Sig, ModuleC4),
+              SigCst = make_cst(
+                TV,
+                SigT,
+                ?LOC(Sig),
+                ?FROM_GLOBAL_SIG(Name),
+                ModuleC5
+              ),
+              {[SigCst, ExprCst], ModuleC5}
           end,
+
+          % Unifying the expr and sig constraints first generally gives better
+          % error messages. We do this by appending them to the list of csts,
+          % as the csts are processed in reverse (depth-first) order.
+          G = ModuleC6#ctx.gnr,
+          ModuleC7 = ModuleC6#ctx{gnr=G#gnr{csts=G#gnr.csts ++ InitCsts}},
           ModuleC8 = ModuleC7#ctx{env=ModuleC#ctx.env},
           {none, finish_gnr(ModuleC8, ModuleC#ctx.gnr)};
 
@@ -696,8 +709,8 @@ infer({'if', _, Expr, Then, Else}, C) ->
     _ ->
       {ElseT, C4} = infer(Else, C3),
       TV = tv_server:fresh(C#ctx.pid),
-      C5 = add_cst(TV, ThenT, ?LOC(Then), ?FROM_IF_BODY, C4),
-      C6 = add_cst(TV, ElseT, ?LOC(Else), ?FROM_IF_BODY, C5),
+      C5 = add_cst(TV, ThenT, ?LOC(Then), ?FROM_THEN_BODY, C4),
+      C6 = add_cst(TV, ElseT, ?LOC(Else), ?FROM_ELSE_BODY, C5),
       {TV, C6}
   end;
 
@@ -754,83 +767,74 @@ infer({block, _, Exprs}, C) ->
   end, {none, C}, Exprs),
   {T, C1};
 
-infer({Op, Line, Left, Right}, C) ->
+infer({'|>', _, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
   {RightT, C2} = infer(Right, C1),
 
   TV = tv_server:fresh(C2#ctx.pid),
+  ArgTV = tv_server:fresh(C2#ctx.pid),
 
-  {T1, T2} = if
+  % add right cst first for better error messages
+  C3 = add_cst({lam, ArgTV, TV}, RightT, ?LOC(Right), ?FROM_OP_RHS('|>'), C2),
+  C4 = add_cst(ArgTV, LeftT, ?LOC(Left), ?FROM_OP_LHS('|>'), C3),
+  {TV, C4};
+
+infer({Op, Line, Left, Right}, C) ->
+  {LeftT, C1} = infer(Left, C),
+  {RightT, C2} = infer(Right, C1),
+  TV = tv_server:fresh(C2#ctx.pid),
+
+  {ExpLeftT, ExpRightT, ResultT} = if
     Op == '=='; Op == '!=' ->
       OperandTV = tv_server:fresh(C2#ctx.pid),
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, OperandTV, {lam, OperandTV, {con, "Bool"}}}
-      };
-    Op == '||'; Op == '&&' -> {
-      {lam, LeftT, {lam, RightT, TV}},
-      {lam, {con, "Bool"}, {lam, {con, "Bool"}, {con, "Bool"}}}
-    };
+      {OperandTV, OperandTV, {con, "Bool"}};
+    Op == '||'; Op == '&&' ->
+      {{con, "Bool"}, {con, "Bool"}, {con, "Bool"}};
     Op == '|>' ->
       ArgTV = tv_server:fresh(C2#ctx.pid),
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, ArgTV, {lam, {lam, ArgTV, TV}, TV}}
-      };
+      {ArgTV, {lam, ArgTV, TV}, TV};
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
       NumTV = tv_server:fresh("Num", C2#ctx.pid),
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, NumTV, {lam, NumTV, {con, "Bool"}}}
-      };
+      {NumTV, NumTV, {con, "Bool"}};
     Op == '+'; Op == '-'; Op == '*'; Op == '/' ->
       NumTV = tv_server:fresh("Num", C2#ctx.pid),
       ReturnT = if Op == '/' -> {con, "Float"}; true -> NumTV end,
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, NumTV, {lam, NumTV, ReturnT}}
-      };
+      {NumTV, NumTV, ReturnT};
     Op == '%' ->
       ReturnTV = tv_server:fresh("Num", C2#ctx.pid),
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, {con, "Int"}, {lam, {con, "Int"}, ReturnTV}}
-      };
+      {{con, "Int"}, {con, "Int"}, ReturnTV};
     Op == '++' ->
       OperandTV = tv_server:fresh("Concatable", C2#ctx.pid),
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, OperandTV, {lam, OperandTV, OperandTV}}
-      };
+      {OperandTV, OperandTV, OperandTV};
     Op == '--' ->
       OperandTV = tv_server:fresh("Separable", C2#ctx.pid),
-      {
-        {lam, LeftT, {lam, RightT, TV}},
-        {lam, OperandTV, {lam, OperandTV, OperandTV}}
-      }
+      {OperandTV, OperandTV, OperandTV}
   end,
 
-  C3 = add_cst(T1, T2, Line, ?FROM_OP(Op), C2),
-  {TV, C3};
+  C3 = add_cst(ExpLeftT, LeftT, ?LOC(Left), ?FROM_OP_LHS(Op), C2),
+  C4 = add_cst(ExpRightT, RightT, ?LOC(Right), ?FROM_OP_RHS(Op), C3),
+  C5 = add_cst(ResultT, TV, Line, ?FROM_OP_RESULT(Op), C4),
+  {TV, C5};
 
 infer({Op, Line, Expr}, C) ->
   {ExprT, C1} = infer(Expr, C),
   TV = tv_server:fresh(C1#ctx.pid),
 
-  {T1, T2} = if
-    Op == '!' -> {{lam, ExprT, TV}, {lam, {con, "Bool"}, {con, "Bool"}}};
+  {ExpExprT, ResultT} = if
+    Op == '!' -> {{con, "Bool"}, {con, "Bool"}};
     Op == '#' ->
       ElemT = tv_server:fresh(C1#ctx.pid),
-      {{lam, ExprT, TV}, {lam, {gen, "List", [ElemT]}, {gen, "Set", [ElemT]}}};
-    Op == '$' -> {{lam, ExprT, TV}, {lam, {con, "Char"}, {con, "Int"}}};
+      {{gen, "List", [ElemT]}, {gen, "Set", [ElemT]}};
+    Op == '$' -> {{con, "Char"}, {con, "Int"}};
     Op == '-' ->
       NumT = tv_server:fresh("Num", C1#ctx.pid),
-      {{lam, ExprT, TV}, {lam, NumT, NumT}};
-    Op == 'discard' -> {TV, none}
+      {NumT, NumT};
+    Op == 'discard' -> {ExprT, none}
   end,
 
-  C2 = add_cst(T1, T2, Line, ?FROM_OP(Op), C1),
-  {TV, C2}.
+  C2 = add_cst(ExpExprT, ExprT, ?LOC(Expr), ?FROM_UNARY_OP(Op), C1),
+  C3 = add_cst(ResultT, TV, Line, ?FROM_OP_RESULT(Op), C2),
+  {TV, C3}.
 
 infer_sig(RestrictVs, Unique, Ifaces, Sig, C) ->
   C1 = C#ctx{ifaces=Ifaces},
@@ -1060,9 +1064,12 @@ add_gnr_dep(ID, G) -> G#gnr{deps=gb_sets:add(ID, G#gnr.deps)}.
 
 add_cst(T1, T2, Line, From, C) ->
   G = C#ctx.gnr,
-  Loc = {C#ctx.module, Line},
-  G1 = G#gnr{csts=[{T1, T2, Loc, From} | G#gnr.csts]},
+  G1 = G#gnr{csts=[make_cst(T1, T2, Line, From, C) | G#gnr.csts]},
   C#ctx{gnr=G1}.
+
+make_cst(T1, T2, Line, From, C) ->
+  Loc = {C#ctx.module, Line},
+  {T1, T2, Loc, From}.
 
 validate_type(Con, NumParams, Line, C) ->
   case maps:find(Con, C#ctx.types) of
@@ -1202,14 +1209,14 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
   end.
 
 unify_csts(#gnr{csts=Csts, env=Env}, S) ->
+  BoundVs = bound_vs(Env, S),
+
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
   % deepest expression's constraints first to have better error messages (e.g.
   % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
-  % reverse the order here.
-  OrderedCsts = lists:reverse(Csts),
-  BoundVs = bound_vs(Env, S),
-  lists:foldl(fun({T1, T2, Loc, From}, FoldS) ->
+  % process the list in reverse order here.
+  lists:foldr(fun({T1, T2, Loc, From}, FoldS) ->
     ResolvedT1 = resolve(T1, FoldS),
     ResolvedT2 = resolve(T2, FoldS),
     #solver{subs=Subs, structs=Structs} = FoldS,
@@ -1219,7 +1226,7 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
       shallow_subs(ResolvedT2, Subs, Structs),
       FoldS#solver{loc=Loc, from=From}
     )
-  end, S#solver{bound_vs=BoundVs}, OrderedCsts).
+  end, S#solver{bound_vs=BoundVs}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};

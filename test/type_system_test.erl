@@ -189,8 +189,8 @@ expr_test_() ->
   , ?_test("Set<A>" = ok_expr("#[]"))
   , ?_test("Set<A: Num>" = ok_expr("#[1, 2]"))
   , ?_test("Set<Float>" = ok_expr("#[3, 4.0]"))
-  , ?_test(bad_expr("#1", {"[A]", "B: Num", 1, ?FROM_OP('#')}))
-  , ?_test(bad_expr("#\"some str\"", {"[A]", "String", 1, ?FROM_OP('#')}))
+  , ?_test(bad_expr("#1", {"[A]", "B: Num", 1, ?FROM_UNARY_OP('#')}))
+  , ?_test(bad_expr("#\"some str\"", {"[A]", "String", 1, ?FROM_UNARY_OP('#')}))
   , ?_test(bad_expr("#[\"hi\", true]", {"Bool", "String", 1, ?FROM_LIST_ELEM}))
 
   , ?_test("Bool" = ok_expr("1 == 2"))
@@ -201,13 +201,13 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("1 != 2.0"))
   , ?_test("Bool" = ok_expr("true == false"))
   , ?_test("Bool" = ok_expr("true != false"))
-  , ?_test(bad_expr("1 == true", {"A: Num", "Bool", 1, ?FROM_OP('==')}))
-  , ?_test(bad_expr("1 != true", {"A: Num", "Bool", 1, ?FROM_OP('!=')}))
+  , ?_test(bad_expr("1 == true", {"A: Num", "Bool", 1, ?FROM_OP_RHS('==')}))
+  , ?_test(bad_expr("1 != true", {"A: Num", "Bool", 1, ?FROM_OP_RHS('!=')}))
 
   , ?_test("Bool" = ok_expr("true || false"))
   , ?_test("Bool" = ok_expr("true && false"))
-  , ?_test(bad_expr("true || 1", {"A: Num", "Bool", 1, ?FROM_OP('||')}))
-  , ?_test(bad_expr("1 && false", {"A: Num", "Bool", 1, ?FROM_OP('&&')}))
+  , ?_test(bad_expr("true || 1", {"A: Num", "Bool", 1, ?FROM_OP_RHS('||')}))
+  , ?_test(bad_expr("1 && false", {"A: Num", "Bool", 1, ?FROM_OP_LHS('&&')}))
 
   , ?_test("Bool" = ok_expr("1 > 2"))
   , ?_test("Bool" = ok_expr("1.2 > 2.34"))
@@ -225,34 +225,34 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("1.2 <= 2.34"))
   , ?_test("Bool" = ok_expr("1 <= 2.34"))
 
-  , ?_test(bad_expr("true > 1", {"Bool", "A: Num", 1, ?FROM_OP('>')}))
-  , ?_test(bad_expr("true <= 1", {"Bool", "A: Num", 1, ?FROM_OP('<=')}))
+  , ?_test(bad_expr("true > 1", {"Bool", "A: Num", 1, ?FROM_OP_LHS('>')}))
+  , ?_test(bad_expr("true <= 1", {"Bool", "A: Num", 1, ?FROM_OP_LHS('<=')}))
 
   , ?_test("A: Num" = ok_expr("100 + 50"))
   , ?_test("Float" = ok_expr("100.1 + 50.23"))
   , ?_test("Float" = ok_expr("100 + 50.23"))
-  , ?_test(bad_expr("true + 30", {"Bool", "A: Num", 1, ?FROM_OP('+')}))
+  , ?_test(bad_expr("true + 30", {"Bool", "A: Num", 1, ?FROM_OP_LHS('+')}))
 
   , ?_test("A: Num" = ok_expr("100 - 50"))
   , ?_test("Float" = ok_expr("100.1 - 50.23"))
   , ?_test("Float" = ok_expr("100.1 - 50"))
-  , ?_test(bad_expr("true - 30.0", {"Bool", "Float", 1, ?FROM_OP('-')}))
+  , ?_test(bad_expr("true - 30.0", {"Bool", "Float", 1, ?FROM_OP_LHS('-')}))
 
   , ?_test("A: Num" = ok_expr("100 * 50"))
   , ?_test("Float" = ok_expr("100.1 * 50.23"))
   , ?_test("Float" = ok_expr("100.1 * 50"))
-  , ?_test(bad_expr("30 * false", {"Bool", "A: Num", 1, ?FROM_OP('*')}))
+  , ?_test(bad_expr("30 * false", {"Bool", "A: Num", 1, ?FROM_OP_RHS('*')}))
 
   , ?_test("Float" = ok_expr("100 / 50"))
   , ?_test("Float" = ok_expr("100.1 / 50.23"))
   , ?_test("Float" = ok_expr("100.1 / 50"))
-  , ?_test(bad_expr("30 / false", {"Bool", "A: Num", 1, ?FROM_OP('/')}))
+  , ?_test(bad_expr("30 / false", {"Bool", "A: Num", 1, ?FROM_OP_RHS('/')}))
 
   , ?_test("A: Num" = ok_expr("5 % 3"))
-  , ?_test(bad_expr("5.3 % 3", {"Float", "Int", 1, ?FROM_OP('%')}))
+  , ?_test(bad_expr("5.3 % 3", {"Float", "Int", 1, ?FROM_OP_LHS('%')}))
 
   , ?_test("Float" = ok_expr("3 + 5 * 7 - 4 / 2 + 38 % 6 - 8"))
-  , ?_test(bad_expr("7 - 12 / 5 % 6", {"Float", "Int", 1, ?FROM_OP('%')}))
+  , ?_test(bad_expr("7 - 12 / 5 % 6", {"Float", "Int", 1, ?FROM_OP_LHS('%')}))
 
   , ?_test("String" = ok_expr("\"hello \" ++ \"world\""))
   , ?_test("[Float]" = ok_expr("[3.0 | []]"))
@@ -273,9 +273,12 @@ expr_test_() ->
     ))
   , ?_test(bad_expr(
       "30.0 ++ \"str\"",
-      {"Float", "String", 1, ?FROM_OP('++')}
+      {"Float", "String", 1, ?FROM_OP_LHS('++')}
     ))
-  , ?_test(bad_expr("[true] ++ [1, 2]", {"Bool", "A: Num", 1, ?FROM_OP('++')}))
+  , ?_test(bad_expr(
+      "[true] ++ [1, 2]",
+      {"Bool", "A: Num", 1, ?FROM_OP_RHS('++')}
+    ))
 
   , ?_test("Set<A>" = ok_expr("#[] -- #[]"))
   , ?_test("Set<Float>" = ok_expr("#[3.0, 5.7, 6.8] -- #[3.0]"))
@@ -283,11 +286,11 @@ expr_test_() ->
   , ?_test("[Float]" = ok_expr("[3.0, 5.7, 6.8] -- [3.0]"))
   , ?_test(bad_expr(
       "\"hi\" -- []",
-      {"String", "[A]", 1, ?FROM_OP('--')}
+      {"String", "[A]", 1, ?FROM_OP_LHS('--')}
     ))
   , ?_test(bad_expr(
       "[1] -- #[2, 3]",
-      {"Set<A: Num>", "[B: Num]", 1, ?FROM_OP('--')}
+      {"Set<A: Num>", "[B: Num]", 1, ?FROM_OP_RHS('--')}
     ))
 
   , ?_test("A: Num" = ok_expr("-15"))
@@ -295,10 +298,10 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("!false"))
   , ?_test("Bool" = ok_expr("!(-3 == 4)"))
   , ?_test("Int" = ok_expr("$'h'"))
-  , ?_test(bad_expr("-true", {"Bool", "A: Num", 1, ?FROM_OP('-')}))
-  , ?_test(bad_expr("!15.0", {"Float", "Bool", 1, ?FROM_OP('!')}))
-  , ?_test(bad_expr("!3 == false", {"A: Num", "Bool", 1, ?FROM_OP('!')}))
-  , ?_test(bad_expr("$false", {"Bool", "Char", 1, ?FROM_OP('$')}))
+  , ?_test(bad_expr("-true", {"Bool", "A: Num", 1, ?FROM_UNARY_OP('-')}))
+  , ?_test(bad_expr("!15.0", {"Float", "Bool", 1, ?FROM_UNARY_OP('!')}))
+  , ?_test(bad_expr("!3 == false", {"A: Num", "Bool", 1, ?FROM_UNARY_OP('!')}))
+  , ?_test(bad_expr("$false", {"Bool", "Char", 1, ?FROM_UNARY_OP('$')}))
 
   , ?_test("Bool" = ok_expr("true :: Bool"))
   , ?_test("Int" = ok_expr("3 :: Int"))
@@ -333,11 +336,11 @@ expr_test_() ->
   , ?_test("()" = ok_expr("if false then @io:nl() :: () else discard 3"))
   , ?_test(bad_expr(
       "if false then @io:nl() :: () else 3",
-      {"A: Num", "()", 1, ?FROM_IF_BODY}
+      {"A: Num", "()", 1, ?FROM_ELSE_BODY}
     ))
   , ?_test(bad_expr(
       "if true then 3.0 else true",
-      {"Float", "Bool", 1, ?FROM_IF_BODY}
+      {"Float", "Bool", 1, ?FROM_ELSE_BODY}
     ))
 
   , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
@@ -351,7 +354,7 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("let a = 1, a = a == 1 in a"))
   , ?_test(bad_expr(
       "let x = 3.0, y = true in x - y",
-      {"Bool", "Float", 1, ?FROM_OP('-')}
+      {"Bool", "Float", 1, ?FROM_OP_RHS('-')}
     ))
   , ?_test(bad_expr(
       "(|x| let a = x(3) in x(true))(|y| y)",
@@ -372,7 +375,7 @@ expr_test_() ->
   , ?_test("A: Num" = ok_expr("(|a, b| a + b)(3)(4)"))
   , ?_test("A: Num -> A: Num -> A: Num" = ok_expr("|x, y| x + y"))
   , ?_test("A: Num -> A: Num -> A: Num" = ok_expr("|x| |y| x + y"))
-  , ?_test(bad_expr("|x| x + true", {"A: Num", "Bool", 1, ?FROM_OP('+')}))
+  , ?_test(bad_expr("|x| x + true", {"Bool", "A: Num", 1, ?FROM_OP_RHS('+')}))
   , ?_test(bad_expr("(|x| x)(1, 2)", {"A: Num", "B: Num -> C", 1, ?FROM_APP}))
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
@@ -390,16 +393,22 @@ expr_test_() ->
   , ?_test("A: Num" =
              ok_expr("let inc(x) = x + 1 in (5 |> |x| 2 * x |> inc) * 7"))
   , ?_test("Atom -> Bool" = ok_expr("let f(x, y) = x == y in @hi |> f"))
-  , ?_test(bad_expr("3 |> true", {"Bool", "A: Num -> B", 1, ?FROM_OP('|>')}))
-  , ?_test(bad_expr("\"hi\" |> |x| #x", {"String", "[A]", 1, ?FROM_OP('|>')}))
+  , ?_test(bad_expr(
+      "3 |> true",
+      {"Bool", "A: Num -> B", 1, ?FROM_OP_RHS('|>')}
+    ))
+  , ?_test(bad_expr(
+      "\"hi\" |> |x| #x",
+      {"String", "[A]", 1, ?FROM_OP_LHS('|>')}
+    ))
   , ?_test(bad_expr(
       "let inc(x) = x + 1 in 5 |> |x| 2 * x |> inc * 7",
-      [{"A: Num -> B", "C: Num", 1, ?FROM_OP('|>')},
-       {"A: Num -> A: Num", "B: Num", 1, ?FROM_OP('*')}]
+      [{"A: Num -> B", "C: Num", 1, ?FROM_OP_RHS('|>')},
+       {"A: Num -> A: Num", "B: Num", 1, ?FROM_OP_LHS('*')}]
     ))
   , ?_test(bad_expr(
       "3 |> |x| [x] |> |x| x ++ [4] |> |x| 2 * x",
-      {"[A: Num]", "B: Num", 1, ?FROM_OP('|>')}
+      {"[A: Num]", "B: Num", 1, ?FROM_OP_LHS('|>')}
     ))
   ].
 
@@ -413,7 +422,7 @@ para_poly_test_() ->
       "expr = add(true)",
       {"Bool", "A: Num", 2, ?FROM_APP}
     ))
-  , ?_test(bad_expr("|x| x == [x]", {"A", "[A]", 1, ?FROM_OP('==')}))
+  , ?_test(bad_expr("|x| x == [x]", {"A", "[A]", 1, ?FROM_OP_RHS('==')}))
   , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B", 1, ?FROM_APP}))
 
 
@@ -431,7 +440,7 @@ para_poly_test_() ->
   , ?_test(bad_prg(
       "id(a) = let foo(x) = a in let a = 4 in let bar = foo(3) in bar\n"
       "expr = id(3) && id(true)",
-      {"A: Num", "Bool", 2, ?FROM_OP('&&')}
+      {"A: Num", "Bool", 2, ?FROM_OP_LHS('&&')}
     ))
   ].
 
@@ -460,11 +469,11 @@ recur_test_() ->
   , ?_test(bad_prg(
       "f(x) = g(x) == 3\n"
       "g(x) = f(x)",
-      {"A: Num", "Bool", 1, ?FROM_GLOBAL_DEF("f")}
+      {"A: Num", "Bool", 1, ?FROM_OP_RESULT('==')}
     ))
   , ?_test(bad_prg(
-      "f(n) = if n > 0 then f(n - 1) == 1 else true",
-      {"Bool", "A: Num", 1, ?FROM_GLOBAL_DEF("f")}
+      "f(n) = if n > 0 then f(n - 1) == 1 else 1",
+      {"Bool", "A: Num", 1, ?FROM_THEN_BODY}
     ))
   ].
 
@@ -537,12 +546,12 @@ sig_test_() ->
   , ?_test(bad_prg(
       "foo :: () -> String\n"
       "foo() = true",
-      {"String", "Bool", 1, ?FROM_GLOBAL_SIG}
+      {"String", "Bool", 1, ?FROM_GLOBAL_SIG("foo")}
     ))
   , ?_test(bad_prg(
       "id :: A -> B\n"
       "id(x) = x",
-      {"rigid(A)", "rigid(B)", 1, ?FROM_GLOBAL_SIG}
+      {"rigid(A)", "rigid(B)", 1, ?FROM_GLOBAL_SIG("id")}
     ))
   , ?_test(bad_prg(
       "inc(x) = x :: B: Num + 1 :: A: Num",
@@ -553,17 +562,17 @@ sig_test_() ->
       "foo(x) = x + 3\n"
       "bar :: A: Num -> Int\n"
       "bar(x) = foo(x)",
-      {"Int", "rigid(A: Num)", 3, ?FROM_GLOBAL_SIG}
+      {"Int", "rigid(A: Num)", 4, ?FROM_APP}
     ))
   , ?_test(bad_prg(
       "push :: [Float] -> [A: Num]\n"
       "push(x) = x ++ [1.0]",
-      {"rigid(A: Num)", "Float", 1, ?FROM_GLOBAL_SIG}
+      {"rigid(A: Num)", "Float", 2, ?FROM_OP_RESULT('++')}
     ))
   , ?_test(bad_prg(
       "empty :: List<A> -> List<B> -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
-      {"rigid(A)", "rigid(B)", 1, ?FROM_GLOBAL_SIG}
+      {"rigid(A)", "rigid(B)", 2, ?FROM_OP_RHS('++')}
     ))
   , ?_test(bad_prg(
       "foo :: { bar :: String, baz :: A: Num } -> String\n"
@@ -609,13 +618,13 @@ global_test_() ->
   , ?_test(bad_prg(
       "foo = \"hello\"\n"
       "expr = foo ++ @world",
-      {"String", "Atom", 2, ?FROM_OP('++')}
+      {"String", "Atom", 2, ?FROM_OP_RHS('++')}
     ))
   , ?_test(bad_prg(
       "foo :: Set<Int>\n"
       "foo = #[1, 2, 3]\n"
       "expr = #[5.0, 6] -- foo",
-      {"Float", "Int", 3, ?FROM_OP('--')}
+      {"Float", "Int", 3, ?FROM_OP_RHS('--')}
     ))
   ].
 
@@ -712,11 +721,11 @@ record_test_() ->
     ))
   , ?_test(bad_expr(
       "{ bar = 3 } == { bar = \"hi\" }",
-      {"A: Num", "String", 1, ?FROM_OP('==')}
+      {"A: Num", "String", 1, ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_expr(
       "{ bar = 3 } == { foo = 4 }",
-      {"{ bar :: A: Num }", "{ foo :: B: Num }", 1, ?FROM_OP('==')}
+      {"{ bar :: A: Num }", "{ foo :: B: Num }", 1, ?FROM_OP_RHS('==')}
     ))
 
 
@@ -737,25 +746,29 @@ record_test_() ->
     ))
   , ?_test(bad_prg(
       "f(x) = (x.bar + 4, x.foo ++ \"hi\", x.foo && true)",
-      {"String", "Bool", 1, ?FROM_OP('&&')}
+      {"String", "Bool", 1, ?FROM_OP_LHS('&&')}
     ))
 
 
   % occurs checks
   , ?_test(bad_expr(
       "|a| a == { bar = a }",
-      {"A", "{ bar :: A }", 1, ?FROM_OP('==')}
+      {"A", "{ bar :: A }", 1, ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_expr(
       "|x, a| a == { x | bar = a }",
-      {"A", "{ B | bar :: A }", 1, ?FROM_OP('==')}
+      {"A", "{ B | bar :: A }", 1, ?FROM_OP_RHS('==')}
+    ))
+  , ?_test(bad_expr(
+      "|x, a| a == { x | bar := a }",
+      {"A", "{ B | bar :: A }", 1, ?FROM_OP_RHS('==')}
     ))
 
 
   % record fvs
   , ?_test(bad_prg(
       "f(x) = let a() = x.a in (true && a(), a() ++ \"hi\")",
-      {"Bool", "String", 1, ?FROM_OP('++')}
+      {"Bool", "String", 1, ?FROM_OP_LHS('++')}
     ))
 
 
@@ -873,12 +886,12 @@ record_test_() ->
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"
       "expr = Foo(\"hi\").bar && true",
-      {"String", "Bool", 2, ?FROM_OP('&&')}
+      {"String", "Bool", 2, ?FROM_OP_LHS('&&')}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"
       "f(x) = (x.bar && true, x.bar ++ \"hi\")",
-      {"Bool", "String", 2, ?FROM_OP('++')}
+      {"Bool", "String", 2, ?FROM_OP_LHS('++')}
     ))
   , ?_test(bad_prg(
       "f(x) = (x.bar(\"hi\"), x.bar(true))",
@@ -939,24 +952,25 @@ record_test_() ->
   , ?_test(bad_prg(
       "struct Foo { bar :: Int }\n"
       "expr = let x = { bar = 3, baz = \"hi\" } in x == Foo { bar = 4 }",
-      {"{ bar :: A: Num, baz :: String }", "{ bar :: Int }", 2, ?FROM_OP('==')}
+      {"{ bar :: A: Num, baz :: String }", "{ bar :: Int }", 2,
+       ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "struct Foo { bar :: String }\n"
       "struct Baz { bar :: Int }\n"
       "expr = Foo { bar = \"hi\" } == Baz { bar = 3 }",
-      {"String", "Int", 3, ?FROM_OP('==')}
+      {"String", "Int", 3, ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"
       "expr = { bar = true } == Foo { bar = 5 }",
-      {"Bool", "A: Num", 2, ?FROM_OP('==')}
+      {"Bool", "A: Num", 2, ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A, baz :: String }\n"
       "struct Baz<A> { bar :: Int, baz :: A }\n"
       "expr = Foo { bar = 3, baz = \"hi\" } == Baz { bar = 3, baz = true }",
-      {"String", "Bool", 3, ?FROM_OP('==')}
+      {"String", "Bool", 3, ?FROM_OP_RHS('==')}
     ))
 
 
@@ -1357,9 +1371,9 @@ import_test_() ->
   , ?_test(bad_many([
       {"foo", "module Foo export x = @hello"},
       {"bar", "module Bar import \"./foo\" y = Foo.x + 4"}
-    ], "bar", {"Atom", "A: Num", {"Bar", 1}, ?FROM_OP('+')}))
+    ], "bar", {"Atom", "A: Num", {"Bar", 1}, ?FROM_OP_LHS('+')}))
   , ?_test(bad_many([
       {"foo", "module Foo\nimport \"./bar\"\nexport f(x) = Bar.g(x) == 3"},
       {"bar", "module Bar\nimport \"./foo\"\nexport g(x) = Foo.f(x)"}
-    ], "foo", {"A: Num", "Bool", {"Foo", 3}, ?FROM_GLOBAL_DEF("f")}))
+    ], "foo", {"A: Num", "Bool", {"Foo", 3}, ?FROM_OP_RESULT('==')}))
   ].

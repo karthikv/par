@@ -6,8 +6,6 @@
 % - Columns + display code in error message reporting
 % - Direct imports
 % - Write parser in par
-% - Update record can change record type
-% - Lexer doesn't account for newlines in comments
 % - Struct literal test when parser supports it
 % - Test lexer errors
 % - Typeclasses + generics w/o concrete types (HKTs)
