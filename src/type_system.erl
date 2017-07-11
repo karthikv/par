@@ -292,13 +292,29 @@ infer_comps(Comps) ->
               {[SigCst, ExprCst], ModuleC5}
           end,
 
+          ModuleC7 = ModuleC6#ctx{env=ModuleC#ctx.env},
+          ModuleC8 = finish_gnr(ModuleC7, ModuleC#ctx.gnr),
+
           % Unifying the expr and sig constraints first generally gives better
-          % error messages. We do this by appending them to the list of csts,
-          % as the csts are processed in reverse (depth-first) order.
-          G = ModuleC6#ctx.gnr,
-          ModuleC7 = ModuleC6#ctx{gnr=G#gnr{csts=G#gnr.csts ++ InitCsts}},
-          ModuleC8 = ModuleC7#ctx{env=ModuleC#ctx.env},
-          {none, finish_gnr(ModuleC8, ModuleC#ctx.gnr)};
+          % error messages. To do this, we create a new gnr containing just
+          % these constraints, and make all other gnrs for this global depend
+          % on it.
+          ModuleC9 = new_gnr(ModuleC8),
+          ModuleC10 = ModuleC9#ctx{gnr=ModuleC9#ctx.gnr#gnr{csts=InitCsts}},
+
+          DepID = ModuleC10#ctx.gnr#gnr.id,
+          UntilID = case ModuleC2#ctx.gnrs of
+            [G | _] -> G#gnr.id;
+            [] -> none
+          end,
+
+          {Gs, _} = lists:mapfoldl(fun(G, Done) ->
+            case Done of
+              true -> {G, Done};
+              false -> {add_gnr_dep(DepID, G), G#gnr.id == UntilID}
+            end
+          end, false, ModuleC10#ctx.gnrs),
+          {none, finish_gnr(ModuleC10#ctx{gnrs=Gs}, ModuleC#ctx.gnr)};
 
         {sig, _, _, _} -> {Node, ModuleC1};
 
@@ -774,7 +790,10 @@ infer({'|>', _, Left, Right}, C) ->
   TV = tv_server:fresh(C2#ctx.pid),
   ArgTV = tv_server:fresh(C2#ctx.pid),
 
-  % add right cst first for better error messages
+  % The left constraint will always unify successfully if processed first. To
+  % get better error messages, add the right constraint first, so it's possible
+  % for the left constraint to fail. This is the main reason |> is in a separate
+  % function clause than the rest of the binary operators below.
   C3 = add_cst({lam, ArgTV, TV}, RightT, ?LOC(Right), ?FROM_OP_RHS('|>'), C2),
   C4 = add_cst(ArgTV, LeftT, ?LOC(Left), ?FROM_OP_LHS('|>'), C3),
   {TV, C4};
@@ -790,9 +809,6 @@ infer({Op, Line, Left, Right}, C) ->
       {OperandTV, OperandTV, {con, "Bool"}};
     Op == '||'; Op == '&&' ->
       {{con, "Bool"}, {con, "Bool"}, {con, "Bool"}};
-    Op == '|>' ->
-      ArgTV = tv_server:fresh(C2#ctx.pid),
-      {ArgTV, {lam, ArgTV, TV}, TV};
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
       NumTV = tv_server:fresh("Num", C2#ctx.pid),
       {NumTV, NumTV, {con, "Bool"}};
@@ -1102,10 +1118,11 @@ norm_sig_type(SigT, RigidVs, Pid) ->
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
-  %% ?LOG(
-  %%   "Generalizations",
-  %%   lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)
-  %% ),
+  ?LOG(
+    "Generalizations",
+    % TODO: revert env={} change
+    lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts), env=#{}} end, Gs)
+  ),
 
   T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
     #{ID := #gnr{index=Index}} = FoldT#tarjan.map,
@@ -1173,7 +1190,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         FoldMap#{SolID := SolG#gnr{on_stack=false}}
       end, Map2, SolvableIDs),
 
-      %% ?LOG("Solvable IDs", SolvableIDs),
+      ?LOG("Solvable IDs", SolvableIDs),
 
       S3 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
@@ -1644,9 +1661,9 @@ occurs(V, {record_ext, _, BaseT, Ext}) ->
   occurs(V, BaseT) or occurs(V, {record, none, Ext});
 occurs(_, none) -> false.
 
-%% pretty_csts([]) -> [];
-%% pretty_csts([{T1, T2, Line, From} | Rest]) ->
-%%   [{pretty(T1), pretty(T2), Line, From} | pretty_csts(Rest)].
+pretty_csts([]) -> [];
+pretty_csts([{T1, T2, Line, From} | Rest]) ->
+  [{pretty(T1), pretty(T2), Line, From} | pretty_csts(Rest)].
 
 pretty({lam, ArgT, ReturnT}) ->
   Format = case ArgT of
