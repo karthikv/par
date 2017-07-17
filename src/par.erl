@@ -3,6 +3,7 @@
 -include("errors.hrl").
 
 % TODO:
+% - Negative numbers and unit in patterns
 % - Columns + display code in error message reporting
 % - Direct imports
 % - Write parser in par
@@ -30,6 +31,7 @@
 % - REPL
 %   - Interpreter import implementation
 % - Concurrency
+% - Tooling + fix syntax highlighting for comments in enum
 % - Second pass for error messages (see TODOs in code)
 %   - Context surrounding add_err cases rather than just two types
 %   - Parsing issue for match Con { ... }
@@ -37,6 +39,9 @@
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
+%   - Lexer/Parser error messages
+%     - Maybe change enclosed methods to accept open tag as well?
+%       - Would allow for more uniform error messages
 % - Prefix function name with _ in recursive let binding to avoid unused error
 % - Update naming conventions
 %
