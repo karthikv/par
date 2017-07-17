@@ -6,6 +6,14 @@
 % - Columns + display code in error message reporting
 % - Direct imports
 % - Write parser in par
+% - Better syntax
+%   - Newlines instead of commas to separate match conditions, let vars, etc?
+%   - Nothing to separate struct/enum fields
+%   - Allow trailing commas?
+%   - Can we do string concat on multiple lines?
+%   - Change fat arrow to regular arrow?
+%   - Enforce else clause to avoid ambiguity/confusion?
+%   - Colon instead of @ for atoms?
 % - Struct literal test when parser supports it
 % - Test lexer errors
 % - Typeclasses + generics w/o concrete types (HKTs)
@@ -29,21 +37,19 @@
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
+% - Prefix function name with _ in recursive let binding to avoid unused error
 % - Update naming conventions
 %
 % Defer
-% - Newlines instead of commas to separate match conditions, let vars, etc?
-%   - Allow trailing commas
-%   - Can we do string concat on multiple lines?
 % - Using EUnit from par
 % - if-let condition and other condition (or maybe when statement?)
 % - Hex escaped characters \xff or \x{...} in strings
+% - Interpreter backtraces
 %
 % Uncertain
-% - Interpreter backtraces?
+% - Operator |< to prepend an argument?
 % - Force all block expressions except last to be type ()?
 % - List indexing?
-% - Change fat arrow to regular arrow?
 % - Type aliases?
 
 main(Args) ->

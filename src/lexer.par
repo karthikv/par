@@ -221,8 +221,8 @@ tokenize_r(chs, line, col, tokens) =
               [] => (Dot(inc(loc, 1)), t),
               [next | t] =>
                 if is_digit(next) then
-                  // must prefix with 0 for to_float to work
-                  tokenize_num(loc, ['0', h, next | t])
+                  // must prefix accum with 0 for to_float to work
+                  tokenize_num_r(loc, [h, next | t], false, ['0'])
                 else
                   (Dot(inc(loc, 1)), [next | t])
             }
