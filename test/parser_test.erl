@@ -6,11 +6,11 @@
 -define(DEF_PREFIX, "module Mod\n").
 -define(EXPR_PREFIX, "module Mod expr =\n").
 
-load() -> 'NewParser':'_@init'(gb_sets:new()).
+load() -> 'Parser':'_@init'(gb_sets:new()).
 
 ok_prg(Prg) ->
   {ok, Tokens} = 'Lexer':tokenize(Prg),
-  #{value := {some, Ast}, errs := []} = 'NewParser':parse(Tokens),
+  #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
   Ast.
 
 ok_prefix(Prefix, Prg) ->

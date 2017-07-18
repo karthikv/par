@@ -1,4 +1,4 @@
-module NewParser
+module Parser
 
 import "./lexer"
 

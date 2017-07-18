@@ -125,7 +125,7 @@
 -endif.
 
 % this also initializes the lexer by dependency
-load() -> 'NewParser':'_@init'(gb_sets:new()).
+load() -> 'Parser':'_@init'(gb_sets:new()).
 
 infer_file(Path) ->
   {_, Comps, _} = parse_file(Path, #{}),
@@ -146,7 +146,7 @@ parse_file(RawPath, Parsed) ->
       {ok, Binary} = file:read_file(Path),
       {ok, Tokens} = 'Lexer':tokenize(binary_to_list(Binary)),
 
-      #{value := {some, Ast}, errs := []} = 'NewParser':parse(Tokens),
+      #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
       {module, _, {con_token, _, Module}, Imports, _} = Ast,
       Parsed1 = Parsed#{Path => Module},
 
@@ -169,7 +169,7 @@ infer_prg(Prg) ->
     is_binary(Prg) -> 'Lexer':tokenize(Prg)
   end,
 
-  #{value := {some, Ast}, errs := []} = 'NewParser':parse(Tokens),
+  #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
   % infer_prg should only be used only when there are no imports
   {module, _, {con_token, _, Module}, [], _} = Ast,
   %% ?LOG("Ast", Ast),
@@ -1655,9 +1655,9 @@ occurs(V, {record_ext, _, BaseT, Ext}) ->
   occurs(V, BaseT) or occurs(V, {record, none, Ext});
 occurs(_, none) -> false.
 
-pretty_csts([]) -> [];
-pretty_csts([{T1, T2, Line, From} | Rest]) ->
-  [{pretty(T1), pretty(T2), Line, From} | pretty_csts(Rest)].
+%% pretty_csts([]) -> [];
+%% pretty_csts([{T1, T2, Line, From} | Rest]) ->
+%%   [{pretty(T1), pretty(T2), Line, From} | pretty_csts(Rest)].
 
 pretty({lam, ArgT, ReturnT}) ->
   Format = case ArgT of
