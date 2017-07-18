@@ -31,7 +31,7 @@ ok_expr(Expr) ->
   GlobalLoc = l(-1, 11, 0, length(Expr)),
 
   Def = ok_prefix(?EXPR_PREFIX, Expr),
-  {global, GlobalLoc, {var, VarLoc, "expr"}, Parsed} = Def,
+  {global, GlobalLoc, {var, VarLoc, "expr"}, Parsed, false} = Def,
   Parsed.
 
 expr_test_() ->
@@ -193,7 +193,7 @@ expr_test_() ->
     )
 
   , ?_assertEqual(
-      {field_lam, l(0, 4), {var, l(1, 3), "bar"}},
+      {field_fn, l(0, 4), {var, l(1, 3), "bar"}},
       ok_expr(".bar")
     )
   , ?_assertEqual(
@@ -205,29 +205,13 @@ expr_test_() ->
         {field, l(0, 21),
           {anon_record, l(0, 17), [{
             {var, l(2, 3), "bar"},
-            {lam, l(8, 7), [{var, l(9, 1), "x"}], {atom, l(12, 3), hi}}
+            {fn, l(8, 7), [{var, l(9, 1), "x"}], {atom, l(12, 3), hi}}
           }]},
           {var, l(18, 3), "bar"}
         },
         [{int, l(22, 1), 2}]
       },
       ok_expr("{ bar = |x| @hi }.bar(2)")
-    )
-
-  , ?_assertEqual(
-      {unary_op, l(0, 3), '#', {list, l(1, 2), []}},
-      ok_expr("#[]")
-    )
-  , ?_assertEqual(
-      {unary_op, l(0, 7), '#', {list, l(1, 6), [
-        {int, l(2, 1), 1},
-        {int, l(5, 1), 2}
-      ]}},
-      ok_expr("#[1, 2]")
-    )
-  , ?_assertEqual(
-      {unary_op, l(0, 4), '#', {atom, l(1, 3), hi}},
-      ok_expr("#@hi")
     )
 
   , ?_assertEqual(
@@ -377,6 +361,21 @@ expr_test_() ->
     )
 
   , ?_assertEqual(
+      {unary_op, l(0, 3), '#', {list, l(1, 2), []}},
+      ok_expr("#[]")
+    )
+  , ?_assertEqual(
+      {unary_op, l(0, 7), '#', {list, l(1, 6), [
+        {int, l(2, 1), 1},
+        {int, l(5, 1), 2}
+      ]}},
+      ok_expr("#[1, 2]")
+    )
+  , ?_assertEqual(
+      {unary_op, l(0, 4), '#', {atom, l(1, 3), hi}},
+      ok_expr("#@hi")
+    )
+  , ?_assertEqual(
       {unary_op, l(0, 3), '-', {int, l(1, 2), 15}},
       ok_expr("-15")
     )
@@ -386,6 +385,10 @@ expr_test_() ->
   , ?_assertEqual(
       {unary_op, l(0, 4), '$', {char, l(1, 3), $h}},
       ok_expr("$'h'")
+    )
+  , ?_assertEqual(
+      {unary_op, l(0, 11), 'discard', {float, l(8, 3), 3.7}},
+      ok_expr("discard 3.7")
     )
 
   , ?_assertEqual(
@@ -431,7 +434,7 @@ expr_test_() ->
   , ?_assertEqual(
       {binary_op, l(0, 27), '|>',
         {int, l(0, 1), 5},
-        {lam, l(5, 22), [{var, l(6, 1), "x"}],
+        {fn, l(5, 22), [{var, l(6, 1), "x"}],
           {binary_op, l(9, 18), '|>',
             {binary_op, l(9, 5), '*',
               {int, l(9, 1), 2},
@@ -448,15 +451,15 @@ expr_test_() ->
     )
 
   , ?_assertEqual(
-      {lam, l(0, 5), [], {int, l(4, 1), 3}},
+      {fn, l(0, 5), [], {int, l(4, 1), 3}},
       ok_expr("|-| 3")
     )
   , ?_assertEqual(
-      {lam, l(0, 5), [{var, l(1, 1), "x"}], {var, l(4, 1), "x"}},
+      {fn, l(0, 5), [{var, l(1, 1), "x"}], {var, l(4, 1), "x"}},
       ok_expr("|x| x")
     )
   , ?_assertEqual(
-      {lam, l(0, 27), [{var, l(1, 4), "left"}, {var, l(7, 5), "right"}],
+      {fn, l(0, 27), [{var, l(1, 4), "left"}, {var, l(7, 5), "right"}],
         {tuple, l(14, 13), [
           {var, l(15, 4), "left"},
           {var, l(21, 5), "right"}
@@ -466,16 +469,16 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {app, l(0, 16),
-        {lam, l(0, 9), [{var, l(2, 1), "x"}],
+        {fn, l(0, 9), [{var, l(2, 1), "x"}],
           {app, l(5, 3), {var, l(5, 1), "x"}, []}
         },
-        [{lam, l(10, 5), [], {int, l(14, 1), 2}}]
+        [{fn, l(10, 5), [], {int, l(14, 1), 2}}]
       },
       ok_expr("(|x| x())(|-| 2)")
     )
   , ?_assertEqual(
-      {lam, l(0, 13), [{var, l(1, 1), "x"}],
-        {lam, l(4, 9), [{var, l(5, 1), "y"}],
+      {fn, l(0, 13), [{var, l(1, 1), "x"}],
+        {fn, l(4, 9), [{var, l(5, 1), "y"}],
           {binary_op, l(8, 5), '+',
             {var, l(8, 1), "x"},
             {var, l(12, 1), "y"}
@@ -500,7 +503,7 @@ expr_test_() ->
           {var, l(7, 6), "filter"},
           2
         },
-        [{lam, l(14, 5), [{var, l(15, 1), "x"}], {var, l(18, 1), "x"}},
+        [{fn, l(14, 5), [{var, l(15, 1), "x"}], {var, l(18, 1), "x"}},
          {list, l(21, 2), []}]
       },
       ok_expr("@lists:filter(|x| x, [])")
@@ -516,7 +519,7 @@ expr_test_() ->
       },
       ok_expr("@io:printable_range/0((), 1, 2)")
     )
-  % TODO: error case w/ no arity + other error cases
+  % TODO: error case w/ no arity
 
   , ?_assertEqual(
       {binary_op, l(0, 8), '::', {none, l(0, 2)}, {none, l(6, 2)}},
@@ -715,8 +718,8 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {'let', l(0, 39),
-        [{{var, l(4, 1), "f"}, {lam, l(4, 7), [], {int, l(10, 1), 3}}},
-         {{var, l(13, 3), "inc"}, {lam, l(13, 14), [{var, l(17, 1), "x"}],
+        [{{var, l(4, 1), "f"}, {fn, l(4, 7), [], {int, l(10, 1), 3}}},
+         {{var, l(13, 3), "inc"}, {fn, l(13, 14), [{var, l(17, 1), "x"}],
            {binary_op, l(22, 5), '+',
              {var, l(22, 1), "x"},
              {int, l(26, 1), 1}
@@ -971,6 +974,62 @@ expr_test_() ->
 
 def_test_() ->
   [ ?_assertEqual(
+      {global, l(0, 11),
+        {var, l(0, 1), "f"},
+        {fn, l(0, 11), [],
+          {binary_op, l(6, 5), '+',
+            {int, l(6, 1), 3},
+            {int, l(10, 1), 5}
+          }
+        },
+        false
+      },
+      ok_def("f() = 3 + 5")
+    )
+  , ?_assertEqual(
+      {global, l(0, 12),
+        {var, l(0, 1), "f"},
+        {fn, l(0, 12), [{var, l(2, 1), "x"}],
+          {binary_op, l(7, 5), '+',
+            {var, l(7, 1), "x"},
+            {int, l(11, 1), 5}
+          }
+        },
+        false
+      },
+      ok_def("f(x) = x + 5")
+    )
+  , ?_assertEqual(
+      {global, l(0, 15),
+        {var, l(0, 1), "f"},
+        {fn, l(0, 15), [{var, l(2, 1), "x"}, {var, l(5, 1), "y"}],
+          {binary_op, l(10, 5), '+',
+            {var, l(10, 1), "x"},
+            {var, l(14, 1), "y"}
+          }
+        },
+        false
+      },
+      ok_def("f(x, y) = x + y")
+    )
+  , ?_assertEqual(
+      {global, l(0, 12), {var, l(7, 1), "a"}, {int, l(11, 1), 3}, true},
+      ok_def("export a = 3")
+    )
+  , ?_assertEqual(
+      {global, l(0, 18),
+        {var, l(7, 1), "f"},
+        {fn, l(7, 11), [],
+          {binary_op, l(13, 5), '+',
+            {int, l(13, 1), 3},
+            {int, l(17, 1), 5}
+          }
+        },
+        true
+      },
+      ok_def("export f() = 3 + 5")
+    )
+  , ?_assertEqual(
       {sig, l(0, 20),
         {var, l(0, 3), "foo"},
         {lam_te, l(7, 13),
@@ -981,7 +1040,7 @@ def_test_() ->
       ok_def("foo :: Int -> String")
     )
   , ?_assertEqual(
-      {enum, l(0, 0, 4, 1), {con_token, l(5, 7), "SumType"}, [], [
+      {enum, l(0, 0, 4, 1), {con_token, l(5, 7), "SumType"}, [
         {{con_token, l(1, 2, 3), "Foo"}, [], none},
         {{con_token, l(2, 2, 3), "Bar"},
           [{con_token, l(2, 6, 6), "String"}],
@@ -1006,8 +1065,9 @@ def_test_() ->
     )
   , ?_assertEqual(
       {enum, l(0, 0, 4, 1),
-        {con_token, l(5, 7), "SumType"},
-        [{tv_te, l(13, 1), "A", {none, l(13, 1)}}], [
+        {gen_te, l(5, 10), {con_token, l(5, 7), "SumType"}, [
+          {tv_te, l(13, 1), "A", {none, l(13, 1)}}
+        ]}, [
           {{con_token, l(1, 2, 3), "Foo"}, [],
            {some, {atom, l(1, 6, 4), foo}}},
           {{con_token, l(2, 2, 3), "Bar"},
@@ -1034,10 +1094,10 @@ def_test_() ->
     )
   , ?_assertEqual(
       {enum, l(0, 0, 4, 1),
-        {con_token, l(5, 7), "SumType"}, [
+        {gen_te, l(5, 13), {con_token, l(5, 7), "SumType"}, [
           {tv_te, l(13, 1), "A", {none, l(13, 1)}},
           {tv_te, l(16, 1), "B", {none, l(16, 1)}}
-        ], [
+        ]}, [
           {{con_token, l(1, 2, 3), "Foo"}, [], none},
           {{con_token, l(2, 2, 3), "Bar"},
             [{tv_te, l(2, 6, 1), "A", {none, l(2, 6, 1)}}],
@@ -1062,7 +1122,7 @@ def_test_() ->
       )
     )
   , ?_assertEqual(
-      {struct, l(0, 0, 3, 1), {con_token, l(7, 11), "ProductType"}, [], [
+      {struct, l(0, 0, 3, 1), {con_token, l(7, 11), "ProductType"}, [
         {{var, l(1, 2, 3), "foo"}, {con_token, l(1, 9, 6), "String"}},
         {{var, l(2, 2, 3), "bar"}, {tuple_te, l(2, 9, 11), [
           {con_token, l(2, 10, 3), "Int"},
@@ -1078,8 +1138,9 @@ def_test_() ->
     )
   , ?_assertEqual(
       {struct, l(0, 0, 3, 1),
-        {con_token, l(7, 11), "ProductType"},
-        [{tv_te, l(19, 1), "A", {none, l(19, 1)}}], [
+        {gen_te, l(7, 14), {con_token, l(7, 11), "ProductType"}, [
+          {tv_te, l(19, 1), "A", {none, l(19, 1)}}
+        ]}, [
           {{var, l(1, 2, 3), "foo"},
            {tv_te, l(1, 9, 1), "A", {none, l(1, 9, 1)}}},
           {{var, l(2, 2, 3), "bar"}, {tuple_te, l(2, 9, 11), [
@@ -1097,10 +1158,10 @@ def_test_() ->
     )
   , ?_assertEqual(
       {struct, l(0, 0, 3, 1),
-        {con_token, l(7, 11), "ProductType"}, [
+        {gen_te, l(7, 17), {con_token, l(7, 11), "ProductType"}, [
           {tv_te, l(19, 1), "A", {none, l(19, 1)}},
           {tv_te, l(22, 1), "B", {none, l(22, 1)}}
-        ], [
+        ]}, [
           {{var, l(1, 2, 3), "foo"},
            {tv_te, l(1, 9, 1), "A", {none, l(1, 9, 1)}}},
           {{var, l(2, 2, 3), "bar"}, {tuple_te, l(2, 9, 8), [
@@ -1122,7 +1183,11 @@ import_test_() ->
   [ ?_assertEqual(
       {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"},
         [{import, l(0, 12), {str, l(7, 5), <<"foo">>}}],
-        [{global, l(1, 0, 6), {var, l(1, 0, 1), "a"}, {none, l(1, 4, 2)}}]
+        [{global, l(1, 0, 6),
+           {var, l(1, 0, 1), "a"},
+           {none, l(1, 4, 2)},
+           false
+         }]
       },
       ok_prg("module Mod\nimport \"foo\"\na = ()")
     )
@@ -1131,7 +1196,11 @@ import_test_() ->
         [{import, l(0, 12), {str, l(7, 5), <<"foo">>}},
          {import, l(1, 0, 16), {str, l(1, 7, 9), <<"bar/baz">>}}
         ],
-        [{global, l(2, 0, 6), {var, l(2, 0, 1), "a"}, {none, l(2, 4, 2)}}]
+        [{global, l(2, 0, 6),
+           {var, l(2, 0, 1), "a"},
+           {none, l(2, 4, 2)},
+           false
+         }]
       },
       ok_prg("module Mod\nimport \"foo\"\nimport \"bar/baz\"\na = ()")
     )

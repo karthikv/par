@@ -95,10 +95,10 @@
   )
 ).
 -define(
-  ERR_DUP_KEY(Key, Con, Line),
+  ERR_DUP_KEY(Key, Con, Loc),
   ?FMT(
     "the key ~s is already used for option ~s on line ~p",
-    [Key, utils:unqualify(Con), Line]
+    [Key, utils:unqualify(Con), ?START_LINE(Loc)]
   )
 ).
 -define(
@@ -108,5 +108,6 @@
 
 
 -define(LOC(Node), element(2, Node)).
+-define(START_LINE(Loc), maps:get(start_line, Loc)).
 
 -endif.

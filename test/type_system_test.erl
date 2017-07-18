@@ -25,20 +25,20 @@ ok_prg(Prg, Name) ->
 
 bad_prg(Prg, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {errors, [Err]} = type_check(Prg),
-  ensure_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom});
+  assert_err_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom});
 
 bad_prg(Prg, ExpErrs) when is_list(ExpErrs) ->
   {errors, Errs} = type_check(Prg),
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, {Exp1, Exp2, ExpLine, ExpFrom}}) ->
-    ensure_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom})
+    assert_err_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom})
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, {"Mod", Line}}]} = type_check(Prg),
+  {errors, [{Msg, {"Mod", Loc}}]} = type_check(Prg),
   ?assertEqual(ExpMsg, Msg),
-  ?assertEqual(ExpLine, Line).
+  ?assertEqual(ExpLine, ?START_LINE(Loc)).
 
 ok_expr(Expr) ->
   type_system:pretty(norm_prg("expr = " ++ Expr, "expr")).
@@ -71,14 +71,18 @@ ok_many(PathPrgs, TargetPath, Name) ->
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
   {errors, [Err]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
-  ensure_equal(Err, ExpErr).
+  assert_err_equal(Err, ExpErr).
 
-ctx_err_many(PathPrgs, TargetPath, {ExpMsg, ExpLoc}) ->
-  {errors, [{Msg, Loc}]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+ctx_err_many(PathPrgs, TargetPath, {ExpMsg, {ExpMod, ExpLine}}) ->
+  {errors, [{Msg, {Mod, Loc}}]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
   ?assertEqual(ExpMsg, Msg),
-  ?assertEqual(ExpLoc, Loc).
+  ?assertEqual(ExpMod, Mod),
+  ?assertEqual(ExpLine, ?START_LINE(Loc)).
 
-ensure_equal({T1, T2, Loc, From}, {Exp1, Exp2, ExpLoc, ExpFrom}) ->
+assert_err_equal(
+  {T1, T2, {Mod, Loc}, From},
+  {Exp1, Exp2, {ExpMod, ExpLine}, ExpFrom}
+ ) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {#{}, Pid}),
   {NormT2, _} = norm(T2, N),
@@ -99,7 +103,8 @@ ensure_equal({T1, T2, Loc, From}, {Exp1, Exp2, ExpLoc, ExpFrom}) ->
       end
   end,
 
-  ?assertEqual(ExpLoc, Loc),
+  ?assertEqual(ExpMod, Mod),
+  ?assertEqual(ExpLine, ?START_LINE(Loc)),
   ?assertEqual(ExpFrom, From).
 
 % We don't use type_system:fvs() and type_system:subs() to implement this
@@ -382,7 +387,7 @@ expr_test_() ->
   , ?_test("Set<A: Num>" =
              ok_expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])"))
   , ?_test("A" = ok_expr("@io:printable_range()"))
-  , ?_test("A" = ok_expr("@io:printable_range(())"))
+  , ?_test("Atom" = ok_expr("let f() = @hi in f(())"))
   , ?_test("A" = ok_expr("@io:printable_range/0((), 1, 2)"))
   , ?_test(bad_expr(
       "@io:printable_range/0(1, 2)",
@@ -1099,9 +1104,6 @@ pattern_test_() ->
   , ?_test("Bool" = ok_expr("let a = true in { if let a = 3.0 then a; a }"))
   , ?_test("Bool" =
              ok_expr("let a = true in { if let a = 3.0 then a else 5; a }"))
-  , ?_test("A: Num" = ok_expr(
-      "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
-    ))
   , ?_test("String" =
              ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test("Float" = ok_expr(
@@ -1162,8 +1164,8 @@ other_errors_test_() ->
       {?ERR_REDEF_TV("A"), 1}
     ))
   , ?_test(ctx_err_many([
-      {"foo", "\nmodule Foo"},
-      {"bar", "module Foo import \"./foo\""}
+      {"foo", "\nmodule Foo a = 1"},
+      {"bar", "module Foo import \"./foo\" b = 1"}
     ], "bar", {?ERR_REDEF_MODULE("Foo"), {"Foo", 2}}))
   , ?_test(ctx_err_prg(
       "foo :: Int",
@@ -1226,12 +1228,12 @@ other_errors_test_() ->
   , ?_test(ctx_err_prg("\n\n\nfoo = a\n", {?ERR_NOT_DEF("a"), 4}))
   , ?_test(ctx_err_prg("foo = 3 + foo", {?ERR_NOT_DEF("foo"), 1}))
   , ?_test(ctx_err_many([
-      {"foo", "module Foo"},
+      {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
     ], "bar", {?ERR_NOT_DEF("x", "Foo"), {"Bar", 3}}))
   , ?_test(ctx_err_prg("foo = \"hi\" :: Bar", {?ERR_NOT_DEF_TYPE("Bar"), 1}))
   , ?_test(ctx_err_many([
-      {"foo", "module Foo"},
+      {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = 3 :: Foo.FooType"}
     ], "bar", {?ERR_NOT_DEF_TYPE("FooType"), {"Bar", 3}}))
   , ?_test(ctx_err_prg(
@@ -1262,14 +1264,14 @@ other_errors_test_() ->
       "  Bar(Char),\n"
       "  Baz @Bar\n"
       "}",
-      {?ERR_DUP_KEY("Bar", "Bar", 2), 3}
+      {?ERR_DUP_KEY("Bar", "Bar", #{start_line => 2}), 3}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
       "  Bar(Char) @Baz,\n"
       "  Baz\n"
       "}",
-      {?ERR_DUP_KEY("Baz", "Baz", 3), 2}
+      {?ERR_DUP_KEY("Baz", "Baz", #{start_line => 3}), 2}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"

@@ -124,7 +124,8 @@
   -define(LOG(Prefix, Value), true).
 -endif.
 
-load() -> 'Lexer':'_@init'(gb_sets:new()).
+% this also initializes the lexer by dependency
+load() -> 'NewParser':'_@init'(gb_sets:new()).
 
 infer_file(Path) ->
   {_, Comps, _} = parse_file(Path, #{}),
@@ -144,11 +145,8 @@ parse_file(RawPath, Parsed) ->
     error ->
       {ok, Binary} = file:read_file(Path),
       {ok, Tokens} = 'Lexer':tokenize(binary_to_list(Binary)),
-      NormTokens = lists:map(fun(T) ->
-        setelement(2, T, maps:get(start_line, element(2, T)))
-      end, Tokens),
 
-      {ok, Ast} = parser:parse(NormTokens),
+      #{value := {some, Ast}, errs := []} = 'NewParser':parse(Tokens),
       {module, _, {con_token, _, Module}, Imports, _} = Ast,
       Parsed1 = Parsed#{Path => Module},
 
@@ -170,11 +168,8 @@ infer_prg(Prg) ->
     is_list(Prg) -> 'Lexer':tokenize(Prg);
     is_binary(Prg) -> 'Lexer':tokenize(Prg)
   end,
-  NormTokens = lists:map(fun(T) ->
-    setelement(2, T, maps:get(start_line, element(2, T)))
-  end, Tokens),
 
-  {ok, Ast} = parser:parse(NormTokens),
+  #{value := {some, Ast}, errs := []} = 'NewParser':parse(Tokens),
   % infer_prg should only be used only when there are no imports
   {module, _, {con_token, _, Module}, [], _} = Ast,
   %% ?LOG("Ast", Ast),
@@ -208,7 +203,7 @@ infer_comps(Comps) ->
               env_add(Name, {add_dep, TV, ID}, Exported, ModuleC)
           end;
 
-        {N, _, TE, _} when N == enum_token; N == struct_token ->
+        {N, _, TE, _} when N == enum; N == struct ->
           {Line, RawCon, NumParams} = case TE of
             {con_token, Line_, RawCon_} -> {Line_, RawCon_, 0};
             {gen_te, _, {con_token, Line_, RawCon_}, ParamTEs} ->
@@ -242,7 +237,7 @@ infer_comps(Comps) ->
 
     lists:foldl(fun(Node, ModuleC) ->
       case Node of
-        {N, _, _, _} when N == enum_token; N == struct_token ->
+        {N, _, _, _} when N == enum; N == struct ->
           {_, ModuleC1} = infer(Node, ModuleC),
           ModuleC1;
 
@@ -381,7 +376,7 @@ infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
   {norm_sig_type(SigT, maps:keys(C1#ctx.ifaces), C#ctx.pid), C1};
 
-infer({'::', Line, Expr, Sig}, C) ->
+infer({binary_op, Line, '::', Expr, Sig}, C) ->
   G = C#ctx.gnr,
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
 
@@ -395,7 +390,7 @@ infer({'::', Line, Expr, Sig}, C) ->
 
   {{inst, TV}, C5};
 
-infer({enum_token, _, EnumTE, Options}, C) ->
+infer({enum, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
   FVs = fvs(T),
 
@@ -431,7 +426,7 @@ infer({enum_token, _, EnumTE, Options}, C) ->
     end,
 
     case KeyNode of
-      default ->
+      none ->
         Key = list_to_atom(Con),
         case maps:find(Key, Keys) of
           {ok, {default, _, _}} ->
@@ -447,7 +442,7 @@ infer({enum_token, _, EnumTE, Options}, C) ->
           error -> {Keys#{Key => {default, Con, Line}}, FoldC5}
         end;
 
-      {atom, KeyLine, Key} ->
+      {some, {atom, KeyLine, Key}} ->
         case maps:find(Key, Keys) of
           {ok, {_, OtherCon, OtherLine}} ->
             FoldC6 = add_ctx_err(
@@ -467,13 +462,13 @@ infer({enum_token, _, EnumTE, Options}, C) ->
 
   {T, C2};
 
-infer({struct_token, Line, StructTE, {record_te, _, Fields}=RecordTE}, C) ->
+infer({struct, Line, StructTE, Fields}, C) ->
   {T, C1} = infer_sig(false, true, #{}, StructTE, C),
   {{record, _, RawFieldMap}, C2} = infer_sig(
     {T, fvs(T)},
     false,
     C1#ctx.ifaces,
-    RecordTE,
+    {record_te, Line, Fields},
     C1
   ),
 
@@ -559,7 +554,7 @@ infer({N, Line, Name}, C) when N == var; N == con_token; N == var_value ->
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
-infer({record, _, Inits}, C) ->
+infer({anon_record, _, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
     {{var, Line, Name}, Expr} = Init,
     {T, FoldC1} = infer(Expr, FoldC),
@@ -572,7 +567,7 @@ infer({record, _, Inits}, C) ->
 
   {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
 
-infer({update_record, Line, Expr, AllInits}, C) ->
+infer({anon_record_ext, Line, Expr, AllInits}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {Inits, ExtInits} = lists:foldl(fun({Init, IsExt}, Memo) ->
     {FoldInits, FoldExtInits} = Memo,
@@ -585,7 +580,7 @@ infer({update_record, Line, Expr, AllInits}, C) ->
   C3 = if
     length(Inits) == 0 -> C1;
     true ->
-      {{record, A, FieldMap}, C2} = infer({record, Line, Inits}, C1),
+      {{record, A, FieldMap}, C2} = infer({anon_record, Line, Inits}, C1),
       add_cst(
         ExprT,
         {record_ext, A, tv_server:fresh(C2#ctx.pid), FieldMap},
@@ -598,7 +593,7 @@ infer({update_record, Line, Expr, AllInits}, C) ->
   if
     length(ExtInits) == 0 -> {ExprT, C3};
     true ->
-      {{record, ExtA, Ext}, C4} = infer({record, Line, ExtInits}, C3),
+      {{record, ExtA, Ext}, C4} = infer({anon_record, Line, ExtInits}, C3),
       % ExprT needs to have every field in ext, but the types can be different
       % because it's a record extension.
       RelaxedExt = maps:map(fun(_, _) -> tv_server:fresh(C4#ctx.pid) end, Ext),
@@ -618,7 +613,7 @@ infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
   Con = qualify(Name, C),
   case maps:find(Con, C#ctx.structs) of
     {ok, {StructT, _, _}} ->
-      {RecordT, C1} = infer({record, Line, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Line, Inits}, C),
       NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_CREATE(Name),
 
@@ -628,15 +623,15 @@ infer({record, Line, {con_token, ConLine, Name}, Inits}, C) ->
       {TV, C3};
 
     error ->
-      {RecordT, C1} = infer({record, Line, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Line, Inits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
   end;
 
-infer({update_record, Line, {con_token, ConLine, Name}, Expr, AllInits}, C) ->
+infer({record_ext, Line, {con_token, ConLine, Name}, Expr, AllInits}, C) ->
   Con = qualify(Name, C),
   case maps:find(Con, C#ctx.structs) of
     {ok, {StructT, _, _}} ->
-      {RecordT, C1} = infer({update_record, Line, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Line, Expr, AllInits}, C),
       NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_UPDATE,
 
@@ -646,11 +641,11 @@ infer({update_record, Line, {con_token, ConLine, Name}, Expr, AllInits}, C) ->
       {TV, C3};
 
     error ->
-      {RecordT, C1} = infer({update_record, Line, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Line, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLine, C1)}
   end;
 
-infer({field, _, {var, _, Name}}, C) ->
+infer({field_fn, _, {var, _, Name}}, C) ->
   FieldTV = tv_server:fresh(C#ctx.pid),
   BaseTV = tv_server:fresh(C#ctx.pid),
   A = tv_server:next_name(C#ctx.pid),
@@ -673,7 +668,7 @@ infer({field, Line, Expr, {N, VarLine, Name}=Var}, C)
 
     _ ->
       {ExprT, C1} = infer(Expr, C),
-      {FieldT, C2} = infer({field, ?LOC(Var), Var}, C1),
+      {FieldT, C2} = infer({field_fn, ?LOC(Var), Var}, C1),
       TV = tv_server:fresh(C2#ctx.pid),
       From = ?FROM_FIELD_ACCESS(element(3, Var)),
       C3 = add_cst({lam, ExprT, TV}, FieldT, Line, From, C2),
@@ -783,7 +778,7 @@ infer({block, _, Exprs}, C) ->
   end, {none, C}, Exprs),
   {T, C1};
 
-infer({'|>', _, Left, Right}, C) ->
+infer({binary_op, _, '|>', Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
   {RightT, C2} = infer(Right, C1),
 
@@ -798,7 +793,7 @@ infer({'|>', _, Left, Right}, C) ->
   C4 = add_cst(ArgTV, LeftT, ?LOC(Left), ?FROM_OP_LHS('|>'), C3),
   {TV, C4};
 
-infer({Op, Line, Left, Right}, C) ->
+infer({binary_op, Line, Op, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
   {RightT, C2} = infer(Right, C1),
   TV = tv_server:fresh(C2#ctx.pid),
@@ -832,7 +827,7 @@ infer({Op, Line, Left, Right}, C) ->
   C5 = add_cst(ResultT, TV, Line, ?FROM_OP_RESULT(Op), C4),
   {TV, C5};
 
-infer({Op, Line, Expr}, C) ->
+infer({unary_op, Line, Op, Expr}, C) ->
   {ExprT, C1} = infer(Expr, C),
   TV = tv_server:fresh(C1#ctx.pid),
 

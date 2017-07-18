@@ -4,6 +4,7 @@
 
 % TODO:
 % - Negative numbers and unit in patterns
+% - Report lexer/parser errors better in cli tool
 % - Columns + display code in error message reporting
 % - Direct imports
 % - Write parser in par
@@ -16,7 +17,7 @@
 %   - Enforce else clause to avoid ambiguity/confusion?
 %   - Colon instead of @ for atoms?
 % - Struct literal test when parser supports it
-% - Test lexer errors
+% - Test lexer/parser errors
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
 % - Move gm start into on_load?

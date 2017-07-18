@@ -11,10 +11,11 @@ enum Node {
   Module(Lexer.Loc, Node, [Node], [Node]) @module,
   Import(Lexer.Loc, Node) @import,
 
-  Enum(Lexer.Loc, Node, [Node], [(Node, [Node], Maybe<Node>)]) @enum,
-  Struct(Lexer.Loc, Node, [Node], [(Node, Node)]) @struct,
-  Global(Lexer.Loc, Node, Node) @global,
+  Enum(Lexer.Loc, Node, [(Node, [Node], Maybe<Node>)]) @enum,
+  Struct(Lexer.Loc, Node, [(Node, Node)]) @struct,
   Sig(Lexer.Loc, Node, Node) @sig,
+  Global(Lexer.Loc, Node, Node, Bool) @global,
+  Fn(Lexer.Loc, [Node], Node) @fn,
 
   Unit(Lexer.Loc) @none,
   LitInt(Lexer.Loc, Int) @int,
@@ -33,7 +34,7 @@ enum Node {
   Tuple(Lexer.Loc, [Node]) @tuple,
   Map(Lexer.Loc, [(Node, Node)]) @map,
 
-  FieldLam(Lexer.Loc, Node) @field_lam,
+  FieldFn(Lexer.Loc, Node) @field_fn,
   Field(Lexer.Loc, Node, Node) @field,
   AnonRecord(Lexer.Loc, [(Node, Node)]) @anon_record,
   Record(Lexer.Loc, Node, [(Node, Node)]) @record,
@@ -41,7 +42,6 @@ enum Node {
   RecordExt(Lexer.Loc, Node, Node, [((Node, Node), Bool)]) @record_ext,
 
   App(Lexer.Loc, Node, [Node]) @app,
-  Lam(Lexer.Loc, [Node], Node) @lam,
   Native(Lexer.Loc, Node, Node, Int) @native,
 
   Con(Lexer.Loc, [Char]) @con_token,
@@ -94,7 +94,8 @@ enum UnaryOpAtom {
   Neg @"-",
   Not @"!",
   Pound @"#",
-  Dollar @"$"
+  Dollar @"$",
+  Discard @"discard"
 }
 
 enum OpAtom {
@@ -153,33 +154,62 @@ def(tokens) = match tokens {
   [Lexer.Enum(l) | t] => enumeration([Lexer.Enum(l) | t]),
   [Lexer.Struct(l) | t] => structure([Lexer.Struct(l) | t]),
 
-  [Lexer.Var(s, name), Lexer.Assign(_) | t] =>
-    expr(t) |> pmap(|v| match v { (node, rest) =>
-      (Global(range(s, node_loc(node)), Var(s, name), node), rest)
-    }),
-
   [Lexer.Var(s, name), Lexer.Sig(_) | t] =>
     type_expr(t) |> pmap(|v| match v { (node, rest) =>
       (Sig(range(s, node_loc(node)), Var(s, name), node), rest)
     }),
 
-  [Lexer.Var(_, _) | t] =>
-    head_loc(t) |> one_err("expected '=' to follow var in global definition"),
+  [Lexer.Var(s, name) | t] =>
+    fn_or_expr(s, t) |> pmap(|v| match v { (node, rest) =>
+      (Global(range(s, node_loc(node)), Var(s, name), node, false), rest)
+    }),
+
+  [Lexer.Export(s), Lexer.Var(var_l, name) | t] =>
+    fn_or_expr(var_l, t) |> pmap(|v| match v { (node, rest) =>
+      (Global(range(s, node_loc(node)), Var(var_l, name), node, true), rest)
+    }),
 
   _ => head_loc(tokens) |> one_err(
-    "expected either keyword 'enum', keyword 'struct', global definition, " ++
-    "or global signature"
+    "expected either global definition, global signature, keyword 'enum', " ++
+    "or keyword 'struct' "
+  )
+}
+
+fn_or_expr :: Lexer.Loc -> [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
+fn_or_expr(s, tokens) = match tokens {
+  [Lexer.LParen(_), Lexer.RParen(_), Lexer.Assign(_) | t] =>
+    expr(t) |> pmap(|v| match v { (node, rest) =>
+      (Fn(range(s, node_loc(node)), [], node), rest)
+    }),
+
+  [Lexer.LParen(_), Lexer.RParen(_) | t] =>
+    head_loc(t) |> one_err("expected equals '='"),
+
+  [Lexer.LParen(_) | t] =>
+    parse_args(var, s, t) |> pbind(|v| match v {
+      (_, args, [Lexer.Assign(_) | t]) =>
+        expr(t) |> pmap(|v| match v { (node, rest) =>
+          (Fn(range(s, node_loc(node)), args, node), rest)
+        }),
+
+      (_, _, t) => head_loc(t) |> one_err("expected equals '='")
+    }),
+
+  [Lexer.Assign(_) | t] => expr(t),
+
+  _ => head_loc(tokens) |> one_err(
+    "expected '(' or '=' to follow variable identifier in global definition"
   )
 }
 
 enumeration :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 enumeration(tokens) = match tokens {
   [Lexer.Enum(s) | t] =>
-    new_type_args_braces(s, t)
-      |> pbind(|v| match v { (l, node, tvs, inner, rest) =>
+    new_type_braces(s, t)
+      |> pbind(|v| match v { (l, node, inner, rest) =>
         many_delim_comma(option, inner)
           |> pmap_or(|v| v, [])
-          |> pmap(|options| (Enum(l, node, tvs, options), rest))
+          |> pmap(|options| (Enum(l, node, options), rest))
       }),
 
   _ => head_loc(tokens) |> one_err("expected keyword 'enum'")
@@ -213,27 +243,27 @@ option(tokens) = match tokens {
 structure :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 structure(tokens) = match tokens {
   [Lexer.Struct(s) | t] =>
-    new_type_args_braces(s, t)
-      |> pbind(|v| match v { (l, node, tvs, inner, rest) =>
+    new_type_braces(s, t)
+      |> pbind(|v| match v { (l, node, inner, rest) =>
         many_delim_comma(field_type, inner)
           |> pmap_or(|v| v, [])
-          |> pmap(|field_types| (Struct(l, node, tvs, field_types), rest))
+          |> pmap(|field_types| (Struct(l, node, field_types), rest))
       }),
 
   _ => head_loc(tokens) |> one_err("expected keyword 'struct'")
 }
 
-new_type_args_braces :: Lexer.Loc -> [Lexer.Token] ->
-  Parsed<(Lexer.Loc, Node, [Node], [Lexer.Token], [Lexer.Token])>
-new_type_args_braces(s, tokens) = match tokens {
+new_type_braces :: Lexer.Loc -> [Lexer.Token] ->
+  Parsed<(Lexer.Loc, Node, [Lexer.Token], [Lexer.Token])>
+new_type_braces(s, tokens) = match tokens {
   [Lexer.Con(con_l, con), Lexer.Lt(_) | t] =>
-    enclosed_tag(s, t) |> pbind(|v| match v {
-      (_, inner, [Lexer.LBrace(_) | t]) =>
+    enclosed_tag(con_l, t) |> pbind(|v| match v {
+      (gen_l, inner, [Lexer.LBrace(_) | t]) =>
         many_delim_comma(tv, inner)
           |> pmap_or(|v| v, [])
           |> pbind(|tvs| (enclosed_brace(s, t) |> pmap(|v| (v, tvs))))
           |> pmap(|v| match v { ((l, inner, rest), tvs) =>
-            (l, Con(con_l, con), tvs, inner, rest)
+            (l, Gen(gen_l, Con(con_l, con), tvs), inner, rest)
           }),
 
       (_, _, t) => head_loc(t) |> one_err("expected open brace '{'")
@@ -241,7 +271,7 @@ new_type_args_braces(s, tokens) = match tokens {
 
   [Lexer.Con(con_l, con), Lexer.LBrace(_) | t] =>
     enclosed_brace(s, t) |> pmap(|v| match v { (l, inner, rest) =>
-      (l, Con(con_l, con), [], inner, rest)
+      (l, Con(con_l, con), inner, rest)
     }),
 
   [Lexer.Con(_, _) | t] => head_loc(t) |> one_err("expected open brace '{'"),
@@ -343,7 +373,7 @@ expr_r(state, stack, tokens) = match state {
             node |> recurse(t),
 
       [Lexer.Dot(s), Lexer.Var(e, name) | t] =>
-        FieldLam(range(s, e), Var(e, name)) |> recurse(t),
+        FieldFn(range(s, e), Var(e, name)) |> recurse(t),
 
       [Lexer.LBrace(s), Lexer.RBrace(e) | t] =>
         Map(range(s, e), []) |> recurse(t),
@@ -391,7 +421,7 @@ expr_r(state, stack, tokens) = match state {
       [Lexer.Bar(s), Lexer.Sub(_), Lexer.Bar(_) | t] =>
         // lam is the lowest precedence, so it's fine to just recurse here
         expr(t) |> pbind(|v| match v { (body, rest) =>
-          Lam(range(s, node_loc(body)), [], body) |> recurse(rest)
+          Fn(range(s, node_loc(body)), [], body) |> recurse(rest)
         }),
       [Lexer.Bar(s) | t] =>
         enclosed(Lexer.Bar, Lexer.Bar, "'|'", s, t)
@@ -403,7 +433,7 @@ expr_r(state, stack, tokens) = match state {
           |> pbind(|v| match v { (args, rest) =>
             // lam is the lowest precedence, so it's fine to just recurse here
             expr(rest) |> pbind(|v| match v { (body, rest) =>
-              Lam(range(s, node_loc(body)), args, body) |> recurse(rest)
+              Fn(range(s, node_loc(body)), args, body) |> recurse(rest)
             })
           }),
 
@@ -411,6 +441,7 @@ expr_r(state, stack, tokens) = match state {
       [Lexer.Not(l) | t] => expr_r(Start, [UnaryOp(l, Not) | stack], t),
       [Lexer.Pound(l) | t] => expr_r(Start, [UnaryOp(l, Pound) | stack], t),
       [Lexer.Dollar(l) | t] => expr_r(Start, [UnaryOp(l, Dollar) | stack], t),
+      [Lexer.Discard(l) | t] => expr_r(Start, [UnaryOp(l, Discard) | stack], t),
 
       [Lexer.If(l) | t] =>
         if_expr([Lexer.If(l) | t])
@@ -711,7 +742,7 @@ let_init(tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_) | t] =>
     if let [Lexer.Assign(_) | t] = t then
       expr(t) |> pmap(|v| match v { (body, rest) =>
-        let lam = Lam(range(s, node_loc(body)), [], body) in
+        let lam = Fn(range(s, node_loc(body)), [], body) in
           ((Var(s, name), lam), rest)
       })
     else
@@ -721,7 +752,7 @@ let_init(tokens) = match tokens {
     parse_args(var, s, t) |> pbind(|v| match v {
       (_, args, [Lexer.Assign(_) | t]) =>
         expr(t) |> pmap(|v| match v { (body, rest) =>
-          let lam = Lam(range(s, node_loc(body)), args, body) in
+          let lam = Fn(range(s, node_loc(body)), args, body) in
             ((Var(s, name), lam), rest)
         }),
 
@@ -851,7 +882,7 @@ opa_prec_list = [
   [Bin(Add), Bin(Sub), Bin(Concat), Bin(Separate)],
   [Bin(Mul), Bin(Div), Bin(Mod)],
   [Bin(ExprSig)],
-  [Un(Neg), Un(Not), Un(Pound), Un(Dollar)],
+  [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Discard)],
   [Bin(Dot)]
 ]
 
