@@ -7,7 +7,6 @@
 % - Report lexer/parser errors better in cli tool
 % - Columns + display code in error message reporting
 % - Direct imports
-% - Write parser in par
 % - Better syntax
 %   - Newlines instead of commas to separate match conditions, let vars, etc?
 %   - Nothing to separate struct/enum fields
@@ -16,7 +15,6 @@
 %   - Change fat arrow to regular arrow?
 %   - Enforce else clause to avoid ambiguity/confusion?
 %   - Colon instead of @ for atoms?
-% - Struct literal test when parser supports it
 % - Test lexer/parser errors
 % - Typeclasses + generics w/o concrete types (HKTs)
 % - Exceptions
@@ -43,7 +41,6 @@
 %   - Lexer/Parser error messages
 %     - Maybe change enclosed methods to accept open tag as well?
 %       - Would allow for more uniform error messages
-% - Prefix function name with _ in recursive let binding to avoid unused error
 % - Update naming conventions
 %
 % Defer

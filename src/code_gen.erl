@@ -485,10 +485,18 @@ rep({unary_op, Loc, Op, Expr}, Env) ->
 % recursive definitions allowed for simple pattern functions
 rep_pattern({var, _, Name}=Pattern, {fn, _, Args, _}=Expr, Env) ->
   Env1 = bind(Name, length(Args), Env),
-  {var, _, Atom}=PatternRep = rep(Pattern, Env1#{'*in_pattern' => true}),
+  PatternRep = rep(Pattern, Env1#{'*in_pattern' => true}),
 
-  {'fun', FunLine, {clauses, Clauses}} = rep(Expr, Env1),
+  % We're unsure whether the named fun is going to be used (i.e. whether the
+  % named fun is recursive), so we give it a name prefixed with an underscore
+  % to prevent unused errors.
+  Atom = unique([$_ | Name]),
+  Env2 = env_set(Name, {Atom, length(Args)}, Env1),
+
+  {'fun', FunLine, {clauses, Clauses}} = rep(Expr, Env2),
   NamedFun = {named_fun, FunLine, Atom, Clauses},
+
+  % Use Env1, not Env2, as the named fun is not accessible to the outer scope.
   {PatternRep, NamedFun, Env1};
 
 rep_pattern(Pattern, Expr, Env) ->
