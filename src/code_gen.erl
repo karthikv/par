@@ -34,15 +34,15 @@ compile_comps(Comps) ->
             false -> {[], ModuleEnv1}
           end;
 
-        {enum_token, _, _, OptionTEs} ->
+        {enum, _, _, OptionTEs} ->
           {EnumExports, ModuleEnv1} = lists:mapfoldl(fun(OptionTE, NestedEnv) ->
             {{con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
 
             Atom = list_to_atom(Con),
             Arity = length(ArgsTE),
             Key = case KeyNode of
-              default -> Atom;
-              {atom, _, Key_} -> Key_
+              none -> Atom;
+              {some, {atom, _, Key_}} -> Key_
             end,
 
             case Arity of
@@ -55,14 +55,13 @@ compile_comps(Comps) ->
 
           {lists:append(EnumExports), ModuleEnv1};
 
-        {struct_token, _, {con_token, _, Con}, {record_te, _, FieldTEs}} ->
+        {struct, _, {con_token, _, Con}, FieldTEs} ->
           Atom = list_to_atom(Con),
           Arity = length(FieldTEs),
           Value = {{global_fn, Atom}, Arity},
           {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
 
-        {struct_token, _, {gen_te, _, {con_token, _, Con}, _},
-            {record_te, _, FieldTEs}} ->
+        {struct, _, {gen_te, _, {con_token, _, Con}, _}, FieldTEs} ->
           Atom = list_to_atom(Con),
           Arity = length(FieldTEs),
           Value = {{global_fn, Atom}, Arity},
@@ -115,7 +114,8 @@ compile_ast({Module, Ast, _, Path}=Comp, Exports, Env) ->
   {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms, debug_info),
   {Mod, Binary}.
 
-rep({global, Line, {var, _, Name}, Expr, _}, Env) ->
+rep({global, Loc, {var, _, Name}, Expr, _}, Env) ->
+  Line = ?START_LINE(Loc),
   case Expr of
     {fn, _, Args, _} ->
       {'fun', _, {clauses, Clauses}} = rep(Expr, Env),
@@ -142,12 +142,13 @@ rep({global, Line, {var, _, Name}, Expr, _}, Env) ->
       [{function, Line, list_to_atom(Name), 0, [Clause]}]
   end;
 
-rep({enum_token, _, _, OptionTEs}, _) ->
+rep({enum, _, _, OptionTEs}, _) ->
   FnOptionTEs = lists:filter(fun({_, ArgsTE, _}) ->
     length(ArgsTE) > 0
   end, OptionTEs),
 
-  lists:map(fun({{con_token, Line, Con}, ArgsTE, KeyNode}) ->
+  lists:map(fun({{con_token, Loc, Con}, ArgsTE, KeyNode}) ->
+    Line = ?START_LINE(Loc),
     ArgsRep = lists:map(fun(_) ->
       Atom = unique("_@Arg"),
       {var, Line, Atom}
@@ -155,8 +156,8 @@ rep({enum_token, _, _, OptionTEs}, _) ->
 
     ConAtom = list_to_atom(Con),
     {KeyLine, Key} = case KeyNode of
-      default -> {Line, ConAtom};
-      {atom, KeyLine_, Key_} -> {KeyLine_, Key_}
+      none -> {Line, ConAtom};
+      {some, {atom, KeyLoc, Key_}} -> {?START_LINE(KeyLoc), Key_}
     end,
 
     Body = [{tuple, Line, [{atom, KeyLine, Key} | ArgsRep]}],
@@ -164,10 +165,10 @@ rep({enum_token, _, _, OptionTEs}, _) ->
     {function, Line, ConAtom, length(ArgsTE), [Clause]}
   end, FnOptionTEs);
 
-rep({struct_token, _, StructTE, {record_te, _, FieldTEs}}, Env) ->
+rep({struct, Loc, StructTE, FieldTEs}, Env) ->
   {Line, Con} = case StructTE of
-    {con_token, Line_, Con_} -> {Line_, Con_};
-    {gen_te, _, {con_token, Line_, Con_}, _} -> {Line_, Con_}
+    {con_token, ConLoc, Con_} -> {?START_LINE(ConLoc), Con_};
+    {gen_te, _, {con_token, ConLoc, Con_}, _} -> {?START_LINE(ConLoc), Con_}
   end,
 
   {ArgsRep, Env1} = lists:mapfoldl(fun({{var, _, FieldName}=Var, _}, FoldEnv) ->
@@ -175,42 +176,44 @@ rep({struct_token, _, StructTE, {record_te, _, FieldTEs}}, Env) ->
     {rep(Var, FoldEnv1), FoldEnv1}
   end, Env, FieldTEs),
 
-  Pairs = lists:map(fun({{var, FieldLine, FieldName}=Var, _}) ->
-    {{atom, FieldLine, list_to_atom(FieldName)}, Var}
+  Pairs = lists:map(fun({{var, FieldLoc, FieldName}=Var, _}) ->
+    {{atom, FieldLoc, list_to_atom(FieldName)}, Var}
   end, FieldTEs),
-  Body = [rep({map, Line, Pairs}, Env1)],
+  Body = [rep({map, Loc, Pairs}, Env1)],
 
   Clause = {clause, Line, ArgsRep, [], Body},
   [{function, Line, list_to_atom(Con), length(FieldTEs), [Clause]}];
 
 rep({sig, _, _, _}, _) -> [];
 
-rep({fn, Line, Args, Expr}, Env) ->
+rep({fn, Loc, Args, Expr}, Env) ->
   {Patterns, Env1} = lists:mapfoldl(fun({var, _, Name}=Var, FoldEnv) ->
     FoldEnv1 = bind(Name, unknown, FoldEnv),
     {rep(Var, FoldEnv1), FoldEnv1}
   end, Env, Args),
+
+  Line = ?START_LINE(Loc),
   Clause = {clause, Line, Patterns, [], [rep(Expr, Env1)]},
   {'fun', Line, {clauses, [Clause]}};
 
-rep({'::', _, Expr, _}, Env) -> rep(Expr, Env);
+rep({binary_op, _, '::', Expr, _}, Env) -> rep(Expr, Env);
 
-rep({none, Line}, _) -> erl_parse:abstract(none, Line);
-rep({N, Line, V}, _)
+rep({none, Loc}, _) -> eabs(none, ?START_LINE(Loc));
+rep({N, Loc, V}, _)
   when N == int; N == float; N == bool; N == str; N == atom ->
-    erl_parse:abstract(V, Line);
-rep({char, Line, V}, _) ->
+    eabs(V, ?START_LINE(Loc));
+rep({char, Loc, V}, _) ->
   % special case; erl_parse:abstract will give us {integer, _, _}
-  {char, Line, V};
+  {char, ?START_LINE(Loc), V};
 
 % only occurs in patterns
-rep({'_', Line}, _) -> {var, Line, '_'};
+rep({'_', Loc}, _) -> {var, ?START_LINE(Loc), '_'};
 
-rep({list, Line, Elems}, Env) ->
+rep({list, Loc, Elems}, Env) ->
   lists:foldr(fun(E, FoldRep) ->
     ERep = rep(E, Env),
     {cons, element(2, ERep), ERep, FoldRep}
-  end, {nil, Line}, Elems);
+  end, {nil, ?START_LINE(Loc)}, Elems);
 
 rep({cons, _, Elems, Tail}, Env) ->
   lists:foldr(fun(E, FoldRep) ->
@@ -218,18 +221,19 @@ rep({cons, _, Elems, Tail}, Env) ->
     {cons, element(2, ERep), ERep, FoldRep}
   end, rep(Tail, Env), Elems);
 
-rep({tuple, Line, Elems}, Env) ->
-  {tuple, Line, lists:map(fun(E) -> rep(E, Env) end, Elems)};
+rep({tuple, Loc, Elems}, Env) ->
+  {tuple, ?START_LINE(Loc), lists:map(fun(E) -> rep(E, Env) end, Elems)};
 
-rep({map, Line, Pairs}, Env) ->
+rep({map, Loc, Pairs}, Env) ->
   PairsRep = lists:map(fun({K, V}) ->
     KRep = rep(K, Env),
     VRep = rep(V, Env),
     {map_field_assoc, element(2, KRep), KRep, VRep}
   end, Pairs),
-  {map, Line, PairsRep};
+  {map, ?START_LINE(Loc), PairsRep};
 
-rep({N, Line, Name}, Env) when N == var; N == con_token; N == var_value ->
+rep({N, Loc, Name}, Env) when N == var; N == con_token; N == var_value ->
+  Line = ?START_LINE(Loc),
   case env_get(Name, Env) of
     % global variable handled by the global manager
     {{global, Atom}, _} -> {call, Line, {atom, Line, Atom}, []};
@@ -239,29 +243,33 @@ rep({N, Line, Name}, Env) when N == var; N == con_token; N == var_value ->
     {Atom, _} -> {var, Line, Atom}
   end;
 
-rep({record, Line, Inits}, Env) ->
-  Pairs = lists:map(fun({{var, VarLine, Name}, Expr}) ->
-    {{atom, VarLine, list_to_atom(Name)}, Expr}
+rep({anon_record, Loc, Inits}, Env) ->
+  Pairs = lists:map(fun({{var, VarLoc, Name}, Expr}) ->
+    {{atom, VarLoc, list_to_atom(Name)}, Expr}
   end, Inits),
-  rep({map, Line, Pairs}, Env);
+  rep({map, Loc, Pairs}, Env);
 
-rep({update_record, Line, Expr, AllInits}, Env) ->
+rep({anon_record_ext, Loc, Expr, AllInits}, Env) ->
   Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
-  call(maps, merge, [rep(Expr, Env), rep({record, Line, Inits}, Env)], Line);
+  ExprRep = rep(Expr, Env),
+  RecordRep = rep({anon_record, Loc, Inits}, Env),
+  call(maps, merge, [ExprRep, RecordRep], ?START_LINE(Loc));
 
-rep({record, Line, _, Inits}, Env) -> rep({record, Line, Inits}, Env);
+rep({record, Loc, _, Inits}, Env) -> rep({anon_record, Loc, Inits}, Env);
 
-rep({update_record, Line, _, Expr, AllInits}, Env) ->
-  rep({update_record, Line, Expr, AllInits}, Env);
+rep({record_ext, Loc, _, Expr, AllInits}, Env) ->
+  rep({anon_record_ext, Loc, Expr, AllInits}, Env);
 
-rep({field, _, {var, Line, Name}}, _) ->
+rep({field_fn, _, {var, Loc, Name}}, _) ->
+  Line = ?START_LINE(Loc),
   RecordVar = {var, Line, 'Record'},
   Atom = list_to_atom(Name),
   Body = [call(maps, get, [{atom, Line, Atom}, RecordVar], Line)],
   Clause = {clause, Line, [RecordVar], [], Body},
   {'fun', Line, {clauses, [Clause]}};
 
-rep({field, Line, Expr, {N, _, Name}}, Env) when N == var; N == con_token ->
+rep({field, Loc, Expr, {N, _, Name}}, Env) when N == var; N == con_token ->
+  Line = ?START_LINE(Loc),
   case Expr of
     {con_token, _, Module} ->
       Mod = list_to_atom(Module),
@@ -282,28 +290,32 @@ rep({field, Line, Expr, {N, _, Name}}, Env) when N == var; N == con_token ->
       call(maps, get, [{atom, Line, Atom}, rep(Expr, Env)], Line)
   end;
 
-rep({app, _, {con_token, Line, Name}, Args}, #{'*in_pattern' := true}=Env) ->
+rep({app, _, {con_token, Loc, Name}, Args}, #{'*in_pattern' := true}=Env) ->
   {{option, Key, _}, _} = env_get(Name, Env),
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, Env) end, Args),
+
+  Line = ?START_LINE(Loc),
   % It's possible that this is actually a partial application, but we can't
   % successfully pattern match a newly generated function anyway, so as long as
   % our pattern fails (which it will, because a function won't match a tuple),
   % we're good.
   {tuple, Line, [{atom, Line, Key} | ArgsRep]};
 
-rep({app, _, {field, Line, {con_token, _, Module}, {con_token, _, Name}}, Args},
+rep({app, _, {field, Loc, {con_token, _, Module}, {con_token, _, Name}}, Args},
     #{'*in_pattern' := true}=Env) ->
   {{option, Key, _}, _} = maps:get({Module, Name}, Env),
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, Env) end, Args),
+
+  Line = ?START_LINE(Loc),
   % It's possible that this is actually a partial application, but we can't
   % successfully pattern match a newly generated function anyway, so as long as
   % our pattern fails (which it will, because a function won't match a tuple),
   % we're good.
   {tuple, Line, [{atom, Line, Key} | ArgsRep]};
 
-rep({app, _, Expr, RawArgs}, Env) ->
+rep({app, Loc, Expr, RawArgs}, Env) ->
   ExprRep = rep(Expr, Env),
-  Line = element(2, ExprRep),
+  Line = ?START_LINE(Loc),
 
   Arity = arity(Expr, Env),
   Args = case Arity of
@@ -316,7 +328,7 @@ rep({app, _, Expr, RawArgs}, Env) ->
 
   if
     Arity == unknown ->
-      ArgsListRep = rep({list, Line, Args}, Env),
+      ArgsListRep = rep({list, Loc, Args}, Env),
       excluder_remove('_@curry'),
       {call, Line, {atom, Line, '_@curry'},
         [ExprRep, ArgsListRep, {integer, Line, Line}]};
@@ -326,7 +338,7 @@ rep({app, _, Expr, RawArgs}, Env) ->
         {var, Line, unique("_@Arg")}
       end, lists:seq(NumArgs + 1, Arity)),
 
-      ArgsListRep = rep({list, Line, Args}, Env),
+      ArgsListRep = rep({list, Loc, Args}, Env),
       NewArgsListRep = lists:foldr(fun(ArgRep, ListRep) ->
         {cons, Line, ArgRep, ListRep}
       end, {nil, Line}, NewArgsRep),
@@ -351,19 +363,21 @@ rep({app, _, Expr, RawArgs}, Env) ->
         NumArgs == Arity -> Call;
         true ->
           RestArgs = lists:sublist(Args, Arity + 1, NumArgs),
-          RestArgsListRep = rep({list, Line, RestArgs}, Env),
+          RestArgsListRep = rep({list, Loc, RestArgs}, Env),
           excluder_remove('_@curry'),
           {call, Line, {atom, Line, '_@curry'},
             [Call, RestArgsListRep, {integer, Line, Line}]}
       end
   end;
 
-rep({native, _, {atom, Line, Mod}, {var, _, Name}, Arity}, _) ->
+rep({native, _, {atom, Loc, Mod}, {var, _, Name}, Arity}, _) ->
+  Line = ?START_LINE(Loc),
   Atom = list_to_atom(Name),
   {'fun', Line,
     {function, {atom, Line, Mod}, {atom, Line, Atom}, {integer, Line, Arity}}};
 
-rep({'if', Line, Cond, Then, Else}, Env) ->
+rep({'if', Loc, Cond, Then, Else}, Env) ->
+  Line = ?START_LINE(Loc),
   ThenBody = case Else of
     {none, _} -> [rep(Then, Env), {atom, Line, none}];
     _ -> [rep(Then, Env)]
@@ -371,7 +385,7 @@ rep({'if', Line, Cond, Then, Else}, Env) ->
 
   % must factor out cond into its own variable, since it might not be a valid
   % guard clause; TODO: optimize by not doing this if valid guard
-  CondLine = element(2, Cond),
+  CondLine = ?START_LINE(?LOC(Cond)),
   CondVar = {var, CondLine, unique("_@Cond")},
   Match = {match, CondLine, CondVar, rep(Cond, Env)},
 
@@ -379,15 +393,16 @@ rep({'if', Line, Cond, Then, Else}, Env) ->
   Clauses = [{clause, Line, [], [[CondVar]], ThenBody}, ElseClause],
   {block, Line, [Match, {'if', Line, Clauses}]};
 
-rep({'let', Line, Inits, Then}, Env) ->
+rep({'let', Loc, Inits, Then}, Env) ->
   {InitsRep, Env1} = lists:mapfoldl(fun({Pattern, Expr}, FoldEnv) ->
     {PatternRep, ExprRep, FoldEnv1} = rep_pattern(Pattern, Expr, FoldEnv),
     {{match, element(2, PatternRep), PatternRep, ExprRep}, FoldEnv1}
   end, Env, Inits),
 
-  {block, Line, InitsRep ++ [rep(Then, Env1)]};
+  {block, ?START_LINE(Loc), InitsRep ++ [rep(Then, Env1)]};
 
-rep({if_let, Line, {Pattern, Expr}, Then, Else}, Env) ->
+rep({if_let, Loc, {Pattern, Expr}, Then, Else}, Env) ->
+  Line = ?START_LINE(Loc),
   {PatternRep, ExprRep, Env1} = rep_pattern(Pattern, Expr, Env),
   ThenBody = case Else of
     {none, _} -> [rep(Then, Env1), {atom, Line, none}];
@@ -400,7 +415,7 @@ rep({if_let, Line, {Pattern, Expr}, Then, Else}, Env) ->
   ],
   {'case', Line, ExprRep, CaseClauses};
 
-rep({match, Line, Expr, Cases}, Env) ->
+rep({match, Loc, Expr, Cases}, Env) ->
   ExprRep = rep(Expr, Env),
   CaseClauses = lists:map(fun({Pattern, Then}) ->
     % TODO: use arity(Expr) in case of simple pattern?
@@ -413,12 +428,13 @@ rep({match, Line, Expr, Cases}, Env) ->
     {clause, element(2, PatternRep), [PatternRep], [], Body}
   end, Cases),
 
-  {'case', Line, ExprRep, CaseClauses};
+  {'case', ?START_LINE(Loc), ExprRep, CaseClauses};
 
-rep({block, Line, Exprs}, Env) ->
-  {block, Line, lists:map(fun(E) -> rep(E, Env) end, Exprs)};
+rep({block, Loc, Exprs}, Env) ->
+  {block, ?START_LINE(Loc), lists:map(fun(E) -> rep(E, Env) end, Exprs)};
 
-rep({Op, Line, Left, Right}, Env) ->
+rep({binary_op, Loc, Op, Left, Right}, Env) ->
+  Line = ?START_LINE(Loc),
   LeftRep = rep(Left, Env),
   RightRep = rep(Right, Env),
 
@@ -431,8 +447,8 @@ rep({Op, Line, Left, Right}, Env) ->
       {call, Line, {atom, Line, '_@separate'}, [LeftRep, RightRep]};
     '|>' ->
       case Right of
-        {app, Expr, Args} -> rep({app, Line, Expr, [Left | Args]}, Env);
-        _ -> rep({app, Line, Right, [Left]}, Env)
+        {app, Expr, Args} -> rep({app, Loc, Expr, [Left | Args]}, Env);
+        _ -> rep({app, Loc, Right, [Left]}, Env)
       end;
     _ ->
       Atom = case Op of
@@ -453,7 +469,8 @@ rep({Op, Line, Left, Right}, Env) ->
       {op, Line, Atom, LeftRep, RightRep}
   end;
 
-rep({Op, Line, Expr}, Env) ->
+rep({unary_op, Loc, Op, Expr}, Env) ->
+  Line = ?START_LINE(Loc),
   ExprRep = rep(Expr, Env),
 
   case Op of
@@ -527,11 +544,11 @@ env_set(Name, Value, Env) -> Env#{{module(Env), Name} => Value}.
 env_get(Name, Env) -> maps:get({module(Env), Name}, Env).
 
 arity({fn, _, Args, _}, _) -> length(Args);
-arity({'::', _, Expr, _}, Env) -> arity(Expr, Env);
+arity({binary_op, _, '::', Expr, _}, Env) -> arity(Expr, Env);
 arity({N, _, Name}, Env) when N == var; N == con_token ->
   {_, Arity} = env_get(Name, Env),
   Arity;
-arity({field, _, _}, _) -> 1;
+arity({field_fn, _, _}, _) -> 1;
 % TODO: we can figure this out in some cases from typing info or analysis
 arity({field, _, _, _}, _) -> unknown;
 % TODO: field for module access!!

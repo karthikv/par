@@ -1113,11 +1113,10 @@ norm_sig_type(SigT, RigidVs, Pid) ->
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
-  ?LOG(
-    "Generalizations",
-    % TODO: revert env={} change
-    lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts), env=#{}} end, Gs)
-  ),
+  %% ?LOG(
+  %%   "Generalizations",
+  %%   lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)
+  %% ),
 
   T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
     #{ID := #gnr{index=Index}} = FoldT#tarjan.map,
@@ -1185,7 +1184,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         FoldMap#{SolID := SolG#gnr{on_stack=false}}
       end, Map2, SolvableIDs),
 
-      ?LOG("Solvable IDs", SolvableIDs),
+      %% ?LOG("Solvable IDs", SolvableIDs),
 
       S3 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,

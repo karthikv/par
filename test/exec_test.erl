@@ -460,9 +460,6 @@ test_pattern(Expr, Run) ->
   % to ensure env is reset appropriately
   , ?_test(true = Expr("let a = true in { if let a = 3.0 then a; a }"))
   , ?_test(true = Expr("let a = true in { if let a = 3.0 then a else 5; a }"))
-  , ?_test(3 = Expr(
-      "if let abs(x) = if x < 0 then abs(-x) else x then abs(-3) else 0"
-    ))
   , ?_test(<<"hey">> = Expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test(2.5 = Expr(
       "if let f = |b| if b then f(!b) + 1 else 1.5\n"

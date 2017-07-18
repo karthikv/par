@@ -470,7 +470,7 @@ expr_test_() ->
   , ?_assertEqual(
       {app, l(0, 16),
         {fn, l(0, 9), [{var, l(2, 1), "x"}],
-          {app, l(5, 3), {var, l(5, 1), "x"}, []}
+          {app, l(5, 3), {var, l(5, 1), "x"}, [{none, l(6, 2)}]}
         },
         [{fn, l(10, 5), [], {int, l(14, 1), 2}}]
       },
@@ -727,7 +727,7 @@ expr_test_() ->
          }}],
         {app, l(31, 8),
           {var, l(31, 3), "inc"},
-          [{app, l(35, 3), {var, l(35, 1), "f"}, []}]
+          [{app, l(35, 3), {var, l(35, 1), "f"}, [{none, l(36, 2)}]}]
         }
       },
       ok_expr("let f() = 3, inc(x) = x + 1 in inc(f())")
@@ -748,6 +748,17 @@ expr_test_() ->
         {str, l(32, 5), <<"hey">>}
       },
       ok_expr("if let [] = true then \"hi\" else \"hey\"")
+    )
+  , ?_assertEqual(
+      {'let', l(0, 39),
+        [{{var, l(4, 1), "x"}, {if_let, l(8, 26),
+          {{int, l(15, 1), 1}, {int, l(19, 1), 1}},
+          {int, l(26, 1), 1},
+          {int, l(33, 1), 2}
+        }}],
+        {var, l(38, 1), "x"}
+      },
+      ok_expr("let x = if let 1 = 1 then 1 else 2 in x")
     )
 
   , ?_assertEqual(
@@ -956,6 +967,15 @@ expr_test_() ->
         }]
       },
       ok_expr("match ('a', @hi) { ('\\b', x) => ('c', @hey) }")
+    )
+  , ?_assertEqual(
+      {binary_op, l(0, 22), '+',
+        {match, l(0, 18), {int, l(6, 1), 1}, [
+          {{'_', l(10, 1)}, {int, l(15, 1), 1}}
+        ]},
+        {int, l(21, 1), 2}
+      },
+      ok_expr("match 1 { _ => 1 } + 2")
     )
 
   , ?_assertEqual(

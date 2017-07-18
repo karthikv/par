@@ -21,11 +21,11 @@ run_ast(Ast, Args) ->
 init({global, _, {var, _, Name}, Expr, _}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
-init({enum_token, _, _, OptionTEs}, ID) ->
+init({enum, _, _, OptionTEs}, ID) ->
   lists:foreach(fun({{con_token, _, Con}, ArgsTE, KeyNode}) ->
     Key = case KeyNode of
-      default -> list_to_atom(Con);
-      {atom, _, Key_} -> Key_
+      none -> list_to_atom(Con);
+      {some, {atom, _, Key_}} -> Key_
     end,
 
     V = if
@@ -39,7 +39,7 @@ init({enum_token, _, _, OptionTEs}, ID) ->
     env_set(Con, {option, Key, V}, ID)
   end, OptionTEs);
 
-init({struct_token, _, StructTE, {record_te, _, FieldTEs}}, ID) ->
+init({struct, _, StructTE, FieldTEs}, ID) ->
   Con = case StructTE of
     {con_token, _, Con_} -> Con_;
     {gen_te, _, {con_token, _, Con_}, _} -> Con_
@@ -71,7 +71,7 @@ eval({fn, _, Args, Expr}, ID) ->
     eval(Expr, NewID)
   end);
 
-eval({'::', _, Expr, _}, ID) -> eval(Expr, ID);
+eval({binary_op, _, '::', Expr, _}, ID) -> eval(Expr, ID);
 
 eval({none, _}, _) -> none;
 eval({N, _, V}, _)
@@ -105,29 +105,29 @@ eval({N, _, Name}, ID) when N == var; N == con_token ->
     V -> V
   end;
 
-eval({record, _, Inits}, ID) ->
+eval({anon_record, _, Inits}, ID) ->
   Pairs = lists:map(fun({{var, _, Name}, Expr}) ->
     {list_to_atom(Name), eval(Expr, ID)}
   end, Inits),
   maps:from_list(Pairs);
 
-eval({update_record, Line, Expr, AllInits}, C) ->
+eval({anon_record_ext, Line, Expr, AllInits}, C) ->
   Record = eval(Expr, C),
   Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
-  maps:merge(Record, eval({record, Line, Inits}, C));
+  maps:merge(Record, eval({anon_record, Line, Inits}, C));
 
-eval({record, Line, _, Inits}, ID) -> eval({record, Line, Inits}, ID);
+eval({record, Line, _, Inits}, ID) -> eval({anon_record, Line, Inits}, ID);
 
-eval({update_record, Line, _, Expr, AllInits}, ID) ->
-  eval({update_record, Line, Expr, AllInits}, ID);
+eval({record_ext, Line, _, Expr, AllInits}, ID) ->
+  eval({anon_record_ext, Line, Expr, AllInits}, ID);
 
-eval({field, _, {var, _, Name}}, _) ->
+eval({field_fn, _, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),
   fun(Record) -> maps:get(Atom, Record) end;
 
 eval({field, Line, Expr, Var}, ID) ->
   Record = eval(Expr, ID),
-  Fun = eval({field, Line, Var}, ID),
+  Fun = eval({field_fn, Line, Var}, ID),
   Fun(Record);
 
 eval({app, _, Expr, Args}, ID) ->
@@ -180,7 +180,7 @@ eval({'match', _, Expr, Cases}, ID) ->
 eval({block, _, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
 
-eval({Op, _, Left, Right}, ID) ->
+eval({binary_op, _, Op, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
   RightV = eval(Right, ID),
 
@@ -221,7 +221,7 @@ eval({Op, _, Left, Right}, ID) ->
       end
   end;
 
-eval({Op, _, Expr}, ID) ->
+eval({unary_op, _, Op, Expr}, ID) ->
   V = eval(Expr, ID),
 
   case Op of

@@ -457,7 +457,8 @@ expr_r(state, stack, tokens) = match state {
             enclosed_brace(s, t) |> pbind(|v| match v { (l, inner, rest) =>
               many_delim_comma(case, inner)
                 |> pmap_or(|v| v, [])
-                |> pmap(|cases| (Match(l, node, cases), rest))
+                |> pmap(|cases| Match(l, node, cases))
+                |> pbind(recurse(rest))
             }),
 
           (_, t) => head_loc(t) |> one_err("expected open brace '{'")
@@ -496,7 +497,7 @@ expr_r(state, stack, tokens) = match state {
         }),
 
       // TODO: flatten app?
-      [Lexer.LParen(_), Lexer.RParen(e) | t] =>
+      [Lexer.LParen(s), Lexer.RParen(e) | t] =>
         let
           // field access and app have equal precedence above all else
           [Node(n) | left] = reduce(get(Bin(Dot), opa_prec), stack),
@@ -511,7 +512,7 @@ expr_r(state, stack, tokens) = match state {
             else
               n,
 
-          app = App(range(node_loc(node), e), node, [])
+          app = App(range(node_loc(node), e), node, [Unit(range(s, e))])
         in
           expr_r(AcceptOp, [Node(app) | left], t),
       [Lexer.LParen(s) | t] =>
@@ -723,19 +724,24 @@ then_else(tokens) = match tokens {
 let_expr :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 let_expr(tokens) = match tokens {
   [Lexer.Let(s) | t] =>
-    enclosed(Lexer.Let, Lexer.In, "'in'", s, t)
-      |> pbind(|v| match v { (_, inner, rest) =>
-        many_delim_comma(let_init, inner)
-          |> pmap_or(|v| v, [])
-          |> pbind(|inits|
-            (expr(rest) |> pmap(|v| match v { (body, rest) =>
-              (Let(range(s, node_loc(body)), inits, body), rest)
-            }))
-          )
-      }),
+    let_inits(t) |> pbind(|v| match v { (inits, rest) =>
+      expr(rest) |> pmap(|v| match v { (body, rest) =>
+        (Let(range(s, node_loc(body)), inits, body), rest)
+      })
+    }),
 
   _ => head_loc(tokens) |> one_err("expected keyword 'let'")
 }
+
+let_inits(tokens) = let_init(tokens) |> pbind(|v| match v {
+  (init, [Lexer.Comma(_) | t]) =>
+    let_inits(t) |> pmap(|v| match v { (inits, rest) =>
+      ([init | inits], rest)
+    }),
+
+  (init, [Lexer.In(_) | t]) => parsed(([init], t)),
+  (_, t) => head_loc(t) |> one_err("expected comma ',' or keyword 'in'")
+})
 
 let_init :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
 let_init(tokens) = match tokens {
