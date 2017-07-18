@@ -86,8 +86,8 @@ main(Args) ->
       end,
 
       case type_system:infer_file(Path) of
-        {errors, Errs} ->
-          type_system:report_errors(Errs),
+        {errors, _, _}=Errors ->
+          reporter:report_errors(Errors),
           halt(1);
 
         {ok, _, Comps} ->

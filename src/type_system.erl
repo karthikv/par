@@ -2,7 +2,6 @@
 -export([
   infer_file/1,
   infer_prg/1,
-  report_errors/1,
   pretty/1,
   pattern_names/1
 ]).
@@ -131,10 +130,7 @@ load() -> 'Parser':'_@init'(gb_sets:new()).
 
 infer_file(Path) ->
   {_, Comps, _} = parse_file(Path, #{}),
-  case infer_comps(Comps) of
-    {ok, Env} -> {ok, Env, Comps};
-    {errors, _}=Errors -> Errors
-  end.
+  infer_comps(Comps).
 
 parse_file(RawPath, Parsed) ->
   Path = case filename:extension(RawPath) of
@@ -146,7 +142,8 @@ parse_file(RawPath, Parsed) ->
     {ok, Module} -> {Module, [], Parsed};
     error ->
       {ok, Binary} = file:read_file(Path),
-      {ok, Tokens} = 'Lexer':tokenize(binary_to_list(Binary)),
+      Contents = binary_to_list(Binary),
+      {ok, Tokens} = 'Lexer':tokenize(Contents),
 
       #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
       {module, _, {con_token, _, Module}, Imports, _} = Ast,
@@ -162,7 +159,14 @@ parse_file(RawPath, Parsed) ->
         {[DepModule | FoldModules], [DepComps | FoldComps], FoldParsed1}
       end, {[], [], Parsed1}, Imports),
 
-      {Module, lists:append([[{Module, Ast, Deps, Path}] | Comps]), Parsed2}
+      Comp = #comp{
+        module=Module,
+        ast=Ast,
+        deps=Deps,
+        path=Path,
+        contents=Contents
+      },
+      {Module, lists:append([[Comp] | Comps]), Parsed2}
   end.
 
 infer_prg(Prg) ->
@@ -176,25 +180,31 @@ infer_prg(Prg) ->
   {module, _, {con_token, _, Module}, [], _} = Ast,
   %% ?LOG("Ast", Ast),
 
-  Comps = [{Module, Ast, [], ""}],
-  case infer_comps(Comps) of
-    {ok, Env} -> {ok, Env, Comps};
-    {errors, _}=Errors -> Errors
-  end.
+  Comp = #comp{
+    module=Module,
+    ast=Ast,
+    deps=[],
+    path="[infer-prg]",
+    contents=Prg
+  },
+  infer_comps([Comp]).
 
 infer_comps(Comps) ->
   {ok, Pid} = tv_server:start_link(),
 
   {_, C} = lists:foldl(fun(Comp, {Modules, FoldC}) ->
-    {Module, {module, Loc, _, _, _}, _, _} = Comp,
+    #comp{module=Module, ast={module, Loc, _, _, _}} = Comp,
     FoldC1 = FoldC#ctx{module=Module},
+
     case gb_sets:is_member(Module, Modules) of
       true -> {Modules, add_ctx_err(?ERR_REDEF_MODULE(Module), Loc, FoldC1)};
       false -> {gb_sets:add(Module, Modules), FoldC1}
     end
   end, {gb_sets:new(), #ctx{pid=Pid}}, Comps),
 
-  C1 = lists:foldl(fun({Module, {module, _, _, _, Defs}, _, _}, FoldC) ->
+  C1 = lists:foldl(fun(Comp, FoldC) ->
+    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
+
     lists:foldl(fun(Node, ModuleC) ->
       case Node of
         {global, Loc, {var, _, Name}, _, Exported} ->
@@ -233,7 +243,8 @@ infer_comps(Comps) ->
     end, FoldC#ctx{module=Module}, Defs)
   end, C, Comps),
 
-  C2 = lists:foldl(fun({Module, {module, _, _, _, Defs}, Deps, _}, FoldC) ->
+  C2 = lists:foldl(fun(Comp, FoldC) ->
+    #comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps} = Comp,
     AccessibleModules = gb_sets:from_list([Module | Deps]),
     FoldC1 = FoldC#ctx{module=Module, modules=AccessibleModules},
 
@@ -248,7 +259,8 @@ infer_comps(Comps) ->
     end, FoldC1, Defs)
   end, C1, Comps),
 
-  C3 = lists:foldl(fun({Module, {module, _, _, _, Defs}, Deps, _}, FoldC) ->
+  C3 = lists:foldl(fun(Comp, FoldC) ->
+    #comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps} = Comp,
     AccessibleModules = gb_sets:from_list([Module | Deps]),
     FoldC1 = FoldC#ctx{module=Module, modules=AccessibleModules},
 
@@ -337,25 +349,14 @@ infer_comps(Comps) ->
         end,
         {inst(maps:get(V, Schemes), Pid), Exported}
       end, C3#ctx.env),
-      {ok, SubbedEnv};
+      {ok, SubbedEnv, Comps};
 
-    {errors, Errs} -> {errors, Errs}
+    {errors, Errs} -> {errors, Errs, Comps}
   end,
 
   % TODO: how to require that main is defined?
   ok = tv_server:stop(Pid),
   Result.
-
-report_errors(Errs) ->
-  lists:foreach(fun
-    ({T1, T2, Module, Loc, From}) ->
-      ?ERR(
-        "[~p:~p] in ~s~nexpected type ~s~ngot type      ~s~n~n",
-        [Module, Loc, From, pretty(T1), pretty(T2)]
-      );
-
-    ({Msg, Module, Loc}) -> ?ERR("[~p:~p] ~s~n", [Module, Loc, Msg])
-  end, Errs).
 
 infer({fn, _, Args, Expr}, C) ->
   {ArgTsRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->

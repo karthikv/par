@@ -8,7 +8,7 @@
 
 compile_comps(Comps) ->
   {AllExports, FullEnv} = lists:mapfoldl(fun(Comp, FoldEnv) ->
-    {Module, {module, _, _, _, Defs}, _, _} = Comp,
+    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     {Exports, FoldEnv1} = lists:mapfoldl(fun(Node, ModuleEnv) ->
       case Node of
@@ -78,7 +78,8 @@ compile_comps(Comps) ->
     compile_ast(Comp, Exports, FullEnv)
   end, lists:zip(Comps, AllExports)).
 
-compile_ast({Module, Ast, _, Path}=Comp, Exports, Env) ->
+compile_ast(Comp, Exports, Env) ->
+  #comp{module=Module, ast=Ast, path=Path} = Comp,
   counter_spawn(),
   excluder_spawn(gb_sets:from_list([
     '_@curry',
@@ -506,7 +507,7 @@ rep_pattern(Pattern, Expr, Env) ->
   end, Env, type_system:pattern_names(Pattern)),
   {rep(Pattern, Env1#{'*in_pattern' => true}), rep(Expr, Env), Env1}.
 
-rep_init_fn({Module, {module, _, _, _, Defs}, Deps, _}) ->
+rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   ArgVar = {var, 1, unique("_@Arg")},
   ModuleRep = eabs(Module, 1),
   IsMemberCall = call(gb_sets, is_member, [ModuleRep, ArgVar], 1),

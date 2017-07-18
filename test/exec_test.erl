@@ -2,6 +2,8 @@
 -export([returns_fun/0]).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("../src/errors.hrl").
+
 -define(TMP_MANY_DIR, "/tmp/exec-test-many").
 
 run_code_gen(Prg) ->
@@ -15,7 +17,7 @@ run_code_gen(Prg) ->
   Mod:main().
 
 run_interpreter(Prg) ->
-  {ok, _, [{_, Ast, _, _}]} = type_system_test:type_check(Prg),
+  {ok, _, [#comp{ast=Ast}]} = type_system_test:type_check(Prg),
   interpreter:run_ast(Ast, []).
 
 expr_code_gen(Expr) -> run_code_gen("main() = " ++ Expr).
@@ -35,7 +37,7 @@ many_code_gen(PathPrgs, TargetPath) ->
     remove(Mod)
   end, code_gen:compile_comps(Comps)),
 
-  {Module, _, _, _} = hd(Comps),
+  #comp{module=Module} = hd(Comps),
   Mod = list_to_atom(Module),
   Mod:'_@init'(gb_sets:new()),
 

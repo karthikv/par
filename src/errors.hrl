@@ -1,6 +1,9 @@
 -ifndef(ERRORS_HRL_).
 -define(ERRORS_HRL_, 1).
 
+% a component to compile, representing a module and its metadata
+-record(comp, {module, ast, deps, path, contents}).
+
 -define(FMT(Str), lists:flatten(io_lib:format(Str, []))).
 -define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
 -define(ERR(Str), io:format(standard_error, Str, [])).

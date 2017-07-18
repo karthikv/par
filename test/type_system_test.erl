@@ -24,11 +24,11 @@ ok_prg(Prg, Name) ->
   type_system:pretty(norm_prg(Prg, Name)).
 
 bad_prg(Prg, {Exp1, Exp2, ExpLine, ExpFrom}) ->
-  {errors, [Err]} = type_check(Prg),
+  {errors, [Err], _} = type_check(Prg),
   assert_err_equal(Err, {Exp1, Exp2, "Mod", ExpLine, ExpFrom});
 
 bad_prg(Prg, ExpErrs) when is_list(ExpErrs) ->
-  {errors, Errs} = type_check(Prg),
+  {errors, Errs, _} = type_check(Prg),
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, {Exp1, Exp2, ExpLine, ExpFrom}}) ->
@@ -36,7 +36,7 @@ bad_prg(Prg, ExpErrs) when is_list(ExpErrs) ->
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, "Mod", Loc}]} = type_check(Prg),
+  {errors, [{Msg, "Mod", Loc}], _} = type_check(Prg),
   ?assertEqual(ExpMsg, Msg),
   ?assertEqual(ExpLine, ?START_LINE(Loc)).
 
@@ -61,7 +61,7 @@ type_check_many(Dir, PathPrgs, TargetPath) ->
 
 ok_many(PathPrgs, TargetPath, Name) ->
   {ok, Env, Comps} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
-  {Module, _, _, _} = hd(Comps),
+  #comp{module=Module} = hd(Comps),
   {T, _} = maps:get({Module, Name}, Env),
 
   {ok, Pid} = tv_server:start_link(),
@@ -70,11 +70,11 @@ ok_many(PathPrgs, TargetPath, Name) ->
   type_system:pretty(NormT).
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
-  {errors, [Err]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  {errors, [Err], _} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
   assert_err_equal(Err, ExpErr).
 
 ctx_err_many(PathPrgs, TargetPath, {ExpMsg, ExpModule, ExpLine}) ->
-  {errors, [{Msg, Module, Loc}]} = type_check_many(
+  {errors, [{Msg, Module, Loc}], _} = type_check_many(
     ?TMP_MANY_DIR,
     PathPrgs,
     TargetPath
