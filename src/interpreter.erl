@@ -80,14 +80,14 @@ eval({N, _, V}, _)
 eval({list, _, Elems}, ID) ->
   lists:map(fun(E) -> eval(E, ID) end, Elems);
 
-eval({cons, Line, Elems, List}, ID) ->
-  ToPrepend = eval({list, Line, Elems}, ID),
+eval({cons, Loc, Elems, List}, ID) ->
+  ToPrepend = eval({list, Loc, Elems}, ID),
   lists:foldr(fun(V, FoldList) ->
     [V | FoldList]
   end, eval(List, ID), ToPrepend);
 
-eval({tuple, Line, Elems}, ID) ->
-  list_to_tuple(eval({list, Line, Elems}, ID));
+eval({tuple, Loc, Elems}, ID) ->
+  list_to_tuple(eval({list, Loc, Elems}, ID));
 
 eval({map, _, Pairs}, ID) ->
   List = lists:map(fun({K, V}) ->
@@ -111,23 +111,23 @@ eval({anon_record, _, Inits}, ID) ->
   end, Inits),
   maps:from_list(Pairs);
 
-eval({anon_record_ext, Line, Expr, AllInits}, C) ->
+eval({anon_record_ext, Loc, Expr, AllInits}, C) ->
   Record = eval(Expr, C),
   Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
-  maps:merge(Record, eval({anon_record, Line, Inits}, C));
+  maps:merge(Record, eval({anon_record, Loc, Inits}, C));
 
-eval({record, Line, _, Inits}, ID) -> eval({anon_record, Line, Inits}, ID);
+eval({record, Loc, _, Inits}, ID) -> eval({anon_record, Loc, Inits}, ID);
 
-eval({record_ext, Line, _, Expr, AllInits}, ID) ->
-  eval({anon_record_ext, Line, Expr, AllInits}, ID);
+eval({record_ext, Loc, _, Expr, AllInits}, ID) ->
+  eval({anon_record_ext, Loc, Expr, AllInits}, ID);
 
 eval({field_fn, _, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),
   fun(Record) -> maps:get(Atom, Record) end;
 
-eval({field, Line, Expr, Var}, ID) ->
+eval({field, Loc, Expr, Var}, ID) ->
   Record = eval(Expr, ID),
-  Fun = eval({field_fn, Line, Var}, ID),
+  Fun = eval({field_fn, Loc, Var}, ID),
   Fun(Record);
 
 eval({app, _, Expr, Args}, ID) ->
@@ -296,7 +296,7 @@ match(V1, {var, _, Name}, ID) ->
     V2 -> V1 == V2
   end;
 
-match(V1, {var_value, Line, Name}, ID) -> V1 == eval({var, Line, Name}, ID);
+match(V1, {var_value, Loc, Name}, ID) -> V1 == eval({var, Loc, Name}, ID);
 match(_, {'_', _}, _) -> true;
 
 match(V1, {con_token, _, Name}, ID) ->
@@ -305,12 +305,12 @@ match(V1, {con_token, _, Name}, ID) ->
     V2 -> V1 == V2
   end;
 
-match(V, {app, _, {con_token, Line, Name}, Args}, ID) ->
+match(V, {app, _, {con_token, Loc, Name}, Args}, ID) ->
   {option, Key, _} = env_get(Name, ID),
   if
     length(Args) == 0 -> V == Key;
     true ->
-      match(tuple_to_list(V), {list, Line, [{atom, Line, Key} | Args]}, ID)
+      match(tuple_to_list(V), {list, Loc, [{atom, Loc, Key} | Args]}, ID)
   end;
 
 match(V, {list, _, List}, ID) ->
@@ -325,14 +325,14 @@ match(V, {list, _, List}, ID) ->
       end, true, lists:zip(V, List))
   end;
 
-match(V, {cons, Line, List, Rest}, ID) ->
+match(V, {cons, Loc, List, Rest}, ID) ->
   if
     length(V) < length(List) -> false;
     true ->
       SubV = lists:sublist(V, length(List)),
       RestV = lists:sublist(V, length(List) + 1, length(V)),
 
-      case match(SubV, {list, Line, List}, ID) of
+      case match(SubV, {list, Loc, List}, ID) of
         false -> false;
         true -> match(RestV, Rest, ID)
       end

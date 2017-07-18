@@ -25,18 +25,18 @@ ok_prg(Prg, Name) ->
 
 bad_prg(Prg, {Exp1, Exp2, ExpLine, ExpFrom}) ->
   {errors, [Err]} = type_check(Prg),
-  assert_err_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom});
+  assert_err_equal(Err, {Exp1, Exp2, "Mod", ExpLine, ExpFrom});
 
 bad_prg(Prg, ExpErrs) when is_list(ExpErrs) ->
   {errors, Errs} = type_check(Prg),
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, {Exp1, Exp2, ExpLine, ExpFrom}}) ->
-    assert_err_equal(Err, {Exp1, Exp2, {"Mod", ExpLine}, ExpFrom})
+    assert_err_equal(Err, {Exp1, Exp2, "Mod", ExpLine, ExpFrom})
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLine}) ->
-  {errors, [{Msg, {"Mod", Loc}}]} = type_check(Prg),
+  {errors, [{Msg, "Mod", Loc}]} = type_check(Prg),
   ?assertEqual(ExpMsg, Msg),
   ?assertEqual(ExpLine, ?START_LINE(Loc)).
 
@@ -73,15 +73,19 @@ bad_many(PathPrgs, TargetPath, ExpErr) ->
   {errors, [Err]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
   assert_err_equal(Err, ExpErr).
 
-ctx_err_many(PathPrgs, TargetPath, {ExpMsg, {ExpMod, ExpLine}}) ->
-  {errors, [{Msg, {Mod, Loc}}]} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+ctx_err_many(PathPrgs, TargetPath, {ExpMsg, ExpModule, ExpLine}) ->
+  {errors, [{Msg, Module, Loc}]} = type_check_many(
+    ?TMP_MANY_DIR,
+    PathPrgs,
+    TargetPath
+  ),
   ?assertEqual(ExpMsg, Msg),
-  ?assertEqual(ExpMod, Mod),
+  ?assertEqual(ExpModule, Module),
   ?assertEqual(ExpLine, ?START_LINE(Loc)).
 
 assert_err_equal(
-  {T1, T2, {Mod, Loc}, From},
-  {Exp1, Exp2, {ExpMod, ExpLine}, ExpFrom}
+  {T1, T2, Module, Loc, From},
+  {Exp1, Exp2, ExpModule, ExpLine, ExpFrom}
  ) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {#{}, Pid}),
@@ -103,7 +107,7 @@ assert_err_equal(
       end
   end,
 
-  ?assertEqual(ExpMod, Mod),
+  ?assertEqual(ExpModule, Module),
   ?assertEqual(ExpLine, ?START_LINE(Loc)),
   ?assertEqual(ExpFrom, From).
 
@@ -1166,7 +1170,7 @@ other_errors_test_() ->
   , ?_test(ctx_err_many([
       {"foo", "\nmodule Foo a = 1"},
       {"bar", "module Foo import \"./foo\" b = 1"}
-    ], "bar", {?ERR_REDEF_MODULE("Foo"), {"Foo", 2}}))
+    ], "bar", {?ERR_REDEF_MODULE("Foo"), "Foo", 2}))
   , ?_test(ctx_err_prg(
       "foo :: Int",
       {?ERR_SIG_NO_DEF("foo"), 1}
@@ -1230,12 +1234,12 @@ other_errors_test_() ->
   , ?_test(ctx_err_many([
       {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
-    ], "bar", {?ERR_NOT_DEF("x", "Foo"), {"Bar", 3}}))
+    ], "bar", {?ERR_NOT_DEF("x", "Foo"), "Bar", 3}))
   , ?_test(ctx_err_prg("foo = \"hi\" :: Bar", {?ERR_NOT_DEF_TYPE("Bar"), 1}))
   , ?_test(ctx_err_many([
       {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = 3 :: Foo.FooType"}
-    ], "bar", {?ERR_NOT_DEF_TYPE("FooType"), {"Bar", 3}}))
+    ], "bar", {?ERR_NOT_DEF_TYPE("FooType"), "Bar", 3}))
   , ?_test(ctx_err_prg(
       "\nfoo = @erlang:asdf(true)",
       {?ERR_NOT_DEF_NATIVE(erlang, "asdf", 1), 2}
@@ -1248,7 +1252,7 @@ other_errors_test_() ->
   , ?_test(ctx_err_many([
       {"foo", "module Foo x = 3"},
       {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
-    ], "bar", {?ERR_NOT_EXPORTED("x", "Foo"), {"Bar", 3}}))
+    ], "bar", {?ERR_NOT_EXPORTED("x", "Foo"), "Bar", 3}))
   , ?_test(ctx_err_prg(
       "foo :: Map<K>\n"
       "foo = {}",
@@ -1383,9 +1387,9 @@ import_test_() ->
   , ?_test(bad_many([
       {"foo", "module Foo export x = @hello"},
       {"bar", "module Bar import \"./foo\" y = Foo.x + 4"}
-    ], "bar", {"Atom", "A: Num", {"Bar", 1}, ?FROM_OP_LHS('+')}))
+    ], "bar", {"Atom", "A: Num", "Bar", 1, ?FROM_OP_LHS('+')}))
   , ?_test(bad_many([
       {"foo", "module Foo\nimport \"./bar\"\nexport f(x) = Bar.g(x) == 3"},
       {"bar", "module Bar\nimport \"./foo\"\nexport g(x) = Foo.f(x)"}
-    ], "foo", {"A: Num", "Bool", {"Foo", 3}, ?FROM_OP_RESULT('==')}))
+    ], "foo", {"A: Num", "Bool", "Foo", 3, ?FROM_OP_RESULT('==')}))
   ].
