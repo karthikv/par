@@ -34,6 +34,18 @@ ok_expr(Expr) ->
   {global, GlobalLoc, {var, VarLoc, "expr"}, Parsed, false} = Def,
   Parsed.
 
+l(Offset, Len) -> l(0, Offset, Len).
+l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
+l(StartLine, StartOffset, EndLine, EndOffset) ->
+  #{
+    % lines are 1-indexed, and the first line is the prefix
+    start_line => 2 + StartLine,
+    % columns are 1-indexed
+    start_col => 1 + StartOffset,
+    end_line => 2 + EndLine,
+    end_col => 1 + EndOffset
+  }.
+
 expr_test_() ->
   [ ?_assertEqual({none, l(0, 2)}, ok_expr("()"))
   , ?_assertEqual({int, l(0, 1), 1}, ok_expr("1"))
@@ -1225,15 +1237,3 @@ import_test_() ->
       ok_prg("module Mod\nimport \"foo\"\nimport \"bar/baz\"\na = ()")
     )
   ].
-
-l(Offset, Len) -> l(0, Offset, Len).
-l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
-l(StartLine, StartOffset, EndLine, EndOffset) ->
-  #{
-    % lines are 1-indexed, and the first line is the prefix
-    start_line => 2 + StartLine,
-    % columns are 1-indexed
-    start_col => 1 + StartOffset,
-    end_line => 2 + EndLine,
-    end_col => 1 + EndOffset
-  }.

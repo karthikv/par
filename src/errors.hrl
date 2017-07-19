@@ -4,6 +4,7 @@
 % a component to compile, representing a module and its metadata
 -record(comp, {module, ast, deps, path, contents}).
 
+
 -define(FMT(Str), lists:flatten(io_lib:format(Str, []))).
 -define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).
 -define(ERR(Str), io:format(standard_error, Str, [])).
@@ -27,13 +28,13 @@
 -define(FROM_ELSE_BODY, "else body").
 -define(FROM_LET, "let pattern").
 -define(FROM_IF_LET_PATTERN, "if-let pattern").
--define(FROM_IF_LET_BODY, "if-let/else body").
 -define(FROM_MATCH_PATTERN, "match pattern").
 -define(FROM_MATCH_BODY, "match body").
 -define(FROM_UNARY_OP(Op), ?FMT("unary ~p operator", [Op])).
 -define(FROM_OP_LHS(Op), ?FMT("left-hand side of ~p operator", [Op])).
 -define(FROM_OP_RHS(Op), ?FMT("right-hand side of ~p operator", [Op])).
 -define(FROM_OP_RESULT(Op), ?FMT("result of ~p operation", [Op])).
+
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
 -define(

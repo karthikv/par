@@ -3,11 +3,10 @@
 -include("errors.hrl").
 
 % TODO:
-% - Negative numbers and unit in patterns
-% - Report lexer/parser errors better in cli tool
-% - Columns + display code in error message reporting
-% - Direct imports
-% - Better syntax
+% - Report lexer/parser errors in cli tool
+% - Reasses foldr vs foldl when solving csts
+% - [1 day] Direct imports
+% - [3 days] Better syntax
 %   - Newlines instead of commas to separate match conditions, let vars, etc?
 %   - Nothing to separate struct/enum fields
 %   - Allow trailing commas?
@@ -15,39 +14,41 @@
 %   - Change fat arrow to regular arrow?
 %   - Enforce else clause to avoid ambiguity/confusion?
 %   - Colon instead of @ for atoms?
-% - Test lexer/parser errors
-% - Typeclasses + generics w/o concrete types (HKTs)
-% - Exceptions
-% - Move gm start into on_load?
-% - Better pattern matching
+% - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
+%   - Allow ifaces on struct/enum params?
+% - [2 days] Exceptions
+% - [2 days] Better pattern matching
+%   - Negative numbers and unit in patterns
 %   - Record types
-%   - Function args with definite type
+%   - Directly matching function args
 %   - Disallow pattern matching w/ struct Con(...) fn?
-% - Exhaustive pattern matching errors
-% - Stdlib
+% - [2 weeks] Stdlib
 %   - Map/Set operations?
-% - Ensure embedded mode?
-% - REPL
+% - [1 week] REPL
 %   - Interpreter import implementation
-% - Concurrency
-% - Tooling + fix syntax highlighting for comments in enum
-% - Second pass for error messages (see TODOs in code)
+% - [3 days] Second pass for error messages (see TODOs in code)
 %   - Context surrounding add_err cases rather than just two types
-%   - Parsing issue for match Con { ... }
 %   - List error messages should include full List type
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
-%   - Lexer/Parser error messages
-%     - Maybe change enclosed methods to accept open tag as well?
-%       - Would allow for more uniform error messages
-% - Update naming conventions
+% - [1 week] Lexer/Parser error messages
+%   - Maybe change enclosed methods to accept open tag as well?
+%     - Would allow for more uniform error messages
+%   - Test these errors
+% - [2 weeks] Editor tooling for vim, atom, emacs, sublime
+%   - Fix syntax highlighting for comments in enum for vim
 %
 % Defer
 % - Using EUnit from par
 % - if-let condition and other condition (or maybe when statement?)
 % - Hex escaped characters \xff or \x{...} in strings
 % - Interpreter backtraces
+% - Update naming conventions
+% - Concurrency
+% - Move gm_start into on_load?
+% - Use NOTP for faster load time?
+% - [1 week] Exhaustive pattern matching errors
 %
 % Uncertain
 % - Operator |< to prepend an argument?

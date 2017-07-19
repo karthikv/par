@@ -193,7 +193,7 @@ infer_comps(Comps) ->
   {ok, Pid} = tv_server:start_link(),
 
   {_, C} = lists:foldl(fun(Comp, {Modules, FoldC}) ->
-    #comp{module=Module, ast={module, Loc, _, _, _}} = Comp,
+    #comp{module=Module, ast={module, _, {con_token, Loc, _}, _, _}} = Comp,
     FoldC1 = FoldC#ctx{module=Module},
 
     case gb_sets:is_member(Module, Modules) of
@@ -207,7 +207,7 @@ infer_comps(Comps) ->
 
     lists:foldl(fun(Node, ModuleC) ->
       case Node of
-        {global, Loc, {var, _, Name}, _, Exported} ->
+        {global, _, {var, Loc, Name}, _, Exported} ->
           case env_exists(Name, ModuleC) of
             true -> add_ctx_err(?ERR_REDEF(Name), Loc, ModuleC);
             false ->
@@ -436,6 +436,7 @@ infer({enum, _, EnumTE, Options}, C) ->
             % we've already added an ERR_REDEF; no need to add another
             {Keys, FoldC5};
           {ok, {custom, _, CustomLoc}} ->
+            % TODO: show actual code instead of just line for ERR_DUP_KEY
             FoldC6 = add_ctx_err(
               ?ERR_DUP_KEY(Key, Con, Loc),
               CustomLoc,
@@ -657,16 +658,15 @@ infer({field_fn, _, {var, _, Name}}, C) ->
 
 % TODO: ensure this is parsed correctly or add error cases (e.g. when var is
 % a con_token, expr must be a con_token)
-infer({field, Loc, Expr, {N, VarLoc, Name}=Var}, C)
+infer({field, Loc, Expr, {N, _, Name}=Var}, C)
     when N == var; N == con_token ->
   case Expr of
-    {con_token, _, Module} ->
+    {con_token, ConLoc, Module} ->
       case gb_sets:is_member(Module, C#ctx.modules) of
-        % TODO: different error message for lookup in another module?
-        true -> lookup(Module, Name, VarLoc, C);
+        true -> lookup(Module, Name, Loc, C);
         false ->
           TV = tv_server:fresh(C#ctx.pid),
-          {TV, add_ctx_err(?ERR_NOT_DEF_MODULE(Module), Loc, C)}
+          {TV, add_ctx_err(?ERR_NOT_DEF_MODULE(Module), ConLoc, C)}
       end;
 
     _ ->
@@ -748,8 +748,8 @@ infer({if_let, _, {Pattern, Expr}, Then, Else}, C) ->
       % must use original env without pattern bindings
       {ElseT, C4} = infer(Else, C3),
       TV = tv_server:fresh(C4#ctx.pid),
-      C5 = add_cst(TV, ThenT, ?LOC(Then), ?FROM_IF_LET_BODY, C4),
-      C6 = add_cst(TV, ElseT, ?LOC(Else), ?FROM_IF_LET_BODY, C5),
+      C5 = add_cst(TV, ThenT, ?LOC(Then), ?FROM_THEN_BODY, C4),
+      C6 = add_cst(TV, ElseT, ?LOC(Else), ?FROM_ELSE_BODY, C5),
       {TV, C6}
   end;
 
@@ -911,10 +911,12 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
   C3 = case maps:find(V, Ifaces) of
     {ok, ExpI} ->
       case {Unique, ExpI} of
-        {true, _} -> add_ctx_err(?ERR_REDEF_TV(V), ?LOC(TE), C2);
+        % TODO: include location of other TV
+        {true, _} -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
         {false, I} -> C2;
         {false, _} ->
-          add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), ?LOC(TE), C2)
+          % TODO: include location of other iface
+          add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), Loc, C2)
       end;
     error -> C2#ctx{ifaces=Ifaces#{V => I}}
   end,
