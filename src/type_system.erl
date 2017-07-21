@@ -78,6 +78,8 @@
   schemes = #{},
   bound_vs,
   structs = #{},
+  t1,
+  t2,
   module,
   loc,
   from,
@@ -671,27 +673,26 @@ infer({field, Loc, Expr, {N, _, Name}=Var}, C)
 
     _ ->
       {ExprT, C1} = infer(Expr, C),
-      {FieldT, C2} = infer({field_fn, ?LOC(Var), Var}, C1),
-      TV = tv_server:fresh(C2#ctx.pid),
+      {{lam, RecordExtT, ResultT}, C2} = infer({field_fn, ?LOC(Var), Var}, C1),
       From = ?FROM_FIELD_ACCESS(element(3, Var)),
-      C3 = add_cst({lam, ExprT, TV}, FieldT, Loc, From, C2),
-      {TV, C3}
+      C3 = add_cst(ExprT, RecordExtT, Loc, From, C2),
+      {ResultT, C3}
   end;
 
 infer({app, Loc, Expr, Args}, C) ->
   {ExprT, C1} = infer(Expr, C),
-  {ArgTsRev, C2} = lists:foldl(fun(Arg, {Ts, FoldC}) ->
+  {ArgLocTsRev, C2} = lists:foldl(fun(Arg, {LocTs, FoldC}) ->
     {T, FoldC1} = infer(Arg, FoldC),
-    {[T | Ts], FoldC1}
+    {[{?LOC(Arg), T} | LocTs], FoldC1}
   end, {[], C1}, Args),
 
   TV = tv_server:fresh(C2#ctx.pid),
   T = if
-    length(ArgTsRev) == 0 -> {lam, none, TV};
+    length(ArgLocTsRev) == 0 -> {lam, none, TV};
     true ->
-      lists:foldl(fun(ArgT, LastT) ->
-        {lam, ArgT, LastT}
-      end, TV, ArgTsRev)
+      lists:foldl(fun({ArgLoc, ArgT}, LastT) ->
+        {lam, ArgLoc, ArgT, LastT}
+      end, TV, ArgLocTsRev)
   end,
 
   C3 = add_cst(T, ExprT, Loc, ?FROM_APP, C2),
@@ -1135,7 +1136,22 @@ solve(Gs, S) ->
         ({T1, T2, Module, Loc, From}) ->
           SubbedT1 = subs(T1, Subs, Structs),
           SubbedT2 = subs(T2, Subs, Structs),
-          {SubbedT1, SubbedT2, Module, Loc, From};
+
+          IsRecord1 = is_tuple(SubbedT1) andalso (
+            element(1, SubbedT1) == record orelse
+            element(1, SubbedT1) == record_ext
+          ),
+          IsRecord2 = is_tuple(SubbedT2) andalso (
+            element(1, SubbedT2) == record orelse
+            element(1, SubbedT2) == record_ext
+          ),
+
+          {FinalT1, FinalT2} = case {IsRecord1, IsRecord2} of
+            {true, false} -> {SubbedT1, unalias(SubbedT2, Structs)};
+            {false, true} -> {unalias(SubbedT1, S#solver.structs), SubbedT2};
+            _ -> {SubbedT1, SubbedT2}
+          end,
+          {FinalT1, FinalT2, Module, Loc, From};
 
         ({_, _, _}=Err) -> Err
       end, Errs),
@@ -1238,15 +1254,23 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
     ResolvedT2 = resolve(T2, FoldS),
     #solver{subs=Subs, structs=Structs} = FoldS,
 
-    unify(
-      shallow_subs(ResolvedT1, Subs, Structs),
-      shallow_subs(ResolvedT2, Subs, Structs),
-      FoldS#solver{module=Module, loc=Loc, from=From}
-    )
+    SubbedT1 = shallow_subs(ResolvedT1, Subs, Structs),
+    SubbedT2 = shallow_subs(ResolvedT2, Subs, Structs),
+    FoldS1 = FoldS#solver{
+      t1=SubbedT1,
+      t2=SubbedT2,
+      module=Module,
+      loc=Loc,
+      from=From
+    },
+
+    unify(SubbedT1, SubbedT2, FoldS1)
   end, S#solver{bound_vs=BoundVs}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {lam, resolve(ArgT, S), resolve(ReturnT, S)};
+resolve({lam, Loc, ArgT, ReturnT}, S) ->
+  {lam, Loc, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, ElemTs}, S) ->
   {tuple, lists:map(fun(T) -> resolve(T, S) end, ElemTs)};
 resolve({tv, V, I, Rigid}, _) -> {tv, V, I, Rigid};
@@ -1278,26 +1302,30 @@ unify(T1, T2, S) when T1 == T2 -> S;
 
 unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   S1 = sub_unify(ArgT1, ArgT2, S),
-  % TODO: should we short-circuit this unification if args failed?
   sub_unify(ReturnT1, ReturnT2, S1);
+unify({lam, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
+  #solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2} = S,
+  S1 = sub_unify(ArgT1, ArgT2, S#solver{loc=Loc, t1=ArgT1, t2=ArgT2}),
+  sub_unify(ReturnT1, ReturnT2, S1#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2});
+unify({lam, _, _}=T1, {lam, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
+unify({lam, _, _, _}=T1, {lam, _, ArgT2, ReturnT2}, S) ->
+  sub_unify(T1, {lam, ArgT2, ReturnT2}, S);
 
 unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   if
-    length(ElemTs1) /= length(ElemTs2) ->
-      add_err({tuple, ElemTs1}, {tuple, ElemTs2}, S);
-
+    length(ElemTs1) /= length(ElemTs2) -> add_err(S);
     true ->
       lists:foldl(fun({T1, T2}, FoldS) ->
         sub_unify(T1, T2, FoldS)
       end, S, lists:zip(ElemTs1, ElemTs2))
   end;
 
-unify({record, A1, FieldMap1}=T1, {record, A2, FieldMap2}=T2, S) ->
+unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
   Keys1 = gb_sets:from_list(maps:keys(FieldMap1)),
   Keys2 = gb_sets:from_list(maps:keys(FieldMap2)),
 
   if
-    Keys1 /= Keys2 -> add_err(T1, T2, S);
+    Keys1 /= Keys2 -> add_err(S);
     true ->
       S1 = gb_sets:fold(fun(Key, FoldS) ->
         sub_unify(maps:get(Key, FieldMap1), maps:get(Key, FieldMap2), FoldS)
@@ -1309,7 +1337,7 @@ unify({record, A1, FieldMap1}=T1, {record, A2, FieldMap2}=T2, S) ->
       end
   end;
 
-unify({record, A1, FieldMap}=T1, {record_ext, A2, BaseT, Ext}=T2, S) ->
+unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
   Keys = gb_sets:from_list(maps:keys(FieldMap)),
   KeysExt = gb_sets:from_list(maps:keys(Ext)),
 
@@ -1332,7 +1360,7 @@ unify({record, A1, FieldMap}=T1, {record_ext, A2, BaseT, Ext}=T2, S) ->
         _ -> S2
       end;
 
-    false -> add_err(T1, T2, S)
+    false -> add_err(S)
   end;
 unify({record_ext, _, _, _}=T1, {record, _, _}=T2, S) ->
   sub_unify(T2, T1, S);
@@ -1393,48 +1421,46 @@ unify({tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}, S) ->
   Occurs = occurs(V1, TV2, S) or occurs(V2, TV1, S),
 
   if
-    Occurs -> add_err(TV1, TV2, S);
+    Occurs -> add_err(S);
 
     not Rigid1, not Bound1, Rigid2 ->
       if
         I1 == none; I1 == I2 -> add_sub(V1, TV2, S);
-        true -> add_err(TV1, TV2, S)
+        true -> add_err(S)
       end;
 
     not Rigid2, not Bound2, Rigid1 ->
       if
         I2 == none; I1 == I2 -> add_sub(V2, TV1, S);
-        true -> add_err(TV1, TV2, S)
+        true -> add_err(S)
       end;
 
     not Rigid1, not Rigid2 ->
       if
         I1 == none; I1 == I2 -> add_sub(V1, TV2, S);
         I2 == none -> add_sub(V2, TV1, S);
-        true -> add_err(TV1, TV2, S)
+        true -> add_err(S)
       end;
 
-    true -> add_err(TV1, TV2, S)
+    true -> add_err(S)
   end;
-unify({tv, V, I, Rigid}=TV, T, S) ->
+unify({tv, V, I, Rigid}, T, S) ->
   Occurs = occurs(V, T, S),
   Instance = (I == none) or instance(T, I),
   Bound = gb_sets:is_member(V, S#solver.bound_vs),
   WouldEscape = Bound and occurs(true, T, S),
 
   if
-    Occurs -> add_err(TV, T, S);
-    Rigid or WouldEscape -> add_err(TV, T, S);
+    Occurs -> add_err(S);
+    Rigid or WouldEscape -> add_err(S);
     Instance -> add_sub(V, T, S);
-    true -> add_err(TV, T, S)
+    true -> add_err(S)
   end;
 unify(T, {tv, V, I, Rigid}, S) -> sub_unify({tv, V, I, Rigid}, T, S);
 
 unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
   if
-    length(ParamTs1) /= length(ParamTs2) ->
-      add_err({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S);
-
+    length(ParamTs1) /= length(ParamTs2) -> add_err(S);
     true ->
       lists:foldl(fun({T1, T2}, FoldS) ->
         sub_unify(T1, T2, FoldS)
@@ -1443,7 +1469,7 @@ unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
 
 unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
   case unalias(T1, S#solver.structs) of
-    T1 -> add_err(T1, T2, S);
+    T1 -> add_err(S);
     NewT1 ->
       S1 = sub_unify(NewT1, T2, S),
       if
@@ -1458,8 +1484,8 @@ unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
 unify(T1, T2, S) ->
   case {unalias(T1, S#solver.structs), unalias(T2, S#solver.structs)} of
     % if only T1 or T2 needs to be unaliased, we've accounted for it above
-    {T1, _} -> add_err(T1, T2, S);
-    {_, T2} -> add_err(T1, T2, S);
+    {T1, _} -> add_err(S);
+    {_, T2} -> add_err(S);
     {NewT1, NewT2} -> sub_unify(NewT1, NewT2, S)
   end.
 
@@ -1488,8 +1514,8 @@ add_sub(V, Sub, S) ->
 add_sub_anchor(A1, A2, S) when A1 == none; A2 == none; A1 == A2 -> S;
 add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
 
-add_err(T1, T2, S) ->
-  #solver{module=Module, loc=Loc, from=From} = S,
+add_err(S) ->
+  #solver{t1=T1, t2=T2, module=Module, loc=Loc, from=From} = S,
   Err = {T1, T2, Module, Loc, From},
   S#solver{errs=[Err | S#solver.errs]}.
 
@@ -1522,6 +1548,8 @@ instance(_, _) -> false.
 
 subs({lam, ArgT, ReturnT}, Subs, Structs) ->
   {lam, subs(ArgT, Subs, Structs), subs(ReturnT, Subs, Structs)};
+subs({lam, Loc, ArgT, ReturnT}, Subs, Structs) ->
+  {lam, Loc, subs(ArgT, Subs, Structs), subs(ReturnT, Subs, Structs)};
 subs({tuple, ElemTs}, Subs, Structs) ->
   {tuple, lists:map(fun(T) -> subs(T, Subs, Structs) end, ElemTs)};
 subs({tv, _, _, _}=TV, Subs, Structs) ->
@@ -1618,6 +1646,7 @@ bound_vs(Env, #solver{subs=Subs, structs=Structs, schemes=Schemes}) ->
   end, gb_sets:new(), Env).
 
 fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
+fvs({lam, _, ArgT, ReturnT}) -> fvs({lam, ArgT, ReturnT});
 fvs({tuple, ElemTs}) ->
   lists:foldl(fun(T, FVs) ->
     gb_sets:union(FVs, fvs(T))
@@ -1642,6 +1671,7 @@ occurs(V, T, #solver{subs=Subs, structs=Structs}) ->
 
 occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
+occurs(V, {lam, _, ArgT, ReturnT}) -> occurs(V, {lam, ArgT, ReturnT});
 occurs(V, {tuple, ElemTs}) ->
   lists:foldl(fun(T, Occurs) ->
     Occurs or occurs(V, T)
@@ -1662,15 +1692,17 @@ occurs(V, {record_ext, _, BaseT, Ext}) ->
 occurs(_, none) -> false.
 
 %% pretty_csts([]) -> [];
-%% pretty_csts([{T1, T2, Loc, From} | Rest]) ->
-%%   [{pretty(T1), pretty(T2), Loc, From} | pretty_csts(Rest)].
+%% pretty_csts([{T1, T2, Module, Loc, From} | Rest]) ->
+%%   [{pretty(T1), pretty(T2), Module, Loc, From} | pretty_csts(Rest)].
 
 pretty({lam, ArgT, ReturnT}) ->
   Format = case ArgT of
     {lam, _, _} -> "(~s) -> ~s";
+    {lam, _, _, _} -> "(~s) -> ~s";
     _ -> "~s -> ~s"
   end,
   ?FMT(Format, [pretty(ArgT), pretty(ReturnT)]);
+pretty({lam, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
 pretty({tuple, ElemTs}) ->
   PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
   ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);

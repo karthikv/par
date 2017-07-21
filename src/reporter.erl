@@ -28,11 +28,12 @@ report_errors({errors, Errs, Comps}) ->
     end,
     Code = extract_code(Loc, StrLinesArray),
 
-    % TODO:
-    % - normalize types
-    % - for multi-line, underline start and end
-
     case Err of
+      {{lam, _, _, _}=T1, {lam, _, _}=T2, _, _, From} ->
+        {report_arg_count(Prefix, T1, T2, From, Code), Module};
+      {{lam, _, _}=T1, {lam, _, _, _}=T2, _, _, From} ->
+        {report_arg_count(Prefix, T2, T1, From, Code), Module};
+
       {T1, T2, _, _, From} ->
         Str = ?FMT(
           "~s"
@@ -54,6 +55,32 @@ report_errors({errors, Errs, Comps}) ->
   end, none, SortedErrs),
 
   ?ERR("~s", [StrErrs]).
+
+report_arg_count(Prefix, T1, T2, From, Code) ->
+  GivenArity = given_arity(T1),
+  NeedArity = max_arity(T2),
+
+  true = GivenArity > NeedArity,
+  Plural = case NeedArity of
+    1 -> "";
+    _ -> "s"
+  end,
+
+  ?FMT(
+    "~s"
+    "From ~s, given ~p arguments, but need at most ~p argument~s:~n"
+    "~s~n",
+    [Prefix, From, GivenArity, NeedArity, Plural, Code]
+  ).
+
+given_arity(T) -> given_arity(T, 0).
+given_arity({lam, _, _, ReturnT}, Arity) -> given_arity(ReturnT, Arity + 1);
+given_arity(_, Arity) -> Arity.
+
+max_arity(T) -> max_arity(T, 0).
+max_arity({lam, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
+max_arity({lam, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
+max_arity(_, Arity) -> Arity.
 
 err_lte(Err1, Err2) ->
   {Module1, Loc1} = case Err1 of

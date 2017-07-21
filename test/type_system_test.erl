@@ -120,6 +120,10 @@ norm({lam, ArgT, ReturnT}, N) ->
   {NormArgT, N1} = norm(ArgT, N),
   {NormReturnT, N2} = norm(ReturnT, N1),
   {{lam, NormArgT, NormReturnT}, N2};
+norm({lam, Loc, ArgT, ReturnT}, N) ->
+  {NormArgT, N1} = norm(ArgT, N),
+  {NormReturnT, N2} = norm(ReturnT, N1),
+  {{lam, Loc, NormArgT, NormReturnT}, N2};
 norm({tuple, ElemTs}, N) ->
   {NormElemTs, N1} = lists:mapfoldl(fun(T, FoldN) ->
     norm(T, FoldN)
@@ -334,7 +338,7 @@ expr_test_() ->
   , ?_test("Set<Float>" = ok_expr("#[1, 2] ++ #[3.0]"))
   , ?_test(bad_expr(
       "[@a | [\"hi\"]]",
-      {"Atom", "String", l(6, 6), ?FROM_LIST_TAIL}
+      {"[Atom]", "[String]", l(6, 6), ?FROM_LIST_TAIL}
     ))
   , ?_test(bad_expr("[@a | @b]", {"Atom", "[Atom]", l(6, 2), ?FROM_LIST_TAIL}))
   , ?_test(bad_expr(
@@ -347,7 +351,7 @@ expr_test_() ->
     ))
   , ?_test(bad_expr(
       "[true] ++ [1, 2]",
-      {"Bool", "A: Num", l(10, 6), ?FROM_OP_RHS('++')}
+      {"[Bool]", "[A: Num]", l(10, 6), ?FROM_OP_RHS('++')}
     ))
 
   , ?_test("Set<A>" = ok_expr("#[] -- #[]"))
@@ -432,10 +436,10 @@ expr_test_() ->
       "let x = 3.0, y = true in x - y",
       {"Bool", "Float", l(29, 1), ?FROM_OP_RHS('-')}
     ))
-  %% , ?_test(bad_expr(
-  %%     "(|x| let a = x(3) in x(true))(|y| y)",
-  %%     {"Bool", "A: Num", l(15, 1), ?FROM_APP}
-  %%   ))
+  , ?_test(bad_expr(
+      "(|x| let a = x(3) in x(true))(|y| y)",
+      {"Bool", "A: Num", l(15, 1), ?FROM_APP}
+    ))
 
   , ?_test("String" = ok_expr("{ \"hello\" }"))
   , ?_test("Bool" = ok_expr("{ @foo; true }"))
@@ -456,10 +460,10 @@ expr_test_() ->
       "|x| x + true",
       {"Bool", "A: Num", l(8, 4), ?FROM_OP_RHS('+')}
     ))
-  %% , ?_test(bad_expr(
-  %%     "(|x| x)(1, 2)",
-  %%     {"A: Num", "B: Num -> C", 1, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_expr(
+      "(|x| x)(1, 2)",
+      {"A: Num -> B: Num -> C", "A: Num -> A: Num", l(0, 13), ?FROM_APP}
+    ))
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A: Num>" =
@@ -467,10 +471,10 @@ expr_test_() ->
   , ?_test("A" = ok_expr("@io:printable_range()"))
   , ?_test("Atom" = ok_expr("let f() = @hi in f(())"))
   , ?_test("A" = ok_expr("@io:printable_range/0((), 1, 2)"))
-  %% , ?_test(bad_expr(
-  %%     "@io:printable_range/0(1, 2)",
-  %%     {"()", "A: Num", l(22, 1), ?FROM_APP}
-  %%   ))
+  , ?_test(bad_expr(
+      "@io:printable_range/0(1, 2)",
+      {"()", "A: Num", l(22, 1), ?FROM_APP}
+    ))
 
   , ?_test("String" = ok_expr("\"hello\" |> |x| x ++ \" world\""))
   , ?_test("A: Num" = ok_expr(
@@ -501,13 +505,13 @@ para_poly_test_() ->
   , ?_test("(A: Num -> B) -> B" = ok_prg("foo(f) = f(3)", "foo"))
   , ?_test("(A -> B) -> (C -> A) -> C -> B" =
              ok_prg("cmp(f, g, x) = f(g(x))", "cmp"))
-  %% , ?_test(bad_prg(
-  %%     "add(x) = x + 3\n"
-  %%     "expr = add(true)",
-  %%     {"Bool", "A: Num", 2, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "add(x) = x + 3\n"
+      "expr = add(true)",
+      {"Bool", "A: Num", l(1, 11, 4), ?FROM_APP}
+    ))
   , ?_test(bad_expr("|x| x == [x]", {"A", "[A]", l(9, 3), ?FROM_OP_RHS('==')}))
-  %% , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B", 1, ?FROM_APP}))
+  , ?_test(bad_prg("omega(x) = x(x)", {"A", "A -> B", l(11, 4), ?FROM_APP}))
 
 
   , ?_test("(Bool, Float, Bool, Float)" = ok_prg(
@@ -544,12 +548,12 @@ recur_test_() ->
       "g(x) = if x >= 0 && f(x) then 10 else 1",
       "f"
     ))
-  %% , ?_test(bad_prg(
-  %%     "f(x) = if x == 0 then 0 else f(x - 1)\n"
-  %%     "h(x) = g(true)\n"
-  %%     "g(x) = f(x)",
-  %%     {"A: Num", "Bool", 2, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "f(x) = if x == 0 then 0 else f(x - 1)\n"
+      "h(x) = g(true)\n"
+      "g(x) = f(x)",
+      {"A: Num", "Bool", l(1, 9, 4), ?FROM_APP}
+    ))
   , ?_test(bad_prg(
       "f(x) = g(x) == 3\n"
       "g(x) = f(x)",
@@ -630,40 +634,42 @@ sig_test_() ->
   , ?_test(bad_prg(
       "foo :: () -> String\n"
       "foo() = true",
-      {"String", "Bool", l(0, 19), ?FROM_GLOBAL_SIG("foo")}
+      {"() -> String", "() -> Bool", l(0, 19), ?FROM_GLOBAL_SIG("foo")}
     ))
   , ?_test(bad_prg(
       "id :: A -> B\n"
       "id(x) = x",
-      {"rigid(A)", "rigid(B)", l(0, 12), ?FROM_GLOBAL_SIG("id")}
+      {"rigid(A) -> rigid(B)", "rigid(A) -> rigid(A)", l(0, 12),
+       ?FROM_GLOBAL_SIG("id")}
     ))
   , ?_test(bad_prg(
       "inc(x) = x :: B: Num + 1 :: A: Num",
       {"A: Num", "rigid(B: Num)", l(9, 11), ?FROM_EXPR_SIG}
     ))
-  %% , ?_test(bad_prg(
-  %%     "foo :: Int -> Int\n"
-  %%     "foo(x) = x + 3\n"
-  %%     "bar :: A: Num -> Int\n"
-  %%     "bar(x) = foo(x)",
-  %%     {"Int", "rigid(A: Num)", 4, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "foo :: Int -> Int\n"
+      "foo(x) = x + 3\n"
+      "bar :: A: Num -> Int\n"
+      "bar(x) = foo(x)",
+      {"Int", "rigid(A: Num)", l(3, 13, 1), ?FROM_APP}
+    ))
   , ?_test(bad_prg(
       "push :: [Float] -> [A: Num]\n"
       "push(x) = x ++ [1.0]",
-      {"rigid(A: Num)", "Float", l(1, 10, 10), ?FROM_OP_RESULT('++')}
+      {"[rigid(A: Num)]", "[Float]", l(1, 10, 10), ?FROM_OP_RESULT('++')}
     ))
   , ?_test(bad_prg(
       "empty :: List<A> -> List<B> -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
-      {"rigid(A)", "rigid(B)", l(1, 22, 2), ?FROM_OP_RHS('++')}
+      {"[rigid(A)]", "[rigid(B)]", l(1, 22, 2), ?FROM_OP_RHS('++')}
     ))
-  %% , ?_test(bad_prg(
-  %%     "foo :: { bar :: String, baz :: A: Num } -> String\n"
-  %%     "foo(x) = x.bar\n"
-  %%     "main() = foo({ bar = \"hi\" })",
-  %%     {"{ bar :: String }", "{ bar :: String, baz :: A: Num }", 3, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "foo :: { bar :: String, baz :: A: Num } -> String\n"
+      "foo(x) = x.bar\n"
+      "main() = foo({ bar = \"hi\" })",
+      {"{ bar :: String }", "{ bar :: String, baz :: A: Num }",
+       l(2, 13, 14), ?FROM_APP}
+    ))
   ].
 
 global_test_() ->
@@ -708,7 +714,7 @@ global_test_() ->
       "foo :: Set<Int>\n"
       "foo = #[1, 2, 3]\n"
       "expr = #[5.0, 6] -- foo",
-      {"Float", "Int", l(2, 20, 3), ?FROM_OP_RHS('--')}
+      {"Set<Float>", "Set<Int>", l(2, 20, 3), ?FROM_OP_RHS('--')}
     ))
   ].
 
@@ -743,21 +749,21 @@ enum_test_() ->
       "expr = Cons(3, Cons(5.0, End))\n",
       "expr"
     ))
-  %% , ?_test(bad_prg(
-  %%     "enum Foo { Bar((Float, Atom)) }\n"
-  %%     "expr = Bar(([1], @atom))",
-  %%     {"[A: Num]", "Float", 2, ?FROM_APP}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "enum Foo<A> { Bar(A, A) }\n"
-  %%     "expr = Bar(3, true)",
-  %%     {"A: Num", "Bool", 2, ?FROM_APP}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
-  %%     "expr = Cons(\"hi\", Cons(5.0, End))\n",
-  %%     {"String", "Float", 2, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "enum Foo { Bar((Float, Atom)) }\n"
+      "expr = Bar(([1], @atom))",
+      {"([A: Num], Atom)", "(Float, Atom)", l(1, 11, 12), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "enum Foo<A> { Bar(A, A) }\n"
+      "expr = Bar(3, true)",
+      {"A: Num", "Bool", l(1, 14, 4), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
+      "expr = Cons(\"hi\", Cons(5.0, End))\n",
+      {"CustomList<String>", "CustomList<Float>", l(1, 18, 14), ?FROM_APP}
+    ))
   ].
 
 record_test_() ->
@@ -781,12 +787,13 @@ record_test_() ->
     ))
   , ?_test(bad_expr(
       "{ { bar = 3 } | bar = true }",
-      {"A: Num", "Bool", l(0, 28), ?FROM_RECORD_UPDATE}
+      {"{ bar :: A: Num }", "{ bar :: Bool }", l(0, 28), ?FROM_RECORD_UPDATE}
     ))
-  %% , ?_test(bad_expr(
-  %%     "{ { bar = 3, baz = @hi } | bar := true, baz = 3.0 }",
-  %%     {"Atom", "Float", l(0, 51), ?FROM_RECORD_UPDATE}
-  %%   ))
+  , ?_test(bad_expr(
+      "{ { bar = 3, baz = @hi } | bar := true, baz = 3.0 }",
+      {"{ bar :: A: Num, baz :: Atom }", "{ bar :: A: Num, baz :: Float }",
+       l(0, 51), ?FROM_RECORD_UPDATE}
+    ))
   , ?_test(bad_expr(
       "{ { bar = 3 } | foo = 4.0 }",
       {"{ bar :: A: Num }", "{ B | foo :: Float }", l(0, 27),
@@ -807,7 +814,7 @@ record_test_() ->
     ))
   , ?_test(bad_expr(
       "{ bar = 3 } == { bar = \"hi\" }",
-      {"A: Num", "String", l(15, 14), ?FROM_OP_RHS('==')}
+      {"{ bar :: A: Num }", "{ bar :: String }", l(15, 14), ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_expr(
       "{ bar = 3 } == { foo = 4 }",
@@ -818,11 +825,11 @@ record_test_() ->
   % record <=> iface unification
   , ?_test("Bool" = ok_expr("let f(x) = x.bar || false in f({ bar = true })"))
   , ?_test("Atom" = ok_expr("let f(x) = x.bar in f({ bar = @hi, baz = 7 })"))
-  %% , ?_test(bad_expr(
-  %%     "let f(x) = x.bar + x.baz in f({ bar = 3 })",
-  %%     {"{ A | bar :: B: Num, baz :: B: Num }", "{ bar :: C: Num }",
-  %%      1, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_expr(
+      "let f(x) = x.bar + x.baz in f({ bar = 3 })",
+      {"{ A | bar :: B: Num, baz :: B: Num }", "{ bar :: C: Num }",
+       l(30, 11), ?FROM_APP}
+    ))
 
 
   % iface <=> iface unification
@@ -900,21 +907,22 @@ record_test_() ->
       "expr = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }",
       "expr"
     ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo { bar :: (Float, Atom) }\n"
-  %%     "expr = Foo(([1], @a))",
-  %%     {"[A: Num]", "Float", 2, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "struct Foo { bar :: (Float, Atom) }\n"
+      "expr = Foo(([1], @a))",
+      {"([A: Num], Atom)", "(Float, Atom)", l(1, 11, 9), ?FROM_APP}
+    ))
   , ?_test(bad_prg(
       "struct Foo<X> { bar :: [X], baz :: Bool }\n"
       "expr = Foo { baz = true, bar = 5 }",
-      {"[A]", "B: Num", l(1, 7, 27), ?FROM_RECORD_CREATE("Foo")}
+      {"{ bar :: A: Num, baz :: Bool }", "{ bar :: [B], baz :: Bool }",
+       l(1, 7, 27), ?FROM_RECORD_CREATE("Foo")}
     ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A, baz :: A }\n"
-  %%     "expr = Foo(3, true)",
-  %%     {"A: Num", "Bool", 2, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A, baz :: A }\n"
+      "expr = Foo(3, true)",
+      {"A: Num", "Bool", l(1, 14, 4), ?FROM_APP}
+    ))
 
 
   % named struct updates
@@ -945,13 +953,15 @@ record_test_() ->
       "struct Foo { bar :: Int }\n"
       "foo = Foo { bar = 3 }\n"
       "baz = Foo { foo | bar := true }",
-      {"Bool", "Int", l(2, 6, 25), ?FROM_RECORD_UPDATE}
+      {"{ bar :: Bool }", "{ bar :: Int }", l(2, 6, 25), ?FROM_RECORD_UPDATE}
     ))
   , ?_test(bad_prg(
       "struct Foo<T> { a :: Map<T, String>, b :: [(T, Int)] }\n"
       "foo = Foo { a = { @a => \"hi\" }, b = [(@b, 3)] }\n"
       "bar = Foo { foo | a = { true => \"hi\" } }",
-      {"Bool", "Atom", l(2, 6, 34), ?FROM_RECORD_UPDATE}
+      {"{ a :: Map<Atom, String>, b :: [(Atom, Int)] }",
+       "{ a :: Map<Bool, String>, b :: [(Atom, Int)] }",
+       l(2, 6, 34), ?FROM_RECORD_UPDATE}
     ))
 
 
@@ -979,16 +989,16 @@ record_test_() ->
       "f(x) = (x.bar && true, x.bar ++ \"hi\")",
       {"Bool", "String", l(1, 23, 5), ?FROM_OP_LHS('++')}
     ))
-  %% , ?_test(bad_prg(
-  %%     "f(x) = (x.bar(\"hi\"), x.bar(true))",
-  %%     {"String", "Bool", 1, ?FROM_APP}
-  %%   ))
-  %% , ?_test(bad_prg(
-  %%     "struct Foo<A> { bar :: A }\n"
-  %%     "expr = let id(a) = a in\n"
-  %%     "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
-  %%     {"String", "Bool", 3, ?FROM_APP}
-  %%   ))
+  , ?_test(bad_prg(
+      "f(x) = (x.bar(\"hi\"), x.bar(true))",
+      {"String", "Bool", l(27, 4), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "struct Foo<A> { bar :: A }\n"
+      "expr = let id(a) = a in\n"
+      "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
+      {"String", "Bool", l(2, 27, 4), ?FROM_APP}
+    ))
   % We purposely sacrifice generalization power here in favor of safety. If
   % x unifies with Foo at any point in time, we expect that x really should be
   % of type Foo everywhere. The user can choose to override us by using the :=
@@ -996,7 +1006,7 @@ record_test_() ->
   , ?_test(bad_prg(
       "struct Foo { a :: Int }\n"
       "expr = let x = { a = 3 } in (x == Foo { a = 5 }, { x | a = 3.0 })",
-      {"Int", "Float", l(1, 49, 15), ?FROM_RECORD_UPDATE}
+      {"{ a :: Int }", "{ a :: Float }", l(1, 49, 15), ?FROM_RECORD_UPDATE}
     ))
 
 
@@ -1045,18 +1055,19 @@ record_test_() ->
       "struct Foo { bar :: String }\n"
       "struct Baz { bar :: Int }\n"
       "expr = Foo { bar = \"hi\" } == Baz { bar = 3 }",
-      {"String", "Int", l(2, 29, 15), ?FROM_OP_RHS('==')}
+      {"Foo", "Baz", l(2, 29, 15), ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"
       "expr = { bar = true } == Foo { bar = 5 }",
-      {"Bool", "A: Num", l(1, 25, 15), ?FROM_OP_RHS('==')}
+      {"{ bar :: Bool }", "{ bar :: A: Num }", l(1, 25, 15),
+       ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A, baz :: String }\n"
       "struct Baz<A> { bar :: Int, baz :: A }\n"
       "expr = Foo { bar = 3, baz = \"hi\" } == Baz { bar = 3, baz = true }",
-      {"String", "Bool", l(2, 38, 27), ?FROM_OP_RHS('==')}
+      {"Foo<Int>", "Baz<Bool>", l(2, 38, 27), ?FROM_OP_RHS('==')}
     ))
 
 
@@ -1171,11 +1182,11 @@ pattern_test_() ->
     ))
   , ?_test(bad_expr(
       "let [_, (x, _)] = [\"foo\", \"bar\"] in x",
-      {"(A, B)", "String", l(4, 11), ?FROM_LET}
+      {"[(A, B)]", "[String]", l(4, 11), ?FROM_LET}
     ))
   , ?_test(bad_expr(
       "let [_, a] = [true, false], (*a, b) = (3, 7) in b",
-      {"A: Num", "Bool", l(28, 7), ?FROM_LET}
+      {"(Bool, A: Num)", "(B: Num, A: Num)", l(28, 7), ?FROM_LET}
     ))
   , ?_test(bad_prg(
       "f(t) = let (a, _) = t in a\n"

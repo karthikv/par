@@ -27,6 +27,8 @@
 % - [1 week] REPL
 %   - Interpreter import implementation
 % - [3 days] Second pass for error messages (see TODOs in code)
+%   - Only show rigid if it matters
+%   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
 %   - List error messages should include full List type
 %   - Norm types for error messages
