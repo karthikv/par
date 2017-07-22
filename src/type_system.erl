@@ -978,7 +978,17 @@ infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   C1 = env_add(Name, {add_dep, TV, ID}, false, C),
   {PatternT, C2} = infer(Pattern, new_gnr(TV, ID, C1)),
   {ExprT, C3} = infer(Expr, C2),
-  C4 = add_cst(PatternT, ExprT, Loc, From, C3),
+
+  % We add the expr constraint last to ensure it's unified first (constraints
+  % are unified in reverse order). This prevents us from ever having to unify
+  % a function application {lam, Loc, _, _} with another function app, since
+  % every function created will first be unified with {lam, _, _}, which has no
+  % Loc. It's a subtle change in ordering that gives us better error messages
+  % for recursive functions that are given too many arguments.
+  G3 = C3#ctx.gnr,
+  G4 = G3#gnr{csts=G3#gnr.csts ++ [make_cst(PatternT, ExprT, Loc, From, C3)]},
+  C4 = C3#ctx{gnr=G4},
+
   finish_gnr(C4, C#ctx.gnr);
 
 infer_pattern(Pattern, Expr, From, C) ->
@@ -1247,8 +1257,8 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
   % deepest expression's constraints first to have better error messages (e.g.
-  % rather than can't unify [A] with B, can't unify [Float] with Bool), so we
-  % process the list in reverse order here.
+  % rather than can't unify Float with Bool, can't unify Set<Float> with
+  % Set<Bool>), so we process the list in reverse order here.
   lists:foldr(fun({T1, T2, Module, Loc, From}, FoldS) ->
     ResolvedT1 = resolve(T1, FoldS),
     ResolvedT2 = resolve(T2, FoldS),

@@ -1,0 +1,20 @@
+*** module Bar *** (/tmp/reporter-test-many/bar.par)
+
+Mismatched types [Char] and String from right-hand side of '++' operator:
+4: e = [Foo.a] ++ "hi"
+                  ^^^^
+
+Mismatched types Char and S: Num from match pattern:
+6:   1 => 3
+     ^
+
+*** module Foo *** (/tmp/reporter-test-many/foo.par)
+
+Mismatched types Bool and V: Num from function call:
+4: b = Bar.d(true)
+             ^^^^
+
+From function call, given 3 arguments, but need at most 1 argument:
+5: c = Bar.d(1, 2, 3)
+       ^^^^^^^^^^^^^^
+

@@ -1,8 +1,8 @@
 -module(reporter).
--export([report_errors/1]).
+-export([format/1]).
 -include("errors.hrl").
 
-report_errors({errors, Errs, Comps}) ->
+format({errors, Errs, Comps}) ->
   {ok, LineRegex} = re:compile("\r?\n"),
   SplitOpts = [{return, list}],
 
@@ -30,9 +30,9 @@ report_errors({errors, Errs, Comps}) ->
 
     case Err of
       {{lam, _, _, _}=T1, {lam, _, _}=T2, _, _, From} ->
-        {report_arg_count(Prefix, T1, T2, From, Code), Module};
+        {format_arity(Prefix, T1, T2, From, Code), Module};
       {{lam, _, _}=T1, {lam, _, _, _}=T2, _, _, From} ->
-        {report_arg_count(Prefix, T2, T1, From, Code), Module};
+        {format_arity(Prefix, T2, T1, From, Code), Module};
 
       {T1, T2, _, _, From} ->
         Str = ?FMT(
@@ -54,9 +54,9 @@ report_errors({errors, Errs, Comps}) ->
     end
   end, none, SortedErrs),
 
-  ?ERR("~s", [StrErrs]).
+  StrErrs.
 
-report_arg_count(Prefix, T1, T2, From, Code) ->
+format_arity(Prefix, T1, T2, From, Code) ->
   GivenArity = given_arity(T1),
   NeedArity = max_arity(T2),
 

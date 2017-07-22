@@ -1,0 +1,6 @@
+*** module Mod *** ([infer-prg])
+
+From function call, given 3 arguments, but need at most 2 arguments:
+3: expr = "bye" |> f("hey", "hi", "hello")
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+

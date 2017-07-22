@@ -4,7 +4,6 @@
 
 % TODO:
 % - Report lexer/parser errors in cli tool
-% - Reasses foldr vs foldl when solving csts
 % - [1 day] Direct imports
 % - [3 days] Better syntax
 %   - Newlines instead of commas to separate match conditions, let vars, etc?
@@ -27,10 +26,10 @@
 % - [1 week] REPL
 %   - Interpreter import implementation
 % - [3 days] Second pass for error messages (see TODOs in code)
+%   - Specify expected type for operators
 %   - Only show rigid if it matters
 %   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
-%   - List error messages should include full List type
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
@@ -90,7 +89,7 @@ main(Args) ->
 
       case type_system:infer_file(Path) of
         {errors, _, _}=Errors ->
-          reporter:report_errors(Errors),
+          ?ERR("~s", [reporter:format(Errors)]),
           halt(1);
 
         {ok, _, Comps} ->
