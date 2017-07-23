@@ -182,42 +182,48 @@ eval({block, _, Exprs}, ID) ->
 
 eval({binary_op, _, Op, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
-  RightV = eval(Right, ID),
+  % can't eval right because of short-circuiting
 
   case Op of
-    '==' -> LeftV == RightV;
-    '!=' -> LeftV /= RightV;
-    '||' -> LeftV or RightV;
-    '&&' -> LeftV and RightV;
-    '|>' -> code_gen_utils:'_@curry'(RightV, [LeftV], ?LINE);
-    '>' -> LeftV > RightV;
-    '<' -> LeftV < RightV;
-    '>=' -> LeftV >= RightV;
-    '<=' -> LeftV =< RightV;
-    '+' -> LeftV + RightV;
-    '-' -> LeftV - RightV;
-    '*' -> LeftV * RightV;
-    '/' -> LeftV / RightV;
-    '%' -> LeftV rem RightV;
-    '++' ->
-      if
-        is_binary(LeftV) -> <<LeftV/binary, RightV/binary>>;
-        is_list(LeftV) -> LeftV ++ RightV;
-        is_map(LeftV) -> maps:merge(LeftV, RightV);
-        true ->
-          true = gb_sets:is_set(LeftV),
-          gb_sets:union(LeftV, RightV)
-      end;
-    '--' ->
-      if
-        is_list(LeftV) ->
-          Set = gb_sets:from_list(RightV),
-          lists:filter(fun(Elem) ->
-            not gb_sets:is_member(Elem, Set)
-          end, LeftV);
-        true ->
-          true = gb_sets:is_set(LeftV),
-          gb_sets:subtract(LeftV, RightV)
+    '||' -> LeftV orelse eval(Right, ID);
+    '&&' -> LeftV andalso eval(Right, ID);
+
+    _ ->
+      RightV = eval(Right, ID),
+
+      case Op of
+        '==' -> LeftV == RightV;
+        '!=' -> LeftV /= RightV;
+        '|>' -> code_gen_utils:'_@curry'(RightV, [LeftV], ?LINE);
+        '>' -> LeftV > RightV;
+        '<' -> LeftV < RightV;
+        '>=' -> LeftV >= RightV;
+        '<=' -> LeftV =< RightV;
+        '+' -> LeftV + RightV;
+        '-' -> LeftV - RightV;
+        '*' -> LeftV * RightV;
+        '/' -> LeftV / RightV;
+        '%' -> LeftV rem RightV;
+        '++' ->
+          if
+            is_binary(LeftV) -> <<LeftV/binary, RightV/binary>>;
+            is_list(LeftV) -> LeftV ++ RightV;
+            is_map(LeftV) -> maps:merge(LeftV, RightV);
+            true ->
+              true = gb_sets:is_set(LeftV),
+              gb_sets:union(LeftV, RightV)
+          end;
+        '--' ->
+          if
+            is_list(LeftV) ->
+              Set = gb_sets:from_list(RightV),
+              lists:filter(fun(Elem) ->
+                not gb_sets:is_member(Elem, Set)
+              end, LeftV);
+            true ->
+              true = gb_sets:is_set(LeftV),
+              gb_sets:subtract(LeftV, RightV)
+          end
       end
   end;
 

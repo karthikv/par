@@ -16,7 +16,10 @@ fi
 
 if [ "$1" == "start" ]; then
   echo "Compiling new par..."
+  bin/par -o ebin src/parser.par
+  bin/parse_utils
   rebar3 as escript escriptize
+
   mv "$PAR_PATH" "$OLD_PAR_PATH"
   mv _build/escript/bin/par "$PAR_PATH"
   echo "Done"

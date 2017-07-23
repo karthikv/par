@@ -455,8 +455,8 @@ rep({binary_op, Loc, Op, Left, Right}, Env) ->
       Atom = case Op of
         '==' -> '==';
         '!=' -> '/=';
-        '||' -> 'or';
-        '&&' -> 'and';
+        '||' -> 'orelse';
+        '&&' -> 'andalso';
         '>' -> '>';
         '<' -> '<';
         '>=' -> '>=';

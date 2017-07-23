@@ -129,6 +129,9 @@ test_expr(Expr) ->
   , ?_test(false = Expr("false || false"))
   , ?_test(true = Expr("true && true"))
   , ?_test(false = Expr("false && true"))
+  % short circuiting
+  , ?_test(false = Expr("false && @erlang:hd([])"))
+  , ?_test(true = Expr("true || @erlang:hd([])"))
   , ?_test(true = Expr("3.0 > 2"))
   , ?_test(false = Expr("5 > 7"))
   , ?_test(true = Expr("1.3 < 1.4"))
