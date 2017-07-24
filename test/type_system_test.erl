@@ -1111,8 +1111,8 @@ pattern_test_() ->
   , ?_test("Float" = ok_expr(
       "let m = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
       "  match m {\n"
-      "    [([h | t], _, _) | _] => h,\n"
-      "    [_, ([], _, c)] => c,\n"
+      "    [([h | t], _, _) | _] => h\n"
+      "    [_, ([], _, c)] => c\n"
       "    [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
       "  }"
     ))
@@ -1121,8 +1121,8 @@ pattern_test_() ->
     ))
   , ?_test("A: Num" = ok_expr(
       "match @io:printable_range() {\n"
-      "  (a, _) => 1,\n"
-      "  [] => 2,\n"
+      "  (a, _) => 1\n"
+      "  [] => 2\n"
       "  @error => 3\n"
       "}"
     ))
@@ -1146,7 +1146,7 @@ pattern_test_() ->
     ))
   , ?_test(bad_expr(
       "match (1, true, @hi) {\n"
-      "  (0, b, c) => (b, 10),\n"
+      "  (0, b, c) => (b, 10)\n"
       "  (a, b, c, d) => (b, a / 2)\n"
       "}",
       {"(A: Num, Bool, Atom)", "(B, C, D, E)", l(2, 2, 12),
@@ -1154,7 +1154,7 @@ pattern_test_() ->
     ))
   , ?_test(bad_expr(
       "match [([], \"hi\", 3.0)] {\n"
-      "  [(a)] => a,\n"
+      "  [(a)] => a\n"
       "  [(_, _, c) | _] => c\n"
       "}",
       {"Float", "([A], String, Float)", l(2, 21, 1), ?FROM_MATCH_BODY}
@@ -1358,35 +1358,35 @@ other_errors_test_() ->
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
-      "  Bar(Char),\n"
+      "  Bar(Char)\n"
       "  Baz @Bar\n"
       "}",
       {?ERR_DUP_KEY("Bar", "Bar", l(1, 2, 3)), l(2, 6, 4)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
-      "  Bar(Char) @Baz,\n"
+      "  Bar(Char) @Baz\n"
       "  Baz\n"
       "}",
       {?ERR_DUP_KEY("Baz", "Baz", l(2, 2, 3)), l(1, 12, 4)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
-      "  Bar(Char) @hi,\n"
+      "  Bar(Char) @hi\n"
       "  Baz @hi\n"
       "}",
       {?ERR_DUP_KEY("hi", "Bar", l(1, 2, 3)), l(2, 6, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
-      "  Bar(Char),\n"
+      "  Bar(Char)\n"
       "  Bar\n"
       "}",
       {?ERR_REDEF("Bar"), l(2, 2, 3)}
     ))
   , ?_test("Foo" = ok_prg(
       "enum Foo {\n"
-      "  Bar(Char) @baz,\n"
+      "  Bar(Char) @baz\n"
       "  Baz\n"
       "}\n"
       "expr = Bar('h')",

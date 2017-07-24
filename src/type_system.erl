@@ -400,7 +400,7 @@ infer({enum, _, EnumTE, Options}, C) ->
   FVs = fvs(T),
 
   {_, C2} = lists:foldl(fun(Option, {Keys, FoldC}) ->
-    {{con_token, Loc, Con}, ArgTEs, KeyNode} = Option,
+    {option, _, {con_token, Loc, Con}, ArgTEs, KeyNode} = Option,
     {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, NestedC}) ->
       {ArgT, NestedC1} = infer_sig(
         {T, FVs},
@@ -478,7 +478,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
     C1
   ),
 
-  FnT = lists:foldr(fun({{var, _, Name}, _}, LastT) ->
+  FnT = lists:foldr(fun({sig, _, {var, _, Name}, _}, LastT) ->
     #{Name := FieldT} = RawFieldMap,
     {lam, FieldT, LastT}
   end, T, Fields),
@@ -562,7 +562,7 @@ infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
 infer({anon_record, _, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
-    {{var, Loc, Name}, Expr} = Init,
+    {init, _, {var, Loc, Name}, Expr} = Init,
     {T, FoldC1} = infer(Expr, FoldC),
 
     case maps:is_key(Name, Map) of
@@ -575,11 +575,11 @@ infer({anon_record, _, Inits}, C) ->
 
 infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
   {ExprT, C1} = infer(Expr, C),
-  {Inits, ExtInits} = lists:foldl(fun({Init, IsExt}, Memo) ->
+  {Inits, ExtInits} = lists:foldl(fun(InitOrExt, Memo) ->
     {FoldInits, FoldExtInits} = Memo,
-    case IsExt of
-      true -> {FoldInits, [Init | FoldExtInits]};
-      false -> {[Init | FoldInits], FoldExtInits}
+    case element(1, InitOrExt) of
+      ext -> {FoldInits, [setelement(1, InitOrExt, init) | FoldExtInits]};
+      init -> {[InitOrExt | FoldInits], FoldExtInits}
     end
   end, {[], []}, AllInits),
 
@@ -729,15 +729,15 @@ infer({'if', _, Expr, Then, Else}, C) ->
       {TV, C6}
   end;
 
-infer({'let', _, Inits, Then}, C) ->
-  C1 = lists:foldl(fun({Pattern, Expr}, FoldC) ->
+infer({'let', _, Bindings, Then}, C) ->
+  C1 = lists:foldl(fun({binding, _, Pattern, Expr}, FoldC) ->
     infer_pattern(Pattern, Expr, ?FROM_LET, FoldC)
-  end, C, Inits),
+  end, C, Bindings),
 
   {T, C2} = infer(Then, C1),
   {T, C2#ctx{env=C#ctx.env}};
 
-infer({if_let, _, {Pattern, Expr}, Then, Else}, C) ->
+infer({if_let, _, Pattern, Expr, Then, Else}, C) ->
   C1 = infer_pattern(Pattern, Expr, ?FROM_IF_LET_PATTERN, C),
   {ThenT, C2} = infer(Then, C1),
   % revert env to before pattern was parsed
@@ -757,7 +757,7 @@ infer({if_let, _, {Pattern, Expr}, Then, Else}, C) ->
 infer({match, _, Expr, Cases}, C) ->
   TV = tv_server:fresh(C#ctx.pid),
 
-  C1 = lists:foldl(fun({Pattern, Then}, FoldC) ->
+  C1 = lists:foldl(fun({'case', _, Pattern, Then}, FoldC) ->
     {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
     {PatternT, FoldC2} = infer(Pattern, with_pattern_env(Pattern, FoldC1)),
     FoldC3 = add_cst(
@@ -901,11 +901,7 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
   {I, C2} = case TE of
     % TODO: ensure this is a valid iface
     {none, _} -> {none, C1};
-    {con_token, _, I_} -> {I_, C1};
-    {record_te, _, _} ->
-      {RecordT, CaseC} = infer_sig_helper(RestrictVs, Unique, TE, C1),
-      {record, _, FieldMap} = RecordT,
-      {FieldMap, CaseC}
+    {con_token, _, I_} -> {I_, C1}
   end,
 
   Ifaces = C2#ctx.ifaces,
@@ -939,7 +935,7 @@ infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
     false -> {tv_server:fresh(C1#ctx.pid), C1}
   end;
 infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
-  {FieldMap, C1} = lists:foldl(fun({Var, FieldTE}, {FoldMap, FoldC}) ->
+  {FieldMap, C1} = lists:foldl(fun({sig, _, Var, FieldTE}, {FoldMap, FoldC}) ->
     {var, Loc, Name} = Var,
     {FieldT, FoldC1} = infer_sig_helper(RestrictVs, Unique, FieldTE, FoldC),
 

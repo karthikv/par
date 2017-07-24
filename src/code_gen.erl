@@ -36,7 +36,7 @@ compile_comps(Comps) ->
 
         {enum, _, _, OptionTEs} ->
           {EnumExports, ModuleEnv1} = lists:mapfoldl(fun(OptionTE, NestedEnv) ->
-            {{con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
+            {option, _, {con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
 
             Atom = list_to_atom(Con),
             Arity = length(ArgsTE),
@@ -144,11 +144,11 @@ rep({global, Loc, {var, _, Name}, Expr, _}, Env) ->
   end;
 
 rep({enum, _, _, OptionTEs}, _) ->
-  FnOptionTEs = lists:filter(fun({_, ArgsTE, _}) ->
+  FnOptionTEs = lists:filter(fun({option, _, _, ArgsTE, _}) ->
     length(ArgsTE) > 0
   end, OptionTEs),
 
-  lists:map(fun({{con_token, Loc, Con}, ArgsTE, KeyNode}) ->
+  lists:map(fun({option, _, {con_token, Loc, Con}, ArgsTE, KeyNode}) ->
     Line = ?START_LINE(Loc),
     ArgsRep = lists:map(fun(_) ->
       Atom = unique("_@Arg"),
@@ -172,12 +172,13 @@ rep({struct, Loc, StructTE, FieldTEs}, Env) ->
     {gen_te, _, {con_token, ConLoc, Con_}, _} -> {?START_LINE(ConLoc), Con_}
   end,
 
-  {ArgsRep, Env1} = lists:mapfoldl(fun({{var, _, FieldName}=Var, _}, FoldEnv) ->
+  {ArgsRep, Env1} = lists:mapfoldl(fun(Sig, FoldEnv) ->
+    {sig, _, {var, _, FieldName}=Var, _} = Sig,
     FoldEnv1 = bind(FieldName, unknown, FoldEnv),
     {rep(Var, FoldEnv1), FoldEnv1}
   end, Env, FieldTEs),
 
-  Pairs = lists:map(fun({{var, FieldLoc, FieldName}=Var, _}) ->
+  Pairs = lists:map(fun({sig, _, {var, FieldLoc, FieldName}=Var, _}) ->
     {{atom, FieldLoc, list_to_atom(FieldName)}, Var}
   end, FieldTEs),
   Body = [rep({map, Loc, Pairs}, Env1)],
@@ -245,13 +246,15 @@ rep({N, Loc, Name}, Env) when N == var; N == con_token; N == var_value ->
   end;
 
 rep({anon_record, Loc, Inits}, Env) ->
-  Pairs = lists:map(fun({{var, VarLoc, Name}, Expr}) ->
+  Pairs = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
     {{atom, VarLoc, list_to_atom(Name)}, Expr}
   end, Inits),
   rep({map, Loc, Pairs}, Env);
 
 rep({anon_record_ext, Loc, Expr, AllInits}, Env) ->
-  Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
+  Inits = lists:map(fun(InitOrExt) ->
+    setelement(1, InitOrExt, init)
+  end, AllInits),
   ExprRep = rep(Expr, Env),
   RecordRep = rep({anon_record, Loc, Inits}, Env),
   call(maps, merge, [ExprRep, RecordRep], ?START_LINE(Loc));
@@ -394,15 +397,15 @@ rep({'if', Loc, Cond, Then, Else}, Env) ->
   Clauses = [{clause, Line, [], [[CondVar]], ThenBody}, ElseClause],
   {block, Line, [Match, {'if', Line, Clauses}]};
 
-rep({'let', Loc, Inits, Then}, Env) ->
-  {InitsRep, Env1} = lists:mapfoldl(fun({Pattern, Expr}, FoldEnv) ->
+rep({'let', Loc, Bindings, Then}, Env) ->
+  {InitsRep, Env1} = lists:mapfoldl(fun({binding, _, Pattern, Expr}, FoldEnv) ->
     {PatternRep, ExprRep, FoldEnv1} = rep_pattern(Pattern, Expr, FoldEnv),
     {{match, element(2, PatternRep), PatternRep, ExprRep}, FoldEnv1}
-  end, Env, Inits),
+  end, Env, Bindings),
 
   {block, ?START_LINE(Loc), InitsRep ++ [rep(Then, Env1)]};
 
-rep({if_let, Loc, {Pattern, Expr}, Then, Else}, Env) ->
+rep({if_let, Loc, Pattern, Expr, Then, Else}, Env) ->
   Line = ?START_LINE(Loc),
   {PatternRep, ExprRep, Env1} = rep_pattern(Pattern, Expr, Env),
   ThenBody = case Else of
@@ -418,7 +421,7 @@ rep({if_let, Loc, {Pattern, Expr}, Then, Else}, Env) ->
 
 rep({match, Loc, Expr, Cases}, Env) ->
   ExprRep = rep(Expr, Env),
-  CaseClauses = lists:map(fun({Pattern, Then}) ->
+  CaseClauses = lists:map(fun({'case', _, Pattern, Then}) ->
     % TODO: use arity(Expr) in case of simple pattern?
     Env1 = gb_sets:fold(fun(Name, FoldEnv) ->
       bind(Name, unknown, FoldEnv)

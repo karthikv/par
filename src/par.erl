@@ -4,6 +4,7 @@
 
 % TODO:
 % - Report lexer/parser errors in cli tool
+% - Fix arity no match for false issue
 % - [1 day] Direct imports
 % - [3 days] Better syntax
 %   - Newlines instead of commas to separate match conditions, let vars, etc?
@@ -13,6 +14,7 @@
 %   - Change fat arrow to regular arrow?
 %   - Enforce else clause to avoid ambiguity/confusion?
 %   - Colon instead of @ for atoms?
+%   - Change *x to &x
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Allow ifaces on struct/enum params?
 % - [2 days] Exceptions
@@ -21,6 +23,7 @@
 %   - Record types
 %   - Directly matching function args
 %   - Disallow pattern matching w/ struct Con(...) fn?
+%   - Allow when clause and or?
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 % - [1 week] REPL

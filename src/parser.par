@@ -11,8 +11,9 @@ enum Node {
   Module(Lexer.Loc, Node, [Node], [Node]) @module,
   Import(Lexer.Loc, Node) @import,
 
-  Enum(Lexer.Loc, Node, [(Node, [Node], Maybe<Node>)]) @enum,
-  Struct(Lexer.Loc, Node, [(Node, Node)]) @struct,
+  Enum(Lexer.Loc, Node, [Node]) @enum,
+  Option(Lexer.Loc, Node, [Node], Maybe<Node>) @option,
+  Struct(Lexer.Loc, Node, [Node]) @struct,
   Sig(Lexer.Loc, Node, Node) @sig,
   Global(Lexer.Loc, Node, Node, Bool) @global,
   Fn(Lexer.Loc, [Node], Node) @fn,
@@ -36,10 +37,14 @@ enum Node {
 
   FieldFn(Lexer.Loc, Node) @field_fn,
   Field(Lexer.Loc, Node, Node) @field,
-  AnonRecord(Lexer.Loc, [(Node, Node)]) @anon_record,
-  Record(Lexer.Loc, Node, [(Node, Node)]) @record,
-  AnonRecordExt(Lexer.Loc, Node, [((Node, Node), Bool)]) @anon_record_ext,
-  RecordExt(Lexer.Loc, Node, Node, [((Node, Node), Bool)]) @record_ext,
+
+  AnonRecord(Lexer.Loc, [Node]) @anon_record,
+  Record(Lexer.Loc, Node, [Node]) @record,
+  Init(Lexer.Loc, Node, Node) @init,
+
+  AnonRecordExt(Lexer.Loc, Node, [Node]) @anon_record_ext,
+  RecordExt(Lexer.Loc, Node, Node, [Node]) @record_ext,
+  Ext(Lexer.Loc, Node, Node) @ext,
 
   App(Lexer.Loc, Node, [Node]) @app,
   Native(Lexer.Loc, Node, Node, Int) @native,
@@ -49,17 +54,18 @@ enum Node {
   Gen(Lexer.Loc, Node, [Node]) @gen_te,
   LamTE(Lexer.Loc, Node, Node) @lam_te,
   TupleTE(Lexer.Loc, [Node]) @tuple_te,
-  RecordTE(Lexer.Loc, [(Node, Node)]) @record_te,
-  RecordExtTE(Lexer.Loc, Node, [(Node, Node)]) @record_ext_te,
+  RecordTE(Lexer.Loc, [Node]) @record_te,
+  RecordExtTE(Lexer.Loc, Node, [Node]) @record_ext_te,
 
   BinaryExpr(Lexer.Loc, BinaryOpAtom, Node, Node) @binary_op,
   UnaryExpr(Lexer.Loc, UnaryOpAtom, Node) @unary_op,
 
   If(Lexer.Loc, Node, Node, Node) @if,
-  Let(Lexer.Loc, [(Node, Node)], Node) @let,
-  IfLet(Lexer.Loc, (Node, Node), Node, Node) @if_let,
-  Match(Lexer.Loc, Node, [(Node, Node)]) @match,
-
+  Let(Lexer.Loc, [Node], Node) @let,
+  Binding(Lexer.Loc, Node, Node) @binding,
+  IfLet(Lexer.Loc, Node, Node, Node, Node) @if_let,
+  Match(Lexer.Loc, Node, [Node]) @match,
+  Case(Lexer.Loc, Node, Node) @case,
   Block(Lexer.Loc, [Node]) @block
 }
 
@@ -207,7 +213,7 @@ enumeration(tokens) = match tokens {
   [Lexer.Enum(s) | t] =>
     new_type_braces(s, t)
       |> pbind(|v| match v { (l, node, inner, rest) =>
-        many_delim_comma(option, inner)
+        many_delim_comma_or_nl(option, inner)
           |> pmap_or(|v| v, [])
           |> pmap(|options| (Enum(l, node, options), rest))
       }),
@@ -221,21 +227,27 @@ tv(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("expected type variable")
 }
 
-option :: [Lexer.Token] -> Parsed<((Node, [Node], Maybe<Node>), [Lexer.Token])>
+option :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 option(tokens) = match tokens {
   [Lexer.Con(s, name), Lexer.LParen(_) | t] =>
     parse_args(type_expr, s, t) |> pmap(|v| match v {
-      (_, args, [Lexer.LitAtom(atom_l, atom) | t]) =>
-        ((Con(s, name), args, Some(LitAtom(atom_l, atom))), t),
+      (l, args, [Lexer.LitAtom(atom_l, atom) | t]) =>
+        (Option(
+          range(l, atom_l),
+          Con(s, name),
+          args,
+          Some(LitAtom(atom_l, atom))
+        ), t),
 
-      (_, args, t) => ((Con(s, name), args, None), t)
+      (l, args, t) => (Option(l, Con(s, name), args, None), t)
     }),
 
-  [Lexer.Con(con_l, name), Lexer.LitAtom(atom_l, atom) | t] =>
-    ((Con(con_l, name), [], Some(LitAtom(atom_l, atom))), t) |> parsed,
+  [Lexer.Con(s, name), Lexer.LitAtom(e, atom) | t] =>
+    (Option(range(s, e), Con(s, name), [], Some(LitAtom(e, atom))), t)
+      |> parsed,
 
   [Lexer.Con(l, name) | t] =>
-    ((Con(l, name), [], None), t) |> parsed,
+    (Option(l, Con(l, name), [], None), t) |> parsed,
 
   _ => head_loc(tokens) |> one_err("expected capitalized name of option")
 }
@@ -245,9 +257,9 @@ structure(tokens) = match tokens {
   [Lexer.Struct(s) | t] =>
     new_type_braces(s, t)
       |> pbind(|v| match v { (l, node, inner, rest) =>
-        many_delim_comma(field_type, inner)
+        many_delim_comma_or_nl(field_sig, inner)
           |> pmap_or(|v| v, [])
-          |> pmap(|field_types| (Struct(l, node, field_types), rest))
+          |> pmap(|field_sigs| (Struct(l, node, field_sigs), rest))
       }),
 
   _ => head_loc(tokens) |> one_err("expected keyword 'struct'")
@@ -347,7 +359,7 @@ expr_r(state, stack, tokens) = match state {
           // match Con { pattern1 => expr1 [, pattern2 => expr2, ...] }.
           if let [Lexer.LBrace(_), Lexer.Var(_, _), Lexer.Assign(_) | _] = t then
             enclosed_brace(s, tail(t)) |> pbind(|v| match v { (l, inner, rest) =>
-              many_delim_comma(field_init, inner)
+              many_delim_comma_or_nl(field_init, inner)
                 |> pmap_or(|v| v, [])
                 |> pmap(|fields| Record(l, node, fields))
                 |> pbind(recurse(rest))
@@ -357,7 +369,7 @@ expr_r(state, stack, tokens) = match state {
             enclosed_brace(s, tail(t)) |> pbind(|v| match v { (l, inner, rest) =>
               expr(inner) |> pbind_or(|v| match v {
                 (base, [Lexer.Bar(_) | t]) =>
-                  many_delim_comma(field_ext, t)
+                  many_delim_comma_or_nl(field_ext, t)
                     |> pmap_or(|v| v, [])
                     |> pmap(|fields| RecordExt(l, node, base, fields))
                     |> pbind(recurse(rest)),
@@ -383,7 +395,7 @@ expr_r(state, stack, tokens) = match state {
       [Lexer.LBrace(s), Lexer.Var(l, name), Lexer.Assign(assign_l) | t] =>
         enclosed_brace(s, [Lexer.Var(l, name), Lexer.Assign(assign_l) | t])
           |> pbind(|v| match v { (l, inner, rest) =>
-            many_delim_comma(field_init, inner)
+            many_delim_comma_or_nl(field_init, inner)
               |> pmap_or(|v| v, [])
               |> pmap(|fields| AnonRecord(l, fields))
               |> pbind(recurse(rest))
@@ -403,7 +415,7 @@ expr_r(state, stack, tokens) = match state {
                 |> pbind(recurse(rest)),
 
             (base, [Lexer.Bar(_) | t]) =>
-              many_delim_comma(field_ext, t)
+              many_delim_comma_or_nl(field_ext, t)
                 |> pmap_or(|v| v, [])
                 |> pmap(|fields| AnonRecordExt(l, base, fields))
                 |> pbind(recurse(rest)),
@@ -455,7 +467,7 @@ expr_r(state, stack, tokens) = match state {
         expr(t) |> pbind(|v| match v {
           (node, [Lexer.LBrace(_) | t]) =>
             enclosed_brace(s, t) |> pbind(|v| match v { (l, inner, rest) =>
-              many_delim_comma(case, inner)
+              many_delim_comma_or_nl(case, inner)
                 |> pmap_or(|v| v, [])
                 |> pmap(|cases| Match(l, node, cases))
                 |> pbind(recurse(rest))
@@ -471,7 +483,13 @@ expr_r(state, stack, tokens) = match state {
     let
       shunt(bopa, t) =
         let op = BinaryOp(bopa), next_prec = get(Bin(bopa), opa_prec) in
-          expr_r(Start, [op | reduce(next_prec, stack)], t)
+          expr_r(Start, [op | reduce(next_prec, stack)], t),
+
+      head_end_line(stack) =
+        let Node(node) = head(stack) in node_loc(node).end_line,
+
+      finish() =
+        let [Node(node)] = reduce(0, stack) in parsed((node, tokens))
     in match tokens {
       [Lexer.Pipe(_) | t] => shunt(Pipe, t),
       [Lexer.Or(_) | t] => shunt(Or, t),
@@ -498,25 +516,9 @@ expr_r(state, stack, tokens) = match state {
 
       // TODO: flatten app?
       [Lexer.LParen(s), Lexer.RParen(e) | t] =>
-        let
-          // field access and app have equal precedence above all else
-          [Node(n) | left] = reduce(get(Bin(Dot), opa_prec), stack),
-
-          // set native arity if not given
-          node =
-            if let Native(l, atom, var, arity) = n then
-              if arity == -1 then
-                Native(l, atom, var, 0)
-              else
-                n
-            else
-              n,
-
-          app = App(range(node_loc(node), e), node, [Unit(range(s, e))])
-        in
-          expr_r(AcceptOp, [Node(app) | left], t),
-      [Lexer.LParen(s) | t] =>
-        parse_args(expr, s, t) |> pbind(|v| match v { (l, args, rest) =>
+        if s.start_line > head_end_line(stack) then
+          finish()
+        else
           let
             // field access and app have equal precedence above all else
             [Node(n) | left] = reduce(get(Bin(Dot), opa_prec), stack),
@@ -525,16 +527,38 @@ expr_r(state, stack, tokens) = match state {
             node =
               if let Native(l, atom, var, arity) = n then
                 if arity == -1 then
-                  Native(l, atom, var, length(args))
+                  Native(l, atom, var, 0)
                 else
                   n
               else
                 n,
 
-            app = App(range(node_loc(node), l), node, args)
+            app = App(range(node_loc(node), e), node, [Unit(range(s, e))])
           in
-            expr_r(AcceptOp, [Node(app) | left], rest)
-        }),
+            expr_r(AcceptOp, [Node(app) | left], t),
+      [Lexer.LParen(s) | t] =>
+        if s.start_line > head_end_line(stack) then
+          finish()
+        else
+          parse_args(expr, s, t) |> pbind(|v| match v { (l, args, rest) =>
+            let
+              // field access and app have equal precedence above all else
+              [Node(n) | left] = reduce(get(Bin(Dot), opa_prec), stack),
+
+              // set native arity if not given
+              node =
+                if let Native(l, atom, var, arity) = n then
+                  if arity == -1 then
+                    Native(l, atom, var, length(args))
+                  else
+                    n
+                else
+                  n,
+
+              app = App(range(node_loc(node), l), node, args)
+            in
+              expr_r(AcceptOp, [Node(app) | left], rest)
+          }),
 
       [Lexer.Dot(_), Lexer.Var(e, name) | t] =>
         let
@@ -544,31 +568,31 @@ expr_r(state, stack, tokens) = match state {
         in
           expr_r(AcceptOp, [Node(field) | left], t),
 
-      _ => let [Node(node)] = reduce(0, stack) in parsed((node, tokens))
+      _ => finish()
     }
 }
 
-field_init :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
+field_init :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 field_init(tokens) = match tokens {
-  [Lexer.Var(l, name), Lexer.Assign(_) | t] =>
+  [Lexer.Var(s, name), Lexer.Assign(_) | t] =>
     expr(t) |> pmap(|v| match v { (node, rest) =>
-      ((Var(l, name), node), rest)
+      (Init(range(s, node_loc(node)), Var(s, name), node), rest)
     }),
 
   [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("expected equals '='"),
   [] => head_loc(tokens) |> one_err("expected field name")
 }
 
-field_ext :: [Lexer.Token] -> Parsed<(((Node, Node), Bool), [Lexer.Token])>
+field_ext :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 field_ext(tokens) = match tokens {
-  [Lexer.Var(l, name), Lexer.Assign(_) | t] =>
+  [Lexer.Var(s, name), Lexer.Assign(_) | t] =>
     expr(t) |> pmap(|v| match v { (node, rest) =>
-      (((Var(l, name), node), false), rest)
+      (Init(range(s, node_loc(node)), Var(s, name), node), rest)
     }),
 
-  [Lexer.Var(l, name), Lexer.Extend(_) | t] =>
+  [Lexer.Var(s, name), Lexer.Ext(_) | t] =>
     expr(t) |> pmap(|v| match v { (node, rest) =>
-      (((Var(l, name), node), true), rest)
+      (Ext(range(s, node_loc(node)), Var(s, name), node), rest)
     }),
 
   [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("expected equals '='"),
@@ -643,18 +667,18 @@ type_expr_r(lhs, tokens) = match lhs {
 
       [Lexer.LBrace(s), Lexer.TV(tv_l, tv), Lexer.Bar(_) | t] =>
         enclosed_brace(s, t) |> pbind(|v| match v { (l, inner, rest) =>
-          many_delim_comma(field_type, inner)
+          many_delim_comma_or_nl(field_sig, inner)
             |> pmap_or(|v| v, [])
-            |> pmap(|field_types|
-              RecordExtTE(l, TV(tv_l, tv, Unit(tv_l)), field_types)
+            |> pmap(|field_sigs|
+              RecordExtTE(l, TV(tv_l, tv, Unit(tv_l)), field_sigs)
             )
             |> pbind(recurse(rest))
         }),
       [Lexer.LBrace(s) | t] =>
         enclosed_brace(s, t) |> pbind(|v| match v { (l, inner, rest) =>
-          many_delim_comma(field_type, inner)
+          many_delim_comma_or_nl(field_sig, inner)
             |> pmap_or(|v| v, [])
-            |> pmap(|field_types| RecordTE(l, field_types))
+            |> pmap(|field_sigs| RecordTE(l, field_sigs))
             |> pbind(recurse(rest))
         }),
 
@@ -671,11 +695,11 @@ type_expr_r(lhs, tokens) = match lhs {
   }
 }
 
-field_type :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
-field_type(tokens) = match tokens {
-  [Lexer.Var(l, name), Lexer.Sig(_) | t] =>
+field_sig :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
+field_sig(tokens) = match tokens {
+  [Lexer.Var(s, name), Lexer.Sig(_) | t] =>
     type_expr(t) |> pmap(|v| match v { (node, rest) =>
-      ((Var(l, name), node), rest)
+      (Sig(range(s, node_loc(node)), Var(s, name), node), rest)
     }),
 
   [Lexer.Var(_, _) | t] =>
@@ -691,7 +715,7 @@ if_expr(tokens) = match tokens {
       expr(t) |> pbind(|v| match v { (right, rest) =>
         then_else(rest) |> pmap(|v| match v { ((then_expr, else_expr), rest) =>
           let l = range(s, node_loc(else_expr)) in
-            (IfLet(l, (left, right), then_expr, else_expr), rest)
+            (IfLet(l, left, right, then_expr, else_expr), rest)
         })
       }),
 
@@ -724,32 +748,28 @@ then_else(tokens) = match tokens {
 let_expr :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 let_expr(tokens) = match tokens {
   [Lexer.Let(s) | t] =>
-    let_inits(t) |> pbind(|v| match v { (inits, rest) =>
-      expr(rest) |> pmap(|v| match v { (body, rest) =>
-        (Let(range(s, node_loc(body)), inits, body), rest)
-      })
-    }),
+    let
+      parsed_bindings = many_delim_cb(|node, rest| match rest {
+        [Lexer.In(_) | t] => parsed((false, t)),
+        _ => delim_comma_or_nl(node, rest)
+      }, binding, t)
+    in
+      parsed_bindings |> pbind(|v| match v { (bindings, rest) =>
+        expr(rest) |> pmap(|v| match v { (body, rest) =>
+          (Let(range(s, node_loc(body)), bindings, body), rest)
+        })
+      }),
 
   _ => head_loc(tokens) |> one_err("expected keyword 'let'")
 }
 
-let_inits(tokens) = let_init(tokens) |> pbind(|v| match v {
-  (init, [Lexer.Comma(_) | t]) =>
-    let_inits(t) |> pmap(|v| match v { (inits, rest) =>
-      ([init | inits], rest)
-    }),
-
-  (init, [Lexer.In(_) | t]) => parsed(([init], t)),
-  (_, t) => head_loc(t) |> one_err("expected comma ',' or keyword 'in'")
-})
-
-let_init :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
-let_init(tokens) = match tokens {
+binding :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
+binding(tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_) | t] =>
     if let [Lexer.Assign(_) | t] = t then
       expr(t) |> pmap(|v| match v { (body, rest) =>
-        let lam = Fn(range(s, node_loc(body)), [], body) in
-          ((Var(s, name), lam), rest)
+        let e = node_loc(body), lam = Fn(range(s, e), [], body) in
+          (Binding(range(s, e), Var(s, name), lam), rest)
       })
     else
       head_loc(t) |> one_err("expected equals '='"),
@@ -758,8 +778,8 @@ let_init(tokens) = match tokens {
     parse_args(var, s, t) |> pbind(|v| match v {
       (_, args, [Lexer.Assign(_) | t]) =>
         expr(t) |> pmap(|v| match v { (body, rest) =>
-          let lam = Fn(range(s, node_loc(body)), args, body) in
-            ((Var(s, name), lam), rest)
+          let e = node_loc(body), lam = Fn(range(s, e), args, body) in
+            (Binding(range(s, e), Var(s, name), lam), rest)
         }),
 
       (_, _, t) => head_loc(t) |> one_err("expected equals '='")
@@ -768,7 +788,7 @@ let_init(tokens) = match tokens {
   _ => pattern(tokens) |> pbind(|v| match v {
     (left, [Lexer.Assign(_) | t]) =>
       expr(t) |> pmap(|v| match v { (right, rest) =>
-        ((left, right), rest)
+        (Binding(range(node_loc(left), node_loc(right)), left, right), rest)
       }),
 
     (_, t) => head_loc(t) |> one_err("expected equals '='")
@@ -830,10 +850,12 @@ var(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("expected variable identifier")
 }
 
-case :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
+case :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 case(tokens) = pattern(tokens) |> pbind(|v| match v {
   (left, [Lexer.FatArrow(_) | t]) =>
-    expr(t) |> pmap(|v| match v { (right, rest) => ((left, right), rest) }),
+    expr(t) |> pmap(|v| match v { (right, rest) =>
+      (Case(range(node_loc(left), node_loc(right)), left, right), rest)
+    }),
 
   (_, t) => head_loc(t) |> one_err("expected fat arrow '=>' after pattern")
 })
@@ -935,33 +957,81 @@ many(f, tokens) = let p = f(tokens) in match p.value {
   None => { p | value := None }
 }
 
+many_delim_cb :: (T -> [Lexer.Token] -> Parsed<(Bool, [Lexer.Token])>) ->
+  ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) -> [Lexer.Token] ->
+  Parsed<([T], [Lexer.Token])>
+many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|v| match v {
+  (item, []) => parsed(([item], [])),
+
+  (item, t) => cb(item, t) |> pbind(|v| match v { (continue, rest) =>
+    if !continue || rest == [] then
+      parsed(([item], rest))
+    else
+      many_delim_cb(cb, f, rest) |> pmap(|v| match v { (items, rest) =>
+        ([item | items], rest)
+      })
+  })
+})
+
 many_delim :: (Lexer.Loc -> Lexer.Token) -> String ->
   ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) -> [Lexer.Token] -> Parsed<[T]>
-many_delim(delim, delim_str, f, tokens) = let p = f(tokens) in match p.value {
-  Some((v, [])) => { p | value := Some([v]) },
-  Some((v, [h | t])) =>
-    if h == delim(token_loc(h)) then
-      let new_r = many_delim(delim, delim_str, f, t) in match new_r.value {
-        Some(vs) => { new_r |
-          value = Some([v | vs]),
-          errs = new_r.errs ++ p.errs
-        },
-        None => { new_r | errs = new_r.errs ++ p.errs }
-      }
-    else
-      add_err(
-        p,
-        "expected " ++ delim_str ++ " delimiter after expression",
-        head_loc(t)
-      ),
-
-  // we don't need to add errors; they've already been added by f()
-  None => { p | value := None }
-}
+many_delim(delim, delim_str, f, tokens) =
+  many_delim_cb(|v, tokens|
+    let [h | t] = tokens, l = token_loc(h) in
+      if h == delim(l) then
+        parsed((true, t))
+      else
+        head_loc(tokens) |> one_err(
+          "expected " ++ delim_str ++ " delimiter after expression"
+        ),
+    f,
+    tokens
+  ) |> pmap(|v| match v { (items, []) => items })
 
 many_delim_comma :: ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) ->
   [Lexer.Token] -> Parsed<[T]>
 many_delim_comma = many_delim(Lexer.Comma, "comma ','")
+
+delim_or_nl :: (Lexer.Loc -> Lexer.Token) -> String -> Node -> [Lexer.Token] ->
+  Parsed<(Bool, [Lexer.Token])>
+delim_or_nl(delim, delim_str, node, tokens) =
+  let
+    [h | t] = tokens,
+    l = token_loc(h),
+    is_delim = h == delim(l)
+  in
+    if is_delim && t == [] then
+      parsed_err(
+        (true, t),
+        delim_str ++ " delimiter is unnecessary because nothing " ++
+          "follows it",
+        Some(l)
+      )
+    else if is_delim && l.end_line < token_loc(head(t)).start_line then
+      parsed_err(
+        (true, t),
+        delim_str ++ " delimiter is unnecessary because it's " ++
+          "followed by a newline",
+        Some(l)
+      )
+    else if is_delim then
+      parsed((true, t))
+    else if node_loc(node).end_line < l.start_line then
+      parsed((true, tokens))
+    else
+      one_err(
+        "expected either " ++ delim_str ++ " or newline delimiter",
+        Some(l)
+      )
+
+delim_comma_or_nl :: Node -> [Lexer.Token] -> Parsed<(Bool, [Lexer.Token])>
+delim_comma_or_nl = delim_or_nl(Lexer.Comma, "comma ','")
+
+many_delim_comma_or_nl :: ([Lexer.Token] -> Parsed<(Node, [Lexer.Token])>) ->
+  [Lexer.Token] -> Parsed<[Node]>
+many_delim_comma_or_nl(f, tokens) =
+  many_delim_cb(delim_comma_or_nl, f, tokens)
+    |> pmap(|v| match v { (items, []) => items })
 
 enclosed :: (Lexer.Loc -> Lexer.Token) -> (Lexer.Loc -> Lexer.Token) ->
   String -> Lexer.Loc -> [Lexer.Token] ->
@@ -1090,6 +1160,9 @@ pbind_or(f, default, p) = match p.value {
 
 parsed :: A -> Parsed<A>
 parsed(a) = Parsed { value = Some(a), errs = [] }
+
+parsed_err :: A -> String -> Maybe<Lexer.Loc> -> Parsed<A>
+parsed_err(a, str, mloc) = Parsed { value = Some(a), errs = [(mloc, str)] }
 
 add_err :: Parsed<A> -> String -> Maybe<Lexer.Loc> -> Parsed<B>
 add_err(p, str, mloc) = { p | value := None, errs = [(mloc, str) | p.errs] }

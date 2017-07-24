@@ -22,7 +22,7 @@ init({global, _, {var, _, Name}, Expr, _}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
 init({enum, _, _, OptionTEs}, ID) ->
-  lists:foreach(fun({{con_token, _, Con}, ArgsTE, KeyNode}) ->
+  lists:foreach(fun({option, _, {con_token, _, Con}, ArgsTE, KeyNode}) ->
     Key = case KeyNode of
       none -> list_to_atom(Con);
       {some, {atom, _, Key_}} -> Key_
@@ -45,7 +45,7 @@ init({struct, _, StructTE, FieldTEs}, ID) ->
     {gen_te, _, {con_token, _, Con_}, _} -> Con_
   end,
 
-  FieldAtoms = lists:map(fun({{var, _, FieldName}, _}) ->
+  FieldAtoms = lists:map(fun({sig, _, {var, _, FieldName}, _}) ->
     list_to_atom(FieldName)
   end, FieldTEs),
   StructV = make_fun(length(FieldTEs), fun(Vs) ->
@@ -106,14 +106,16 @@ eval({N, _, Name}, ID) when N == var; N == con_token ->
   end;
 
 eval({anon_record, _, Inits}, ID) ->
-  Pairs = lists:map(fun({{var, _, Name}, Expr}) ->
+  Pairs = lists:map(fun({init, _, {var, _, Name}, Expr}) ->
     {list_to_atom(Name), eval(Expr, ID)}
   end, Inits),
   maps:from_list(Pairs);
 
 eval({anon_record_ext, Loc, Expr, AllInits}, C) ->
   Record = eval(Expr, C),
-  Inits = lists:map(fun({Init, _}) -> Init end, AllInits),
+  Inits = lists:map(fun(InitOrExt) ->
+    setelement(1, InitOrExt, init)
+  end, AllInits),
   maps:merge(Record, eval({anon_record, Loc, Inits}, C));
 
 eval({record, Loc, _, Inits}, ID) -> eval({anon_record, Loc, Inits}, ID);
@@ -152,17 +154,17 @@ eval({'if', _, Expr, Then, Else}, ID) ->
     _ -> V
   end;
 
-eval({'let', _, Inits, Then}, ID) ->
-  ChildID = lists:foldl(fun({Pattern, Expr}, FoldID) ->
+eval({'let', _, Bindings, Then}, ID) ->
+  ChildID = lists:foldl(fun({binding, _, Pattern, Expr}, FoldID) ->
     case eval_pattern(Pattern, Expr, FoldID) of
       {{false, V}, _} -> error({badmatch, V, Pattern});
       {true, FoldChildID} -> FoldChildID
     end
-  end, ID, Inits),
+  end, ID, Bindings),
 
   eval(Then, ChildID);
 
-eval({if_let, _, {Pattern, Expr}, Then, Else}, ID) ->
+eval({if_let, _, Pattern, Expr, Then, Else}, ID) ->
   V = case eval_pattern(Pattern, Expr, ID) of
     {{false, _}, _} -> eval(Else, ID);
     {true, ChildID} -> eval(Then, ChildID)
@@ -279,7 +281,7 @@ make_fun(Arity, Callback) ->
   Value.
 
 match_cases(V, [], _) -> error({badmatch, V});
-match_cases(V, [{Pattern, Expr} | Rest], ID) ->
+match_cases(V, [{'case', _, Pattern, Expr} | Rest], ID) ->
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, {}, ChildID)
