@@ -46,6 +46,8 @@ enum Token {
   Colon(Loc) @":"
 
   And(Loc) @"&&"
+  Amp(Loc) @"&"
+
   Comma(Loc) @","
   Mul(Loc) @"*"
   Mod(Loc) @"%"
@@ -158,6 +160,8 @@ tokenize_r(chs, line, col, tokens) =
         [':' | t] => (Colon(inc(loc, 1)), t)
 
         ['&', '&' | t] => (And(inc(loc, 2)), t)
+        ['&' | t] => (Amp(inc(loc, 1)), t)
+
         [',' | t] => (Comma(inc(loc, 1)), t)
         ['*' | t] => (Mul(inc(loc, 1)), t)
         ['%' | t] => (Mod(inc(loc, 1)), t)

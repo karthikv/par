@@ -1008,7 +1008,7 @@ expr_test_() ->
       {match, l(0, 19), {var, l(6, 1), "x"}, [
         {'case', l(10, 7), {var_value, l(10, 2), "y"}, {var, l(16, 1), "z"}}
       ]},
-      ok_expr("match x { *y => z }")
+      ok_expr("match x { &y => z }")
     )
   , ?_assertEqual(
       {match, l(0, 19), {var, l(6, 1), "x"}, [

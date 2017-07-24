@@ -449,7 +449,7 @@ test_pattern(Expr, Run) ->
       "  }"
     ))
   , ?_test([1, 2] = Expr(
-      "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
+      "let x = 3, y = [2] in match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
 
 
@@ -458,7 +458,7 @@ test_pattern(Expr, Run) ->
       "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
       "  (x + 3 :: Int, x + 3.0)"
     ))
-  , ?_test(7 = Expr("let [_, a] = [1, 3], (*a, b, *a) = (3, 7, 3) in b"))
+  , ?_test(7 = Expr("let [_, a] = [1, 3], (&a, b, &a) = (3, 7, 3) in b"))
 
 
   , ?_test(none = Expr("if let a = 3.0 then a"))

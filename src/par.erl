@@ -7,8 +7,6 @@
 % - Fix arity no match for false issue
 % - [1 day] Direct imports
 % - [3 days] Better syntax
-%   - Newlines instead of commas to separate match conditions, let vars, etc?
-%   - Nothing to separate struct/enum fields
 %   - Allow trailing commas?
 %   - Can we do string concat on multiple lines?
 %   - Change fat arrow to regular arrow?

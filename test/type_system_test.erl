@@ -1117,7 +1117,7 @@ pattern_test_() ->
       "  }"
     ))
   , ?_test("[A: Num]" = ok_expr(
-      "let x = 3, y = [2] in match [1] { *y => y ++ [1], x => x ++ [2] }"
+      "let x = 3, y = [2] in match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
   , ?_test("A: Num" = ok_expr(
       "match @io:printable_range() {\n"
@@ -1160,7 +1160,7 @@ pattern_test_() ->
       {"Float", "([A], String, Float)", l(2, 21, 1), ?FROM_MATCH_BODY}
     ))
   , ?_test(bad_expr(
-      "let x = 3, y = [2] in match [1] { y => y ++ [1], *x => [x] }",
+      "let x = 3, y = [2] in match [1] { y => y ++ [1], &x => [x] }",
       {"[A: Num]", "B: Num", l(49, 2), ?FROM_MATCH_PATTERN}
     ))
 
@@ -1170,8 +1170,9 @@ pattern_test_() ->
       "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
       "  (x + 3 :: Int, x + 3.0)"
     ))
-  , ?_test("A: Num" =
-             ok_expr("let [_, a] = [1, 3], (*a, b, *a) = (3, 7, 3) in b"))
+  , ?_test("A: Num" = ok_expr(
+      "let [_, a] = [1, 3], (&a, b, &a) = (3, 7, 3) in b"
+    ))
   , ?_test("(A, B) -> A" = ok_prg(
       "f(t) = let (a, _) = t in a",
       "f"
@@ -1185,7 +1186,7 @@ pattern_test_() ->
       {"[(A, B)]", "[String]", l(4, 11), ?FROM_LET}
     ))
   , ?_test(bad_expr(
-      "let [_, a] = [true, false], (*a, b) = (3, 7) in b",
+      "let [_, a] = [true, false], (&a, b) = (3, 7) in b",
       {"(Bool, A: Num)", "(B: Num, A: Num)", l(28, 7), ?FROM_LET}
     ))
   , ?_test(bad_prg(

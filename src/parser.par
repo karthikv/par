@@ -805,7 +805,7 @@ pattern(tokens) = let finish(t, node) = parsed((node, t)) in match tokens {
   [Lexer.LitAtom(l, atom) | t] => LitAtom(l, atom) |> finish(t)
 
   [Lexer.Var(l, name) | t] => Var(l, name) |> finish(t)
-  [Lexer.Mul(s), Lexer.Var(e, name) | t] =>
+  [Lexer.Amp(s), Lexer.Var(e, name) | t] =>
     VarValue(range(s, e), name) |> finish(t)
   [Lexer.Underscore(l) | t] => Underscore(l) |> finish(t)
 
@@ -868,7 +868,7 @@ reduce(next_prec, stack) =
     Some(BinaryOp(bopa)) =>
       if next_prec <= get(Bin(bopa), opa_prec) then
         let
-          [Node(right), BinaryOp(*bopa), Node(left) | t] = stack
+          [Node(right), BinaryOp(&bopa), Node(left) | t] = stack
           l = range(node_loc(left), node_loc(right))
         in
           reduce(next_prec, [Node(BinaryExpr(l, bopa, left, right)) | t])
@@ -878,7 +878,7 @@ reduce(next_prec, stack) =
     Some(UnaryOp(s, uopa)) =>
       if next_prec <= get(Un(uopa), opa_prec) then
         let
-          [Node(right), UnaryOp(*s, *uopa) | t] = stack
+          [Node(right), UnaryOp(&s, &uopa) | t] = stack
           l = range(s, node_loc(right))
         in
           reduce(next_prec, [Node(UnaryExpr(l, uopa, right)) | t])
