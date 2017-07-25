@@ -670,6 +670,20 @@ sig_test_() ->
       {"{ bar :: String }", "{ bar :: String, baz :: A: Num }",
        l(2, 13, 14), ?FROM_APP}
     ))
+
+
+  % ensures that we don't include full lam types in errors with return values
+  , ?_test(bad_prg(
+      "foo :: Bool\n"
+      "foo = (|a, b| a + b)(1, 2)",
+      {"Bool", "A: Num", l(1, 6, 20), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "foo :: A -> Bool\n"
+      "foo = (|a, b| a + b)(1)",
+      {"rigid(A) -> Bool", "B: Num -> B: Num", l(1, 6, 17),
+       ?FROM_APP}
+    ))
   ].
 
 global_test_() ->
@@ -992,6 +1006,19 @@ record_test_() ->
   , ?_test(bad_prg(
       "f(x) = (x.bar(\"hi\"), x.bar(true))",
       {"String", "Bool", l(27, 4), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "f(x) = (x.bar(1) && true, x.bar(2, 3))",
+      {"A: Num -> Bool", "A: Num -> B: Num -> C", l(26, 11), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "f(x) = (x.bar(2, 3), x.bar(1) && true)",
+      {"A: Num -> B", "Bool", l(21, 8), ?FROM_OP_LHS('&&')}
+    ))
+  , ?_test(bad_prg(
+      "f(x) = let y = x.bar(2) in (y, g(true, x.bar))\n"
+      "g(a, b) = b(a)",
+      {"A: Num -> B", "Bool -> C", l(39, 5), ?FROM_APP}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar :: A }\n"

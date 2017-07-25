@@ -4,15 +4,14 @@
 
 % TODO:
 % - Report lexer/parser errors in cli tool
-% - Fix arity no match for false issue
 % - [1 day] Direct imports
 % - [3 days] Better syntax
+%   - One colon instead of two for signatures?
+%   - Colon syntax for records?
 %   - Allow trailing commas?
 %   - Can we do string concat on multiple lines?
-%   - Change fat arrow to regular arrow?
 %   - Enforce else clause to avoid ambiguity/confusion?
 %   - Colon instead of @ for atoms?
-%   - Change *x to &x
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Allow ifaces on struct/enum params?
 % - [2 days] Exceptions

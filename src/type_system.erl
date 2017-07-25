@@ -1308,14 +1308,29 @@ unify(T1, T2, S) when T1 == T2 -> S;
 
 unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   S1 = sub_unify(ArgT1, ArgT2, S),
-  sub_unify(ReturnT1, ReturnT2, S1);
+  case no_errs(S1, S) of
+    true -> sub_unify(ReturnT1, ReturnT2, S1);
+    false -> S1
+  end;
 unify({lam, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   #solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2} = S,
   S1 = sub_unify(ArgT1, ArgT2, S#solver{loc=Loc, t1=ArgT1, t2=ArgT2}),
-  sub_unify(ReturnT1, ReturnT2, S1#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2});
+  S2 = S1#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2},
+
+  case {ReturnT1, ReturnT2} of
+    % We're continuing to unify arguments passed in a function application.
+    % Retain the same t1/t2 as before, so if an error occurs between a lam and
+    % a non-lam type, the entire lam types will be included in the error,
+    % thereby allowing the reporter to report too many arguments.
+    {{lam, _, _, _}, _} -> sub_unify(ReturnT1, ReturnT2, S2);
+
+    % We're done with the arguments of the function application. We shouldn't
+    % include the full lam types in errors between the return types (not only
+    % is it confusing to the user, but it'll also be misconstrued by the
+    % reporter as too many arguments), so set the return types to be t1/t2.
+    _ -> sub_unify(ReturnT1, ReturnT2, S2#solver{t1=ReturnT1, t2=ReturnT2})
+  end;
 unify({lam, _, _}=T1, {lam, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
-unify({lam, _, _, _}=T1, {lam, _, ArgT2, ReturnT2}, S) ->
-  sub_unify(T1, {lam, ArgT2, ReturnT2}, S);
 
 unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   if
@@ -1339,7 +1354,7 @@ unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
 
       case no_errs(S, S1) of
         true -> add_sub_anchor(A1, A2, S1);
-        _ -> S1
+        false -> S1
       end
   end;
 
@@ -1363,7 +1378,7 @@ unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
 
       case no_errs(S, S2) of
         true -> add_sub_anchor(A1, A2, S2);
-        _ -> S2
+        false -> S2
       end;
 
     false -> add_err(S)
@@ -1415,7 +1430,7 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
 
   case no_errs(S, S3) of
     true -> add_sub_anchor(A1, A2, S3);
-    _ -> S3
+    false -> S3
   end;
 
 unify({tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}, S) ->
@@ -1478,9 +1493,10 @@ unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
     T1 -> add_err(S);
     NewT1 ->
       S1 = sub_unify(NewT1, T2, S),
+      A = element(2, T2),
       if
-        length(S#solver.errs) == length(S1#solver.errs) ->
-          add_sub(element(2, T2), T1, S1);
+        length(S#solver.errs) == length(S1#solver.errs) andalso A /= none ->
+          add_sub(A, T1, S1);
         true -> S1
       end
   end;
@@ -1498,7 +1514,15 @@ unify(T1, T2, S) ->
 sub_unify(T1, T2, #solver{subs=Subs, structs=Structs}=S) ->
   unify(shallow_subs(T1, Subs, Structs), shallow_subs(T2, Subs, Structs), S).
 
-add_sub(V, Sub, S) ->
+add_sub(V, RawSub, S) ->
+  Sub = case RawSub of
+    % We don't want to keep the locations of arguments if we're subbing for
+    % a function application. This aids comprehension: we can only ever
+    % unify a function application (a 4-tuple lam) with a regular 3-tuple lam.
+    {lam, _, _, _} -> remove_arg_locs(RawSub);
+    _ -> RawSub
+  end,
+
   S1 = case maps:find(V, S#solver.subs) of
     error -> S#solver{subs=(S#solver.subs)#{V => Sub}};
     % we're allowed to override set_iface to another value
@@ -1551,6 +1575,10 @@ instance({gen, "Set", _}, "Concatable") -> true;
 instance({gen, "List", _}, "Separable") -> true;
 instance({gen, "Set", _}, "Separable") -> true;
 instance(_, _) -> false.
+
+remove_arg_locs({lam, _, ArgT, ReturnT}) ->
+  {lam, ArgT, remove_arg_locs(ReturnT)};
+remove_arg_locs(T) -> T.
 
 subs({lam, ArgT, ReturnT}, Subs, Structs) ->
   {lam, subs(ArgT, Subs, Structs), subs(ReturnT, Subs, Structs)};
