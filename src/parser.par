@@ -192,7 +192,7 @@ fn_or_expr(s, tokens) = match tokens {
     head_loc(t) |> one_err("expected equals '='")
 
   [Lexer.LParen(_) | t] =>
-    parse_args(var, s, t) |> pbind(|v| match v {
+    parse_args(pattern, s, t) |> pbind(|v| match v {
       (_, args, [Lexer.Assign(_) | t]) =>
         expr(t) |> pmap(|v| match v { (node, rest) =>
           (Fn(range(s, node_loc(node)), args, node), rest)
@@ -436,13 +436,14 @@ expr_r(state, stack, tokens) = match state {
           Fn(range(s, node_loc(body)), [], body) |> recurse(rest)
         })
       [Lexer.Bar(s) | t] =>
-        enclosed(Lexer.Bar, Lexer.Bar, "'|'", s, t)
-          |> pbind(|v| match v { (_, inner, rest) =>
-            many_delim_comma(var, inner)
-              |> pmap_or(|v| v, [])
-              |> pmap(|args| (args, rest))
-          })
-          |> pbind(|v| match v { (args, rest) =>
+        let
+          parsed_args = many_delim_cb(|node, rest| match rest {
+            [Lexer.Bar(_) | t] => parsed((false, t))
+            [_ | _] => delim_cb(Lexer.Comma, "comma ','", node, rest)
+            [] => head_loc(rest) |> one_err("expected closing pipe '|'")
+          }, pattern, t)
+        in
+          parsed_args |> pbind(|v| match v { (args, rest) =>
             // lam is the lowest precedence, so it's fine to just recurse here
             expr(rest) |> pbind(|v| match v { (body, rest) =>
               Fn(range(s, node_loc(body)), args, body) |> recurse(rest)
@@ -751,7 +752,8 @@ let_expr(tokens) = match tokens {
     let
       parsed_bindings = many_delim_cb(|node, rest| match rest {
         [Lexer.In(_) | t] => parsed((false, t))
-        _ => delim_comma_or_nl(node, rest)
+        [_ | _] => delim_comma_or_nl_cb(node, rest)
+        [] => head_loc(rest) |> one_err("expected keyword 'in'")
       }, binding, t)
     in
       parsed_bindings |> pbind(|v| match v { (bindings, rest) =>
@@ -775,7 +777,7 @@ binding(tokens) = match tokens {
       head_loc(t) |> one_err("expected equals '='")
 
   [Lexer.Var(s, name), Lexer.LParen(_) | t] =>
-    parse_args(var, s, t) |> pbind(|v| match v {
+    parse_args(pattern, s, t) |> pbind(|v| match v {
       (_, args, [Lexer.Assign(_) | t]) =>
         expr(t) |> pmap(|v| match v { (body, rest) =>
           let e = node_loc(body), lam = Fn(range(s, e), args, body) in
@@ -841,13 +843,6 @@ pattern(tokens) = let finish(t, node) = parsed((node, t)) in match tokens {
     })
 
   _ => head_loc(tokens) |> one_err("expected pattern")
-}
-
-// simple production passed to parse_args()
-var :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
-var(tokens) = match tokens {
-  [Lexer.Var(l, name) | t] => parsed((Var(l, name), t))
-  _ => head_loc(tokens) |> one_err("expected variable identifier")
 }
 
 case :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -960,12 +955,12 @@ many(f, tokens) = let p = f(tokens) in match p.value {
 many_delim_cb :: (T -> [Lexer.Token] -> Parsed<(Bool, [Lexer.Token])>) ->
   ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) -> [Lexer.Token] ->
   Parsed<([T], [Lexer.Token])>
-many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|v| match v {
-  (item, []) => parsed(([item], []))
-
-  (item, t) => cb(item, t) |> pbind(|v| match v { (continue, rest) =>
-    if !continue || rest == [] then
+many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|v| match v { (item, rest) =>
+  cb(item, rest) |> pbind(|v| match v { (continue, rest) =>
+    if !continue then
       parsed(([item], rest))
+    else if rest == [] then
+      one_err("many_delim didn't finish", None)
     else
       many_delim_cb(cb, f, rest) |> pmap(|v| match v { (items, rest) =>
         ([item | items], rest)
@@ -973,64 +968,72 @@ many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|v| match v {
   })
 })
 
-many_delim :: (Lexer.Loc -> Lexer.Token) -> String ->
-  ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) -> [Lexer.Token] -> Parsed<[T]>
-many_delim(delim, delim_str, f, tokens) =
-  many_delim_cb(|v, tokens|
+delim_cb :: (Lexer.Loc -> Lexer.Token) -> String -> T -> [Lexer.Token] ->
+  Parsed<(Bool, [Lexer.Token])>
+delim_cb(delim, delim_str, v, tokens) =
+  if let [] = tokens then
+    parsed((false, []))
+  else
     let [h | t] = tokens, l = token_loc(h) in
       if h == delim(l) then
-        parsed((true, t))
+        parsed((t != [], t))
       else
         head_loc(tokens) |> one_err(
           "expected " ++ delim_str ++ " delimiter after expression"
-        ),
-    f,
-    tokens
-  ) |> pmap(|v| match v { (items, []) => items })
+        )
+
+many_delim :: (Lexer.Loc -> Lexer.Token) -> String ->
+  ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) -> [Lexer.Token] -> Parsed<[T]>
+many_delim(delim, delim_str, f, tokens) =
+  many_delim_cb(delim_cb(delim, delim_str), f, tokens)
+    |> pmap(|v| match v { (items, []) => items })
 
 many_delim_comma :: ([Lexer.Token] -> Parsed<(T, [Lexer.Token])>) ->
   [Lexer.Token] -> Parsed<[T]>
 many_delim_comma = many_delim(Lexer.Comma, "comma ','")
 
-delim_or_nl :: (Lexer.Loc -> Lexer.Token) -> String -> Node -> [Lexer.Token] ->
+delim_or_nl_cb :: (Lexer.Loc -> Lexer.Token) -> String -> Node -> [Lexer.Token] ->
   Parsed<(Bool, [Lexer.Token])>
-delim_or_nl(delim, delim_str, node, tokens) =
-  let
-    [h | t] = tokens
-    l = token_loc(h)
-    is_delim = h == delim(l)
-  in
-    if is_delim && t == [] then
-      parsed_err(
-        (true, t),
-        delim_str ++ " delimiter is unnecessary because nothing " ++
-          "follows it",
-        Some(l)
-      )
-    else if is_delim && l.end_line < token_loc(head(t)).start_line then
-      parsed_err(
-        (true, t),
-        delim_str ++ " delimiter is unnecessary because it's " ++
-          "followed by a newline",
-        Some(l)
-      )
-    else if is_delim then
-      parsed((true, t))
-    else if node_loc(node).end_line < l.start_line then
-      parsed((true, tokens))
-    else
-      one_err(
-        "expected either " ++ delim_str ++ " or newline delimiter",
-        Some(l)
-      )
+delim_or_nl_cb(delim, delim_str, node, tokens) =
+  if let [] = tokens then
+    parsed((false, []))
+  else
+    let
+      [h | t] = tokens
+      l = token_loc(h)
+      is_delim = h == delim(l)
+    in
+      if is_delim && t == [] then
+        parsed_err(
+          (t != [], t),
+          delim_str ++ " delimiter is unnecessary because nothing " ++
+            "follows it",
+          Some(l)
+        )
+      else if is_delim && l.end_line < token_loc(head(t)).start_line then
+        parsed_err(
+          (t != [], t),
+          delim_str ++ " delimiter is unnecessary because it's " ++
+            "followed by a newline",
+          Some(l)
+        )
+      else if is_delim then
+        parsed((t != [], t))
+      else if node_loc(node).end_line < l.start_line then
+        parsed((tokens != [], tokens))
+      else
+        one_err(
+          "expected either " ++ delim_str ++ " or newline delimiter",
+          Some(l)
+        )
 
-delim_comma_or_nl :: Node -> [Lexer.Token] -> Parsed<(Bool, [Lexer.Token])>
-delim_comma_or_nl = delim_or_nl(Lexer.Comma, "comma ','")
+delim_comma_or_nl_cb :: Node -> [Lexer.Token] -> Parsed<(Bool, [Lexer.Token])>
+delim_comma_or_nl_cb = delim_or_nl_cb(Lexer.Comma, "comma ','")
 
 many_delim_comma_or_nl :: ([Lexer.Token] -> Parsed<(Node, [Lexer.Token])>) ->
   [Lexer.Token] -> Parsed<[Node]>
 many_delim_comma_or_nl(f, tokens) =
-  many_delim_cb(delim_comma_or_nl, f, tokens)
+  many_delim_cb(delim_comma_or_nl_cb, f, tokens)
     |> pmap(|v| match v { (items, []) => items })
 
 enclosed :: (Lexer.Loc -> Lexer.Token) -> (Lexer.Loc -> Lexer.Token) ->
@@ -1076,7 +1079,7 @@ enclosed_brace = enclosed(Lexer.LBrace, Lexer.RBrace, "closing brace '}'")
 
 enclosed_tag :: Lexer.Loc -> [Lexer.Token] ->
   Parsed<(Lexer.Loc, [Lexer.Token], [Lexer.Token])>
-enclosed_tag = enclosed(Lexer.Lt, Lexer.Gt, "greater than '>'")
+enclosed_tag = enclosed(Lexer.Lt, Lexer.Gt, "closing greater than '>'")
 
 split_bar :: [Lexer.Token] -> Parsed<([Lexer.Token], [Lexer.Token])>
 split_bar(tokens) = split_bar_r(tokens, [], false, [], 1)

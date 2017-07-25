@@ -451,6 +451,25 @@ test_pattern(Expr, Run) ->
   , ?_test([1, 2] = Expr(
       "let x = 3, y = [2] in match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
+  , ?_test($h = Expr("(|(a, _)| a)(('h', true))"))
+  , ?_test(2 = Run(
+      "f(3, [x | _]) = 3 + x\n"
+      "main() = f(3, [-1])"
+    ))
+  , ?_assertError(function_clause, Run(
+      "f(3, [x | _]) = 3 + x\n"
+      "main() = f(4, [-1])"
+    ))
+  , ?_test(hey = Run(
+      "enum Foo<A> { Bar(Atom), Baz(A) }\n"
+      "f(Bar(x), [Baz(y), Baz(x) | _]) = y\n"
+      "main() = f(Bar(@hi), [Baz(@hey), Baz(@hi), Baz(@hello)])"
+    ))
+  , ?_assertError(function_clause, Run(
+      "enum Foo<A> { Bar(Atom), Baz(A) }\n"
+      "f(Bar(x), [Baz(y), Baz(x) | _]) = y\n"
+      "main() = f(Bar(@hi), [Baz(@hey), Baz(@hello), Baz(@hello)])"
+    ))
 
 
   , ?_test([] = Expr("let 3 = 3 in []"))

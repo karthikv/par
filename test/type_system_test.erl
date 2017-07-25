@@ -1135,6 +1135,13 @@ pattern_test_() ->
   , ?_test("[String]" = ok_expr(
       "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
     ))
+  , ?_test("A: Num" = ok_expr(
+      "match @io:printable_range() {\n"
+      "  (a, _) => 1\n"
+      "  [] => 2\n"
+      "  @error => 3\n"
+      "}"
+    ))
   , ?_test("Float" = ok_expr(
       "let m = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
       "  match m {\n"
@@ -1146,12 +1153,15 @@ pattern_test_() ->
   , ?_test("[A: Num]" = ok_expr(
       "let x = 3, y = [2] in match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
-  , ?_test("A: Num" = ok_expr(
-      "match @io:printable_range() {\n"
-      "  (a, _) => 1\n"
-      "  [] => 2\n"
-      "  @error => 3\n"
-      "}"
+  , ?_test("(A, B) -> A" = ok_expr("|(a, _)| a"))
+  , ?_test("A: Num -> [B: Num] -> B: Num" = ok_prg(
+      "f(3, [x | _]) = 3 + x",
+      "f"
+    ))
+  , ?_test("Foo<A> -> [Foo<Atom>] -> Atom" = ok_prg(
+      "enum Foo<A> { Bar(Atom), Baz(A) }\n"
+      "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
+      "f"
     ))
   , ?_test(bad_expr(
       "match \"hi\" { \"hey\" => true, \"hello\" => 1 }",
@@ -1189,6 +1199,19 @@ pattern_test_() ->
   , ?_test(bad_expr(
       "let x = 3, y = [2] in match [1] { y => y ++ [1], &x => [x] }",
       {"[A: Num]", "B: Num", l(49, 2), ?FROM_MATCH_PATTERN}
+    ))
+  , ?_test(bad_expr(
+      "(|a, &a| a)(true, @hi)",
+      {"Atom", "Bool", l(18, 3), ?FROM_APP}
+    ))
+  , ?_test(bad_expr(
+      "(|[a | _], a| a)(['a'], 3.0)",
+      {"Float", "Char", l(24, 3), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "enum Foo { Bar(Int), Baz(Char) }\n"
+      "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
+      {"Int", "Char", l(1, 23, 1), ?FROM_APP}
     ))
 
 

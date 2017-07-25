@@ -1,6 +1,7 @@
 -module(interpreter).
 -export([run_ast/2, env_run/2]).
 
+-include("errors.hrl").
 -define(ENV_NAME, interpreter_env).
 
 run_ast(Ast, Args) ->
@@ -62,9 +63,19 @@ eval({fn, _, Args, Expr}, ID) ->
       length(Args) == 0 -> ID;
       true ->
         ChildID = env_child(ID),
-        lists:foreach(fun({{var, _, Name}, V}) ->
-          env_set(Name, V, ChildID)
-        end, lists:zip(Args, Vs)),
+        Names = gb_sets:union(lists:map(fun type_system:pattern_names/1, Args)),
+
+        lists:foreach(fun(Name) ->
+          env_set(Name, {}, ChildID)
+        end, gb_sets:to_list(Names)),
+
+        lists:foreach(fun({V, Pattern}) ->
+          case match(V, Pattern, ChildID) of
+            false -> error(function_clause);
+            true -> true
+          end
+        end, lists:zip(Vs, Args)),
+
         ChildID
     end,
 

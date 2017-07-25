@@ -361,12 +361,18 @@ infer_comps(Comps) ->
   Result.
 
 infer({fn, _, Args, Expr}, C) ->
-  {ArgTsRev, C1} = lists:foldl(fun({var, _, ArgName}, {Ts, FoldC}) ->
-    ArgTV = tv_server:fresh(FoldC#ctx.pid),
-    {[ArgTV | Ts], env_add(ArgName, {no_dep, ArgTV}, false, FoldC)}
-  end, {[], C}, Args),
+  Names = gb_sets:union(lists:map(fun pattern_names/1, Args)),
+  C1 = gb_sets:fold(fun(Name, FoldC) ->
+    TV = tv_server:fresh(FoldC#ctx.pid),
+    env_add(Name, {no_dep, TV}, false, FoldC)
+  end, C, Names),
 
-  {ReturnT, C2} = infer(Expr, C1),
+  {ArgTsRev, C2} = lists:foldl(fun(Pattern, {Ts, FoldC}) ->
+    {PatternT, FoldC1} = infer(Pattern, FoldC),
+    {[PatternT | Ts], FoldC1}
+  end, {[], C1}, Args),
+
+  {ReturnT, C3} = infer(Expr, C2),
   T = if
     length(Args) == 0 -> {lam, none, ReturnT};
     true -> lists:foldl(fun(ArgT, LastT) ->
@@ -375,7 +381,7 @@ infer({fn, _, Args, Expr}, C) ->
   end,
 
   % restore original env
-  {T, C2#ctx{env=C#ctx.env}};
+  {T, C3#ctx{env=C#ctx.env}};
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
@@ -1062,8 +1068,9 @@ env_get(Name, C) ->
 env_add(Name, Value, Exported, C) ->
   % just a sanity assertion that Value is in the right format
   case Value of
+    % add_dep must be a TV so we can add V to the list of deps when accessed
     {add_dep, {tv, _, _, _}, _} -> true;
-    {no_dep, {tv, _, _, _}} -> true
+    {no_dep, _} -> true
   end,
   Key = {C#ctx.module, Name},
   C#ctx{env=(C#ctx.env)#{Key => {Value, Exported}}}.

@@ -555,22 +555,27 @@ expr_test_() ->
       ok_expr("|x| x")
     )
   , ?_assertEqual(
-      {fn, l(0, 27), [{var, l(1, 4), "left"}, {var, l(7, 5), "right"}],
-        {tuple, l(14, 13), [
-          {var, l(15, 4), "left"},
-          {var, l(21, 5), "right"}
-        ]}
+      {fn, l(0, 16), [
+          {tuple, l(1, 9), [
+            {var, l(2, 4), "left"},
+            {'_', l(8, 1)}
+          ]}
+        ],
+        {var, l(12, 4), "left"}
       },
-      ok_expr("|left, right| (left, right)")
+      ok_expr("|(left, _)| left")
     )
   , ?_assertEqual(
-      {app, l(0, 16),
-        {fn, l(0, 9), [{var, l(2, 1), "x"}],
-          {app, l(5, 3), {var, l(5, 1), "x"}, [{none, l(6, 2)}]}
+      {app, l(0, 25),
+        {fn, l(0, 18), [
+            {var, l(2, 1), "x"},
+            {cons, l(5, 7), [{int, l(6, 1), 3}], {var, l(10, 1), "t"}}
+          ],
+          {app, l(14, 3), {var, l(14, 1), "x"}, [{none, l(15, 2)}]}
         },
-        [{fn, l(10, 5), [], {int, l(14, 1), 2}}]
+        [{fn, l(19, 5), [], {int, l(23, 1), 2}}]
       },
-      ok_expr("(|x| x())(|-| 2)")
+      ok_expr("(|x, [3 | t]| x())(|-| 2)")
     )
   , ?_assertEqual(
       {fn, l(0, 13), [{var, l(1, 1), "x"}],

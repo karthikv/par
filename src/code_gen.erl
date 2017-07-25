@@ -189,10 +189,14 @@ rep({struct, Loc, StructTE, FieldTEs}, Env) ->
 rep({sig, _, _, _}, _) -> [];
 
 rep({fn, Loc, Args, Expr}, Env) ->
-  {Patterns, Env1} = lists:mapfoldl(fun({var, _, Name}=Var, FoldEnv) ->
-    FoldEnv1 = bind(Name, unknown, FoldEnv),
-    {rep(Var, FoldEnv1), FoldEnv1}
-  end, Env, Args),
+  Names = gb_sets:union(lists:map(fun type_system:pattern_names/1, Args)),
+  Env1 = gb_sets:fold(fun(Name, FoldEnv) ->
+    bind(Name, unknown, FoldEnv)
+  end, Env, Names),
+
+  Patterns = lists:map(fun(Pattern) ->
+    rep(Pattern, Env1#{'*in_pattern' => true})
+  end, Args),
 
   Line = ?START_LINE(Loc),
   Clause = {clause, Line, Patterns, [], [rep(Expr, Env1)]},
@@ -505,8 +509,8 @@ rep_pattern({var, _, Name}=Pattern, {fn, _, Args, _}=Expr, Env) ->
 
 rep_pattern(Pattern, Expr, Env) ->
   % TODO arity(Expr) for simple patterns
-  Env1 = gb_sets:fold(fun(Name, NestedEnv) ->
-    bind(Name, unknown, NestedEnv)
+  Env1 = gb_sets:fold(fun(Name, FoldEnv) ->
+    bind(Name, unknown, FoldEnv)
   end, Env, type_system:pattern_names(Pattern)),
   {rep(Pattern, Env1#{'*in_pattern' => true}), rep(Expr, Env), Env1}.
 

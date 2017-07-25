@@ -25,6 +25,7 @@
 %   - Map/Set operations?
 % - [1 week] REPL
 %   - Interpreter import implementation
+%   - Interpreter better error messages and backtraces
 % - [3 days] Second pass for error messages (see TODOs in code)
 %   - Specify expected type for operators
 %   - Only show rigid if it matters
@@ -34,6 +35,7 @@
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
 % - [1 week] Lexer/Parser error messages
+%   - For "expected closing ___", mark matching open ___
 %   - Maybe change enclosed methods to accept open tag as well?
 %     - Would allow for more uniform error messages
 %   - Test these errors
@@ -44,7 +46,6 @@
 % - Using EUnit from par
 % - if-let condition and other condition (or maybe when statement?)
 % - Hex escaped characters \xff or \x{...} in strings
-% - Interpreter backtraces
 % - Update naming conventions
 % - Concurrency
 % - Move gm_start into on_load?
