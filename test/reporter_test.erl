@@ -125,7 +125,7 @@ expr_test_() ->
   % type system errors
   , golden_expr_("ts-mismatch", "true + 5")
   , golden_expr_("ts-other", "let a = 3 in (a, true, b)")
-  , golden_expr_("ts-order", "let a = 3 :: Bool in a.field")
+  , golden_expr_("ts-order", "let a = 3 : Bool in a.field")
   , golden_expr_("ts-extra-args-lam", "(|x| x)(true, @hi)")
   , golden_expr_(
       "ts-extra-args-recursive",

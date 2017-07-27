@@ -202,7 +202,7 @@ rep({fn, Loc, Args, Expr}, Env) ->
   Clause = {clause, Line, Patterns, [], [rep(Expr, Env1)]},
   {'fun', Line, {clauses, [Clause]}};
 
-rep({binary_op, _, '::', Expr, _}, Env) -> rep(Expr, Env);
+rep({binary_op, _, ':', Expr, _}, Env) -> rep(Expr, Env);
 
 rep({none, Loc}, _) -> eabs(none, ?START_LINE(Loc));
 rep({N, Loc, V}, _)
@@ -560,7 +560,7 @@ env_set(Name, Value, Env) -> Env#{{module(Env), Name} => Value}.
 env_get(Name, Env) -> maps:get({module(Env), Name}, Env).
 
 arity({fn, _, Args, _}, _) -> length(Args);
-arity({binary_op, _, '::', Expr, _}, Env) -> arity(Expr, Env);
+arity({binary_op, _, ':', Expr, _}, Env) -> arity(Expr, Env);
 arity({N, _, Name}, Env) when N == var; N == con_token ->
   {_, Arity} = env_get(Name, Env),
   Arity;

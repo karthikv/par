@@ -1,10 +1,10 @@
 module Lexer
 
 struct Loc {
-  start_line :: Int
-  start_col :: Int
-  end_line :: Int
-  end_col :: Int
+  start_line : Int
+  start_col : Int
+  end_line : Int
+  end_col : Int
 }
 
 enum Token {
@@ -41,7 +41,6 @@ enum Token {
   Comment(Loc, [Char])
   Div(Loc) @"/"
 
-  Sig(Loc) @"::"
   Ext(Loc) @":="
   Colon(Loc) @":"
 
@@ -155,7 +154,6 @@ tokenize_r(chs, line, col, tokens) =
             (Comment(inc(loc, 2 + len), comment), t)
         ['/' | t] => (Div(inc(loc, 1)), t)
 
-        [':', ':' | t] => (Sig(inc(loc, 2)), t)
         [':', '=' | t] => (Ext(inc(loc, 2)), t)
         [':' | t] => (Colon(inc(loc, 1)), t)
 
@@ -244,7 +242,7 @@ tokenize_r(chs, line, col, tokens) =
           else
             (Unexpected(inc(loc, 1), [h], "Unexpected character"), t)
       }
-      next_loc = @erlang:element(2, token) :: Loc
+      next_loc = @erlang:element(2, token) : Loc
     in tokenize_r(left, next_loc.end_line, next_loc.end_col, [token | tokens])
 
 tokenize_num(loc, chs) = tokenize_num_r(loc, chs, false, [])
@@ -331,10 +329,10 @@ chs_to_token_fn = {
   to_list("discard") => Discard
 }
 
-get :: A -> Map<A, B> -> B -> B
+get : A -> Map<A, B> -> B -> B
 get = @maps:get/3
 
-is_key :: A -> Map<A, B> -> Bool
+is_key : A -> Map<A, B> -> Bool
 is_key = @maps:is_key/2
 
 until_nl(chs) = until_nl_r(chs, [], 0)
@@ -376,35 +374,35 @@ unesc(ch) = match ch {
   _ => ch
 }
 
-filter :: (A -> Bool) -> [A] -> [A]
+filter : (A -> Bool) -> [A] -> [A]
 filter = @lists:filter/2
 
-flip :: (A -> B -> C) -> B -> A -> C
+flip : (A -> B -> C) -> B -> A -> C
 flip(f, b, a) = f(a, b)
 
-length :: [A] -> Int
+length : [A] -> Int
 length = @erlang:length/1
 
-to_str :: [Char] -> String
+to_str : [Char] -> String
 to_str = @erlang:list_to_binary/1
 
-to_atom :: [Char] -> Atom
+to_atom : [Char] -> Atom
 to_atom = @erlang:list_to_atom/1
 
-str_to_atom :: String -> Atom
+str_to_atom : String -> Atom
 str_to_atom = flip(@erlang:binary_to_atom/2, @latin1)
 
-to_int :: [Char] -> Int
+to_int : [Char] -> Int
 to_int = @erlang:list_to_integer/1
 
-to_float :: [Char] -> Float
+to_float : [Char] -> Float
 to_float = @erlang:list_to_float/1
 
-to_list :: String -> [Char]
+to_list : String -> [Char]
 to_list = @erlang:binary_to_list/1
 
-reverse :: [A] -> [A]
+reverse : [A] -> [A]
 reverse = @lists:reverse/1
 
-print :: A -> A
+print : A -> A
 print(a) = { @io:format("~p~n", [a]); a }

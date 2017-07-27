@@ -93,7 +93,7 @@ test_expr(Expr) ->
   , ?_test([true, false] =
              Expr("if false || true && 3.5 < 4 then [true, false] else [true]"))
   , ?_test(none = Expr("if true then @foo"))
-  , ?_test(none = Expr("if false then @io:nl() :: () else discard 3"))
+  , ?_test(none = Expr("if false then @io:nl() : () else discard 3"))
   % ensures that we handle conditions that aren't valid guard clauses
   , ?_test($a = Expr("let f = |x| x == 3 in if f(3) then 'a' else 'b'"))
 
@@ -206,8 +206,8 @@ code_gen_prg_test_() -> test_prg(fun run_code_gen/1).
 interpreter_prg_test_() -> test_prg(fun run_interpreter/1).
 test_prg(Run) ->
   [ ?_test(3 = Run(
-     "main :: () -> Int\n"
-     "main() = 3 :: Int"
+     "main : () -> Int\n"
+     "main() = 3 : Int"
     ))
   , ?_test(8 = Run(
       "fib(n) = if n == 0 || n == 1 then n else fib(n - 1) + fib(n - 2)\n"
@@ -345,58 +345,58 @@ test_record(Expr, Run) ->
 
   % named struct
   , ?_assertEqual(#{bar => 3}, Run(
-      "struct Foo { bar :: Int }\n"
+      "struct Foo { bar : Int }\n"
       "main() = Foo(3)"
     ))
   , ?_assertEqual(#{bar => 3}, Run(
-      "struct Foo { bar :: Int }\n"
+      "struct Foo { bar : Int }\n"
       "main() = Foo { bar = 3 }"
     ))
   , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (Run(
-      "struct Foo { bar :: Int, baz :: [String] }\n"
+      "struct Foo { bar : Int, baz : [String] }\n"
       "main() = Foo(3)"
     ))([<<"hello">>]))
   , ?_assertEqual(#{baz => [first, second], bar => 15}, Run(
-      "struct Foo { bar :: Int, baz :: [Atom] }\n"
+      "struct Foo { bar : Int, baz : [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
     ))
   , ?_assertEqual(#{bar => hi, baz => true}, (Run(
-      "struct Foo<X, Y> { bar :: X, baz :: Y }\n"
+      "struct Foo<X, Y> { bar : X, baz : Y }\n"
       "main() = Foo(@hi)"
     ))(true))
   , ?_assertEqual(#{bar => hi}, Run(
-      "struct Foo<X> { bar :: X }\n"
+      "struct Foo<X> { bar : X }\n"
       "main() = Foo { bar = @hi }"
     ))
   % Won't be able to create a valid Foo, but should still type check.
   , ?_test(true = Run(
-      "struct Foo { baz :: Foo }\n"
+      "struct Foo { baz : Foo }\n"
       "main() = true"
     ))
   , ?_assertEqual(#{bar => hi, baz => [#{bar => hello, baz => []}]}, Run(
-      "struct Foo { bar :: Atom, baz :: [Foo] }\n"
+      "struct Foo { bar : Atom, baz : [Foo] }\n"
       "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
     ))
 
 
   % named struct updates
   , ?_assertEqual(#{bar => 7}, Run(
-      "struct Foo { bar :: Int }\n"
-      "f(x) = { x :: Foo | bar = 7 }\n"
+      "struct Foo { bar : Int }\n"
+      "f(x) = { x : Foo | bar = 7 }\n"
       "main() = f({ bar = 3 })"
     ))
   , ?_assertEqual(#{bar => true}, Run(
-      "struct Foo { bar :: Int }\n"
+      "struct Foo { bar : Int }\n"
       "foo = Foo { bar = 3 }\n"
       "main() = { foo | bar := true }"
     ))
   , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
-      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
       "main() = { foo | bar := true }"
     ))
   , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
-      "struct Foo<A> { bar :: A, baz :: [String] }\n"
+      "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
       "main() = Foo { foo | bar := true }"
     ))
@@ -404,7 +404,7 @@ test_record(Expr, Run) ->
 
   % generalization cases
   , ?_test({<<"hi">>, true} = Run(
-      "struct Foo<A> { bar :: A }\n"
+      "struct Foo<A> { bar : A }\n"
       "main() = let id(a) = a, f = Foo { bar = id } in\n"
       "  (f.bar(\"hi\"), f.bar(true))"
     ))
@@ -425,7 +425,7 @@ test_pattern(Expr, Run) ->
   , ?_test(5.0 = Expr("match |x| x { id => let y = id(true) in id(5.0) }"))
   , ?_test({6, 6.0, 8, 8.0} = Expr(
       "match (3, 4) {\n"
-      "  (a, b) => (a + 3 :: Int, a + 3.0, b + 4 :: Int, b + 4.0)\n"
+      "  (a, b) => (a + 3 : Int, a + 3.0, b + 4 : Int, b + 4.0)\n"
       "}"
     ))
   , ?_test(5 = Run(
@@ -475,7 +475,7 @@ test_pattern(Expr, Run) ->
   , ?_test([] = Expr("let 3 = 3 in []"))
   , ?_test({5, 5.0} = Expr(
       "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 :: Int, x + 3.0)"
+      "  (x + 3 : Int, x + 3.0)"
     ))
   , ?_test(7 = Expr("let [_, a] = [1, 3], (&a, b, &a) = (3, 7, 3) in b"))
 
@@ -544,7 +544,7 @@ test_import(Many) ->
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "x :: Foo.Baz\n"
+        "x : Foo.Baz\n"
         "x = Foo.BazInt(3)\n"
         "main() = x"
       }
@@ -552,11 +552,11 @@ test_import(Many) ->
   , ?_assertEqual(
       #{a => 3},
       Many([
-        {"foo", "module Foo struct Baz { a :: Int }"},
+        {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
           "module Bar\n"
           "import \"./foo\"\n"
-          "x :: Foo.Baz\n"
+          "x : Foo.Baz\n"
           "x = Foo.Baz(3)\n"
           "main() = x"
         }
@@ -565,7 +565,7 @@ test_import(Many) ->
   , ?_assertEqual(
       #{a => 3},
       Many([
-        {"foo", "module Foo struct Baz { a :: Int }"},
+        {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
           "module Bar\n"
           "import \"./foo\"\n"
@@ -576,7 +576,7 @@ test_import(Many) ->
   , ?_assertEqual(
       #{a => 5},
       Many([
-        {"foo", "module Foo struct Baz { a :: Int }"},
+        {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
           "module Bar\n"
           "import \"./foo\"\n"
@@ -590,7 +590,7 @@ test_import(Many) ->
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "x :: Foo.Foo\n"
+        "x : Foo.Foo\n"
         "x = Foo.Foo(3)\n"
         "main() = x"
       }
@@ -607,12 +607,12 @@ test_import(Many) ->
   , ?_assertEqual(
       {'Baz', #{a => 3}},
       Many([
-        {"foo", "module Foo struct Baz { a :: Int }"},
+        {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
           "module Bar\n"
           "import \"./foo\"\n"
           "enum Baz { Baz(Foo.Baz) }\n"
-          "x :: Baz\n"
+          "x : Baz\n"
           "x = Baz(Foo.Baz(3))\n"
           "main() = x"
         }

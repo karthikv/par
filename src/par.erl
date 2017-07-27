@@ -5,7 +5,6 @@
 % TODO:
 % - [1 day] Direct imports
 % - [3 days] Better syntax
-%   - One colon instead of two for signatures?
 %   - Colon syntax for records?
 %   - Allow trailing commas?
 %   - Can we do string concat on multiple lines?

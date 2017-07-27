@@ -82,7 +82,7 @@ eval({fn, _, Args, Expr}, ID) ->
     eval(Expr, NewID)
   end);
 
-eval({binary_op, _, '::', Expr, _}, ID) -> eval(Expr, ID);
+eval({binary_op, _, ':', Expr, _}, ID) -> eval(Expr, ID);
 
 eval({none, _}, _) -> none;
 eval({N, _, V}, _)

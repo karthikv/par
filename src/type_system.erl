@@ -422,7 +422,7 @@ infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
   {norm_sig_type(SigT, maps:keys(C1#ctx.ifaces), C#ctx.pid), C1};
 
-infer({binary_op, Loc, '::', Expr, Sig}, C) ->
+infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   G = C#ctx.gnr,
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
 
@@ -1817,6 +1817,6 @@ pretty(none) -> "()".
 
 pretty_field_map(FieldMap) ->
   FieldStrs = maps:fold(fun(Name, T, Strs) ->
-    [?FMT("~s :: ~s", [Name, pretty(T)]) | Strs]
+    [?FMT("~s : ~s", [Name, pretty(T)]) | Strs]
   end, [], FieldMap),
   string:join(lists:sort(FieldStrs), ", ").
