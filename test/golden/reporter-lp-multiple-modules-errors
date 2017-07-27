@@ -1,0 +1,20 @@
+*** file /tmp/reporter-test-many/bar.par ***
+
+Unexpected character:
+2: a = `14.153.0
+       ^
+
+Can't have multiple dots in numeric literal:
+2: a = `14.153.0
+        ^^^^^^^
+
+*** file /tmp/reporter-test-many/baz.par ***
+
+Expected comma ',' delimiter after expression:
+2: a(x y z) = *4.5
+       ^
+
+Expected an expression:
+2: a(x y z) = *4.5
+              ^
+

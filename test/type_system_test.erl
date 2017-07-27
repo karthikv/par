@@ -190,6 +190,7 @@ expr_test_() ->
   , ?_test("Char" = ok_expr("\'\\n\'"))
   , ?_test("String" = ok_expr("\"\""))
   , ?_test("String" = ok_expr("\"some string\\n\""))
+  , ?_test("String" = ok_expr("\"some\\\nstring\""))
   , ?_test("Atom" = ok_expr("@hello"))
   , ?_test("Atom" = ok_expr("@\"hello world\""))
 

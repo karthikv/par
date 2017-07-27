@@ -1412,7 +1412,7 @@ def_test_() ->
       "enum SumType<A> {\n"
       "  Foo(A) Bar\n"
       "}",
-      "expected comma ',' or newline",
+      "Expected comma ',' or newline",
       l(1, 9, 3)
     )
 
@@ -1507,7 +1507,7 @@ def_test_() ->
       "struct ProductType<A> {\n"
       "  foo :: A bar :: Atom\n"
       "}",
-      "expected comma ',' or newline",
+      "Expected comma ',' or newline",
       l(1, 11, 3)
     )
   ].

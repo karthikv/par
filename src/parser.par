@@ -129,14 +129,14 @@ export parse(tokens) = match tokens {
   [Lexer.Module(_) | t] =>
     add_err(
       many(def, tokens),
-      "expected module name to follow module keyword",
+      "Expected module name to follow module keyword",
       head_loc(t)
     )
 
   _ =>
     add_err(
       many(def, tokens),
-      "expected module name to follow module keyword",
+      "Expected module name to follow module keyword",
       head_loc(tokens)
     )
 }
@@ -150,7 +150,7 @@ imports(tokens) = match tokens {
     )
 
   [Lexer.Import(_) | t] =>
-    head_loc(t) |> one_err("expected string path to import")
+    head_loc(t) |> one_err("Expected string path to import")
 
   _ => parsed(([], tokens))
 }
@@ -176,8 +176,8 @@ def(tokens) = match tokens {
     )
 
   _ => head_loc(tokens) |> one_err(
-    "expected either global definition, global signature, keyword 'enum', " ++
-    "or keyword 'struct' "
+    "Expected either global definition, global signature, keyword 'enum', " ++
+    "or keyword 'struct'"
   )
 }
 
@@ -189,7 +189,7 @@ fn_or_expr(s, tokens) = match tokens {
     )
 
   [Lexer.LParen(_), Lexer.RParen(_) | t] =>
-    head_loc(t) |> one_err("expected equals '='")
+    head_loc(t) |> one_err("Expected equals '='")
 
   [Lexer.LParen(_) | t] =>
     parse_args(pattern, s, t) |> pbind(|v| match v {
@@ -198,13 +198,13 @@ fn_or_expr(s, tokens) = match tokens {
           (Fn(range(s, node_loc(node)), args, node), rest)
         )
 
-      (_, _, t) => head_loc(t) |> one_err("expected equals '='")
+      (_, _, t) => head_loc(t) |> one_err("Expected equals '='")
     })
 
   [Lexer.Assign(_) | t] => expr(t)
 
   _ => head_loc(tokens) |> one_err(
-    "expected '(' or '=' to follow variable identifier in global definition"
+    "Expected '(' or '=' to follow variable identifier in global definition"
   )
 }
 
@@ -218,13 +218,13 @@ enumeration(tokens) = match tokens {
           |> pmap(|options| (Enum(l, node, options), rest))
       )
 
-  _ => head_loc(tokens) |> one_err("expected keyword 'enum'")
+  _ => head_loc(tokens) |> one_err("Expected keyword 'enum'")
 }
 
 tv :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 tv(tokens) = match tokens {
   [Lexer.TV(l, tv) | t] => parsed((TV(l, tv, Unit(l)), t))
-  _ => head_loc(tokens) |> one_err("expected type variable")
+  _ => head_loc(tokens) |> one_err("Expected type variable")
 }
 
 option :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -249,7 +249,7 @@ option(tokens) = match tokens {
   [Lexer.Con(l, name) | t] =>
     (Option(l, Con(l, name), [], None), t) |> parsed
 
-  _ => head_loc(tokens) |> one_err("expected capitalized name of option")
+  _ => head_loc(tokens) |> one_err("Expected capitalized name of option")
 }
 
 structure :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -262,7 +262,7 @@ structure(tokens) = match tokens {
           |> pmap(|field_sigs| (Struct(l, node, field_sigs), rest))
       )
 
-  _ => head_loc(tokens) |> one_err("expected keyword 'struct'")
+  _ => head_loc(tokens) |> one_err("Expected keyword 'struct'")
 }
 
 new_type_braces :: Lexer.Loc -> [Lexer.Token] ->
@@ -278,7 +278,7 @@ new_type_braces(s, tokens) = match tokens {
             (l, Gen(gen_l, Con(con_l, con), tvs), inner, rest)
           )
 
-      (_, _, t) => head_loc(t) |> one_err("expected open brace '{'")
+      (_, _, t) => head_loc(t) |> one_err("Expected open brace '{'")
     })
 
   [Lexer.Con(con_l, con), Lexer.LBrace(_) | t] =>
@@ -286,8 +286,8 @@ new_type_braces(s, tokens) = match tokens {
       (l, Con(con_l, con), inner, rest)
     )
 
-  [Lexer.Con(_, _) | t] => head_loc(t) |> one_err("expected open brace '{'")
-  _ => head_loc(tokens) |> one_err("expected capitalized type name")
+  [Lexer.Con(_, _) | t] => head_loc(t) |> one_err("Expected open brace '{'")
+  _ => head_loc(tokens) |> one_err("Expected capitalized type name")
 }
 
 expr :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -311,7 +311,7 @@ expr_r(state, stack, tokens) = match state {
             Native(range(s, e), LitAtom(s, atom), Var(var_l, name), arity)
               |> recurse(t)
           [Lexer.Div(_) | t] =>
-            head_loc(t) |> one_err("expected integer arity")
+            head_loc(t) |> one_err("Expected integer arity")
 
           [Lexer.LParen(_) | _] =>
             // arity will be updated after parsing args below
@@ -322,7 +322,7 @@ expr_r(state, stack, tokens) = match state {
             head_loc(t) |> one_err(
               "Native functions need to be annotated with their arity " ++
               "(e.g. @lists:filter/2) or called immediately so the arity " ++
-              "is implied."
+              "is implied"
             )
         }
       [Lexer.LitAtom(l, atom) | t] => LitAtom(l, atom) |> recurse(t)
@@ -421,7 +421,7 @@ expr_r(state, stack, tokens) = match state {
             (node, []) => Block(l, [node]) |> recurse(rest)
 
             (_, t) => head_loc(t) |> one_err(
-              "expected either a fat arrow '=>' to define a key/value pair " ++
+              "Expected either a fat arrow '=>' to define a key/value pair " ++
               "in a map literal, a semicolon ';' to separate a sequence of " ++
               "expressions in block, or a pipe '|' to update a record"
             )
@@ -438,7 +438,7 @@ expr_r(state, stack, tokens) = match state {
           parsed_args = many_delim_cb(|node, rest| match rest {
             [Lexer.Bar(_) | t] => parsed((false, t))
             [_ | _] => delim_cb(Lexer.Comma, "comma ','", node, rest)
-            [] => head_loc(rest) |> one_err("expected closing pipe '|'")
+            [] => head_loc(rest) |> one_err("Expected closing pipe '|'")
           }, pattern, t)
         in
           parsed_args |> pbind(|(args, rest)|
@@ -471,10 +471,10 @@ expr_r(state, stack, tokens) = match state {
                 |> pbind(recurse(rest))
             )
 
-          (_, t) => head_loc(t) |> one_err("expected open brace '{'")
+          (_, t) => head_loc(t) |> one_err("Expected open brace '{'")
         })
 
-      _ => head_loc(tokens) |> one_err("expected an expression")
+      _ => head_loc(tokens) |> one_err("Expected an expression")
     }
 
   AcceptOp =>
@@ -577,8 +577,8 @@ field_init(tokens) = match tokens {
       (Init(range(s, node_loc(node)), Var(s, name), node), rest)
     )
 
-  [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("expected equals '='")
-  [] => head_loc(tokens) |> one_err("expected field name")
+  [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("Expected equals '='")
+  [] => head_loc(tokens) |> one_err("Expected field name")
 }
 
 field_ext :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -593,8 +593,8 @@ field_ext(tokens) = match tokens {
       (Ext(range(s, node_loc(node)), Var(s, name), node), rest)
     )
 
-  [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("expected equals '='")
-  [] => head_loc(tokens) |> one_err("expected field name")
+  [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("Expected equals '='")
+  [] => head_loc(tokens) |> one_err("Expected field name")
 }
 
 kv_pair :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
@@ -602,7 +602,7 @@ kv_pair(tokens) = expr(tokens) |> pbind(|v| match v {
   (key, [Lexer.FatArrow(_) | t]) =>
     expr(t) |> pmap(|(value, rest)| ((key, value), rest))
 
-  (_, t) => head_loc(t) |> one_err("expected fat arrow '=>'")
+  (_, t) => head_loc(t) |> one_err("Expected fat arrow '=>'")
 })
 
 type_expr :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -643,7 +643,7 @@ type_expr_r(lhs, tokens) = match lhs {
           type_expr(inner)
             |> pbind(|(param, rest)|
               if length(rest) > 0 then
-                head_loc(rest) |> one_err("expected closing ']'")
+                head_loc(rest) |> one_err("Expected closing ']'")
               else
                 parsed([param])
             )
@@ -680,7 +680,7 @@ type_expr_r(lhs, tokens) = match lhs {
             |> pbind(recurse(rest))
         )
 
-      _ => head_loc(tokens) |> one_err("expected a type expression")
+      _ => head_loc(tokens) |> one_err("Expected a type expression")
     }
 
   Some(left) => match tokens {
@@ -701,9 +701,9 @@ field_sig(tokens) = match tokens {
     )
 
   [Lexer.Var(_, _) | t] =>
-    head_loc(t) |> one_err("expected start of type signature '::'")
+    head_loc(t) |> one_err("Expected start of type signature '::'")
 
-  _ => head_loc(tokens) |> one_err("expected field name")
+  _ => head_loc(tokens) |> one_err("Expected field name")
 }
 
 if_expr :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -717,7 +717,7 @@ if_expr(tokens) = match tokens {
         )
       )
 
-    (_, t) => head_loc(t) |> one_err("expected equals '='")
+    (_, t) => head_loc(t) |> one_err("Expected equals '='")
   })
 
   [Lexer.If(s) | t] => expr(t) |> pbind(|(cond, rest)|
@@ -726,7 +726,7 @@ if_expr(tokens) = match tokens {
     )
   )
 
-  _ => head_loc(tokens) |> one_err("expected keyword 'if'")
+  _ => head_loc(tokens) |> one_err("Expected keyword 'if'")
 }
 
 then_else :: [Lexer.Token] -> Parsed<((Node, Node), [Lexer.Token])>
@@ -738,7 +738,7 @@ then_else(tokens) = match tokens {
     (then_expr, t) => ((then_expr, Unit(node_loc(then_expr))), t) |> parsed
   })
 
-  _ => head_loc(tokens) |> one_err("expected keyword 'then'")
+  _ => head_loc(tokens) |> one_err("Expected keyword 'then'")
 }
 
 let_expr :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -748,7 +748,7 @@ let_expr(tokens) = match tokens {
       parsed_bindings = many_delim_cb(|node, rest| match rest {
         [Lexer.In(_) | t] => parsed((false, t))
         [_ | _] => delim_comma_or_nl_cb(node, rest)
-        [] => head_loc(rest) |> one_err("expected keyword 'in'")
+        [] => head_loc(rest) |> one_err("Expected keyword 'in'")
       }, binding, t)
     in
       parsed_bindings |> pbind(|(bindings, rest)|
@@ -757,7 +757,7 @@ let_expr(tokens) = match tokens {
         )
       )
 
-  _ => head_loc(tokens) |> one_err("expected keyword 'let'")
+  _ => head_loc(tokens) |> one_err("Expected keyword 'let'")
 }
 
 binding :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -769,7 +769,7 @@ binding(tokens) = match tokens {
           (Binding(range(s, e), Var(s, name), lam), rest)
       )
     else
-      head_loc(t) |> one_err("expected equals '='")
+      head_loc(t) |> one_err("Expected equals '='")
 
   [Lexer.Var(s, name), Lexer.LParen(_) | t] =>
     parse_args(pattern, s, t) |> pbind(|v| match v {
@@ -779,7 +779,7 @@ binding(tokens) = match tokens {
             (Binding(range(s, e), Var(s, name), lam), rest)
         )
 
-      (_, _, t) => head_loc(t) |> one_err("expected equals '='")
+      (_, _, t) => head_loc(t) |> one_err("Expected equals '='")
     })
 
   _ => pattern(tokens) |> pbind(|v| match v {
@@ -788,7 +788,7 @@ binding(tokens) = match tokens {
         (Binding(range(node_loc(left), node_loc(right)), left, right), rest)
       )
 
-    (_, t) => head_loc(t) |> one_err("expected equals '='")
+    (_, t) => head_loc(t) |> one_err("Expected equals '='")
   })
 }
 
@@ -837,7 +837,7 @@ pattern(tokens) = let finish(t, node) = parsed((node, t)) in match tokens {
         |> pmap(|node| (node, rest))
     )
 
-  _ => head_loc(tokens) |> one_err("expected pattern")
+  _ => head_loc(tokens) |> one_err("Expected pattern")
 }
 
 case :: [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -847,7 +847,7 @@ case(tokens) = pattern(tokens) |> pbind(|v| match v {
       (Case(range(node_loc(left), node_loc(right)), left, right), rest)
     )
 
-  (_, t) => head_loc(t) |> one_err("expected fat arrow '=>' after pattern")
+  (_, t) => head_loc(t) |> one_err("Expected fat arrow '=>' after pattern")
 })
 
 
@@ -918,7 +918,7 @@ parse_list(f, s, tokens) =
         else
           f(right) |> pbind(|(base, rest)|
             if length(rest) > 0 then
-              head_loc(rest) |> one_err("expected closing ']'")
+              head_loc(rest) |> one_err("Expected closing ']'")
             else
               parsed(Cons(l, elems, base))
           )
@@ -963,7 +963,7 @@ many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|(item, rest)|
 
 delim_cb :: (Lexer.Loc -> Lexer.Token) -> String -> T -> [Lexer.Token] ->
   Parsed<(Bool, [Lexer.Token])>
-delim_cb(delim, delim_str, v, tokens) =
+delim_cb(delim, delim_str, _, tokens) =
   if let [] = tokens then
     parsed((false, []))
   else
@@ -972,7 +972,7 @@ delim_cb(delim, delim_str, v, tokens) =
         parsed((t != [], t))
       else
         head_loc(tokens) |> one_err(
-          "expected " ++ delim_str ++ " delimiter after expression"
+          "Expected " ++ delim_str ++ " delimiter after expression"
         )
 
 many_delim :: (Lexer.Loc -> Lexer.Token) -> String ->
@@ -1016,7 +1016,7 @@ delim_or_nl_cb(delim, delim_str, node, tokens) =
         parsed((tokens != [], tokens))
       else
         one_err(
-          "expected either " ++ delim_str ++ " or newline delimiter",
+          "Expected either " ++ delim_str ++ " or newline delimiter",
           Some(l)
         )
 
@@ -1053,7 +1053,7 @@ enclosed_r(inner, depth, open, close, close_str, s, tokens) =
         else
           enclosed_r([h | inner], depth, open, close, close_str, s, t)
 
-    [] => one_err("expected " ++ close_str ++ "", None)
+    [] => one_err("Expected " ++ close_str ++ "", None)
   }
 
 enclosed_bracket :: Lexer.Loc -> [Lexer.Token] ->
@@ -1092,7 +1092,7 @@ split_bar_r(tokens, left, seen_bar, right, depth) =
       if depth == 1 then
         if seen_bar then
           one_err(
-            "expected an expression; already saw a '|' within " ++
+            "Expected an expression; already saw a '|' within " ++
               "this list literal",
             Some(l)
           )

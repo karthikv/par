@@ -1,0 +1,6 @@
+*** file [infer-prg] ***
+
+Unexpected character:
+2: expr = let a = ^3 in a
+                  ^
+

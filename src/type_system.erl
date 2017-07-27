@@ -131,8 +131,10 @@
 load() -> 'Parser':'_@init'(gb_sets:new()).
 
 infer_file(Path) ->
-  {_, Comps, _} = parse_file(Path, #{}),
-  infer_comps(Comps).
+  case parse_file(Path, #{}) of
+    {ok, _, Comps, _} -> infer_comps(Comps);
+    {errors, Errors, _} -> Errors
+  end.
 
 parse_file(RawPath, Parsed) ->
   Path = case filename:extension(RawPath) of
@@ -141,55 +143,88 @@ parse_file(RawPath, Parsed) ->
   end,
 
   case maps:find(Path, Parsed) of
-    {ok, Module} -> {Module, [], Parsed};
+    {ok, {module, Module}} -> {ok, Module, [], Parsed};
+    {ok, skip} -> skip;
+
     error ->
-      {ok, Binary} = file:read_file(Path),
-      Contents = binary_to_list(Binary),
-      {ok, Tokens} = 'Lexer':tokenize(Contents),
+      case file:read_file(Path) of
+        {error, Reason} ->
+          {errors, [{read_error, Path, Reason}], Parsed#{Path => skip}};
 
-      #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
-      {module, _, {con_token, _, Module}, Imports, _} = Ast,
-      Parsed1 = Parsed#{Path => Module},
+        {ok, Binary} ->
+          Prg = binary_to_list(Binary),
 
-      Dir = filename:dirname(Path),
-      {Deps, Comps, Parsed2} = lists:foldr(fun(Import, Memo) ->
-        {import, _, {str, _, DepPath}} = Import,
-        {FoldModules, FoldComps, FoldParsed} = Memo,
+          case parse_prg(Prg, Path) of
+            {ok, Ast} ->
+              {module, _, {con_token, _, Module}, Imports, _} = Ast,
+              Parsed1 = Parsed#{Path => {module, Module}},
 
-        FullPath = filename:join(Dir, binary_to_list(DepPath)),
-        {DepModule, DepComps, FoldParsed1} = parse_file(FullPath, FoldParsed),
-        {[DepModule | FoldModules], [DepComps | FoldComps], FoldParsed1}
-      end, {[], [], Parsed1}, Imports),
+              Comp = #comp{module=Module, ast=Ast, path=Path, prg=Prg},
+              Dir = filename:dirname(Path),
+
+              {Deps, Comps, AllErrors, Parsed2} = lists:foldr(fun(Import, Memo) ->
+                {import, Loc, {str, _, DepPath}} = Import,
+                {FoldModules, FoldComps, FoldAllErrors, FoldParsed} = Memo,
+
+                FullPath = filename:join(Dir, binary_to_list(DepPath)),
+                case parse_file(FullPath, FoldParsed) of
+                  {ok, DepModule, DepComps, FoldParsed1} ->
+                    {[DepModule | FoldModules], [DepComps | FoldComps],
+                     FoldAllErrors, FoldParsed1};
+
+                  {errors, [{read_error, ImportPath, Reason}], FoldParsed1} ->
+                    ImportError = {import_error, Loc, ImportPath, Reason, Comp},
+                    {FoldModules, FoldComps, [[ImportError] | FoldAllErrors],
+                     FoldParsed1};
+
+                  {errors, DepAllErrors, FoldParsed1} ->
+                    {FoldModules, FoldComps, [DepAllErrors | FoldAllErrors],
+                     FoldParsed1};
+
+                  skip -> Memo
+                end
+              end, {[], [], [], Parsed1}, Imports),
+
+              case AllErrors of
+                [_ | _] -> {errors, lists:append(AllErrors), Parsed2};
+                _ ->
+                  FullComp = Comp#comp{deps=Deps},
+                  {ok, Module, lists:append([[FullComp] | Comps]), Parsed2}
+              end;
+
+            Errors -> {errors, [Errors], Parsed#{Path => skip}}
+          end
+      end
+  end.
+
+infer_prg(Prg) ->
+  case parse_prg(Prg, "[infer-prg]") of
+    {ok, Ast} ->
+      % infer_prg should only be used only when there are no imports
+      {module, _, {con_token, _, Module}, [], _} = Ast,
+      %% ?LOG("Ast", Ast),
 
       Comp = #comp{
         module=Module,
         ast=Ast,
-        deps=Deps,
-        path=Path,
-        contents=Contents
+        deps=[],
+        path="[infer-prg]",
+        prg=Prg
       },
-      {Module, lists:append([[Comp] | Comps]), Parsed2}
+      infer_comps([Comp]);
+
+    Errors -> Errors
   end.
 
-infer_prg(Prg) ->
-  {ok, Tokens} = if
-    is_list(Prg) -> 'Lexer':tokenize(Prg);
-    is_binary(Prg) -> 'Lexer':tokenize(Prg)
-  end,
-
-  #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
-  % infer_prg should only be used only when there are no imports
-  {module, _, {con_token, _, Module}, [], _} = Ast,
-  %% ?LOG("Ast", Ast),
-
-  Comp = #comp{
-    module=Module,
-    ast=Ast,
-    deps=[],
-    path="[infer-prg]",
-    contents=Prg
-  },
-  infer_comps([Comp]).
+parse_prg(Prg, Path) ->
+  case 'Lexer':tokenize(Prg) of
+    {errors, Errs} -> {lexer_errors, Errs, Path, Prg};
+    {ok, Tokens} ->
+      case 'Parser':parse(Tokens) of
+        #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, Prg};
+        #{value := {some, Ast}} -> {ok, Ast}
+      end
+  end.
 
 infer_comps(Comps) ->
   {ok, Pid} = tv_server:start_link(),

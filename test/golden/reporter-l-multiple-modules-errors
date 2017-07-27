@@ -1,0 +1,16 @@
+*** file /tmp/reporter-test-many/bar.par ***
+
+Unexpected character:
+2: a = `something`
+       ^
+
+Unexpected character:
+2: a = `something`
+                 ^
+
+*** file /tmp/reporter-test-many/baz.par ***
+
+Unterminated string literal:
+2: a = @"hi
+        ^^^
+

@@ -3,7 +3,7 @@
 -include("errors.hrl").
 
 % TODO:
-% - Report lexer/parser errors in cli tool
+% - Struct literal from another module
 % - [1 day] Direct imports
 % - [3 days] Better syntax
 %   - One colon instead of two for signatures?
@@ -18,7 +18,6 @@
 % - [2 days] Better pattern matching
 %   - Negative numbers and unit in patterns
 %   - Record types
-%   - Directly matching function args
 %   - Disallow pattern matching w/ struct Con(...) fn?
 %   - Allow when clause and or?
 % - [2 weeks] Stdlib

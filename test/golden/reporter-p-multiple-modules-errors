@@ -1,0 +1,16 @@
+*** file /tmp/reporter-test-many/bar.par ***
+
+Expected '(' or '=' to follow variable identifier in global definition:
+2: a b = 3
+     ^
+
+*** file /tmp/reporter-test-many/baz.par ***
+
+Expected comma ',' delimiter after expression:
+2: a(x y z) = *4.5
+       ^
+
+Expected an expression:
+2: a(x y z) = *4.5
+              ^
+

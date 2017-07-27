@@ -2,7 +2,7 @@
 -define(ERRORS_HRL_, 1).
 
 % a component to compile, representing a module and its metadata
--record(comp, {module, ast, deps, path, contents}).
+-record(comp, {module, ast, deps, path, prg}).
 
 
 -define(FMT(Str), lists:flatten(io_lib:format(Str, []))).

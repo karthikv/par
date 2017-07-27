@@ -1,0 +1,6 @@
+*** file [infer-prg] ***
+
+Expected comma ',' delimiter after expression:
+2: expr = [@a @b]
+              ^^
+

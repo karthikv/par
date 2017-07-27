@@ -85,12 +85,12 @@ enum Token {
   LitFloat(Loc, Float) @float
 
   Whitespace(Loc, [Char])
-  Unexpected(Loc, [Char], String)
+  Unexpected(Loc, [Char], String) @unexpected
 }
 
 enum Result<T, E> {
   Ok(T) @ok
-  Err(E) @error
+  Err(E) @errors
 }
 
 export tokenize(chs) =
@@ -175,8 +175,15 @@ tokenize_r(chs, line, col, tokens) =
         ['"' | t] => tokenize_str(loc, ['"' | t])
 
         ['@', '"' | t] =>
-          let (LitStr(loc, str), t) = tokenize_str(loc, ['"' | t]) in
-            (LitAtom(inc(loc, 1), str_to_atom(str)), t)
+          match tokenize_str(loc, ['"' | t]) {
+            (LitStr(loc, str), t) =>
+              (LitAtom(inc(loc, 1), str_to_atom(str)), t)
+
+            // bad string literal; make the error start at the opening quote
+            (Unexpected(loc, token, msg), t) =>
+              let new_loc = inc({ loc | start_col = loc.start_col + 1 }, 1) in
+                (Unexpected(new_loc, token, msg), t)
+          }
 
         ['@', h | t] =>
           if is_word(h) then
@@ -186,7 +193,7 @@ tokenize_r(chs, line, col, tokens) =
             let token = Unexpected(
               inc(loc, 2),
               ['@', h],
-              "Atom must start with a letter, digit, or underscore."
+              "Atom must start with a letter, digit, or underscore"
             ) in (token, t)
 
         [h | t] =>
@@ -235,7 +242,7 @@ tokenize_r(chs, line, col, tokens) =
           else if is_whitespace(h) then
             tokenize_whitespace(loc, [h | t])
           else
-            (Unexpected(inc(loc, 1), [h], "Unexpected character."), t)
+            (Unexpected(inc(loc, 1), [h], "Unexpected character"), t)
       }
       next_loc = @erlang:element(2, token) :: Loc
     in tokenize_r(left, next_loc.end_line, next_loc.end_col, [token | tokens])
@@ -251,7 +258,7 @@ tokenize_num_r(loc, chs, seen_dot, accum) = match chs {
         let token = Unexpected(
           inc(loc, 1),
           reverse(accum),
-          "Can't have multiple dots in numeric literal."
+          "Can't have multiple dots in numeric literal"
         ) in (token, t)
       else
         tokenize_num_r(inc(loc, 1), t, true, [h | accum])
@@ -277,17 +284,17 @@ tokenize_str_r(loc, chs, accum) = match chs {
     let token = Unexpected(
       next_line(loc),
       reverse(['\n' | accum]),
-      "Unterminated string literal. You can use \n for a newline character " ++
+      "Unterminated string literal. You can use \\n for a newline character " ++
       "or use \\ at the end of a line to continue the string literal on the " ++
       "next line. Note that the latter also inserts a newline character. If " ++
-      "you want to concat multiple strings, use the ++ operator."
+      "you want to concat multiple strings, use the ++ operator"
     ) in (token, t)
   [h | t] => tokenize_str_r(inc(loc, 1), t, [h | accum])
   [] =>
     let token = Unexpected(
       loc,
       reverse(accum),
-      "Unterminated string literal."
+      "Unterminated string literal"
     ) in (token, [])
 }
 
