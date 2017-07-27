@@ -3,7 +3,6 @@
 -include("errors.hrl").
 
 % TODO:
-% - Struct literal from another module
 % - [1 day] Direct imports
 % - [3 days] Better syntax
 %   - One colon instead of two for signatures?

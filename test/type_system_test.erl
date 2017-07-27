@@ -1509,9 +1509,22 @@ import_test_() ->
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "x :: Foo.Baz\n"
         "x = Foo.Baz(3)"}
     ], "bar", "x"))
+  , ?_test("Baz" = ok_many([
+      {"foo", "module Foo struct Baz { a :: Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "x = Foo.Baz { a = 3 }"}
+    ], "bar", "x"))
+  , ?_test("Baz -> Baz" = ok_many([
+      {"foo", "module Foo struct Baz { a :: Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "f(x) = Foo.Baz { x | a = 3 }"}
+    ], "bar", "f"))
   , ?_test("Foo" = ok_many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",

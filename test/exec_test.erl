@@ -518,22 +518,26 @@ test_import(Many) ->
         "module Bar\n"
         "import \"../foo\"\n"
         "import \"../b/baz\"\n"
-        "main() = Foo.x ++ Baz.z"},
+        "main() = Foo.x ++ Baz.z"
+      },
       {"b/baz",
         "module Baz\n"
         "import \"../foo\"\n"
-        "export z = Foo.twice(@b)"}
+        "export z = Foo.twice(@b)"
+      }
     ], "a/bar"))
   , ?_test(100 = Many([
       {"foo",
         "module Foo\n"
         "import \"./bar\"\n"
         "export f(x) = Bar.g(x - 10.0)\n"
-        "main() = f(27)"},
+        "main() = f(27)"
+      },
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
+        "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"
+      }
     ], "foo"))
   , ?_test({'BazInt', 3} = Many([
       {"foo", "module Foo enum Baz { BazInt(Int) }"},
@@ -542,7 +546,8 @@ test_import(Many) ->
         "import \"./foo\"\n"
         "x :: Foo.Baz\n"
         "x = Foo.BazInt(3)\n"
-        "main() = x"}
+        "main() = x"
+      }
     ], "bar"))
   , ?_assertEqual(
       #{a => 3},
@@ -553,7 +558,31 @@ test_import(Many) ->
           "import \"./foo\"\n"
           "x :: Foo.Baz\n"
           "x = Foo.Baz(3)\n"
-          "main() = x"}
+          "main() = x"
+        }
+      ], "bar")
+    )
+  , ?_assertEqual(
+      #{a => 3},
+      Many([
+        {"foo", "module Foo struct Baz { a :: Int }"},
+        {"bar",
+          "module Bar\n"
+          "import \"./foo\"\n"
+          "main() = Foo.Baz { a = 3 }"
+        }
+      ], "bar")
+    )
+  , ?_assertEqual(
+      #{a => 5},
+      Many([
+        {"foo", "module Foo struct Baz { a :: Int }"},
+        {"bar",
+          "module Bar\n"
+          "import \"./foo\"\n"
+          "f(x) = Foo.Baz { x | a = 5 }\n"
+          "main() = f(Foo.Baz { a = 3 })"
+        }
       ], "bar")
     )
   , ?_test({'Foo', 3} = Many([
@@ -563,7 +592,8 @@ test_import(Many) ->
         "import \"./foo\"\n"
         "x :: Foo.Foo\n"
         "x = Foo.Foo(3)\n"
-        "main() = x"}
+        "main() = x"
+      }
     ], "bar"))
   , ?_test(7 = Many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
@@ -571,7 +601,8 @@ test_import(Many) ->
         "module Bar\n"
         "import \"./foo\"\n"
         "x = match Foo.Foo(7) { Foo.Foo(n) => n }\n"
-        "main() = x"}
+        "main() = x"
+      }
     ], "bar"))
   , ?_assertEqual(
       {'Baz', #{a => 3}},
@@ -583,7 +614,8 @@ test_import(Many) ->
           "enum Baz { Baz(Foo.Baz) }\n"
           "x :: Baz\n"
           "x = Baz(Foo.Baz(3))\n"
-          "main() = x"}
+          "main() = x"
+        }
       ], "bar")
     )
   , ?_test(4 = Many([
@@ -592,10 +624,12 @@ test_import(Many) ->
         "import \"./bar\"\n"
         "export a = Bar.b\n"
         "export c(x) = x + 1\n"
-        "main() = a"},
+        "main() = a"
+      },
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "export b = Foo.c(3)"}
+        "export b = Foo.c(3)"
+      }
     ], "foo"))
   ].

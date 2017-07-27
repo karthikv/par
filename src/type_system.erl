@@ -656,8 +656,13 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
       {{record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext}, C5}
   end;
 
-infer({record, Loc, {con_token, ConLoc, Name}, Inits}, C) ->
-  Con = qualify(Name, C),
+infer({record, Loc, RecordCon, Inits}, C) ->
+  {Con, ConLoc} = case RecordCon of
+    {con_token, ConLoc_, Name} -> {qualify(Name, C), ConLoc_};
+    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Name}} ->
+      {lists:concat([Module, '.', Name]), ConLoc_}
+  end,
+
   case maps:find(Con, C#ctx.structs) of
     {ok, {StructT, _, _}} ->
       {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
@@ -674,8 +679,13 @@ infer({record, Loc, {con_token, ConLoc, Name}, Inits}, C) ->
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLoc, C1)}
   end;
 
-infer({record_ext, Loc, {con_token, ConLoc, Name}, Expr, AllInits}, C) ->
-  Con = qualify(Name, C),
+infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
+  {Con, ConLoc} = case RecordCon of
+    {con_token, ConLoc_, Name} -> {qualify(Name, C), ConLoc_};
+    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Name}} ->
+      {lists:concat([Module, '.', Name]), ConLoc_}
+  end,
+
   case maps:find(Con, C#ctx.structs) of
     {ok, {StructT, _, _}} ->
       {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
