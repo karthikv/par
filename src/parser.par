@@ -1120,7 +1120,7 @@ token_loc :: Lexer.Token -> Lexer.Loc
 token_loc(token) = @erlang:element(2, token)
 
 range :: Lexer.Loc -> Lexer.Loc -> Lexer.Loc
-range(start, end) = {
+range(start, end) = Lexer.Loc {
   start_line = start.start_line
   start_col = start.start_col
   end_line = end.end_line
