@@ -4,10 +4,6 @@
 
 % TODO:
 % - [1 day] Direct imports
-% - [3 days] Better syntax
-%   - Can we do string concat on multiple lines?
-%   - Enforce else clause to avoid ambiguity/confusion?
-%   - Colon instead of @ for atoms?
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Allow ifaces on struct/enum params?
 % - [2 days] Exceptions
@@ -26,6 +22,7 @@
 %   - Only show rigid if it matters
 %   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
+%     - Error message with context when there's no else clause
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported

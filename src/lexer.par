@@ -95,17 +95,17 @@ enum Result<T, E> {
 export tokenize(chs) =
   let
     tokens = tokenize_r(chs, 1, 1, [])
-    errs = filter(
-      |t| match t { Unexpected(_, _, _) => true, _ => false }, tokens)
+    (tokens, errs) = foldl(|token, (accum, errs)| match token {
+      Comment(_, _) => (accum, errs)
+      Whitespace(_, _) => (accum, errs)
+      Unexpected(_, _, _) => (accum, [token | errs])
+      _ => ([token | accum], errs)
+    }, ([], []), tokens)
   in
-    if let [] = errs then
-      Ok(filter(|t| match t {
-        Comment(_, _) => false
-        Whitespace(_, _) => false
-        _ => true
-      }, tokens))
+    if errs == [] then
+      Ok(reverse(tokens))
     else
-      Err(errs)
+      Err(reverse(errs))
 
 tokenize_r(chs, line, col, tokens) =
   if let [] = chs then
@@ -374,8 +374,8 @@ unesc(ch) = match ch {
   _ => ch
 }
 
-filter : (A -> Bool) -> [A] -> [A]
-filter = @lists:filter/2
+foldl : (A -> B -> B) -> B -> [A] -> B
+foldl = @lists:foldl/3
 
 flip : (A -> B -> C) -> B -> A -> C
 flip(f, b, a) = f(a, b)
