@@ -336,14 +336,8 @@ expr_r(state, stack, tokens) = match state {
 
       [Lexer.LParen(s), Lexer.RParen(e) | t] => Unit(range(s, e)) |> recurse(t)
       [Lexer.LParen(s) | t] =>
-        enclosed_paren(s, t) |> pbind(|(l, inner, rest)|
-          many_delim_comma(expr, inner)
-            |> pmap_or(|elems| match length(elems) {
-              1 => @erlang:setelement(2, head(elems), l) : Node
-              _ => Tuple(l, elems)
-            }, Tuple(l, []))
-            |> pbind(recurse(rest))
-        )
+        parse_tuple(expr, Tuple, s, t)
+          |> pbind(|(node, rest)| recurse(rest, node))
 
       [Lexer.Con(s, mod) | t] =>
         let
@@ -654,14 +648,8 @@ type_expr_r(lhs, tokens) = match lhs {
 
       [Lexer.LParen(s), Lexer.RParen(e) | t] => Unit(range(s, e)) |> recurse(t)
       [Lexer.LParen(s) | t] =>
-        enclosed_paren(s, t) |> pbind(|(l, inner, rest)|
-          many_delim_comma(type_expr, inner)
-            |> pmap_or(|types| match length(types) {
-              1 => @erlang:setelement(2, head(types), l) : Node
-              _ => TupleTE(l, types)
-            }, TupleTE(l, []))
-            |> pbind(recurse(rest))
-        )
+        parse_tuple(type_expr, TupleTE, s, t)
+          |> pbind(|(node, rest)| recurse(rest, node))
 
       [Lexer.LBrace(s), Lexer.TV(tv_l, tv), Lexer.Bar(_) | t] =>
         enclosed_brace(s, t) |> pbind(|(l, inner, rest)|
@@ -827,15 +815,7 @@ pattern(tokens) = let finish(t, node) = parsed((node, t)) in match tokens {
     List(range(s, e), []) |> finish(t)
   [Lexer.LBracket(s) | t] => parse_list(pattern, s, t)
 
-  [Lexer.LParen(s) | t] =>
-    enclosed_paren(s, t) |> pbind(|(l, inner, rest)|
-      many_delim_comma(pattern, inner)
-        |> pmap_or(|elems| match length(elems) {
-          1 => @erlang:setelement(2, head(elems), l) : Node
-          _ => Tuple(l, elems)
-        }, Tuple(l, []))
-        |> pmap(|node| (node, rest))
-    )
+  [Lexer.LParen(s) | t] => parse_tuple(pattern, Tuple, s, t)
 
   _ => head_loc(tokens) |> one_err("Expected pattern")
 }
@@ -926,6 +906,35 @@ parse_list(f, s, tokens) =
       |> pmap_or(|v| (v, rest), (List(l, []), rest))
   )
 
+parse_tuple : ([Lexer.Token] -> Parsed<(Node, [Lexer.Token])>) ->
+  (Lexer.Loc -> [Node] -> Node) -> Lexer.Loc -> [Lexer.Token] ->
+  Parsed<(Node, [Lexer.Token])>
+parse_tuple(f, wrap, s, tokens) =
+  enclosed_paren(s, tokens) |> pbind(|(l, inner, rest)|
+    f(inner) |> pbind(|(node, t)| match t {
+      [Lexer.Comma(_)] =>
+        parsed_err(
+          (wrap(l, []), rest),
+          "Expected at least two elements within tuple",
+          Some(l)
+        )
+
+      [Lexer.Comma(_) | t] =>
+        many_delim_comma(f, t)
+          |> pmap_or(|elems| wrap(l, [node | elems]), wrap(l, []))
+          |> pmap(|tuple| (tuple, rest))
+
+      [h | _] =>
+        parsed_err(
+          (wrap(l, []), rest),
+          "Expected comma ',' delimiter or closing paren ')'",
+          Some(token_loc(h))
+        )
+
+      [] => parsed((@erlang:setelement(2, node, l), rest))
+    })
+  )
+
 parse_args : ([Lexer.Token] -> Parsed<(Node, [Lexer.Token])>) -> Lexer.Loc ->
   [Lexer.Token] -> Parsed<(Lexer.Loc, [Node], [Lexer.Token])>
 parse_args(f, s, tokens) =
@@ -994,25 +1003,27 @@ delim_or_nl_cb(delim, delim_str, node, tokens) =
     let
       [h | t] = tokens
       l = token_loc(h)
+      end_line = node_loc(node).end_line
       is_delim = h == delim(l)
     in
       if is_delim && t == [] then
         parsed_err(
           (t != [], t),
-          delim_str ++ " delimiter is unnecessary because nothing " ++
-            "follows it",
+          "Delimiting " ++ delim_str ++ " is unnecessary because nothing " ++
+            "follows it. Note that if you separate successive items by " ++
+            "newlines, no commas are necessary at all",
           Some(l)
         )
-      else if is_delim && l.end_line < token_loc(head(t)).start_line then
+      else if is_delim && end_line < token_loc(head(t)).start_line then
         parsed_err(
           (t != [], t),
-          delim_str ++ " delimiter is unnecessary because it's " ++
-            "followed by a newline",
+          "Delimiting " ++ delim_str ++ " is unnecessary because items are " ++
+            "separated by a newline",
           Some(l)
         )
       else if is_delim then
         parsed((t != [], t))
-      else if node_loc(node).end_line < l.start_line then
+      else if end_line < l.start_line then
         parsed((tokens != [], tokens))
       else
         one_err(

@@ -1,0 +1,6 @@
+*** file [infer-prg] ***
+
+Expected at least two elements within tuple:
+2: expr = (1,)
+          ^^^^
+

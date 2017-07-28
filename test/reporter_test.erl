@@ -77,6 +77,59 @@ expr_test_() ->
   , golden_expr_("p-list-literal", "[@a @b]")
   , golden_expr_("p-let-no-in", "let x = 3")
   , golden_expr_("p-bad-block", "{ 3 + 5, @hello }")
+  , golden_expr_("p-bad-tuple", "(1,)")
+  , golden_expr_("p-bad-tuple-te", "(1, @hi) : (Int,)")
+  , golden_expr_("p-bad-tuple-pattern", "let (1,) = (1, @hi) in 2")
+  , golden_prg_(
+      "p-enum-comma-newline-1",
+      "enum SumType {\n"
+      "  Foo,\n"
+      "  Bar(String) @bar\n"
+      "}"
+    )
+  , golden_prg_(
+      "p-enum-comma-newline-2",
+      "enum SumType { Foo\n"
+      "             , Bar(String) @bar\n"
+      "             }"
+    )
+  , golden_prg_(
+      "p-enum-comma-newline-3",
+      "enum SumType<A> {\n"
+      "  Foo(Atom, A),\n"
+      "}"
+    )
+  , golden_prg_(
+      "p-enum-comma-newline-4",
+      "enum SumType<A> {\n"
+      "  Foo(A) Bar\n"
+      "}"
+    )
+  , golden_prg_(
+      "p-struct-comma-newline-1",
+      "struct ProductType {\n"
+      "  foo : Foo,\n"
+      "  bar : String\n"
+      "}"
+    )
+  , golden_prg_(
+      "p-struct-comma-newline-2",
+      "struct ProductType { foo : Foo\n"
+      "                   , bar : String\n"
+      "                   }"
+    )
+  , golden_prg_(
+      "p-struct-comma-newline-3",
+      "struct ProductType<A> {\n"
+      "  foo : Atom -> A,\n"
+      "}"
+    )
+  , golden_prg_(
+      "p-struct-comma-newline-4",
+      "struct ProductType<A> {\n"
+      "  foo : A bar : Atom\n"
+      "}"
+    )
   , golden_many_("p-multiple-modules-errors", [
       {"foo",
         "module Foo\n"

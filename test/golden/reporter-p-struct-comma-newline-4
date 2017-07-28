@@ -1,0 +1,6 @@
+*** file [infer-prg] ***
+
+Expected either comma ',' or newline delimiter:
+3:   foo : A bar : Atom
+             ^^^
+

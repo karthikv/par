@@ -35,34 +35,6 @@ ok_expr(Expr) ->
   {global, GlobalLoc, {var, VarLoc, "expr"}, Parsed, false} = Def,
   Parsed.
 
-bad_def_(Prg, ExpMsg, ExpLoc) ->
-  fun() ->
-    {ok, Tokens} = 'Lexer':tokenize(?DEF_PREFIX ++ Prg),
-    #{errs := [{MaybeLoc, Binary}]} = 'Parser':parse(Tokens),
-
-    AllWords = re:split(Binary, "\s+", [{return, list}]),
-    ExpWords = re:split(ExpMsg, "\s+", [{return, list}]),
-
-    case check_words(ExpWords, AllWords) of
-      false -> ?assertEqual(ExpWords, AllWords);
-      true -> true
-    end,
-
-    case MaybeLoc of
-      {some, Loc} -> ?assertEqual(ExpLoc, Loc);
-      none -> ?assertEqual(ExpLoc, none)
-    end
-  end.
-
-check_words([], _) -> true;
-check_words([Exp | RestExp]=ExpWords, [Word | RestWords]) ->
-  case Word of
-    Exp -> check_words(RestExp, RestWords);
-    _ -> check_words(ExpWords, RestWords)
-  end;
-check_words(_, []) -> false.
-
-
 l(Offset, Len) -> l(0, Offset, Len).
 l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
 l(StartLine, StartOffset, EndLine, EndOffset) ->
@@ -116,6 +88,10 @@ expr_test_() ->
       ok_expr("[[@a, @hey], [], [@hi]]")
     )
   , ?_assertEqual({list, l(0, 6), [{bool, l(1, 4), true}]}, ok_expr("[true]"))
+  , ?_assertEqual(
+      {list, l(0, 7), [{var, l(1, 1), "a"}, {var, l(4, 1), "b"}]},
+      ok_expr("[a, b,]")
+    )
 
 
   , ?_assertEqual({bool, l(0, 6), true}, ok_expr("(true)"))
@@ -125,6 +101,13 @@ expr_test_() ->
         {float, l(8, 3), 3.0}
       ]},
       ok_expr("(false, 3.0)")
+    )
+  , ?_assertEqual(
+      {tuple, l(0, 13), [
+        {bool, l(1, 5), false},
+        {float, l(8, 3), 3.0}
+      ]},
+      ok_expr("(false, 3.0,)")
     )
   , ?_assertEqual(
       {tuple, l(0, 21), [
@@ -172,6 +155,18 @@ expr_test_() ->
         ]}}
       ]},
       ok_expr("{@hi => {}, @hey => {true => 4.0}}")
+    )
+  , ?_assertEqual(
+      {map, l(0, 0, 3, 1), [
+        {{atom, l(1, 2, 2), a}, {atom, l(1, 8, 2), b}},
+        {{atom, l(2, 2, 2), c}, {atom, l(2, 8, 2), d}}
+      ]},
+      ok_expr(
+        "{\n"
+        "  @a => @b,\n"
+        "  @c => @d,\n"
+        "}"
+      )
     )
 
 
@@ -1393,28 +1388,6 @@ def_test_() ->
         "}"
       )
     )
-  , bad_def_(
-      "enum SumType {\n"
-      "  Foo,\n"
-      "  Bar(String) @bar\n"
-      "}",
-      "comma ',' unnecessary followed by newline",
-      l(1, 5, 1)
-    )
-  , bad_def_(
-      "enum SumType<A> {\n"
-      "  Foo(Atom, A),\n"
-      "}",
-      "comma ',' unnecessary nothing follows",
-      l(1, 14, 1)
-    )
-  , bad_def_(
-      "enum SumType<A> {\n"
-      "  Foo(A) Bar\n"
-      "}",
-      "Expected comma ',' or newline",
-      l(1, 9, 3)
-    )
 
 
   , ?_assertEqual(
@@ -1487,28 +1460,6 @@ def_test_() ->
         "  bar : (Int, B)\n"
         "}"
       )
-    )
-  , bad_def_(
-      "struct ProductType {\n"
-      "  foo : Foo,\n"
-      "  bar : String\n"
-      "}",
-      "comma ',' unnecessary followed by newline",
-      l(1, 11, 1)
-    )
-  , bad_def_(
-      "struct ProductType<A> {\n"
-      "  foo : Atom -> A,\n"
-      "}",
-      "comma ',' unnecessary nothing follows",
-      l(1, 17, 1)
-    )
-  , bad_def_(
-      "struct ProductType<A> {\n"
-      "  foo : A bar : Atom\n"
-      "}",
-      "Expected comma ',' or newline",
-      l(1, 10, 3)
     )
   ].
 

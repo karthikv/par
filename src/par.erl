@@ -5,8 +5,6 @@
 % TODO:
 % - [1 day] Direct imports
 % - [3 days] Better syntax
-%   - Colon syntax for records?
-%   - Allow trailing commas?
 %   - Can we do string concat on multiple lines?
 %   - Enforce else clause to avoid ambiguity/confusion?
 %   - Colon instead of @ for atoms?
@@ -86,10 +84,6 @@ main(Args) ->
       end,
 
       case type_system:infer_file(Path) of
-        {errors, _, _}=Errors ->
-          ?ERR("~s", [reporter:format(Errors)]),
-          halt(1);
-
         {ok, _, Comps} ->
           {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps]),
           {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
@@ -100,6 +94,10 @@ main(Args) ->
             io:format(standard_error, "~s~n", [Filename])
           end, Compiled),
 
-          io:format(standard_error, "~pms~n", [Time div 1000])
+          io:format(standard_error, "~pms~n", [Time div 1000]);
+
+        Errors ->
+          ?ERR("~s", [reporter:format(Errors)]),
+          halt(1)
       end
   end.
