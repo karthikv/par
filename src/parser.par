@@ -136,7 +136,7 @@ export parse(tokens) = match tokens {
   _ =>
     add_err(
       many(def, tokens),
-      "Expected module name to follow module keyword",
+      "Expected 'module' keyword",
       head_loc(tokens)
     )
 }
@@ -286,7 +286,9 @@ new_type_braces(s, tokens) = match tokens {
       (l, Con(con_l, con), inner, rest)
     )
 
-  [Lexer.Con(_, _) | t] => head_loc(t) |> one_err("Expected open brace '{'")
+  [Lexer.Con(_, _) | t] =>
+    head_loc(t) |> one_err("Expected open brace '{' or less than '<'")
+
   _ => head_loc(tokens) |> one_err("Expected capitalized type name")
 }
 
@@ -378,6 +380,8 @@ expr_r(state, stack, tokens) = match state {
 
       [Lexer.Dot(s), Lexer.Var(e, name) | t] =>
         FieldFn(range(s, e), Var(e, name)) |> recurse(t)
+      [Lexer.Dot(_) | t] =>
+        head_loc(t) |> one_err("Expected variable identifier after dot '.'")
 
       [Lexer.LBrace(s), Lexer.RBrace(e) | t] =>
         Map(range(s, e), []) |> recurse(t)
@@ -559,6 +563,8 @@ expr_r(state, stack, tokens) = match state {
           field = Field(range(node_loc(node), e), node, Var(e, name))
         in
           expr_r(AcceptOp, [Node(field) | left], t)
+      [Lexer.Dot(_) | t] =>
+        head_loc(t) |> one_err("Expected variable identifier after dot '.'")
 
       _ => finish()
     }
@@ -587,7 +593,8 @@ field_ext(tokens) = match tokens {
       (Ext(range(s, node_loc(node)), Var(s, name), node), rest)
     )
 
-  [Lexer.Var(_, _) | t] => head_loc(t) |> one_err("Expected equals '='")
+  [Lexer.Var(_, _) | t] =>
+    head_loc(t) |> one_err("Expected equals '=' or extend ':='")
   [] => head_loc(tokens) |> one_err("Expected field name")
 }
 
@@ -630,6 +637,8 @@ type_expr_r(lhs, tokens) = match lhs {
           |> recurse(t)
       [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(e, con) | t] =>
         TV(range(s, e), tv, Con(e, con)) |> recurse(t)
+      [Lexer.TV(_, _), Lexer.Colon(_) | t] =>
+        head_loc(t) |> one_err("Expected capitalized name of interface")
       [Lexer.TV(l, tv) | t] => TV(l, tv, Unit(l)) |> recurse(t)
 
       [Lexer.LBracket(s) | t] =>
@@ -792,6 +801,8 @@ pattern(tokens) = let finish(t, node) = parsed((node, t)) in match tokens {
   [Lexer.Var(l, name) | t] => Var(l, name) |> finish(t)
   [Lexer.Amp(s), Lexer.Var(e, name) | t] =>
     VarValue(range(s, e), name) |> finish(t)
+  [Lexer.Amp(_) | t] =>
+    head_loc(t) |> one_err("Expected variable identifier after ampersand '&'")
   [Lexer.Underscore(l) | t] => Underscore(l) |> finish(t)
 
   [Lexer.Con(s, mod), Lexer.Dot(_), Lexer.Con(e, con) | t] =>
@@ -802,6 +813,8 @@ pattern(tokens) = let finish(t, node) = parsed((node, t)) in match tokens {
         )
       else
         node |> finish(t)
+  [Lexer.Con(_, _), Lexer.Dot(_) | t] =>
+    head_loc(t) |> one_err("Expected capitalized identifier after dot '.'")
   [Lexer.Con(s, con) | t] =>
     let node = Con(s, con) in
       if let [Lexer.LParen(_) | t] = t then
@@ -1064,7 +1077,7 @@ enclosed_r(inner, depth, open, close, close_str, s, tokens) =
         else
           enclosed_r([h | inner], depth, open, close, close_str, s, t)
 
-    [] => one_err("Expected " ++ close_str ++ "", None)
+    [] => Some(s) |> one_err("Couldn't find matching " ++ close_str)
   }
 
 enclosed_bracket : Lexer.Loc -> [Lexer.Token] ->
@@ -1103,8 +1116,8 @@ split_bar_r(tokens, left, seen_bar, right, depth) =
       if depth == 1 then
         if seen_bar then
           one_err(
-            "Expected an expression; already saw a '|' within " ++
-              "this list literal",
+            "Expected an expression; already saw a pipe '|' within this " ++
+              "list literal",
             Some(l)
           )
         else

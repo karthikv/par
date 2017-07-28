@@ -1,0 +1,6 @@
+*** file [infer-prg] ***
+
+Couldn't find matching closing bracket ']':
+2: expr = [1, [2, [3, 4], 5, 6]
+          ^
+

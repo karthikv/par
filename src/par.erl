@@ -26,11 +26,6 @@
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
-% - [1 week] Lexer/Parser error messages
-%   - For "expected closing ___", mark matching open ___
-%   - Maybe change enclosed methods to accept open tag as well?
-%     - Would allow for more uniform error messages
-%   - Test these errors
 % - [2 weeks] Editor tooling for vim, atom, emacs, sublime
 %   - Fix syntax highlighting for comments in enum for vim
 %
@@ -43,6 +38,7 @@
 % - Move gm_start into on_load?
 % - Use NOTP for faster load time?
 % - [1 week] Exhaustive pattern matching errors
+% - [1 day] Test more parser error messages
 %
 % Uncertain
 % - Operator |< to prepend an argument?
