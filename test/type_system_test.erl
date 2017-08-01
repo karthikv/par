@@ -439,7 +439,7 @@ expr_test_() ->
     ))
   , ?_test(bad_expr(
       "(|x| let a = x(3) in x(true))(|y| y)",
-      {"Bool", "A: Num", l(15, 1), ?FROM_APP}
+      {"Bool", "A: Num", l(23, 4), ?FROM_APP}
     ))
 
   , ?_test("String" = ok_expr("{ \"hello\" }"))
@@ -689,6 +689,7 @@ sig_test_() ->
 
 global_test_() ->
   [ ?_test("A: Num" = ok_prg("foo = 3", "foo"))
+  , ?_test("Bool -> Bool" = ok_prg("f(x) = let y = x && false in true", "f"))
   , ?_test("[Bool]" = ok_prg(
       "foo = baz && false\n"
       "bar = [foo] ++ [true]\n"
@@ -1128,6 +1129,11 @@ pattern_test_() ->
       "  (a, b) => (a + 3 : Int, a + 3.0, b + 4 : Int, b + 4.0)\n"
       "}"
     ))
+  , ?_test("Foo -> A: Num" = ok_prg(
+      "enum Foo { One, Two, Three }\n"
+      "f(x) = match x { One => 1, Two => 2, Three => 3 }",
+      "f"
+    ))
   , ?_test("Int" = ok_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Baz(5) { Bar => 1, Baz(x) => x }",
@@ -1427,7 +1433,7 @@ other_errors_test_() ->
       "  Bar(Char) @hi\n"
       "  Baz @hi\n"
       "}",
-      {?ERR_DUP_KEY("hi", "Bar", l(1, 2, 3)), l(2, 6, 3)}
+      {?ERR_DUP_KEY("hi", "Bar", l(1, 12, 3)), l(2, 6, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"
@@ -1480,21 +1486,25 @@ import_test_() ->
         "module Bar\n"
         "import \"../foo\"\n"
         "import \"../b/baz\"\n"
-        "y = Foo.x ++ Baz.z"},
+        "y = Foo.x ++ Baz.z"
+      },
       {"b/baz",
         "module Baz\n"
         "import \"../foo\"\n"
-        "export z = Foo.twice(@b)"}
+        "export z = Foo.twice(@b)"
+      }
     ], "a/bar", "y"))
   , ?_test("Float -> A: Num" = ok_many([
       {"foo",
         "module Foo\n"
         "import \"./bar\"\n"
-        "export f(x) = Bar.g(x - 10.0)"},
+        "export f(x) = Bar.g(x - 10.0)"
+      },
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"}
+        "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"
+      }
     ], "foo", "f"))
   , ?_test("Baz" = ok_many([
       {"foo", "module Foo enum Baz { BazInt(Int) }"},
@@ -1502,28 +1512,32 @@ import_test_() ->
         "module Bar\n"
         "import \"./foo\"\n"
         "x : Foo.Baz\n"
-        "x = Foo.BazInt(3)"}
+        "x = Foo.BazInt(3)"
+      }
     ], "bar", "x"))
   , ?_test("Baz" = ok_many([
       {"foo", "module Foo struct Baz { a : Int }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "x = Foo.Baz(3)"}
+        "x = Foo.Baz(3)"
+      }
     ], "bar", "x"))
   , ?_test("Baz" = ok_many([
       {"foo", "module Foo struct Baz { a : Int }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "x = Foo.Baz { a = 3 }"}
+        "x = Foo.Baz { a = 3 }"
+      }
     ], "bar", "x"))
   , ?_test("Baz -> Baz" = ok_many([
       {"foo", "module Foo struct Baz { a : Int }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "f(x) = Foo.Baz { x | a = 3 }"}
+        "f(x) = Foo.Baz { x | a = 3 }"
+      }
     ], "bar", "f"))
   , ?_test("Foo" = ok_many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
@@ -1531,14 +1545,16 @@ import_test_() ->
         "module Bar\n"
         "import \"./foo\"\n"
         "x : Foo.Foo\n"
-        "x = Foo.Foo(3)"}
+        "x = Foo.Foo(3)"
+      }
     ], "bar", "x"))
   , ?_test("Int" = ok_many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "x = match Foo.Foo(7) { Foo.Foo(n) => n }"}
+        "x = match Foo.Foo(7) { Foo.Foo(n) => n }"
+      }
     ], "bar", "x"))
   , ?_test("Baz" = ok_many([
       {"foo", "module Foo struct Baz { a : Int }"},
@@ -1547,14 +1563,130 @@ import_test_() ->
         "import \"./foo\"\n"
         "enum Baz { Baz(Foo.Baz) }\n"
         "x : Baz\n"
-        "x = Baz(Foo.Baz(3))"}
+        "x = Baz(Foo.Baz(3))"
+      }
     ], "bar", "x"))
   , ?_test(bad_many([
-      {"foo", "module Foo\nexport x = @hello"},
-      {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x + 4"}
+      {"foo",
+        "module Foo\n"
+        "export x = @hello"
+      },
+      {"bar",
+       "module Bar\n"
+       "import \"./foo\"\n"
+       "y = Foo.x + 4"
+      }
     ], "bar", {"Atom", "A: Num", "Bar", l(1, 4, 5), ?FROM_OP_LHS('+')}))
   , ?_test(bad_many([
-      {"foo", "module Foo\nimport \"./bar\"\nexport f(x) = Bar.g(x) == 3"},
-      {"bar", "module Bar\nimport \"./foo\"\nexport g(x) = Foo.f(x)"}
+      {"foo",
+        "module Foo\n"
+        "import \"./bar\"\n"
+        "export f(x) = Bar.g(x) == 3"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "export g(x) = Foo.f(x)"
+      }
     ], "foo", {"A: Num", "Bool", "Foo", l(1, 14, 13), ?FROM_OP_RESULT('==')}))
+
+
+  , ?_test("A: Num" = ok_many([
+      {"foo", "module Foo export x = 3"},
+      {"bar", "module Bar import \"./foo\" (x) y = x + 4"}
+    ], "bar", "y"))
+  , ?_test("[Atom]" = ok_many([
+      {"foo", "module Foo export x = [@a] export twice(x) = [x, x]"},
+      {"a/bar",
+        "module Bar\n"
+        "import \"../foo\" (x, twice)\n"
+        "y = x ++ twice(@b)"
+      }
+    ], "a/bar", "y"))
+  , ?_test("Baz" = ok_many([
+      {"foo", "module Foo struct Baz { a : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Baz)\n"
+        "x = Baz(3)"
+      }
+    ], "bar", "x"))
+  , ?_test("Baz" = ok_many([
+      {"foo", "module Foo enum Baz { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Baz)\n"
+        "x : Baz\n"
+        "x = Foo.Foo(3)"
+      }
+    ], "bar", "x"))
+  , ?_test("Foo" = ok_many([
+      {"foo", "module Foo enum Foo { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Foo)\n"
+        "x : Foo\n"
+        "x = Foo(3)"
+      }
+    ], "bar", "x"))
+  , ?_test("Foo -> A: Num" = ok_many([
+      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (One, Two, Three)\n"
+        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+      }
+    ], "bar", "f"))
+  , ?_test("Foo -> A: Num" = ok_many([
+      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (variants Foo)\n"
+        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+      }
+    ], "bar", "f"))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "export x = 3"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (x)\n"
+        "x = 4"
+      }
+    ], "bar", {?ERR_REDEF("x"), "Bar", l(16, 1)}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo enum Foo { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (SomeEnum)\n"
+        "x = 3"
+      }
+    ], "bar", {?ERR_NOT_DEF("SomeEnum", "Foo"), "Bar", l(16, 8)}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (variants Foo)\n"
+        "f : Foo -> Int\n"
+        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+      }
+    ], "bar", {?ERR_NOT_DEF_TYPE("Foo"), "Bar", l(1, 4, 3)}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo export x = 3"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (x, x)\n"
+        "y = x + 4"
+      }
+    ], "bar", {?ERR_REDEF("x"), "Bar", l(19, 1)}))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Foo, One, variants Foo)\n"
+        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+      }
+    ], "bar", {?ERR_REDEF("One"), "Bar", l(26, 12)}))
   ].

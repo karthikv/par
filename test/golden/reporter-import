@@ -2,5 +2,5 @@
 
 Couldn't import /tmp/reporter-test-many/bar.par: file doesn't exist:
 2: import "./bar"
-   ^^^^^^^^^^^^^^
+          ^^^^^^^
 

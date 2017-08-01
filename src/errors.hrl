@@ -74,14 +74,18 @@
     [V, Exp, Actual]
   )
 ).
--define(ERR_NOT_DEF(Name), ?FMT("variable ~s is not defined", [Name])).
+-define(ERR_NOT_DEF(Name), ?FMT("~s is not defined", [Name])).
 -define(
   ERR_NOT_DEF(Name, Module),
-  ?FMT("variable ~s is not defined in module ~s", [Name, Module])
+  ?FMT("~s is not defined in module ~s", [Name, Module])
 ).
 -define(
   ERR_NOT_DEF_TYPE(Con),
   ?FMT("type ~s is not defined", [utils:unqualify(Con)])
+).
+-define(
+  ERR_NOT_DEF_TYPE(Con, Module),
+  ?FMT("type ~s is not defined in module ~s", [utils:unqualify(Con), Module])
 ).
 -define(
   ERR_NOT_DEF_NATIVE(Module, Name, Arity),
@@ -101,17 +105,25 @@
 -define(
   ERR_DUP_KEY(Key, Con, Loc),
   ?FMT(
-    "the key ~s is already used for option ~s on line ~p",
-    [Key, utils:unqualify(Con), ?START_LINE(Loc)]
+    "the key ~s is already used for option ~s on line ~p, column ~p",
+    [Key, utils:unqualify(Con), ?START_LINE(Loc), ?START_COL(Loc)]
   )
 ).
 -define(
   ERR_NOT_EXPORTED(Name, Module),
-  ?FMT("variable ~s is not exported from module ~s", [Name, Module])
+  ?FMT("~s is not exported from module ~s", [Name, Module])
+).
+-define(
+  ERR_DUP_IMPORT(Name, Loc),
+  ?FMT(
+    "~s is already imported on line ~p, column ~p",
+    [Name, ?START_LINE(Loc), ?START_COL(Loc)]
+  )
 ).
 
 
 -define(LOC(Node), element(2, Node)).
 -define(START_LINE(Loc), maps:get(start_line, Loc)).
+-define(START_COL(Loc), maps:get(start_col, Loc)).
 
 -endif.

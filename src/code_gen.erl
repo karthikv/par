@@ -524,8 +524,8 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
     call(gb_sets, add, [ModuleRep, ArgVar], 1)},
 
   StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, gm(Module)}]},
-  InitCalls = lists:map(fun(Dep) ->
-    call(list_to_atom(Dep), '_@init', [InitSetVar], 1)
+  InitCalls = lists:map(fun({DepModule, _}) ->
+    call(list_to_atom(DepModule), '_@init', [InitSetVar], 1)
   end, Deps),
 
   GlobalVarNames = lists:filtermap(fun

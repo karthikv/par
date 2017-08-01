@@ -3,13 +3,14 @@
 -include("errors.hrl").
 
 % TODO:
-% - [1 day] Direct imports
+% - TV vs. Con parsing
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Allow ifaces on struct/enum params?
 % - [2 days] Exceptions
 % - [2 days] Better pattern matching
 %   - Negative numbers and unit in patterns
 %   - Record types
+%   - '=' sign
 %   - Disallow pattern matching w/ struct Con(...) fn?
 %   - Allow when clause and or?
 % - [2 weeks] Stdlib
@@ -26,8 +27,11 @@
 %   - Norm types for error messages
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
-% - [2 weeks] Editor tooling for vim, atom, emacs, sublime
-%   - Fix syntax highlighting for comments in enum for vim
+%   - Struct/Enum name conflict w/ global causes hard-to-understand errors
+%   - Import errors: import from same file twice, import self
+%   - More descriptive error when there's a dup import from variant
+%   - Show both locations for redef + other relevant errors
+% - Website + Documentation
 %
 % Defer
 % - Using EUnit from par
@@ -39,12 +43,14 @@
 % - Use NOTP for faster load time?
 % - [1 week] Exhaustive pattern matching errors
 % - [1 day] Test more parser error messages
+% - [2 weeks] Editor tooling for vim, atom, emacs, sublime
+%   - Fix syntax highlighting for comments in enum for vim
+% - Type aliases
 %
 % Uncertain
 % - Operator |< to prepend an argument?
 % - Force all block expressions except last to be type ()?
 % - List indexing?
-% - Type aliases?
 
 main(Args) ->
   {ok, Dir} = file:get_cwd(),

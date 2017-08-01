@@ -9,7 +9,8 @@ enum Maybe<T> {
 
 enum Node {
   Module(Lexer.Loc, Node, [Node], [Node]) @module
-  Import(Lexer.Loc, Node) @import
+  Import(Lexer.Loc, Node, [Node]) @import
+  Variants(Lexer.Loc, [Char]) @variants
 
   Enum(Lexer.Loc, Node, [Node]) @enum
   Option(Lexer.Loc, Node, [Node], Maybe<Node>) @option
@@ -145,14 +146,33 @@ export parse(tokens) = match tokens {
 imports : [Lexer.Token] -> Parsed<([Node], [Lexer.Token])>
 imports(tokens) = match tokens {
   [Lexer.Import(s), Lexer.LitStr(e, str) | t] =>
-    imports(t) |> pmap(|(nodes, rest)|
-      ([Import(range(s, e), LitStr(e, str)) | nodes], rest)
-    )
+    let
+      parsed_import =
+        if let [Lexer.LParen(_) | t] = t then
+          enclosed_paren(s, t) |> pbind(|(l, inner, rest)|
+            many_delim_comma_or_nl(import_ident, inner)
+              |> pmap_or(|v| v, [])
+              |> pmap(|idents| (Import(l, LitStr(e, str), idents), rest))
+          )
+        else
+          parsed((Import(range(s, e), LitStr(e, str), []), t))
+    in
+      parsed_import |> pbind(|(node, rest)|
+        imports(rest) |> pmap(|(nodes, rest)| ([node | nodes], rest))
+      )
 
   [Lexer.Import(_) | t] =>
     head_loc(t) |> one_err("Expected string path to import")
 
   _ => parsed(([], tokens))
+}
+
+import_ident : [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
+import_ident(tokens) = let variants = to_list("variants") in match tokens {
+  [Lexer.Var(s, &variants), Lexer.Con(e, name) | t] =>
+    parsed((Variants(range(s, e), name), t))
+  [Lexer.Var(l, name) | t] => parsed((Var(l, name), t))
+  [Lexer.Con(l, name) | t] => parsed((Con(l, name), t))
 }
 
 def : [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
@@ -211,12 +231,11 @@ fn_or_expr(s, tokens) = match tokens {
 enumeration : [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 enumeration(tokens) = match tokens {
   [Lexer.Enum(s) | t] =>
-    new_type_braces(s, t)
-      |> pbind(|(l, node, inner, rest)|
-        many_delim_comma_or_nl(option, inner)
-          |> pmap_or(|v| v, [])
-          |> pmap(|options| (Enum(l, node, options), rest))
-      )
+    new_type_braces(s, t) |> pbind(|(l, node, inner, rest)|
+      many_delim_comma_or_nl(option, inner)
+        |> pmap_or(|v| v, [])
+        |> pmap(|options| (Enum(l, node, options), rest))
+    )
 
   _ => head_loc(tokens) |> one_err("Expected keyword 'enum'")
 }
@@ -255,12 +274,11 @@ option(tokens) = match tokens {
 structure : [Lexer.Token] -> Parsed<(Node, [Lexer.Token])>
 structure(tokens) = match tokens {
   [Lexer.Struct(s) | t] =>
-    new_type_braces(s, t)
-      |> pbind(|(l, node, inner, rest)|
-        many_delim_comma_or_nl(field_sig, inner)
-          |> pmap_or(|v| v, [])
-          |> pmap(|field_sigs| (Struct(l, node, field_sigs), rest))
-      )
+    new_type_braces(s, t) |> pbind(|(l, node, inner, rest)|
+      many_delim_comma_or_nl(field_sig, inner)
+        |> pmap_or(|v| v, [])
+        |> pmap(|field_sigs| (Struct(l, node, field_sigs), rest))
+    )
 
   _ => head_loc(tokens) |> one_err("Expected keyword 'struct'")
 }

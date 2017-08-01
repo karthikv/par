@@ -1466,19 +1466,68 @@ def_test_() ->
 import_test_() ->
   [ ?_assertEqual(
       {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"},
-        [{import, l(0, 12), {str, l(7, 5), <<"foo">>}}],
+        [{import, l(0, 12), {str, l(7, 5), <<"foo">>}, []}],
         [{global, l(1, 0, 6),
            {var, l(1, 0, 1), "a"},
            {none, l(1, 4, 2)},
            false
          }]
       },
-      ok_prg("module Mod\nimport \"foo\"\na = ()")
+      ok_prg(
+        "module Mod\n"
+        "import \"foo\"\n"
+        "a = ()"
+      )
     )
   , ?_assertEqual(
-      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"},
-        [{import, l(0, 12), {str, l(7, 5), <<"foo">>}},
-         {import, l(1, 0, 16), {str, l(1, 7, 9), <<"bar/baz">>}}
+      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"}, [
+          {import, l(0, 37), {str, l(7, 5), <<"foo">>}, [
+            {var, l(14, 3), "foo"},
+            {con_token, l(19, 3), "Bar"},
+            {variants, l(24, 12), "Baz"}
+          ]}
+        ],
+        [{global, l(1, 0, 6),
+           {var, l(1, 0, 1), "a"},
+           {none, l(1, 4, 2)},
+           false
+         }]
+      },
+      ok_prg(
+        "module Mod\n"
+        "import \"foo\" (foo, Bar, variants Baz)\n"
+        "a = ()"
+      )
+    )
+  , ?_assertEqual(
+      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"}, [
+          {import, l(0, 0, 4, 1), {str, l(7, 5), <<"foo">>}, [
+            {var, l(1, 2, 3), "foo"},
+            {con_token, l(2, 2, 3), "Bar"},
+            {variants, l(3, 2, 12), "Baz"}
+          ]}
+        ],
+        [{global, l(5, 0, 6),
+           {var, l(5, 0, 1), "a"},
+           {none, l(5, 4, 2)},
+           false
+         }]
+      },
+      ok_prg(
+        "module Mod\n"
+        "import \"foo\" (\n"
+        "  foo\n"
+        "  Bar\n"
+        "  variants Baz\n"
+        ")\n"
+        "a = ()"
+      )
+    )
+  , ?_assertEqual(
+      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"}, [
+          {import, l(0, 18), {str, l(7, 5), <<"foo">>},
+            [{var, l(14, 3), "foo"}]},
+          {import, l(1, 0, 16), {str, l(1, 7, 9), <<"bar/baz">>}, []}
         ],
         [{global, l(2, 0, 6),
            {var, l(2, 0, 1), "a"},
@@ -1486,6 +1535,11 @@ import_test_() ->
            false
          }]
       },
-      ok_prg("module Mod\nimport \"foo\"\nimport \"bar/baz\"\na = ()")
+      ok_prg(
+        "module Mod\n"
+        "import \"foo\" (foo)\n"
+        "import \"bar/baz\"\n"
+        "a = ()"
+      )
     )
   ].

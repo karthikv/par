@@ -25,16 +25,18 @@
 % fresh - a function that generates a new TV.
 % fvs - a function that computes the set of free TV names in an expression.
 % Scheme - a tuple {GVs, T} that represents a T generalized across GVs, a set of
-%          TV names.
+%   TV names.
 % Env - a Name => T mapping of bindings in the environment.
 
 % C - A context record for type inference with the following fields:
 %   gnr - the current gnr record that constraints are being added to; see G
-%         below
+%     below
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
 %   types - a Name => Int (number of type params) map for types in the env
-%   structs - a Name => StructInfo map for structs in the env
+%   aliases - a Name => {Vs, T} map denoting a type alias between the type
+%     given by Name and the type T, parameterized by Vs
+%   structs - a Name => {T, Ifaces} map for structs in the env
 %   ifaces - a map of V => I for TV names in a signature to ensure consistency
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   pid - the process id of the TV server used to generated fresh TVs
@@ -53,7 +55,9 @@
     "Set" => 1,
     "Map" => 2
   },
+  aliases = #{},
   structs = #{},
+  enums = #{},
   ifaces = #{},
   errs = [],
   modules = gb_sets:new(),
@@ -65,9 +69,9 @@
 %   subs - the substitutions made to unify types
 %   errs - any constraints that couldn't be unified
 %   schemes - the schemes of env variables that have been solved for and
-%             generalized
+%     generalized
 %   bound_vs - the set of TV names in the environment
-%   structs - a Name => StructInfo map for structs in the env
+%   aliases - see aliases in ctx record
 %   module - the module of the current constraint that's being unified
 %   loc - the location of the current constraint that's being unified
 %   from - a string describing where the current constraint is from
@@ -77,7 +81,7 @@
   errs = [],
   schemes = #{},
   bound_vs,
-  structs = #{},
+  aliases = #{},
   t1,
   t2,
   module,
@@ -92,10 +96,10 @@
 %   env - see Env above
 %   csts - an array of constraints to solve before generalizing
 %   deps - a set of TV names corresponding to gnr records that need to solved
-%          before this record or, in the case of (mutual) recursion,
-%          simultaneously with this record
+%     before this record or, in the case of (mutual) recursion,
+%     simultaneously with this record
 %   index / low_link / on_stack - bookkeeping for Tarjan's strongly connected
-%                                 components algorithm; see T below and [1]
+%     components algorithm; see T below and [1]
 -record(gnr, {
   id,
   vs,
@@ -111,7 +115,7 @@
 %     components algorithm. This is necessary to solve constraints in the proper
 %     order so as to respect dependencies.
 %   map - a V => gnr record mapping so you can find the appropriate node given
-%         the TV name
+%     the TV name
 %   stack / next_index - bookkeeping for Tarjan's algorithm; see [1]
 %   solver - the solver record used for unification; see S below
 %
@@ -163,22 +167,22 @@ parse_file(RawPath, Parsed) ->
               Dir = filename:dirname(Path),
 
               {Deps, Comps, AllErrors, Parsed2} = lists:foldr(fun(Import, Memo) ->
-                {import, Loc, {str, _, DepPath}} = Import,
-                {FoldModules, FoldComps, FoldAllErrors, FoldParsed} = Memo,
+                {import, _, {str, Loc, DepPath}, Idents} = Import,
+                {FoldDeps, FoldComps, FoldAllErrors, FoldParsed} = Memo,
 
                 FullPath = filename:join(Dir, binary_to_list(DepPath)),
                 case parse_file(FullPath, FoldParsed) of
                   {ok, DepModule, DepComps, FoldParsed1} ->
-                    {[DepModule | FoldModules], [DepComps | FoldComps],
+                    {[{DepModule, Idents} | FoldDeps], [DepComps | FoldComps],
                      FoldAllErrors, FoldParsed1};
 
                   {errors, [{read_error, ImportPath, Reason}], FoldParsed1} ->
                     ImportError = {import_error, Loc, ImportPath, Reason, Comp},
-                    {FoldModules, FoldComps, [[ImportError] | FoldAllErrors],
+                    {FoldDeps, FoldComps, [[ImportError] | FoldAllErrors],
                      FoldParsed1};
 
                   {errors, DepAllErrors, FoldParsed1} ->
-                    {FoldModules, FoldComps, [DepAllErrors | FoldAllErrors],
+                    {FoldDeps, FoldComps, [DepAllErrors | FoldAllErrors],
                      FoldParsed1};
 
                   skip -> Memo
@@ -239,67 +243,103 @@ infer_comps(Comps) ->
     end
   end, {gb_sets:new(), #ctx{pid=Pid}}, Comps),
 
-  C1 = lists:foldl(fun(Comp, FoldC) ->
+  C1 = populate_env_and_types(Comps, C),
+  C2 = infer_defs(Comps, C1),
+
+  S = #solver{errs=C2#ctx.errs, aliases=C2#ctx.aliases, pid=Pid},
+  Result = case solve(C2#ctx.gnrs, S) of
+    {ok, Schemes} ->
+      SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
+        {tv, V, _, _} = case Value of
+          % TODO: would no_dep ever happen?
+          {no_dep, TV} -> TV;
+          {add_dep, TV, _} -> TV
+        end,
+        {inst(maps:get(V, Schemes), Pid), Exported}
+      end, C2#ctx.env),
+      {ok, SubbedEnv, Comps};
+
+    {errors, Errs} -> {errors, Errs, Comps}
+  end,
+
+  % TODO: how to require that main is defined?
+  ok = tv_server:stop(Pid),
+  Result.
+
+populate_env_and_types(Comps, C) ->
+  lists:foldl(fun(Comp, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     lists:foldl(fun(Node, ModuleC) ->
       case Node of
         {global, _, {var, Loc, Name}, _, Exported} ->
-          case env_exists(Name, ModuleC) of
-            true -> add_ctx_err(?ERR_REDEF(Name), Loc, ModuleC);
-            false ->
-              {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
-              env_add(Name, {add_dep, TV, ID}, Exported, ModuleC)
-          end;
+          {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
+          define(Name, {add_dep, TV, ID}, Exported, Loc, ModuleC);
 
-        {N, _, TE, _} when N == enum; N == struct ->
-          {Loc, RawCon, NumParams} = case TE of
-            {con_token, Loc_, RawCon_} -> {Loc_, RawCon_, 0};
-            {gen_te, _, {con_token, Loc_, RawCon_}, ParamTEs} ->
-              {Loc_, RawCon_, length(ParamTEs)}
+        {N, _, TE, OptionsOrFields} when N == enum; N == struct ->
+          {Loc, Name, NumParams} = case TE of
+            {con_token, Loc_, Name_} -> {Loc_, Name_, 0};
+            {gen_te, _, {con_token, Loc_, Name_}, ParamTEs} ->
+              {Loc_, Name_, length(ParamTEs)}
           end,
 
-          Con = qualify(RawCon, ModuleC),
-          Types = ModuleC#ctx.types,
+          Con = qualify(Name, ModuleC),
+          ModuleC1 = define_type(Con, NumParams, Loc, ModuleC),
 
-          RedefBuiltin = (string:chr(RawCon, $.) == 0) and
-            maps:is_key(RawCon, Types),
-          Redef = maps:is_key(Con, Types),
+          case N of
+            enum ->
+              Enums = ModuleC1#ctx.enums,
+              {Variants, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
+                {option, _, {con_token, OptionLoc, OptionCon}, _, _} = Option,
+                {TV, ID} = tv_server:fresh_gnr_id(NestedC#ctx.pid),
+                Value = {add_dep, TV, ID},
+                {OptionCon, define(OptionCon, Value, true, OptionLoc, NestedC)}
+              end, ModuleC1, OptionsOrFields),
 
-          if
-            RedefBuiltin ->
-              add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(RawCon), Loc, ModuleC);
+              ModuleC2#ctx{enums=Enums#{Con => Variants}};
 
-            % TODO: add line numbers for where redef occurred
-            Redef -> add_ctx_err(?ERR_REDEF_TYPE(Con), Loc, ModuleC);
-            true -> ModuleC#ctx{types=Types#{Con => NumParams}}
+            struct ->
+              {TV, ID} = tv_server:fresh_gnr_id(ModuleC1#ctx.pid),
+              ModuleC2 = define(Name, {add_dep, TV, ID}, true, Loc, ModuleC1),
+
+              {T, ModuleC3} = infer_sig(false, true, #{}, TE, ModuleC2),
+              StructInfo = {T, ModuleC3#ctx.ifaces},
+              ModuleC3#ctx{structs=(ModuleC3#ctx.structs)#{Con => StructInfo}}
           end;
 
         _ -> ModuleC
       end
     end, FoldC#ctx{module=Module}, Defs)
-  end, C, Comps),
+  end, C, Comps).
 
-  C2 = lists:foldl(fun(Comp, FoldC) ->
+define(Name, Value, Exported, Loc, C) ->
+  case env_exists(Name, C) of
+    true -> add_ctx_err(?ERR_REDEF(Name), Loc, C);
+    false -> env_add(Name, Value, Exported, C)
+  end.
+
+define_type(Con, NumParams, Loc, C) ->
+  Types = C#ctx.types,
+  Builtin = string:chr(Con, $.) == 0,
+  Redef = maps:is_key(Con, Types),
+
+  if
+    Redef andalso Builtin -> add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), Loc, C);
+    % TODO: add line numbers for where redef occurred
+    Redef -> add_ctx_err(?ERR_REDEF_TYPE(Con), Loc, C);
+    true -> C#ctx{types=Types#{Con => NumParams}}
+  end.
+
+infer_defs(Comps, C) ->
+  lists:foldl(fun(Comp, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps} = Comp,
-    AccessibleModules = gb_sets:from_list([Module | Deps]),
-    FoldC1 = FoldC#ctx{module=Module, modules=AccessibleModules},
+    DepModules = lists:map(fun({DepModule, _}) -> DepModule end, Deps),
+    AccessibleModules = gb_sets:from_list([Module | DepModules]),
 
-    lists:foldl(fun(Node, ModuleC) ->
-      case Node of
-        {N, _, _, _} when N == enum; N == struct ->
-          {_, ModuleC1} = infer(Node, ModuleC),
-          ModuleC1;
-
-        _ -> ModuleC
-      end
-    end, FoldC1, Defs)
-  end, C1, Comps),
-
-  C3 = lists:foldl(fun(Comp, FoldC) ->
-    #comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps} = Comp,
-    AccessibleModules = gb_sets:from_list([Module | Deps]),
-    FoldC1 = FoldC#ctx{module=Module, modules=AccessibleModules},
+    FoldC1 = populate_direct_imports(
+      Deps,
+      FoldC#ctx{module=Module, modules=AccessibleModules}
+    ),
 
     {LastSig, FoldC2} = lists:foldl(fun(Node, {Sig, ModuleC}) ->
       ModuleC1 = if
@@ -365,7 +405,9 @@ infer_comps(Comps) ->
         {sig, _, _, _} -> {Node, ModuleC1};
 
         % we've already processed enums/structs
-        _ -> {none, ModuleC1}
+        {N, _, _, _} when N == enum; N == struct ->
+          {_, ModuleC2} = infer(Node, ModuleC1),
+          {none, ModuleC2}
       end
     end, {none, FoldC1}, Defs),
 
@@ -374,26 +416,57 @@ infer_comps(Comps) ->
       {sig, _, {var, _, SigName}, _} ->
         add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC2)
     end
-  end, C2, Comps),
+  end, C, Comps).
 
-  S = #solver{errs=C3#ctx.errs, structs=C3#ctx.structs, pid=Pid},
-  Result = case solve(C3#ctx.gnrs, S) of
-    {ok, Schemes} ->
-      SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
-        {tv, V, _, _} = case Value of
-          {no_dep, TV} -> TV;
-          {add_dep, TV, _} -> TV
-        end,
-        {inst(maps:get(V, Schemes), Pid), Exported}
-      end, C3#ctx.env),
-      {ok, SubbedEnv, Comps};
+populate_direct_imports(Deps, C) ->
+  lists:foldl(fun({Module, Idents}, ModuleC) ->
+    lists:foldl(fun(Ident, NestedC) ->
+      case Ident of
+        {var, Loc, Name} ->
+          {Value, NestedC1} = raw_lookup(Module, Name, Loc, NestedC),
+          define(Name, Value, false, Loc, NestedC1);
 
-    {errors, Errs} -> {errors, Errs, Comps}
-  end,
+        {con_token, Loc, Name} ->
+          Con = lists:concat([Module, '.', Name]),
+          {TypeExists, NestedC1} = case maps:find(Con, NestedC#ctx.types) of
+            {ok, NumParams} ->
+              NewCon = qualify(Name, NestedC),
+              CaseC = case NumParams of
+                0 -> add_alias(NewCon, [], {con, Con}, NestedC);
+                _ ->
+                  Vs = lists:map(fun(_) ->
+                    tv_server:fresh(NestedC#ctx.pid)
+                  end, lists:seq(1, NumParams)),
 
-  % TODO: how to require that main is defined?
-  ok = tv_server:stop(Pid),
-  Result.
+                  add_alias(NewCon, Vs, {gen, Con, Vs}, NestedC)
+              end,
+              {true, define_type(NewCon, NumParams, Loc, CaseC)};
+
+            error -> {false, NestedC}
+          end,
+
+          {Value, NestedC2} = raw_lookup(Module, Name, Loc, NestedC1),
+          case {TypeExists, no_ctx_errs(NestedC2, NestedC1)} of
+            {false, false} -> NestedC2;
+            {true, false} -> NestedC1;
+            {_, true} -> define(Name, Value, false, Loc, NestedC2)
+          end;
+
+        {variants, Loc, Name} ->
+          Con = lists:concat([Module, '.', Name]),
+          case maps:find(Con, NestedC#ctx.enums) of
+            {ok, Variants} ->
+              lists:foldl(fun(VariantCon, FoldC) ->
+                Env = FoldC#ctx.env,
+                {Value, true} = maps:get({Module, VariantCon}, Env),
+                define(VariantCon, Value, false, Loc, FoldC)
+              end, NestedC, Variants);
+
+            error -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con, Module), Loc, NestedC)
+          end
+      end
+    end, ModuleC, Idents)
+  end, C, Deps).
 
 infer({fn, _, Args, Expr}, C) ->
   Names = gb_sets:union(lists:map(fun pattern_names/1, Args)),
@@ -458,18 +531,12 @@ infer({enum, _, EnumTE, Options}, C) ->
     end, T, ArgTsRev),
 
     % don't need to make any Vs rigid; inst still works correctly
-    NormOptionT = norm_sig_type(OptionT, [], C#ctx.pid),
+    NormOptionT = norm_sig_type(OptionT, [], FoldC1#ctx.pid),
+    {add_dep, TV, ID} = env_get(Con, FoldC1),
 
-    {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
     FoldC2 = new_gnr(TV, ID, FoldC1),
     FoldC3 = add_cst(TV, NormOptionT, Loc, ?FROM_ENUM_CTOR, FoldC2),
     FoldC4 = finish_gnr(FoldC3, FoldC1#ctx.gnr),
-
-    Name = utils:unqualify(Con),
-    FoldC5 = case env_exists(Name, FoldC4) of
-      true -> add_ctx_err(?ERR_REDEF(Name), Loc, FoldC4);
-      false -> env_add(Name, {add_dep, TV, ID}, true, FoldC4)
-    end,
 
     case KeyNode of
       none ->
@@ -477,32 +544,32 @@ infer({enum, _, EnumTE, Options}, C) ->
         case maps:find(Key, Keys) of
           {ok, {default, _, _}} ->
             % we've already added an ERR_REDEF; no need to add another
-            {Keys, FoldC5};
+            {Keys, FoldC4};
           {ok, {custom, _, CustomLoc}} ->
             % TODO: show actual code instead of just line for ERR_DUP_KEY
-            FoldC6 = add_ctx_err(
+            FoldC5 = add_ctx_err(
               ?ERR_DUP_KEY(Key, Con, Loc),
               CustomLoc,
-              FoldC5
+              FoldC4
             ),
-            {Keys, FoldC6};
-          error -> {Keys#{Key => {default, Con, Loc}}, FoldC5}
+            {Keys, FoldC5};
+          error -> {Keys#{Key => {default, Con, Loc}}, FoldC4}
         end;
 
       {some, {atom, KeyLoc, Key}} ->
         case maps:find(Key, Keys) of
           {ok, {_, OtherCon, OtherLoc}} ->
-            FoldC6 = add_ctx_err(
+            FoldC5 = add_ctx_err(
               ?ERR_DUP_KEY(Key, OtherCon, OtherLoc),
               KeyLoc,
-              FoldC5
+              FoldC4
             ),
 
             % In case the map contains a default, we go ahead and replace the
             % value with a custom. This way, if another default comes up, we'll
             % correctly report an error.
-            {Keys#{Key := {custom, Con, KeyLoc}}, FoldC6};
-          error -> {Keys#{Key => {custom, Con, KeyLoc}}, FoldC5}
+            {Keys#{Key := {custom, Con, KeyLoc}}, FoldC5};
+          error -> {Keys#{Key => {custom, Con, KeyLoc}}, FoldC4}
         end
     end
   end, {#{}, C1}, Options),
@@ -510,46 +577,42 @@ infer({enum, _, EnumTE, Options}, C) ->
   {T, C2};
 
 infer({struct, Loc, StructTE, Fields}, C) ->
-  {T, C1} = infer_sig(false, true, #{}, StructTE, C),
-  {{record, _, RawFieldMap}, C2} = infer_sig(
+  Name = case StructTE of
+    {con_token, _, Name_} -> Name_;
+    {gen_te, _, {con_token, _, Name_}, _} -> Name_
+  end,
+  Con = qualify(Name, C),
+
+  {T, Ifaces} = maps:get(Con, C#ctx.structs),
+  {{record, _, RawFieldMap}, C1} = infer_sig(
     {T, fvs(T)},
     false,
-    C1#ctx.ifaces,
+    Ifaces,
     {record_te, Loc, Fields},
-    C1
+    C
   ),
 
-  FnT = lists:foldr(fun({sig, _, {var, _, Name}, _}, LastT) ->
-    #{Name := FieldT} = RawFieldMap,
+  FnT = lists:foldr(fun({sig, _, {var, _, FieldName}, _}, LastT) ->
+    #{FieldName := FieldT} = RawFieldMap,
     {lam, FieldT, LastT}
   end, T, Fields),
 
   % don't need to make any Vs rigid; inst still works correctly
-  NormFnT = norm_sig_type(FnT, [], C2#ctx.pid),
+  NormFnT = norm_sig_type(FnT, [], C1#ctx.pid),
 
-  {Con, ConLoc, Value} = case {T, StructTE} of
-    {{con, Con_}, {con_token, ConLoc_, _}} ->
-      {Con_, ConLoc_, {T, [], RawFieldMap}};
-
-    {{gen, Con_, ParamTs}, {gen_te, _, {con_token, ConLoc_, _}, _}} ->
-      Vs = lists:map(fun({tv, V, none, _}) -> V end, ParamTs),
-      {Con_, ConLoc_, {T, Vs, RawFieldMap}}
+  Vs = case T of
+    {con, _} -> [];
+    {gen, _, ParamTs} ->
+      lists:map(fun({tv, V, none, _}) -> V end, ParamTs)
   end,
+  C2 = add_alias(Con, Vs, {record, none, RawFieldMap}, C1),
 
-  {TV, ID} = tv_server:fresh_gnr_id(C2#ctx.pid),
-  Name = utils:unqualify(Con),
-  C3 = case env_exists(Name, C2) of
-    true -> add_ctx_err(?ERR_REDEF(Name), ConLoc, C2);
-    false ->
-      NewStructs = (C2#ctx.structs)#{Con => Value},
-      env_add(Name, {add_dep, TV, ID}, true, C2#ctx{structs=NewStructs})
-  end,
+  {add_dep, TV, ID} = env_get(Name, C2),
+  C3 = new_gnr(TV, ID, C2),
+  C4 = add_cst(TV, NormFnT, Loc, ?FROM_STRUCT_CTOR, C3),
+  C5 = finish_gnr(C4, C2#ctx.gnr),
 
-  C4 = new_gnr(TV, ID, C3),
-  C5 = add_cst(TV, NormFnT, Loc, ?FROM_STRUCT_CTOR, C4),
-  C6 = finish_gnr(C5, C3#ctx.gnr),
-
-  {TV, C6};
+  {TV, C5};
 
 infer({none, _}, C) -> {none, C};
 infer({int, _, _}, C) ->
@@ -664,7 +727,7 @@ infer({record, Loc, RecordCon, Inits}, C) ->
   end,
 
   case maps:find(Con, C#ctx.structs) of
-    {ok, {StructT, _, _}} ->
+    {ok, {StructT, _}} ->
       {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
       NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_CREATE(Name),
@@ -687,7 +750,7 @@ infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
   end,
 
   case maps:find(Con, C#ctx.structs) of
-    {ok, {StructT, _, _}} ->
+    {ok, {StructT, _}} ->
       {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
       NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_UPDATE,
@@ -810,6 +873,7 @@ infer({match, _, Expr, Cases}, C) ->
 
   C1 = lists:foldl(fun({'case', _, Pattern, Then}, FoldC) ->
     {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
+    ID = FoldC1#ctx.gnr#gnr.id,
     {PatternT, FoldC2} = infer(Pattern, with_pattern_env(Pattern, FoldC1)),
     FoldC3 = add_cst(
       ExprT,
@@ -819,10 +883,11 @@ infer({match, _, Expr, Cases}, C) ->
       FoldC2
     ),
 
-    {ThenT, FoldC4} = infer(Then, finish_gnr(FoldC3, FoldC#ctx.gnr)),
+    FoldC4 = finish_gnr(FoldC3, add_gnr_dep(ID, FoldC#ctx.gnr)),
+    {ThenT, FoldC5} = infer(Then, FoldC4),
     % revert env to before pattern was parsed
-    FoldC5 = FoldC4#ctx{env=FoldC#ctx.env},
-    add_cst(TV, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC5)
+    FoldC6 = FoldC5#ctx{env=FoldC#ctx.env},
+    add_cst(TV, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
   end, C, Cases),
 
   {TV, C1};
@@ -1036,13 +1101,15 @@ infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   G4 = G3#gnr{csts=G3#gnr.csts ++ [make_cst(PatternT, ExprT, Loc, From, C3)]},
   C4 = C3#ctx{gnr=G4},
 
-  finish_gnr(C4, C#ctx.gnr);
+  finish_gnr(C4, add_gnr_dep(ID, C#ctx.gnr));
 
 infer_pattern(Pattern, Expr, From, C) ->
   {ExprT, C1} = infer(Expr, new_gnr(C)),
+  ID = C1#ctx.gnr#gnr.id,
   {PatternT, C2} = infer(Pattern, with_pattern_env(Pattern, C1)),
+
   C3 = add_cst(PatternT, ExprT, ?LOC(Pattern), From, C2),
-  finish_gnr(C3, C#ctx.gnr).
+  finish_gnr(C3, add_gnr_dep(ID, C#ctx.gnr)).
 
 with_pattern_env(Pattern, C) ->
   ID = C#ctx.gnr#gnr.id,
@@ -1074,23 +1141,28 @@ pattern_names({cons, _, Elems, Tail}) ->
 pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 
 lookup(Module, Name, Loc, C) ->
-  Key = {Module, Name},
-  External = C#ctx.module /= Module,
-
-  case maps:find(Key, C#ctx.env) of
-    {ok, {_, false}} when External ->
-      TV = tv_server:fresh(C#ctx.pid),
-      {TV, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
-
-    {ok, {{add_dep, EnvTV, ID}, _}} ->
-      G = add_gnr_dep(ID, C#ctx.gnr),
+  {Value, C1} = raw_lookup(Module, Name, Loc, C),
+  case Value of
+    {add_dep, EnvTV, ID} ->
+      G = add_gnr_dep(ID, C1#ctx.gnr),
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
-      {{inst, EnvTV}, C#ctx{gnr=G}};
+      {{inst, EnvTV}, C1#ctx{gnr=G}};
 
-    {ok, {{_, EnvTV}, _}} -> {EnvTV, C};
+    {no_dep, EnvTV} -> {EnvTV, C1}
+  end.
+
+raw_lookup(Module, Name, Loc, C) ->
+  Key = {Module, Name},
+  External = C#ctx.module /= Module,
+
+  case maps:find(Key, C#ctx.env) of
+    {ok, {Value, false}} when External ->
+      {Value, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
+
+    {ok, {Value, _}} -> {Value, C};
 
     error ->
       TV = tv_server:fresh(C#ctx.pid),
@@ -1098,7 +1170,7 @@ lookup(Module, Name, Loc, C) ->
         External -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C);
         true -> add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)
       end,
-      {TV, C1}
+      {{no_dep, TV}, C1}
   end.
 
 env_exists(Name, C) ->
@@ -1159,6 +1231,10 @@ validate_type(Con, NumParams, Loc, C) ->
 add_ctx_err(Msg, Loc, C) ->
   C#ctx{errs=[{Msg, C#ctx.module, Loc} | C#ctx.errs]}.
 
+no_ctx_errs(C1, C2) -> length(C1#ctx.errs) == length(C2#ctx.errs).
+
+add_alias(Con, Vs, T, C) -> C#ctx{aliases=(C#ctx.aliases)#{Con => {Vs, T}}}.
+
 norm_sig_type(SigT, RigidVs, Pid) ->
   RigidVsSet = gb_sets:from_list(RigidVs),
 
@@ -1189,11 +1265,11 @@ solve(Gs, S) ->
   end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
 
   case T#tarjan.solver of
-    #solver{errs=Errs, subs=Subs, structs=Structs} when length(Errs) > 0 ->
+    #solver{errs=Errs, subs=Subs, aliases=Aliases} when length(Errs) > 0 ->
       SubbedErrs = lists:map(fun
         ({T1, T2, Module, Loc, From}) ->
-          SubbedT1 = subs(T1, Subs, Structs),
-          SubbedT2 = subs(T2, Subs, Structs),
+          SubbedT1 = subs(T1, Subs, Aliases),
+          SubbedT2 = subs(T2, Subs, Aliases),
 
           IsRecord1 = is_tuple(SubbedT1) andalso (
             element(1, SubbedT1) == record orelse
@@ -1205,8 +1281,8 @@ solve(Gs, S) ->
           ),
 
           {FinalT1, FinalT2} = case {IsRecord1, IsRecord2} of
-            {true, false} -> {SubbedT1, unalias(SubbedT2, Structs)};
-            {false, true} -> {unalias(SubbedT1, S#solver.structs), SubbedT2};
+            {true, false} -> {SubbedT1, unalias(SubbedT2, Aliases)};
+            {false, true} -> {unalias(SubbedT1, S#solver.aliases), SubbedT2};
             _ -> {SubbedT1, SubbedT2}
           end,
           {FinalT1, FinalT2, Module, Loc, From};
@@ -1285,9 +1361,9 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         BoundVs = bound_vs(SolG#gnr.env, FoldS),
 
         lists:foldl(fun(SolV, NestedS) ->
-          #solver{subs=Subs, structs=Structs, schemes=Schemes} = NestedS,
+          #solver{subs=Subs, aliases=Aliases, schemes=Schemes} = NestedS,
           SolTV = {tv, SolV, none, false},
-          T = subs(SolTV, Subs, Structs),
+          T = subs(SolTV, Subs, Aliases),
           GVs = gb_sets:subtract(fvs(T), BoundVs),
           Schemes1 = Schemes#{SolV => {GVs, T}},
           NestedS#solver{schemes=Schemes1}
@@ -1310,10 +1386,10 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   lists:foldr(fun({T1, T2, Module, Loc, From}, FoldS) ->
     ResolvedT1 = resolve(T1, FoldS),
     ResolvedT2 = resolve(T2, FoldS),
-    #solver{subs=Subs, structs=Structs} = FoldS,
+    #solver{subs=Subs, aliases=Aliases} = FoldS,
 
-    SubbedT1 = shallow_subs(ResolvedT1, Subs, Structs),
-    SubbedT2 = shallow_subs(ResolvedT2, Subs, Structs),
+    SubbedT1 = shallow_subs(ResolvedT1, Subs, Aliases),
+    SubbedT2 = shallow_subs(ResolvedT2, Subs, Aliases),
     FoldS1 = FoldS#solver{
       t1=SubbedT1,
       t2=SubbedT2,
@@ -1541,7 +1617,7 @@ unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
   end;
 
 unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
-  case unalias(T1, S#solver.structs) of
+  case unalias(T1, S#solver.aliases) of
     T1 -> add_err(S);
     NewT1 ->
       S1 = sub_unify(NewT1, T2, S),
@@ -1556,15 +1632,14 @@ unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
   sub_unify(T2, T1, S);
 
 unify(T1, T2, S) ->
-  case {unalias(T1, S#solver.structs), unalias(T2, S#solver.structs)} of
-    % if only T1 or T2 needs to be unaliased, we've accounted for it above
-    {T1, _} -> add_err(S);
-    {_, T2} -> add_err(S);
+  case {unalias(T1, S#solver.aliases), unalias(T2, S#solver.aliases)} of
+    {T1, T2} -> add_err(S);
+    % at least one type was an alias
     {NewT1, NewT2} -> sub_unify(NewT1, NewT2, S)
   end.
 
-sub_unify(T1, T2, #solver{subs=Subs, structs=Structs}=S) ->
-  unify(shallow_subs(T1, Subs, Structs), shallow_subs(T2, Subs, Structs), S).
+sub_unify(T1, T2, #solver{subs=Subs, aliases=Aliases}=S) ->
+  unify(shallow_subs(T1, Subs, Aliases), shallow_subs(T2, Subs, Aliases), S).
 
 add_sub(V, RawSub, S) ->
   Sub = case RawSub of
@@ -1603,17 +1678,16 @@ add_err(S) ->
 
 no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
-unalias({con, Con}, Structs) ->
-  case maps:find(Con, Structs) of
-    {ok, {_, [], RawFieldMap}} ->
-      {record, none, RawFieldMap};
+unalias({con, Con}, Aliases) ->
+  case maps:find(Con, Aliases) of
+    {ok, {[], T}} -> T;
     error -> {con, Con}
   end;
-unalias({gen, Con, ParamTs}, Structs) ->
-  case maps:find(Con, Structs) of
-    {ok, {_, Vs, RawFieldMap}} ->
+unalias({gen, Con, ParamTs}, Aliases) ->
+  case maps:find(Con, Aliases) of
+    {ok, {Vs, T}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
-      subs({record, none, RawFieldMap}, Subs, Structs);
+      subs(T, Subs, Aliases);
     error -> {gen, Con, ParamTs}
   end;
 unalias(T, _) -> T.
@@ -1632,43 +1706,43 @@ remove_arg_locs({lam, _, ArgT, ReturnT}) ->
   {lam, ArgT, remove_arg_locs(ReturnT)};
 remove_arg_locs(T) -> T.
 
-subs({lam, ArgT, ReturnT}, Subs, Structs) ->
-  {lam, subs(ArgT, Subs, Structs), subs(ReturnT, Subs, Structs)};
-subs({lam, Loc, ArgT, ReturnT}, Subs, Structs) ->
-  {lam, Loc, subs(ArgT, Subs, Structs), subs(ReturnT, Subs, Structs)};
-subs({tuple, ElemTs}, Subs, Structs) ->
-  {tuple, lists:map(fun(T) -> subs(T, Subs, Structs) end, ElemTs)};
-subs({tv, _, _, _}=TV, Subs, Structs) ->
-  case shallow_subs(TV, Subs, Structs) of
+subs({lam, ArgT, ReturnT}, Subs, Aliases) ->
+  {lam, subs(ArgT, Subs, Aliases), subs(ReturnT, Subs, Aliases)};
+subs({lam, Loc, ArgT, ReturnT}, Subs, Aliases) ->
+  {lam, Loc, subs(ArgT, Subs, Aliases), subs(ReturnT, Subs, Aliases)};
+subs({tuple, ElemTs}, Subs, Aliases) ->
+  {tuple, lists:map(fun(T) -> subs(T, Subs, Aliases) end, ElemTs)};
+subs({tv, _, _, _}=TV, Subs, Aliases) ->
+  case shallow_subs(TV, Subs, Aliases) of
     TV -> TV;
-    NewT -> subs(NewT, Subs, Structs)
+    NewT -> subs(NewT, Subs, Aliases)
   end;
 subs({con, Con}, _, _) -> {con, Con};
-subs({gen, Con, ParamTs}, Subs, Structs) ->
-  {gen, Con, lists:map(fun(T) -> subs(T, Subs, Structs) end, ParamTs)};
-subs({record, A, FieldMap}, Subs, Structs) ->
+subs({gen, Con, ParamTs}, Subs, Aliases) ->
+  {gen, Con, lists:map(fun(T) -> subs(T, Subs, Aliases) end, ParamTs)};
+subs({record, A, FieldMap}, Subs, Aliases) ->
   case maps:find(A, Subs) of
     error ->
       NewFieldMap = maps:map(fun(_, T) ->
-        subs(T, Subs, Structs)
+        subs(T, Subs, Aliases)
       end, FieldMap),
       {record, A, NewFieldMap};
-    {ok, {anchor, NewA}} -> subs({record, NewA, FieldMap}, Subs, Structs);
-    {ok, T} -> subs(T, Subs, Structs)
+    {ok, {anchor, NewA}} -> subs({record, NewA, FieldMap}, Subs, Aliases);
+    {ok, T} -> subs(T, Subs, Aliases)
   end;
-subs({record_ext, A, BaseT, Ext}, Subs, Structs) ->
+subs({record_ext, A, BaseT, Ext}, Subs, Aliases) ->
   case maps:find(A, Subs) of
     error ->
-      NewBase = subs(BaseT, Subs, Structs),
-      NewExt = maps:map(fun(_, T) -> subs(T, Subs, Structs) end, Ext),
-      consolidate({record_ext, A, NewBase, NewExt}, Structs);
+      NewBase = subs(BaseT, Subs, Aliases),
+      NewExt = maps:map(fun(_, T) -> subs(T, Subs, Aliases) end, Ext),
+      consolidate({record_ext, A, NewBase, NewExt}, Aliases);
     {ok, {anchor, NewA}} ->
-      subs({record_ext, NewA, BaseT, Ext}, Subs, Structs);
-    {ok, T} -> subs(T, Subs, Structs)
+      subs({record_ext, NewA, BaseT, Ext}, Subs, Aliases);
+    {ok, T} -> subs(T, Subs, Aliases)
   end;
 subs(none, _, _) -> none.
 
-shallow_subs({tv, V, I, Rigid}, Subs, Structs) ->
+shallow_subs({tv, V, I, Rigid}, Subs, Aliases) ->
   case maps:find(V, Subs) of
     error -> {tv, V, I, Rigid};
     {ok, {rigid, V1}} -> {tv, V1, I, true};
@@ -1684,39 +1758,39 @@ shallow_subs({tv, V, I, Rigid}, Subs, Structs) ->
         % Instantiation, so rigid resets to false
         true -> {tv, Value, I, false}
       end,
-      shallow_subs(Sub, Subs, Structs)
+      shallow_subs(Sub, Subs, Aliases)
   end;
-shallow_subs({record, A, FieldMap}=T, Subs, Structs) ->
+shallow_subs({record, A, FieldMap}=T, Subs, Aliases) ->
   case maps:find(A, Subs) of
     error -> T;
     {ok, {anchor, NewA}} ->
-      shallow_subs({record, NewA, FieldMap}, Subs, Structs);
-    {ok, NewT} -> shallow_subs(NewT, Subs, Structs)
+      shallow_subs({record, NewA, FieldMap}, Subs, Aliases);
+    {ok, NewT} -> shallow_subs(NewT, Subs, Aliases)
   end;
-shallow_subs({record_ext, A, BaseT, Ext}=T, Subs, Structs) ->
+shallow_subs({record_ext, A, BaseT, Ext}=T, Subs, Aliases) ->
   case maps:find(A, Subs) of
-    error -> consolidate(T, Structs);
+    error -> consolidate(T, Aliases);
     {ok, {anchor, NewA}} ->
-      shallow_subs({record_ext, NewA, BaseT, Ext}, Subs, Structs);
-    {ok, NewT} -> shallow_subs(NewT, Subs, Structs)
+      shallow_subs({record_ext, NewA, BaseT, Ext}, Subs, Aliases);
+    {ok, NewT} -> shallow_subs(NewT, Subs, Aliases)
   end;
 shallow_subs(T, _, _) -> T.
 
-consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Structs) ->
-  consolidate({record_ext, A, BaseT, maps:merge(Ext1, Ext2)}, Structs);
+consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Aliases) ->
+  consolidate({record_ext, A, BaseT, maps:merge(Ext1, Ext2)}, Aliases);
 consolidate({record_ext, A, {record, _, FieldMap}, Ext}, _) ->
   {record, A, maps:merge(FieldMap, Ext)};
-consolidate({record_ext, A, BaseT, Ext}, Structs) ->
-  case unalias(BaseT, Structs) of
+consolidate({record_ext, A, BaseT, Ext}, Aliases) ->
+  case unalias(BaseT, Aliases) of
     % invalid base; just return as is
     BaseT -> {record_ext, A, BaseT, Ext};
-    NewBaseT -> consolidate({record_ext, A, NewBaseT, Ext}, Structs)
+    NewBaseT -> consolidate({record_ext, A, NewBaseT, Ext}, Aliases)
   end.
 
-bound_vs(Env, #solver{subs=Subs, structs=Structs, schemes=Schemes}) ->
+bound_vs(Env, #solver{subs=Subs, aliases=Aliases, schemes=Schemes}) ->
   maps:fold(fun(_, {Value, _}, FoldVs) ->
     case Value of
-      {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs, Structs)));
+      {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs(T, Subs, Aliases)));
 
       % 1) If a given other binding has been fully generalized already,
       %    we'll add the bound type variables from its scheme.
@@ -1752,8 +1826,8 @@ fvs({record_ext, _, BaseT, Ext}) ->
   gb_sets:union(fvs(BaseT), fvs({record, none, Ext}));
 fvs(none) -> gb_sets:new().
 
-occurs(V, T, #solver{subs=Subs, structs=Structs}) ->
-  occurs(V, subs(T, Subs, Structs)).
+occurs(V, T, #solver{subs=Subs, aliases=Aliases}) ->
+  occurs(V, subs(T, Subs, Aliases)).
 
 occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
