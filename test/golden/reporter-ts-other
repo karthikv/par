@@ -1,6 +1,6 @@
 *** module Mod *** ([infer-prg])
 
-variable b is not defined:
+b is not defined:
 2: expr = let a = 3 in (a, true, b)
                                  ^
 

@@ -1350,6 +1350,10 @@ other_errors_test_() ->
       {?ERR_NOT_DEF_TYPE("Bar"), l(2, 6, 3)}
     ))
   , ?_test(ctx_err_prg(
+      "foo = Bar { { baz = 3 } | baz = 4 }",
+      {?ERR_NOT_DEF_TYPE("Bar"), l(6, 3)}
+    ))
+  , ?_test(ctx_err_prg(
       "enum Foo {\n"
       "  Bar(\n"
       "    [\n"
@@ -1612,6 +1616,15 @@ import_test_() ->
       }
     ], "bar", "x"))
   , ?_test("Baz" = ok_many([
+      {"foo", "module Foo struct Baz { a : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Baz)\n"
+        "x = Baz { a = 3 }"
+        "y = Baz { { a = 3 } | a = 4 }"
+      }
+    ], "bar", "x"))
+  , ?_test("Baz" = ok_many([
       {"foo", "module Foo enum Baz { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -1643,6 +1656,15 @@ import_test_() ->
         "module Bar\n"
         "import \"./foo\" (variants Foo)\n"
         "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+      }
+    ], "bar", "f"))
+  , ?_test("Loc -> Loc" = ok_many([
+      {"foo", "module Foo struct Loc { start_line : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Loc)\n"
+        "f : Loc -> Loc\n"
+        "f(l) = { start_line = l.start_line + 1 }"
       }
     ], "bar", "f"))
   , ?_test(ctx_err_many([

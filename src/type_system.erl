@@ -726,15 +726,23 @@ infer({record, Loc, RecordCon, Inits}, C) ->
       {lists:concat([Module, '.', Name]), ConLoc_}
   end,
 
-  case maps:find(Con, C#ctx.structs) of
-    {ok, {StructT, _}} ->
+  case maps:find(Con, C#ctx.types) of
+    {ok, NumParams} ->
+      ExpT = case NumParams of
+        0 -> {con, Con};
+        _ ->
+          Vs = lists:map(fun(_) ->
+            tv_server:fresh(C#ctx.pid)
+          end, lists:seq(1, NumParams)),
+          {gen, Con, Vs}
+      end,
+
       {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
-      NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_CREATE(Name),
 
       TV = tv_server:fresh(C1#ctx.pid),
       C2 = add_cst(TV, RecordT, Loc, From, C1),
-      C3 = add_cst(TV, NormSigT, Loc, From, C2),
+      C3 = add_cst(TV, ExpT, Loc, From, C2),
       {TV, C3};
 
     error ->
@@ -749,15 +757,23 @@ infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
       {lists:concat([Module, '.', Name]), ConLoc_}
   end,
 
-  case maps:find(Con, C#ctx.structs) of
-    {ok, {StructT, _}} ->
+  case maps:find(Con, C#ctx.types) of
+    {ok, NumParams} ->
+      ExpT = case NumParams of
+        0 -> {con, Con};
+        _ ->
+          Vs = lists:map(fun(_) ->
+            tv_server:fresh(C#ctx.pid)
+          end, lists:seq(1, NumParams)),
+          {gen, Con, Vs}
+      end,
+
       {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
-      NormSigT = norm_sig_type(StructT, [], C1#ctx.pid),
       From = ?FROM_RECORD_UPDATE,
 
       TV = tv_server:fresh(C1#ctx.pid),
       C2 = add_cst(TV, RecordT, Loc, From, C1),
-      C3 = add_cst(TV, NormSigT, Loc, From, C2),
+      C3 = add_cst(TV, ExpT, Loc, From, C2),
       {TV, C3};
 
     error ->
@@ -1622,9 +1638,9 @@ unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
     NewT1 ->
       S1 = sub_unify(NewT1, T2, S),
       A = element(2, T2),
+      NoErrs = no_errs(S, S1),
       if
-        length(S#solver.errs) == length(S1#solver.errs) andalso A /= none ->
-          add_sub(A, T1, S1);
+        NoErrs andalso A /= none -> add_sub(A, T1, S1);
         true -> S1
       end
   end;
@@ -1680,14 +1696,14 @@ no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
 unalias({con, Con}, Aliases) ->
   case maps:find(Con, Aliases) of
-    {ok, {[], T}} -> T;
+    {ok, {[], T}} -> unalias(T, Aliases);
     error -> {con, Con}
   end;
 unalias({gen, Con, ParamTs}, Aliases) ->
   case maps:find(Con, Aliases) of
     {ok, {Vs, T}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
-      subs(T, Subs, Aliases);
+      unalias(subs(T, Subs, Aliases), Aliases);
     error -> {gen, Con, ParamTs}
   end;
 unalias(T, _) -> T.
