@@ -1620,7 +1620,7 @@ import_test_() ->
       {"bar",
         "module Bar\n"
         "import \"./foo\" (Baz)\n"
-        "x = Baz { a = 3 }"
+        "x = Baz { a = 3 }\n"
         "y = Baz { { a = 3 } | a = 4 }"
       }
     ], "bar", "x"))

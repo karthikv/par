@@ -632,4 +632,84 @@ test_import(Many) ->
         "export b = Foo.c(3)"
       }
     ], "foo"))
+
+
+  , ?_test(7 = Many([
+      {"foo", "module Foo export x = 3"},
+      {"bar", "module Bar import \"./foo\" (x) main() = x + 4"}
+    ], "bar"))
+  , ?_test([a, b, b] = Many([
+      {"foo", "module Foo export x = [@a] export twice(x) = [x, x]"},
+      {"a/bar",
+        "module Bar\n"
+        "import \"../foo\" (x, twice)\n"
+        "main() = x ++ twice(@b)"
+      }
+    ], "a/bar"))
+  , ?_assertEqual(#{a => 3}, Many([
+      {"foo", "module Foo struct Baz { a : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Baz)\n"
+        "main() = Baz(3)"
+      }
+    ], "bar"))
+  , ?_assertEqual({#{a => 3}, #{a => 4}}, Many([
+      {"foo", "module Foo struct Baz { a : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Baz)\n"
+        "x = Baz { a = 3 }\n"
+        "y = Baz { { a = 3 } | a = 4 }\n"
+        "main() = (x, y)"
+      }
+    ], "bar"))
+  , ?_test({'Foo', 3} = Many([
+      {"foo", "module Foo enum Baz { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Baz)\n"
+        "x : Baz\n"
+        "x = Foo.Foo(3)\n"
+        "main() = x"
+      }
+    ], "bar"))
+  , ?_test({'Foo', 3} = Many([
+      {"foo", "module Foo enum Foo { Foo(Int) }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Foo)\n"
+        "x : Foo\n"
+        "x = Foo(3)\n"
+        "main() = x"
+      }
+    ], "bar"))
+  , ?_test(2 = Many([
+      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (One, Two, Three)\n"
+        "f(x) = match x { One => 1, Two => 2, Three => 3 }\n"
+        "main() = f(Two)"
+      }
+    ], "bar"))
+  , ?_test(3 = Many([
+      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (variants Foo)\n"
+        "f(x) = match x { One => 1, Two => 2, Three => 3 }\n"
+        "main() = f(Three)"
+      }
+    ], "bar"))
+  , ?_assertEqual(#{start_line => 18}, Many([
+      {"foo", "module Foo struct Loc { start_line : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Loc)\n"
+        "f : Loc -> Loc\n"
+        "f(l) = { start_line = l.start_line + 1 }\n"
+        "main() = f({ start_line = 17 })"
+      }
+    ], "bar"))
   ].

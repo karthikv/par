@@ -7,76 +7,108 @@
 -define(INIT_FN_ATOM, '_@init').
 
 compile_comps(Comps) ->
-  {AllExports, FullEnv} = lists:mapfoldl(fun(Comp, FoldEnv) ->
-    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
-
-    {Exports, FoldEnv1} = lists:mapfoldl(fun(Node, ModuleEnv) ->
-      case Node of
-        {global, _, {var, _, Name}, {fn, _, Args, _}, Exported} ->
-          Atom = list_to_atom(Name),
-          Arity = length(Args),
-          Value = {{global_fn, Atom}, Arity},
-
-          ModuleEnv1 = env_set(Name, Value, ModuleEnv),
-          if
-            Exported or ((Name == "main") and (Arity == 0)) ->
-              {[{Atom, Arity}], ModuleEnv1};
-            true -> {[], ModuleEnv1}
-          end;
-
-        {global, _, {var, _, Name}, _, Exported} ->
-          Atom = list_to_atom(Name),
-          Value = {{global, Atom}, unknown},
-
-          ModuleEnv1 = env_set(Name, Value, ModuleEnv),
-          case Exported of
-            true -> {[{Atom, 0}], ModuleEnv1};
-            false -> {[], ModuleEnv1}
-          end;
-
-        {enum, _, _, OptionTEs} ->
-          {EnumExports, ModuleEnv1} = lists:mapfoldl(fun(OptionTE, NestedEnv) ->
-            {option, _, {con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
-
-            Atom = list_to_atom(Con),
-            Arity = length(ArgsTE),
-            Key = case KeyNode of
-              none -> Atom;
-              {some, {atom, _, Key_}} -> Key_
-            end,
-
-            case Arity of
-              0 -> {[], env_set(Con, {{option, Key}, badarity}, NestedEnv)};
-              _ ->
-                Value = {{option, Key, Atom}, Arity},
-                {[{Atom, Arity}], env_set(Con, Value, NestedEnv)}
-            end
-          end, ModuleEnv, OptionTEs),
-
-          {lists:append(EnumExports), ModuleEnv1};
-
-        {struct, _, {con_token, _, Con}, FieldTEs} ->
-          Atom = list_to_atom(Con),
-          Arity = length(FieldTEs),
-          Value = {{global_fn, Atom}, Arity},
-          {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
-
-        {struct, _, {gen_te, _, {con_token, _, Con}, _}, FieldTEs} ->
-          Atom = list_to_atom(Con),
-          Arity = length(FieldTEs),
-          Value = {{global_fn, Atom}, Arity},
-          {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
-
-        _ -> {[], ModuleEnv}
-      end
-    end, FoldEnv#{'*module' => Module}, Defs),
-
+  {AllExports, Env} = lists:mapfoldl(fun(Comp, FoldEnv) ->
+    {Exports, FoldEnv1} = populate_env(Comp, FoldEnv),
     {lists:append(Exports), FoldEnv1}
   end, #{}, Comps),
+
+  FullEnv = lists:foldl(fun populate_direct_imports/2, Env, Comps),
 
   lists:map(fun({Comp, Exports}) ->
     compile_ast(Comp, Exports, FullEnv)
   end, lists:zip(Comps, AllExports)).
+
+populate_env(#comp{module=Module, ast={module, _, _, _, Defs}}, Env) ->
+  % populate env and aggregate exports
+  lists:mapfoldl(fun(Node, ModuleEnv) ->
+    case Node of
+      {global, _, {var, _, Name}, {fn, _, Args, _}, Exported} ->
+        Atom = list_to_atom(Name),
+        Arity = length(Args),
+        Value = {{global_fn, Atom}, Arity},
+
+        ModuleEnv1 = env_set(Name, Value, ModuleEnv),
+        if
+          Exported or ((Name == "main") and (Arity == 0)) ->
+            {[{Atom, Arity}], ModuleEnv1};
+          true -> {[], ModuleEnv1}
+        end;
+
+      {global, _, {var, _, Name}, _, Exported} ->
+        Atom = list_to_atom(Name),
+        Value = {{global, Atom}, unknown},
+
+        ModuleEnv1 = env_set(Name, Value, ModuleEnv),
+        case Exported of
+          true -> {[{Atom, 0}], ModuleEnv1};
+          false -> {[], ModuleEnv1}
+        end;
+
+      {enum, _, _, OptionTEs} ->
+        {EnumExports, ModuleEnv1} = lists:mapfoldl(fun(OptionTE, NestedEnv) ->
+          {option, _, {con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
+
+          Atom = list_to_atom(Con),
+          Arity = length(ArgsTE),
+          Key = case KeyNode of
+            none -> Atom;
+            {some, {atom, _, Key_}} -> Key_
+          end,
+
+          case Arity of
+            0 -> {[], env_set(Con, {{option, Key}, badarity}, NestedEnv)};
+            _ ->
+              Value = {{option, Key, Atom}, Arity},
+              {[{Atom, Arity}], env_set(Con, Value, NestedEnv)}
+          end
+        end, ModuleEnv, OptionTEs),
+
+        {lists:append(EnumExports), ModuleEnv1};
+
+      {struct, _, {con_token, _, Con}, FieldTEs} ->
+        Atom = list_to_atom(Con),
+        Arity = length(FieldTEs),
+        Value = {{global_fn, Atom}, Arity},
+        {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
+
+      {struct, _, {gen_te, _, {con_token, _, Con}, _}, FieldTEs} ->
+        Atom = list_to_atom(Con),
+        Arity = length(FieldTEs),
+        Value = {{global_fn, Atom}, Arity},
+        {[{Atom, Arity}], env_set(Con, Value, ModuleEnv)};
+
+      _ -> {[], ModuleEnv}
+    end
+  end, Env#{'*module' => Module}, Defs).
+
+populate_direct_imports(#comp{module=Module, deps=Deps, enums=Enums}, Env) ->
+  lists:foldl(fun({DepModule, Idents}, ModuleEnv) ->
+    lists:foldl(fun(Ident, NestedEnv) ->
+      case Ident of
+        {var, _, Name} ->
+          {_, Arity} = maps:get({DepModule, Name}, NestedEnv),
+          env_set(Name, {{external, DepModule}, Arity}, NestedEnv);
+
+        {con_token, _, Name} ->
+          % Name may refer to a type or a variant. We don't need to import
+          % types, so only import the variant if it exists.
+          case maps:find({DepModule, Name}, NestedEnv) of
+            {ok, {_, Arity}} ->
+              env_set(Name, {{external, DepModule}, Arity}, NestedEnv);
+            error -> NestedEnv
+          end;
+
+        {variants, _, Name} ->
+          Con = lists:concat([DepModule, '.', Name]),
+          Variants = maps:get(Con, Enums),
+
+          lists:foldl(fun(Variant, FoldEnv) ->
+            {_, Arity} = maps:get({DepModule, Variant}, FoldEnv),
+            env_set(Variant, {{external, DepModule}, Arity}, FoldEnv)
+          end, NestedEnv, Variants)
+      end
+    end, ModuleEnv, Idents)
+  end, Env#{'*module' => Module}, Deps).
 
 compile_ast(Comp, Exports, Env) ->
   #comp{module=Module, ast=Ast, path=Path} = Comp,
@@ -246,7 +278,9 @@ rep({N, Loc, Name}, Env) when N == var; N == con_token; N == var_value ->
     {{option, Key}, _} -> {atom, Line, Key};
     {{option, _, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {{global_fn, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
-    {Atom, _} -> {var, Line, Atom}
+    {{external, Module}, _} ->
+      rep({field, Loc, {con_token, Loc, Module}, {N, Loc, Name}}, Env);
+    {Atom, _} when is_atom(Atom) -> {var, Line, Atom}
   end;
 
 rep({anon_record, Loc, Inits}, Env) ->
@@ -276,7 +310,9 @@ rep({field_fn, _, {var, Loc, Name}}, _) ->
   Clause = {clause, Line, [RecordVar], [], Body},
   {'fun', Line, {clauses, [Clause]}};
 
-rep({field, Loc, Expr, {N, _, Name}}, Env) when N == var; N == con_token ->
+% N can be var_value if we're called by rep({var_value, _, _}, _) above
+rep({field, Loc, Expr, {N, _, Name}}, Env)
+    when N == var; N == con_token; N == var_value ->
   Line = ?START_LINE(Loc),
   case Expr of
     {con_token, _, Module} ->

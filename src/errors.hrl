@@ -2,7 +2,17 @@
 -define(ERRORS_HRL_, 1).
 
 % a component to compile, representing a module and its metadata
--record(comp, {module, ast, deps, path, prg}).
+-record(comp, {
+  % fields added prior to type inference
+  module,
+  ast,
+  deps,
+  path,
+  prg,
+
+  % fields added after type inference
+  enums
+}).
 
 
 -define(FMT(Str), lists:flatten(io_lib:format(Str, []))).

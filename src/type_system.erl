@@ -257,7 +257,11 @@ infer_comps(Comps) ->
         end,
         {inst(maps:get(V, Schemes), Pid), Exported}
       end, C2#ctx.env),
-      {ok, SubbedEnv, Comps};
+
+      FinalComps = lists:map(fun(Comp) ->
+        Comp#comp{enums=C2#ctx.enums}
+      end, Comps),
+      {ok, SubbedEnv, FinalComps};
 
     {errors, Errs} -> {errors, Errs, Comps}
   end,
@@ -461,10 +465,10 @@ populate_direct_imports(Deps, C) ->
           Con = lists:concat([Module, '.', Name]),
           case maps:find(Con, NestedC#ctx.enums) of
             {ok, Variants} ->
-              lists:foldl(fun(VariantCon, FoldC) ->
+              lists:foldl(fun(Variant, FoldC) ->
                 Env = FoldC#ctx.env,
-                {Value, true} = maps:get({Module, VariantCon}, Env),
-                define(VariantCon, Value, false, Loc, FoldC)
+                {Value, true} = maps:get({Module, Variant}, Env),
+                define(Variant, Value, false, Loc, FoldC)
               end, NestedC, Variants);
 
             error -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con, Module), Loc, NestedC)
