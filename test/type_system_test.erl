@@ -1711,4 +1711,22 @@ import_test_() ->
         "f(x) = match x { One => 1, Two => 2, Three => 3 }"
       }
     ], "bar", {?ERR_REDEF("One"), "Bar", l(26, 12)}))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "import \"./bar\"\n"
+        "export x = 3"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./baz\"\n"
+        "import \"./foo\" (x)\n"
+        "y = 4"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./bar\" (x)\n"
+        "z = 5"
+      }
+    ], "foo", {?ERR_NOT_DEF("x", "Bar"), "Baz", l(16, 1)}))
   ].

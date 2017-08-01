@@ -411,10 +411,15 @@ infer_defs(Comps, C) ->
       end
     end, {none, FoldC1}, Defs),
 
+    % Remove direct imports from env. We don't want modules trying to import
+    % recursively through other modules, as this would make the order in
+    % which files are processed important.
+    FoldC3 = FoldC2#ctx{env=FoldC#ctx.env},
+
     case LastSig of
-      none -> FoldC2;
+      none -> FoldC3;
       {sig, _, {var, _, SigName}, _} ->
-        add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC2)
+        add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC3)
     end
   end, C, Comps).
 
