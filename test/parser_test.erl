@@ -177,11 +177,26 @@ expr_test_() ->
       ok_expr("{ a = 3 }")
     )
   , ?_assertEqual(
+      {anon_record, l(0, 12), [
+        {init, l(2, 8), {var, l(2, 1), "f"},
+          {fn, l(2, 8), [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}}
+      ]},
+      ok_expr("{ f(x) = 3 }")
+    )
+  , ?_assertEqual(
       {anon_record, l(0, 21), [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(9, 10), {var, l(9, 3), "bar"}, {bool, l(15, 4), true}}
       ]},
       ok_expr("{ a = 3, bar = true }")
+    )
+  , ?_assertEqual(
+      {anon_record, l(0, 24), [
+        {init, l(2, 8), {var, l(2, 1), "f"},
+          {fn, l(2, 8), [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}},
+        {init, l(12, 10), {var, l(12, 3), "bar"}, {bool, l(18, 4), true}}
+      ]},
+      ok_expr("{ f(x) = 3, bar = true }")
     )
   , ?_assertEqual(
       {anon_record, l(0, 0, 1, 12), [
@@ -222,6 +237,16 @@ expr_test_() ->
       },
       ok_expr("Module.Foo { a = 3, bar = true }")
     )
+  % to ensure parsing after named record works fine
+  , ?_assertEqual(
+      {binary_op, l(0, 18), '==',
+        {record, l(0, 13), {con_token, l(0, 3), "Foo"}, [
+          {init, l(6, 5), {var, l(6, 1), "a"}, {int, l(10, 1), 3}}
+        ]},
+        {int, l(17, 1), 1}
+      },
+      ok_expr("Foo { a = 3 } == 1")
+    )
 
 
   , ?_assertEqual(
@@ -239,6 +264,22 @@ expr_test_() ->
         {ext, l(16, 9), {var, l(16, 1), "c"}, {bool, l(21, 4), true}}
       ]},
       ok_expr("{ a | bar = @a, c := true }")
+    )
+  , ?_assertEqual(
+      {anon_record_ext, l(0, 34), {var, l(2, 1), "a"}, [
+        {init, l(6, 8), {var, l(6, 1), "f"},
+          {fn, l(6, 8), [], {atom, l(12, 2), a}}},
+        {ext, l(16, 16), {var, l(16, 1), "c"},
+          {fn, l(16, 16),
+            [{var, l(18, 1), "x"}, {var, l(21, 1), "y"}],
+            {binary_op, l(27, 5), '+',
+              {var, l(27, 1), "x"},
+              {var, l(31, 1), "y"}
+            }
+          }
+        }
+      ]},
+      ok_expr("{ a | f() = @a, c(x, y) := x + y }")
     )
   , ?_assertEqual(
       {anon_record_ext, l(0, 0, 1, 11), {var, l(2, 1), "a"}, [
@@ -696,6 +737,27 @@ expr_test_() ->
       ok_expr("{@a => 3} : Map<Atom, A: Concatable>")
     )
   , ?_assertEqual(
+      {binary_op, l(0, 9), ':',
+        {none, l(0, 2)},
+        {gen_te, l(5, 4), {tv_te, l(5, 1), "T", {none, l(5, 1)}}, [
+          {tv_te, l(7, 1), "A", {none, l(7, 1)}}
+        ]}
+      },
+      ok_expr("() : T<A>")
+    )
+  , ?_assertEqual(
+      {binary_op, l(0, 24), ':',
+        {none, l(0, 2)},
+        {gen_te, l(5, 19),
+          {tv_te, l(5, 11), "T", {con_token, l(8, 8), "Mappable"}}, [
+            {tv_te, l(17, 1), "A", {none, l(17, 1)}},
+            {con_token, l(20, 3), "Int"}
+          ]
+        }
+      },
+      ok_expr("() : T: Mappable<A, Int>")
+    )
+  , ?_assertEqual(
       {binary_op, l(0, 26), ':',
         {tuple, l(0, 12), [{atom, l(1, 4), hey}, {str, l(7, 4), <<"hi">>}]},
         {tuple_te, l(15, 11), [
@@ -1027,8 +1089,8 @@ expr_test_() ->
     )
 
 
-  % Ensure ambiguity is resolved. The first two tests below ensure that the
-  % second pair of brackets are considered the match cases. The third test
+  % Ensure ambiguity is resolved. The first three tests below ensure that the
+  % second pair of brackets are considered the match cases. The fourth test
   % ensures that we don't incorrectly parse '_' as an expression, which we might
   % do to check if the braces represent a record update.
   , ?_assertEqual(
@@ -1043,6 +1105,21 @@ expr_test_() ->
         ]
       },
       ok_expr("match Bar { a = 3 } { Bar => Bar }")
+    )
+  , ?_assertEqual(
+      {match, l(0, 37),
+        {record, l(6, 16), {con_token, l(6, 3), "Bar"}, [
+          {init, l(12, 8), {var, l(12, 1), "f"},
+            {fn, l(12, 8), [{var, l(14, 1), "x"}], {var, l(19, 1), "x"}}
+          }
+        ]}, [
+          {'case', l(25, 10),
+            {con_token, l(25, 3), "Bar"},
+            {con_token, l(32, 3), "Bar"}
+          }
+        ]
+      },
+      ok_expr("match Bar { f(x) = x } { Bar => Bar }")
     )
   , ?_assertEqual(
       {match, l(0, 38),
@@ -1458,6 +1535,112 @@ def_test_() ->
         "struct ProductType<A, B> {\n"
         "  foo : A\n"
         "  bar : (Int, B)\n"
+        "}"
+      )
+    )
+
+
+  , ?_assertEqual(
+      {interface, l(0, 0, 2, 1), {con_token, l(10, 5), "Iface"}, [
+        {sig, l(1, 2, 12),
+          {var, l(1, 2, 3), "foo"},
+          {con_token, l(1, 8, 6), "String"}
+        },
+        {sig, l(1, 16, 14),
+          {var, l(1, 16, 3), "bar"},
+          {lam_te, l(1, 22, 8),
+            {tv_te, l(1, 22, 1), "T", {none, l(1, 22, 1)}},
+            {con_token, l(1, 27, 3), "Int"}
+          }
+        }
+      ]},
+      ok_def(
+        "interface Iface {\n"
+        "  foo : String, bar : T -> Int\n"
+        "}"
+      )
+    )
+  , ?_assertEqual(
+      {interface, l(0, 0, 3, 1), {con_token, l(10, 8), "Mappable"}, [
+        {sig, l(1, 2, 23),
+          {var, l(1, 2, 3), "add"},
+          {lam_te, l(1, 8, 17),
+            {tv_te, l(1, 8, 1), "A", {none, l(1, 8, 1)}},
+            {lam_te, l(1, 13, 12),
+              {gen_te, l(1, 13, 4),
+                {tv_te, l(1, 13, 1), "T", {none, l(1, 13, 1)}},
+                [{tv_te, l(1, 15, 1), "A", {none, l(1, 15, 1)}}]
+              },
+              {gen_te, l(1, 21, 4),
+                {tv_te, l(1, 21, 1), "T", {none, l(1, 21, 1)}},
+                [{tv_te, l(1, 23, 1), "A", {none, l(1, 23, 1)}}]
+              }
+            }
+          }
+        },
+        {sig, l(2, 2, 20),
+          {var, l(2, 2, 6), "length"},
+          {lam_te, l(2, 11, 11),
+            {gen_te, l(2, 11, 4),
+              {tv_te, l(2, 11, 1), "T", {none, l(2, 11, 1)}},
+              [{tv_te, l(2, 13, 1), "B", {none, l(2, 13, 1)}}]
+            },
+            {con_token, l(2, 19, 3), "Int"}
+          }
+        }
+      ]},
+      ok_def(
+        "interface Mappable {\n"
+        "  add : A -> T<A> -> T<A>\n"
+        "  length : T<B> -> Int\n"
+        "}"
+      )
+    )
+
+
+  , ?_assertEqual(
+      {impl, l(0, 0, 2, 1),
+        {con_token, l(5, 10), "Stringlike"},
+        {con_token, l(20, 4), "Bool"}, [
+          {init, l(1, 2, 17),
+            {var, l(1, 2, 4), "to_s"},
+            {fn, l(1, 2,  17),
+              [{var, l(1, 7, 4), "bool"}],
+              {var, l(1, 15, 4), "bool"}
+            }
+          }
+        ]
+      },
+      ok_def(
+        "impl Stringlike for Bool {\n"
+        "  to_s(bool) = bool\n"
+        "}"
+      )
+    )
+  , ?_assertEqual(
+      {impl, l(0, 0, 3, 1),
+        {con_token, l(5, 10), "Stringlike"},
+        {con_token, l(20, 4), "Bool"}, [
+          {init, l(1, 2, 17),
+            {var, l(1, 2, 4), "to_s"},
+            {fn, l(1, 2,  17),
+              [{var, l(1, 7, 4), "bool"}],
+              {var, l(1, 15, 4), "bool"}
+            }
+          },
+          {init, l(2, 2, 13),
+            {var, l(2, 2, 5), "other"},
+            {binary_op, l(2, 10, 5), '+',
+              {int, l(2, 10, 1), 3},
+              {int, l(2, 14, 1), 5}
+            }
+          }
+        ]
+      },
+      ok_def(
+        "impl Stringlike for Bool {\n"
+        "  to_s(bool) = bool\n"
+        "  other = 3 + 5\n"
         "}"
       )
     )

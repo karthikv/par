@@ -57,8 +57,10 @@ enum Token {
   Module(Loc) @module
   Import(Loc) @import
   Export(Loc) @export
-  Enum(Loc) @enum_token
-  Struct(Loc) @struct_token
+  Enum(Loc) @enum
+  Struct(Loc) @struct
+  Interface(Loc) @interface
+  Impl(Loc) @impl
 
   If(Loc) @if
   Then(Loc) @then
@@ -317,6 +319,8 @@ chs_to_token_fn = {
   to_list("export") => Export,
   to_list("enum") => Enum,
   to_list("struct") => Struct,
+  to_list("interface") => Interface,
+  to_list("impl") => Impl,
 
   to_list("if") => If,
   to_list("then") => Then,
@@ -326,7 +330,7 @@ chs_to_token_fn = {
   to_list("match") => Match,
   to_list("true") => flip(LitBool, true),
   to_list("false") => flip(LitBool, false),
-  to_list("discard") => Discard
+  to_list("discard") => Discard,
 }
 
 get : A -> Map<A, B> -> B -> B

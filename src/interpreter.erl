@@ -118,8 +118,19 @@ eval({N, _, Name}, ID) when N == var; N == con_token ->
 
 eval({anon_record, _, Inits}, ID) ->
   Pairs = lists:map(fun({init, _, {var, _, Name}, Expr}) ->
-    {list_to_atom(Name), eval(Expr, ID)}
+    V = case Expr of
+      {fn, _, _, _} ->
+        ChildID = env_child(ID),
+        ExprV = eval(Expr, ChildID),
+        env_set(Name, ExprV, ChildID),
+        ExprV;
+
+      _ -> eval(Expr, ID)
+    end,
+
+    {list_to_atom(Name), V}
   end, Inits),
+
   maps:from_list(Pairs);
 
 eval({anon_record_ext, Loc, Expr, AllInits}, C) ->

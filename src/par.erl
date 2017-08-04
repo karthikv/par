@@ -3,9 +3,9 @@
 -include("errors.hrl").
 
 % TODO:
-% - TV vs. Con parsing
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Allow ifaces on struct/enum params?
+%   - Empty impl body?
 % - [2 days] Exceptions
 % - [2 days] Better pattern matching
 %   - Negative numbers and unit in patterns
@@ -13,6 +13,7 @@
 %   - '=' sign
 %   - Disallow pattern matching w/ struct Con(...) fn?
 %   - Allow when clause and or?
+% - [1 day] TV vs. Con parsing
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 % - [1 week] REPL
@@ -31,6 +32,8 @@
 %   - Import errors: import from same file twice, import self
 %   - More descriptive error when there's a dup import from variant
 %   - Show both locations for redef + other relevant errors
+%   - "Expected closing '}'" messages might have wrong start location b/c
+%     we use the keyword location!
 % - Website + Documentation
 %
 % Defer

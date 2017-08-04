@@ -785,6 +785,10 @@ enum_test_() ->
 record_test_() ->
   % simple create/access/update record
   [ ?_test("{ bar : A: Num }" = ok_expr("{ bar = 3 }"))
+  , ?_test("{ bar : () -> Bool }" = ok_expr("{ bar() = true }"))
+  , ?_test("{ abs : A: Num -> A: Num }" = ok_expr(
+      "{ abs(x) = if x > 0 then x else abs(-x) }"
+    ))
   , ?_test("{ bar : A: Num, baz : Bool }" =
              ok_expr("{ bar = 3, baz = true }"))
   , ?_test("{ id : A -> A }" = ok_expr("let id(a) = a in { id = id }"))
@@ -796,6 +800,10 @@ record_test_() ->
              ok_expr("{ { bar = 3, baz = @hi } | bar := true, baz = @hey }"))
   , ?_test("{ bar : Bool, baz : Float }" =
              ok_expr("{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }"))
+  , ?_test(bad_expr(
+      "{ abs(x) = if x > 0 then x else abs(true) }",
+      {"Bool -> A: Num", "A: Num -> A: Num", l(2, 39), ?FROM_FIELD_DEF("abs")}
+    ))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
       {"{ foo : Atom }", "{ A | bar : B }", l(0, 17),

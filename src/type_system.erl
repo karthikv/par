@@ -676,7 +676,14 @@ infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 infer({anon_record, _, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
     {init, _, {var, Loc, Name}, Expr} = Init,
-    {T, FoldC1} = infer(Expr, FoldC),
+    {T, FoldC1} = case Expr of
+      {fn, FnLoc, _, _} ->
+        TV = tv_server:fresh(FoldC#ctx.pid),
+        {ExprT, CaseC} = infer(Expr, env_add(Name, {no_dep, TV}, false, FoldC)),
+        % TODO: should this cst be unified first for better error messages?
+        {TV, add_cst(TV, ExprT, FnLoc, ?FROM_FIELD_DEF(Name), CaseC)};
+      _ -> infer(Expr, FoldC)
+    end,
 
     case maps:is_key(Name, Map) of
       true -> {Map, add_ctx_err(?ERR_DUP_FIELD(Name), Loc, FoldC1)};
@@ -1115,17 +1122,7 @@ infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   C1 = env_add(Name, {add_dep, TV, ID}, false, C),
   {PatternT, C2} = infer(Pattern, new_gnr(TV, ID, C1)),
   {ExprT, C3} = infer(Expr, C2),
-
-  % We add the expr constraint last to ensure it's unified first (constraints
-  % are unified in reverse order). This prevents us from ever having to unify
-  % a function application {lam, Loc, _, _} with another function app, since
-  % every function created will first be unified with {lam, _, _}, which has no
-  % Loc. It's a subtle change in ordering that gives us better error messages
-  % for recursive functions that are given too many arguments.
-  G3 = C3#ctx.gnr,
-  G4 = G3#gnr{csts=G3#gnr.csts ++ [make_cst(PatternT, ExprT, Loc, From, C3)]},
-  C4 = C3#ctx{gnr=G4},
-
+  C4 = add_cst(PatternT, ExprT, Loc, From, C3),
   finish_gnr(C4, add_gnr_dep(ID, C#ctx.gnr));
 
 infer_pattern(Pattern, Expr, From, C) ->

@@ -284,10 +284,27 @@ rep({N, Loc, Name}, Env) when N == var; N == con_token; N == var_value ->
   end;
 
 rep({anon_record, Loc, Inits}, Env) ->
-  Pairs = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
-    {{atom, VarLoc, list_to_atom(Name)}, Expr}
+  PairsRep = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
+    Line = ?START_LINE(VarLoc),
+
+    ExprRep = case Expr of
+      {fn, _, Args, _} ->
+        % We're unsure whether the named fun is going to be used (i.e. whether
+        % the named fun is recursive), so we give it a name prefixed with an
+        % underscore to prevent unused errors.
+        Atom = unique([$_ | Name]),
+        Env1 = env_set(Name, {Atom, length(Args)}, Env),
+
+        {'fun', FunLine, {clauses, Clauses}} = rep(Expr, Env1),
+        {named_fun, FunLine, Atom, Clauses};
+
+      _ -> rep(Expr, Env)
+    end,
+
+    {map_field_assoc, Line, eabs(list_to_atom(Name), Line), ExprRep}
   end, Inits),
-  rep({map, Loc, Pairs}, Env);
+
+  {map, ?START_LINE(Loc), PairsRep};
 
 rep({anon_record_ext, Loc, Expr, AllInits}, Env) ->
   Inits = lists:map(fun(InitOrExt) ->
