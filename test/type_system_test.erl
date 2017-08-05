@@ -1308,6 +1308,14 @@ other_errors_test_() ->
       {?ERR_REDEF_BUILTIN_TYPE("Bool"), l(5, 4)}
     ))
   , ?_test(ctx_err_prg(
+      "interface Num { add : T -> T -> T }",
+      {?ERR_REDEF_BUILTIN_IFACE("Num"), l(10, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Separable { to_bool : T -> Bool }",
+      {?ERR_REDEF_BUILTIN_IFACE("Separable"), l(10, 9)}
+    ))
+  , ?_test(ctx_err_prg(
       "enum Foo { Bar }\n"
       "struct Foo { baz : String }",
       {?ERR_REDEF_TYPE("Foo"), l(1, 7, 3)}
@@ -1316,6 +1324,16 @@ other_errors_test_() ->
       "struct Foo<A, B> { baz : String }\n"
       "enum Foo<T> { Bar }",
       {?ERR_REDEF_TYPE("Foo"), l(1, 5, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { baz : T -> String }\n"
+      "enum Foo<T> { Bar }",
+      {?ERR_REDEF_IFACE("Foo"), l(1, 5, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { baz : T -> String }\n"
+      "interface Foo { bar : T -> T }",
+      {?ERR_REDEF_IFACE("Foo"), l(1, 10, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo<A, A> { Baz(A) }",
@@ -1404,6 +1422,14 @@ other_errors_test_() ->
       {"bar", "module Bar\nimport \"./foo\"\ny = 3 : Foo.FooType"}
     ], "bar", {?ERR_NOT_DEF_TYPE("FooType"), "Bar", l(1, 8, 11)}))
   , ?_test(ctx_err_prg(
+      "foo = 1 : A: Bar",
+      {?ERR_NOT_DEF_IFACE("Bar"), l(13, 3)}
+    ))
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo a = 1"},
+      {"bar", "module Bar\nimport \"./foo\"\ny = 3 : A: Foo.FooIface"}
+    ], "bar", {?ERR_NOT_DEF_IFACE("FooIface"), "Bar", l(1, 11, 12)}))
+  , ?_test(ctx_err_prg(
       "\nfoo = @erlang:asdf(true)",
       {?ERR_NOT_DEF_NATIVE(erlang, "asdf", 1), l(1, 6, 12)}
     ))
@@ -1425,6 +1451,30 @@ other_errors_test_() ->
       "struct Foo<A> { bar : A }\n"
       "foo = 'a' : Foo",
       {?ERR_TYPE_PARAMS("Foo", 1, 0), l(1, 12, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo = 3 : Num",
+      {?ERR_IFACE_NOT_TYPE("Num"), l(10, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo = Separable { a = 3 }",
+      {?ERR_IFACE_NOT_TYPE("Separable"), l(6, 9)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { a : T -> Int }\n"
+      "foo : Foo\n"
+      "foo = @hi",
+      {?ERR_IFACE_NOT_TYPE("Foo"), l(1, 6, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "foo = 3 : A: Int",
+      {?ERR_TYPE_NOT_IFACE("Int"), l(13, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Bar { Bar(Int) }\n"
+      "bar : A: Bar\n"
+      "bar = Bar(3)",
+      {?ERR_TYPE_NOT_IFACE("Bar"), l(1, 9, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo {\n"

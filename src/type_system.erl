@@ -33,11 +33,13 @@
 %     below
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - see Env above
-%   types - a Name => Int (number of type params) map for types in the env
+%   types - a Name => NumParams map for types in the env
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
-%   structs - a Name => {T, Ifaces} map for structs in the env
-%   ifaces - a map of V => I for TV names in a signature to ensure consistency
+%   structs - a Name => {T, SigIfaces} map for structs in the env
+%   enums - a Name => [VariantName] map for enums in the env
+%   ifaces - a Name => NumParams map for interfaces in the env
+%   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(ctx, {
@@ -45,20 +47,26 @@
   gnrs = [],
   env = #{},
   types = #{
-    "Int" => 0,
-    "Float" => 0,
-    "Bool" => 0,
-    "Atom" => 0,
-    "Char" => 0,
-    "String" => 0,
-    "List" => 1,
-    "Set" => 1,
-    "Map" => 2
+    "Int" => {false, 0},
+    "Float" => {false, 0},
+    "Bool" => {false, 0},
+    "Atom" => {false, 0},
+    "Char" => {false, 0},
+    "String" => {false, 0},
+    "List" => {false, 1},
+    "Set" => {false, 1},
+    "Map" => {false, 2},
+
+    % ifaces
+    "Num" => {true, 0},
+    "Concatable" => {true, 0},
+    "Separable" => {true, 0}
   },
   aliases = #{},
   structs = #{},
   enums = #{},
   ifaces = #{},
+  sig_ifaces = #{},
   errs = [],
   modules = gb_sets:new(),
   module,
@@ -288,7 +296,7 @@ populate_env_and_types(Comps, C) ->
           end,
 
           Con = qualify(Name, ModuleC),
-          ModuleC1 = define_type(Con, NumParams, Loc, ModuleC),
+          ModuleC1 = define_type(Con, false, NumParams, Loc, ModuleC),
 
           case N of
             enum ->
@@ -307,9 +315,18 @@ populate_env_and_types(Comps, C) ->
               ModuleC2 = define(Name, {add_dep, TV, ID}, true, Loc, ModuleC1),
 
               {T, ModuleC3} = infer_sig(false, true, #{}, TE, ModuleC2),
-              StructInfo = {T, ModuleC3#ctx.ifaces},
+              StructInfo = {T, ModuleC3#ctx.sig_ifaces},
               ModuleC3#ctx{structs=(ModuleC3#ctx.structs)#{Con => StructInfo}}
           end;
+
+        {interface, _, {con_token, Loc, Name}, Fields} ->
+          Con = qualify(Name, ModuleC),
+          ModuleC1 = define_type(Con, true, 0, Loc, ModuleC),
+
+          lists:foldl(fun({sig, _, {var, VarLoc, VarName}, _}, NestedC) ->
+            {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
+            define(VarName, {add_dep, TV, ID}, true, VarLoc, NestedC)
+          end, ModuleC1, Fields);
 
         _ -> ModuleC
       end
@@ -322,16 +339,22 @@ define(Name, Value, Exported, Loc, C) ->
     false -> env_add(Name, Value, Exported, C)
   end.
 
-define_type(Con, NumParams, Loc, C) ->
+define_type(Con, IsIface, NumParams, Loc, C) ->
   Types = C#ctx.types,
   Builtin = string:chr(Con, $.) == 0,
-  Redef = maps:is_key(Con, Types),
 
-  if
-    Redef andalso Builtin -> add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), Loc, C);
-    % TODO: add line numbers for where redef occurred
-    Redef -> add_ctx_err(?ERR_REDEF_TYPE(Con), Loc, C);
-    true -> C#ctx{types=Types#{Con => NumParams}}
+  case maps:find(Con, Types) of
+    {ok, {true, _}} ->
+      if
+        Builtin -> add_ctx_err(?ERR_REDEF_BUILTIN_IFACE(Con), Loc, C);
+        true -> add_ctx_err(?ERR_REDEF_IFACE(Con), Loc, C)
+      end;
+    {ok, {false, _}} ->
+      if
+        Builtin -> add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), Loc, C);
+        true -> add_ctx_err(?ERR_REDEF_TYPE(Con), Loc, C)
+      end;
+    error -> C#ctx{types=Types#{Con => {IsIface, NumParams}}}
   end.
 
 infer_defs(Comps, C) ->
@@ -408,10 +431,11 @@ infer_defs(Comps, C) ->
 
         {sig, _, _, _} -> {Node, ModuleC1};
 
-        % we've already processed enums/structs
         {N, _, _, _} when N == enum; N == struct ->
           {_, ModuleC2} = infer(Node, ModuleC1),
-          {none, ModuleC2}
+          {none, ModuleC2};
+
+        _ -> {none, ModuleC1}
       end
     end, {none, FoldC1}, Defs),
 
@@ -438,7 +462,7 @@ populate_direct_imports(Deps, C) ->
         {con_token, Loc, Name} ->
           Con = lists:concat([Module, '.', Name]),
           {TypeExists, NestedC1} = case maps:find(Con, NestedC#ctx.types) of
-            {ok, NumParams} ->
+            {ok, {IsIface, NumParams}} ->
               NewCon = qualify(Name, NestedC),
               CaseC = case NumParams of
                 0 -> add_alias(NewCon, [], {con, Con}, NestedC);
@@ -449,7 +473,7 @@ populate_direct_imports(Deps, C) ->
 
                   add_alias(NewCon, Vs, {gen, Con, Vs}, NestedC)
               end,
-              {true, define_type(NewCon, NumParams, Loc, CaseC)};
+              {true, define_type(NewCon, IsIface, NumParams, Loc, CaseC)};
 
             error -> {false, NestedC}
           end,
@@ -502,7 +526,7 @@ infer({fn, _, Args, Expr}, C) ->
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
-  {norm_sig_type(SigT, maps:keys(C1#ctx.ifaces), C#ctx.pid), C1};
+  {norm_sig_type(SigT, maps:keys(C1#ctx.sig_ifaces), C#ctx.pid), C1};
 
 infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   G = C#ctx.gnr,
@@ -510,7 +534,7 @@ infer({binary_op, Loc, ':', Expr, Sig}, C) ->
 
   {ExprT, C1} = infer(Expr, new_gnr(TV, ID, C)),
   {SigT, C2} = infer_sig(false, false, #{}, Sig, C1),
-  NormSigT = norm_sig_type(SigT, maps:keys(C2#ctx.ifaces), C2#ctx.pid),
+  NormSigT = norm_sig_type(SigT, maps:keys(C2#ctx.sig_ifaces), C2#ctx.pid),
 
   C3 = add_cst(TV, ExprT, ?LOC(Expr), ?FROM_EXPR_SIG, C2),
   C4 = add_cst(TV, NormSigT, Loc, ?FROM_EXPR_SIG, C3),
@@ -528,7 +552,7 @@ infer({enum, _, EnumTE, Options}, C) ->
       {ArgT, NestedC1} = infer_sig(
         {T, FVs},
         false,
-        NestedC#ctx.ifaces,
+        NestedC#ctx.sig_ifaces,
         ArgTE,
         NestedC
       ),
@@ -592,11 +616,11 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   end,
   Con = qualify(Name, C),
 
-  {T, Ifaces} = maps:get(Con, C#ctx.structs),
+  {T, SigIfaces} = maps:get(Con, C#ctx.structs),
   {{record, _, RawFieldMap}, C1} = infer_sig(
     {T, fvs(T)},
     false,
-    Ifaces,
+    SigIfaces,
     {record_te, Loc, Fields},
     C
   ),
@@ -737,13 +761,13 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
 
 infer({record, Loc, RecordCon, Inits}, C) ->
   {Con, ConLoc} = case RecordCon of
-    {con_token, ConLoc_, Name} -> {qualify(Name, C), ConLoc_};
-    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Name}} ->
-      {lists:concat([Module, '.', Name]), ConLoc_}
+    {con_token, ConLoc_, Con_} -> {qualify(Con_, C), ConLoc_};
+    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
+      {lists:concat([Module, '.', Con_]), ConLoc_}
   end,
 
   case maps:find(Con, C#ctx.types) of
-    {ok, NumParams} ->
+    {ok, {false, NumParams}} ->
       ExpT = case NumParams of
         0 -> {con, Con};
         _ ->
@@ -754,27 +778,31 @@ infer({record, Loc, RecordCon, Inits}, C) ->
       end,
 
       {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
-      From = ?FROM_RECORD_CREATE(Name),
+      From = ?FROM_RECORD_CREATE(Con),
 
       TV = tv_server:fresh(C1#ctx.pid),
       C2 = add_cst(TV, RecordT, Loc, From, C1),
       C3 = add_cst(TV, ExpT, Loc, From, C2),
       {TV, C3};
 
+    {ok, {true, _}} ->
+      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
+
     error ->
       {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
-      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLoc, C1)}
+      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
 infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
   {Con, ConLoc} = case RecordCon of
-    {con_token, ConLoc_, Name} -> {qualify(Name, C), ConLoc_};
-    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Name}} ->
-      {lists:concat([Module, '.', Name]), ConLoc_}
+    {con_token, ConLoc_, Con_} -> {qualify(Con_, C), ConLoc_};
+    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
+      {lists:concat([Module, '.', Con_]), ConLoc_}
   end,
 
   case maps:find(Con, C#ctx.types) of
-    {ok, NumParams} ->
+    {ok, {false, NumParams}} ->
       ExpT = case NumParams of
         0 -> {con, Con};
         _ ->
@@ -792,9 +820,13 @@ infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
       C3 = add_cst(TV, ExpT, Loc, From, C2),
       {TV, C3};
 
+    {ok, {true, _}} ->
+      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
+
     error ->
       {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
-      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Name), ConLoc, C1)}
+      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
 infer({field_fn, _, {var, _, Name}}, C) ->
@@ -999,8 +1031,8 @@ infer({unary_op, Loc, Op, Expr}, C) ->
   C3 = add_cst(ResultT, TV, Loc, ?FROM_OP_RESULT(Op), C2),
   {TV, C3}.
 
-infer_sig(RestrictVs, Unique, Ifaces, Sig, C) ->
-  C1 = C#ctx{ifaces=Ifaces},
+infer_sig(RestrictVs, Unique, SigIfaces, Sig, C) ->
+  C1 = C#ctx{sig_ifaces=SigIfaces},
   infer_sig_helper(RestrictVs, Unique, Sig, C1).
 
 infer_sig_helper(RestrictVs, Unique, {lam_te, _, ArgTE, ReturnTE}, C) ->
@@ -1017,7 +1049,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, ConToken, ParamTEs}, C) ->
   Con = qualify(RawCon, C),
 
   {Valid, C1} = case Unique of
-    false -> validate_type(Con, length(ParamTEs), Loc, C);
+    false -> validate_type(Con, false, length(ParamTEs), Loc, C);
     % We're inferring a new type, so don't do validation. Name conflicts for
     % new types are handled prior to beginning inference.
     true -> {true, C}
@@ -1046,33 +1078,39 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
       end
   end,
 
-  {I, C2} = case TE of
-    % TODO: ensure this is a valid iface
-    {none, _} -> {none, C1};
-    {con_token, _, I_} -> {I_, C1}
+  {I, {Valid, C2}} = case TE of
+    {none, _} -> {none, {true, C1}};
+    {con_token, _, RawI_} ->
+      I_ = qualify(RawI_, C1),
+      {I_, validate_type(I_, true, 0, ?LOC(TE), C1)}
   end,
 
-  Ifaces = C2#ctx.ifaces,
-  C3 = case maps:find(V, Ifaces) of
-    {ok, ExpI} ->
-      case {Unique, ExpI} of
-        % TODO: include location of other TV
-        {true, _} -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
-        {false, I} -> C2;
-        {false, _} ->
-          % TODO: include location of other iface
-          add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), Loc, C2)
-      end;
-    error -> C2#ctx{ifaces=Ifaces#{V => I}}
-  end,
+  case Valid of
+    true ->
+      SigIfaces = C2#ctx.sig_ifaces,
+      C3 = case maps:find(V, SigIfaces) of
+        {ok, ExpI} ->
+          case {Unique, ExpI} of
+            % TODO: include location of other TV
+            {true, _} -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
+            {false, I} -> C2;
+            {false, _} ->
+              % TODO: include location of other iface
+              add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), Loc, C2)
+          end;
+        error -> C2#ctx{sig_ifaces=SigIfaces#{V => I}}
+      end,
 
-  % This TV should be rigid in signatures, but it'll be reset to flex in
-  % norm_sig_type. Hence, we don't set rigid here, but rather after renaming.
-  {{tv, V, I, false}, C3};
+      % This TV should be rigid in signatures, but it'll be reset to flex in
+      % norm_sig_type. Hence, we don't set rigid here.
+      {{tv, V, I, false}, C3};
+
+    false -> {{tv, V, none, false}, C2}
+  end;
 infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
   Con = qualify(RawCon, C),
   {Valid, C1} = case Unique of
-    false -> validate_type(Con, 0, Loc, C);
+    false -> validate_type(Con, false, 0, Loc, C);
     % We're inferring a new type, so don't do validation. Name conflicts for
     % new types are handled prior to beginning inference.
     true -> {true, C}
@@ -1107,7 +1145,7 @@ infer_sig_helper(_, _, {none, _}, C) -> {none, C}.
 
 qualify(RawCon, C) ->
   case maps:is_key(RawCon, C#ctx.types) of
-    % built-in type
+    % built-in type or iface
     true -> RawCon;
 
     false ->
@@ -1239,15 +1277,25 @@ add_cst(T1, T2, Loc, From, C) ->
 make_cst(T1, T2, Loc, From, C) ->
   {T1, T2, C#ctx.module, Loc, From}.
 
-validate_type(Con, NumParams, Loc, C) ->
+validate_type(Con, IsIface, NumParams, Loc, C) ->
   case maps:find(Con, C#ctx.types) of
-    {ok, NumParams} -> {true, C};
-    {ok, ExpNumParams} ->
+    {ok, {IsIface, NumParams}} -> {true, C};
+
+    {ok, {false, _}} when IsIface ->
+      {false, add_ctx_err(?ERR_TYPE_NOT_IFACE(Con), Loc, C)};
+    {ok, {true, _}} when not IsIface ->
+      {false, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), Loc, C)};
+
+    {ok, {_, ExpNumParams}} ->
       Msg = ?ERR_TYPE_PARAMS(Con, ExpNumParams, NumParams),
       {false, add_ctx_err(Msg, Loc, C)};
+
     % TODO: better messages when module is not defined (e.g. Bad.Type) and
     % module is defined but no such type exists (e.g. Module.Bad)
-    error -> {false, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Loc, C)}
+    error when IsIface ->
+      {false, add_ctx_err(?ERR_NOT_DEF_IFACE(Con), Loc, C)};
+    error when not IsIface ->
+      {false, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Loc, C)}
   end.
 
 add_ctx_err(Msg, Loc, C) ->

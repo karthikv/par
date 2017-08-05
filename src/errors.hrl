@@ -30,7 +30,10 @@
 -define(FROM_MAP_KEY, "key in map literal").
 -define(FROM_MAP_VALUE, "value in map literal").
 -define(FROM_RECORD_UPDATE, "updating record").
--define(FROM_RECORD_CREATE(Name), ?FMT("creating record ~s", [Name])).
+-define(
+  FROM_RECORD_CREATE(Con),
+  ?FMT("creating record ~s", [utils:unqualify(Con)])
+).
 -define(FROM_FIELD_DEF(Name), ?FMT("definition of field ~s", [Name])).
 -define(FROM_FIELD_ACCESS(Name), ?FMT("accessing field ~s", [Name])).
 -define(FROM_APP, "function call").
@@ -50,11 +53,19 @@
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
 -define(
   ERR_REDEF_TYPE(Con),
-  ?FMT("type ~s is already defined", [utils:unqualify(Con)])
+  ?FMT("~s is already defined as a type", [utils:unqualify(Con)])
 ).
 -define(
   ERR_REDEF_BUILTIN_TYPE(Con),
   ?FMT("~s is already defined as a builtin type", [utils:unqualify(Con)])
+).
+-define(
+  ERR_REDEF_IFACE(Con),
+  ?FMT("~s is already defined as an interface", [utils:unqualify(Con)])
+).
+-define(
+  ERR_REDEF_BUILTIN_IFACE(Con),
+  ?FMT("~s is already defined as a builtin interface", [utils:unqualify(Con)])
 ).
 -define(
   ERR_REDEF_TV(Con),
@@ -99,6 +110,10 @@
   ?FMT("type ~s is not defined in module ~s", [utils:unqualify(Con), Module])
 ).
 -define(
+  ERR_NOT_DEF_IFACE(Con),
+  ?FMT("interface ~s is not defined", [utils:unqualify(Con)])
+).
+-define(
   ERR_NOT_DEF_NATIVE(Module, Name, Arity),
   ?FMT("native function ~s:~s/~p is not defined", [Module, Name, Arity])
 ).
@@ -130,6 +145,14 @@
     "~s is already imported on line ~p, column ~p",
     [Name, ?START_LINE(Loc), ?START_COL(Loc)]
   )
+).
+-define(
+  ERR_TYPE_NOT_IFACE(Con),
+  ?FMT("~s is a type, not an interface", [utils:unqualify(Con)])
+).
+-define(
+  ERR_IFACE_NOT_TYPE(Con),
+  ?FMT("~s is an interface, not a type", [utils:unqualify(Con)])
 ).
 
 
