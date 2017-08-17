@@ -1,10 +1,5 @@
 -module(type_system).
--export([
-  infer_file/1,
-  infer_prg/1,
-  pretty/1,
-  pattern_names/1
-]).
+-export([infer_file/1, infer_prg/1, pattern_names/1]).
 -on_load(load/0).
 -include("errors.hrl").
 
@@ -66,6 +61,7 @@
   structs = #{},
   enums = #{},
   ifaces = #{},
+  impls = #{},
   sig_ifaces = #{},
   errs = [],
   modules = gb_sets:new(),
@@ -90,6 +86,7 @@
   schemes = #{},
   bound_vs,
   aliases = #{},
+  impls = #{},
   t1,
   t2,
   module,
@@ -254,7 +251,12 @@ infer_comps(Comps) ->
   C1 = populate_env_and_types(Comps, C),
   C2 = infer_defs(Comps, C1),
 
-  S = #solver{errs=C2#ctx.errs, aliases=C2#ctx.aliases, pid=Pid},
+  S = #solver{
+    errs=C2#ctx.errs,
+    aliases=C2#ctx.aliases,
+    impls=C2#ctx.impls,
+    pid=Pid
+  },
   Result = case solve(C2#ctx.gnrs, S) of
     {ok, Schemes} ->
       SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
@@ -323,10 +325,13 @@ populate_env_and_types(Comps, C) ->
           Con = qualify(Name, ModuleC),
           ModuleC1 = define_type(Con, true, 0, Loc, ModuleC),
 
+          Ifaces = ModuleC1#ctx.ifaces,
+          ModuleC2 = ModuleC1#ctx{ifaces=Ifaces#{Con => Fields}},
+
           lists:foldl(fun({sig, _, {var, VarLoc, VarName}, _}, NestedC) ->
             {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
             define(VarName, {add_dep, TV, ID}, true, VarLoc, NestedC)
-          end, ModuleC1, Fields);
+          end, ModuleC2, Fields);
 
         _ -> ModuleC
       end
@@ -368,76 +373,62 @@ infer_defs(Comps, C) ->
       FoldC#ctx{module=Module, modules=AccessibleModules}
     ),
 
-    {LastSig, FoldC2} = lists:foldl(fun(Node, {Sig, ModuleC}) ->
-      ModuleC1 = if
-        Sig == none -> ModuleC;
+    {LastSig, FoldC2} = lists:foldl(fun(Node, {UncheckedSig, ModuleC}) ->
+      {Sig, ModuleC1} = if
+        UncheckedSig == undefined -> {undefined, ModuleC};
         true ->
-          {sig, _, {var, _, SigName}, _} = Sig,
+          {sig, _, {var, _, SigName}, _} = UncheckedSig,
           case Node of
-            {global, _, {var, _, SigName}, _, _} -> ModuleC;
-            _ -> add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(Sig), ModuleC)
+            {global, _, {var, _, SigName}, _, _} -> {UncheckedSig, ModuleC};
+            _ ->
+              Err = ?ERR_SIG_NO_DEF(SigName),
+              {undefined, add_ctx_err(Err, ?LOC(UncheckedSig), ModuleC)}
           end
       end,
 
       case Node of
-        {global, Loc, {var, _, Name}, Expr, _} ->
+        {global, _, {var, _, Name}, Expr, _} ->
           {add_dep, TV, ID} = env_get(Name, ModuleC1),
           ModuleC2 = case Expr of
             {fn, _, _, _} -> ModuleC1;
             _ -> env_remove(Name, ModuleC1)
           end,
 
-          ModuleC3 = new_gnr(TV, ID, ModuleC2),
-          {T, ModuleC4} = infer(Expr, ModuleC3),
-          ExprCst = make_cst(TV, T, Loc, ?FROM_GLOBAL_DEF(Name), ModuleC4),
+          {ExprT, ModuleC3} = infer(Expr, new_gnr(TV, ID, ModuleC2)),
+          ExprCst = make_cst(
+            TV,
+            ExprT,
+            ?LOC(Expr),
+            ?FROM_GLOBAL_DEF(Name),
+            ModuleC3
+          ),
 
-          {InitCsts, ModuleC6} = if
-            Sig == none -> {[ExprCst], ModuleC4};
-            true ->
-              {SigT, ModuleC5} = infer(Sig, ModuleC4),
+          {Csts, ModuleC4} = case Sig of
+            undefined -> {[ExprCst], ModuleC3};
+            _ ->
+              {SigT, CaseC} = infer(Sig, ModuleC3),
               SigCst = make_cst(
                 TV,
                 SigT,
                 ?LOC(Sig),
                 ?FROM_GLOBAL_SIG(Name),
-                ModuleC5
+                CaseC
               ),
-              {[SigCst, ExprCst], ModuleC5}
+              % infer ExprCst first; inference is in reverse order
+              {[SigCst, ExprCst], CaseC}
           end,
 
-          ModuleC7 = ModuleC6#ctx{env=ModuleC#ctx.env},
-          ModuleC8 = finish_gnr(ModuleC7, ModuleC#ctx.gnr),
-
-          % Unifying the expr and sig constraints first generally gives better
-          % error messages. To do this, we create a new gnr containing just
-          % these constraints, and make all other gnrs for this global depend
-          % on it.
-          ModuleC9 = new_gnr(ModuleC8),
-          ModuleC10 = ModuleC9#ctx{gnr=ModuleC9#ctx.gnr#gnr{csts=InitCsts}},
-
-          DepID = ModuleC10#ctx.gnr#gnr.id,
-          UntilID = case ModuleC2#ctx.gnrs of
-            [G | _] -> G#gnr.id;
-            [] -> none
-          end,
-
-          {Gs, _} = lists:mapfoldl(fun(G, Done) ->
-            case Done of
-              true -> {G, Done};
-              false -> {add_gnr_dep(DepID, G), G#gnr.id == UntilID}
-            end
-          end, false, ModuleC10#ctx.gnrs),
-          {none, finish_gnr(ModuleC10#ctx{gnrs=Gs}, ModuleC#ctx.gnr)};
+          ModuleC5 = finish_gnr(ModuleC4, ModuleC2#ctx.gnr),
+          ModuleC6 = ModuleC5#ctx{env=ModuleC#ctx.env},
+          {undefined, infer_csts_first(Csts, ModuleC2#ctx.gnrs, ModuleC6)};
 
         {sig, _, _, _} -> {Node, ModuleC1};
 
-        {N, _, _, _} when N == enum; N == struct ->
+        _ ->
           {_, ModuleC2} = infer(Node, ModuleC1),
-          {none, ModuleC2};
-
-        _ -> {none, ModuleC1}
+          {undefined, ModuleC2}
       end
-    end, {none, FoldC1}, Defs),
+    end, {undefined, FoldC1}, Defs),
 
     % Remove direct imports from env. We don't want modules trying to import
     % recursively through other modules, as this would make the order in
@@ -445,7 +436,7 @@ infer_defs(Comps, C) ->
     FoldC3 = FoldC2#ctx{env=FoldC#ctx.env},
 
     case LastSig of
-      none -> FoldC3;
+      undefined -> FoldC3;
       {sig, _, {var, _, SigName}, _} ->
         add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC3)
     end
@@ -500,6 +491,32 @@ populate_direct_imports(Deps, C) ->
       end
     end, ModuleC, Idents)
   end, C, Deps).
+
+infer_csts_first(Csts, UntilGs, C) ->
+  % Unifying the expr and sig constraints first generally gives better
+  % error messages. To do this, we create a new gnr containing just
+  % these constraints, and make all other gnrs for this global depend
+  % on it.
+  C1 = new_gnr(C),
+  C2 = C1#ctx{gnr=C1#ctx.gnr#gnr{csts=Csts}},
+
+  DepID = C2#ctx.gnr#gnr.id,
+  UntilID = case UntilGs of
+    [G | _] -> G#gnr.id;
+    [] -> none
+  end,
+
+  {Gs, _} = lists:mapfoldl(fun(G, Done) ->
+    case Done of
+      true -> {G, Done};
+      false ->
+        case G#gnr.id of
+          UntilID -> {G, true};
+          _ -> {add_gnr_dep(DepID, G), false}
+        end
+    end
+  end, false, C2#ctx.gnrs),
+  finish_gnr(C2#ctx{gnrs=Gs}, C#ctx.gnr).
 
 infer({fn, _, Args, Expr}, C) ->
   Names = gb_sets:union(lists:map(fun pattern_names/1, Args)),
@@ -647,9 +664,125 @@ infer({struct, Loc, StructTE, Fields}, C) ->
 
   {TV, C5};
 
+infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
+  Con = qualify(RawCon, C),
+  {RawRecordT, C1} = infer_sig(
+    false,
+    false,
+    #{"T" => none},
+    {record_te, Loc, Fields},
+    C
+  ),
+
+  Subs = #{"T" => {set_iface, Con}},
+  % user can't input type signature that needs consolidation, so pass empty
+  % map for aliases
+  {record, _, RawFieldMap} = subs(RawRecordT, Subs, #{}),
+
+  C2 = lists:foldl(fun({sig, SigLoc, {var, _, Name}, _}, FoldC) ->
+    #{Name := RawT} = RawFieldMap,
+    FoldC1 = validate_iface_type(RawT, Name, SigLoc, FoldC),
+    % don't need to make any Vs rigid; inst still works correctly
+    T = norm_sig_type(RawT, [], FoldC1#ctx.pid),
+
+    {add_dep, TV, ID} = env_get(Name, C),
+    FoldC2 = new_gnr(TV, ID, FoldC1),
+    FoldC3 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC2),
+    finish_gnr(FoldC3, FoldC1#ctx.gnr)
+  end, C1, Fields),
+
+  {none, C2};
+
+infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
+  Con = qualify(RawCon, C),
+  {RawT, C1} = infer_sig(false, false, #{}, TE, C),
+  ImplT = norm_sig_type(RawT, maps:keys(C1#ctx.sig_ifaces), C1#ctx.pid),
+
+  case no_ctx_errs(C1, C) of
+    false -> {none, C1};
+
+    true ->
+      Key = impl_key(Con, RawT),
+      Impls = C1#ctx.impls,
+
+      C2 = case maps:find(Key, Impls) of
+        {ok, ExistingT} ->
+          Err = ?ERR_DUP_IMPL(Key, utils:pretty(ExistingT)),
+          add_ctx_err(Err, ?LOC(TE), C1);
+        error -> C1#ctx{impls=Impls#{Key => RawT}}
+      end,
+
+      case maps:find(Con, C2#ctx.ifaces) of
+        % TODO: are builtin type classes implementable?
+        error -> {none, add_ctx_err(?ERR_NOT_DEF_IFACE(Con), ConLoc, C2)};
+
+        {ok, Fields} ->
+          % TODO: is there a way around inferring these sigs again?
+          {Pairs, C3} = lists:mapfoldl(fun(Sig, FoldC) ->
+            {sig, SigLoc, {var, _, Name}, SigTE} = Sig,
+            {SigT, FoldC1} = infer_sig(false, false, #{"T" => none}, SigTE,
+              FoldC),
+            {{Name, {SigLoc, SigT}}, FoldC1}
+          end, C2, Fields),
+
+          % don't duplicate errors, as we've already inferred this signature
+          C4 = C3#ctx{errs=C2#ctx.errs},
+          FieldLocTs = maps:from_list(Pairs),
+
+          {ActualNames, C5} = lists:foldl(fun(Init, {Names, FoldC}) ->
+            {init, _, {var, VarLoc, Name}, Expr} = Init,
+
+            case gb_sets:is_member(Name, Names) of
+              true ->
+                {Names, add_ctx_err(?ERR_DUP_FIELD_IMPL(Name), VarLoc, FoldC)};
+
+              false ->
+                NewNames = gb_sets:add(Name, Names),
+                NewC = case maps:find(Name, FieldLocTs) of
+                  error ->
+                    add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, Con), VarLoc,
+                      FoldC);
+
+                  {ok, {SigLoc, RawSigT}} ->
+                    FVs = gb_sets:delete("T", fvs(RawSigT)),
+                    RigidVs = gb_sets:to_list(FVs),
+                    NormT = norm_sig_type(RawSigT, RigidVs, FVs, C4#ctx.pid),
+
+                    % user can't input type signature that needs consolidation,
+                    % so pass empty map for aliases
+                    SigT = subs(NormT, #{"T" => ImplT}, #{}),
+
+                    {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
+                    FoldC2 = finish_gnr(FoldC1, FoldC#ctx.gnr),
+
+                    TV = tv_server:fresh(FoldC2#ctx.pid),
+                    % the from here doesn't really matter; this cst is always
+                    % inferred first, so it'll never fail
+                    ExprCst = make_cst(TV, ExprT, ?LOC(Expr),
+                      ?FROM_GLOBAL_DEF(Name), FoldC2),
+                    SigCst = make_cst(TV, SigT, SigLoc, ?FROM_GLOBAL_SIG(Name),
+                      FoldC2),
+
+                    % infer ExprCst first; inference is in reverse order
+                    infer_csts_first([SigCst, ExprCst], FoldC#ctx.gnrs, FoldC2)
+                end,
+
+                {NewNames, NewC}
+            end
+          end, {gb_sets:new(), C4}, Inits),
+
+          ExpNames = gb_sets:from_list(maps:keys(FieldLocTs)),
+          MissingNames = gb_sets:difference(ExpNames, ActualNames),
+
+          C6 = gb_sets:fold(fun(Name, FoldC) ->
+            add_ctx_err(?ERR_MISSING_FIELD_IMPL(Name, Con), Loc, FoldC)
+          end, C5, MissingNames),
+          {none, C6}
+      end
+  end;
+
 infer({none, _}, C) -> {none, C};
-infer({int, _, _}, C) ->
-  {tv_server:fresh("Num", C#ctx.pid), C};
+infer({int, _, _}, C) -> {tv_server:fresh("Num", C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, "Float"}, C};
 infer({bool, _, _}, C) -> {{con, "Bool"}, C};
 infer({char, _, _}, C) -> {{con, "Char"}, C};
@@ -700,12 +833,17 @@ infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 infer({anon_record, _, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
     {init, _, {var, Loc, Name}, Expr} = Init,
+
     {T, FoldC1} = case Expr of
       {fn, FnLoc, _, _} ->
         TV = tv_server:fresh(FoldC#ctx.pid),
-        {ExprT, CaseC} = infer(Expr, env_add(Name, {no_dep, TV}, false, FoldC)),
+        CaseC = env_add(Name, {no_dep, TV}, false, FoldC),
+        {ExprT, CaseC1} = infer(Expr, CaseC),
+
         % TODO: should this cst be unified first for better error messages?
-        {TV, add_cst(TV, ExprT, FnLoc, ?FROM_FIELD_DEF(Name), CaseC)};
+        CaseC2 = add_cst(TV, ExprT, FnLoc, ?FROM_FIELD_DEF(Name), CaseC1),
+        {TV, CaseC2#ctx{env=FoldC#ctx.env}};
+
       _ -> infer(Expr, FoldC)
     end,
 
@@ -1298,6 +1436,16 @@ validate_type(Con, IsIface, NumParams, Loc, C) ->
       {false, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Loc, C)}
   end.
 
+validate_iface_type(T, Name, Loc, C) ->
+  case T of
+    {lam, ArgT, ReturnT} ->
+      case gb_sets:is_member("T", fvs(ArgT)) of
+        true -> C;
+        _ -> validate_iface_type(ReturnT, Name, Loc, C)
+      end;
+    _ -> add_ctx_err(?ERR_IFACE_TYPE(Name), Loc, C)
+  end.
+
 add_ctx_err(Msg, Loc, C) ->
   C#ctx{errs=[{Msg, C#ctx.module, Loc} | C#ctx.errs]}.
 
@@ -1306,6 +1454,9 @@ no_ctx_errs(C1, C2) -> length(C1#ctx.errs) == length(C2#ctx.errs).
 add_alias(Con, Vs, T, C) -> C#ctx{aliases=(C#ctx.aliases)#{Con => {Vs, T}}}.
 
 norm_sig_type(SigT, RigidVs, Pid) ->
+  norm_sig_type(SigT, RigidVs, fvs(SigT), Pid).
+
+norm_sig_type(SigT, RigidVs, FVs, Pid) ->
   RigidVsSet = gb_sets:from_list(RigidVs),
 
   % TODO: is it more intuitive to change each fv to *fv and then replace?
@@ -1314,16 +1465,24 @@ norm_sig_type(SigT, RigidVs, Pid) ->
       true -> FoldSubs#{V => {rigid, tv_server:next_name(Pid)}};
       false -> FoldSubs#{V => tv_server:next_name(Pid)}
     end
-  end, #{}, fvs(SigT)),
+  end, #{}, FVs),
 
   % user can't input a type signature that needs record consolidation
   subs(SigT, Subs, #{}).
+
+impl_key(Con, {lam, _, _}) -> {Con, "Function"};
+impl_key(Con, {tuple, _}) -> {Con, "Tuple"};
+impl_key(IfaceCon, {con, Con}) -> {IfaceCon, Con};
+impl_key(IfaceCon, {gen, Con, _}) -> {IfaceCon, Con};
+impl_key(Con, {record, _, _}) -> {Con, "Record"};
+impl_key(Con, {record_ext, _, _, _}) -> {Con, "Record"};
+impl_key(Con, {none, _}) -> {Con, "()"}.
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
   %% ?LOG(
   %%   "Generalizations",
-  %%   lists:map(fun(G) -> G#gnr{csts=pretty_csts(G#gnr.csts)} end, Gs)
+  %%   lists:map(fun(G) -> G#gnr{csts=utils:pretty_csts(G#gnr.csts)} end, Gs)
   %% ),
 
   T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
@@ -1665,15 +1824,19 @@ unify({tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}, S) ->
   end;
 unify({tv, V, I, Rigid}, T, S) ->
   Occurs = occurs(V, T, S),
-  Instance = (I == none) or instance(T, I),
   Bound = gb_sets:is_member(V, S#solver.bound_vs),
   WouldEscape = Bound and occurs(true, T, S),
 
   if
     Occurs -> add_err(S);
     Rigid or WouldEscape -> add_err(S);
-    Instance -> add_sub(V, T, S);
-    true -> add_err(S)
+    I == none -> add_sub(V, T, S);
+    true ->
+      S1 = instance(T, I, S),
+      case no_errs(S1, S) of
+        true -> add_sub(V, T, S1);
+        false -> S1
+      end
   end;
 unify(T, {tv, V, I, Rigid}, S) -> sub_unify({tv, V, I, Rigid}, T, S);
 
@@ -1762,15 +1925,26 @@ unalias({gen, Con, ParamTs}, Aliases) ->
   end;
 unalias(T, _) -> T.
 
-instance({con, "Int"}, "Num") -> true;
-instance({con, "Float"}, "Num") -> true;
-instance({con, "String"}, "Concatable") -> true;
-instance({gen, "List", _}, "Concatable") -> true;
-instance({gen, "Map", _}, "Concatable") -> true;
-instance({gen, "Set", _}, "Concatable") -> true;
-instance({gen, "List", _}, "Separable") -> true;
-instance({gen, "Set", _}, "Separable") -> true;
-instance(_, _) -> false.
+instance({con, "Int"}, "Num", S) -> S;
+instance({con, "Float"}, "Num", S) -> S;
+instance({con, "String"}, "Concatable", S) -> S;
+instance({gen, "List", _}, "Concatable", S) -> S;
+instance({gen, "Map", _}, "Concatable", S) -> S;
+instance({gen, "Set", _}, "Concatable", S) -> S;
+instance({gen, "List", _}, "Separable", S) -> S;
+instance({gen, "Set", _}, "Separable", S) -> S;
+instance({con, Con}, Iface, S) ->
+  case maps:find({Iface, Con}, S#solver.impls) of
+    % these should be the only two cases
+    {ok, {con, Con}} -> S;
+    _ -> add_err(S)
+  end;
+instance({gen, Con, _}=T, Iface, S) ->
+  case maps:find({Iface, Con}, S#solver.impls) of
+    {ok, RawT} -> sub_unify(T, norm_sig_type(RawT, [], S#solver.pid), S);
+    _ -> add_err(S)
+  end;
+instance(_, _, S) -> add_err(S).
 
 remove_arg_locs({lam, _, ArgT, ReturnT}) ->
   {lam, ArgT, remove_arg_locs(ReturnT)};
@@ -1920,47 +2094,3 @@ occurs(V, {record, _, FieldMap}) ->
 occurs(V, {record_ext, _, BaseT, Ext}) ->
   occurs(V, BaseT) or occurs(V, {record, none, Ext});
 occurs(_, none) -> false.
-
-%% pretty_csts([]) -> [];
-%% pretty_csts([{T1, T2, Module, Loc, From} | Rest]) ->
-%%   [{pretty(T1), pretty(T2), Module, Loc, From} | pretty_csts(Rest)].
-
-pretty({lam, ArgT, ReturnT}) ->
-  Format = case ArgT of
-    {lam, _, _} -> "(~s) -> ~s";
-    {lam, _, _, _} -> "(~s) -> ~s";
-    _ -> "~s -> ~s"
-  end,
-  ?FMT(Format, [pretty(ArgT), pretty(ReturnT)]);
-pretty({lam, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
-pretty({tuple, ElemTs}) ->
-  PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
-  ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);
-pretty({tv, V, I, Rigid}) ->
-  Str = if
-    I == none -> tl(V);
-    true -> ?FMT("~s: ~s", [tl(V), I])
-  end,
-
-  case Rigid of
-    false -> Str;
-    true -> ?FMT("rigid(~s)", [Str])
-  end;
-pretty({set_iface, I}) -> ?FMT("I = ~s", [I]);
-% TODO: keep qualified when ambiguous
-pretty({con, Con}) -> utils:unqualify(Con);
-pretty({gen, "List", [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
-pretty({gen, Con, ParamTs}) ->
-  PrettyParamTs = lists:map(fun(T) -> pretty(T) end, ParamTs),
-  ?FMT("~s<~s>", [utils:unqualify(Con), string:join(PrettyParamTs, ", ")]);
-pretty({inst, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
-pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
-pretty({record_ext, _, BaseT, Ext}) ->
-  ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
-pretty(none) -> "()".
-
-pretty_field_map(FieldMap) ->
-  FieldStrs = maps:fold(fun(Name, T, Strs) ->
-    [?FMT("~s : ~s", [Name, pretty(T)]) | Strs]
-  end, [], FieldMap),
-  string:join(lists:sort(FieldStrs), ", ").

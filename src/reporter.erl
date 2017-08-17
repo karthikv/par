@@ -108,7 +108,7 @@ format({errors, Errs, Comps}) ->
       {T1, T2, _, _, From} ->
         Msg = ?FMT(
           "Mismatched types ~s and ~s from ~s",
-          [type_system:pretty(T1), type_system:pretty(T2), From]
+          [utils:pretty(T1), utils:pretty(T2), From]
         ),
         [wrap(Msg, ?LINE_WIDTH), $:, $\n];
 

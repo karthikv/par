@@ -1600,8 +1600,8 @@ def_test_() ->
 
   , ?_assertEqual(
       {impl, l(0, 0, 2, 1),
-        {con_token, l(5, 10), "Stringlike"},
-        {con_token, l(20, 4), "Bool"}, [
+        {con_token, l(5, 5), "ToStr"},
+        {con_token, l(15, 4), "Bool"}, [
           {init, l(1, 2, 17),
             {var, l(1, 2, 4), "to_s"},
             {fn, l(1, 2,  17),
@@ -1612,35 +1612,31 @@ def_test_() ->
         ]
       },
       ok_def(
-        "impl Stringlike for Bool {\n"
+        "impl ToStr for Bool {\n"
         "  to_s(bool) = bool\n"
         "}"
       )
     )
   , ?_assertEqual(
       {impl, l(0, 0, 3, 1),
-        {con_token, l(5, 10), "Stringlike"},
-        {con_token, l(20, 4), "Bool"}, [
-          {init, l(1, 2, 17),
-            {var, l(1, 2, 4), "to_s"},
-            {fn, l(1, 2,  17),
-              [{var, l(1, 7, 4), "bool"}],
-              {var, l(1, 15, 4), "bool"}
-            }
+        {con_token, l(5, 3), "Foo"},
+        {gen_te, l(13, 8), {con_token, l(13, 8), "List"},
+          [{tv_te, l(14, 6), "A", {con_token, l(17, 3), "Foo"}}]
+        }, [
+          {init, l(1, 2, 11),
+            {var, l(1, 2, 3), "foo"},
+            {fn, l(1, 2, 11), [], {char, l(1, 10, 3), $c}}
           },
-          {init, l(2, 2, 13),
+          {init, l(2, 2, 11),
             {var, l(2, 2, 5), "other"},
-            {binary_op, l(2, 10, 5), '+',
-              {int, l(2, 10, 1), 3},
-              {int, l(2, 14, 1), 5}
-            }
+            {atom, l(2, 10, 3), hi}
           }
         ]
       },
       ok_def(
-        "impl Stringlike for Bool {\n"
-        "  to_s(bool) = bool\n"
-        "  other = 3 + 5\n"
+        "impl Foo for [A: Foo] {\n"
+        "  foo() = 'c'\n"
+        "  other = @hi\n"
         "}"
       )
     )

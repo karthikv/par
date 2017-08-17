@@ -48,6 +48,10 @@
 -define(FROM_OP_LHS(Op), ?FMT("left-hand side of ~p operator", [Op])).
 -define(FROM_OP_RHS(Op), ?FMT("right-hand side of ~p operator", [Op])).
 -define(FROM_OP_RESULT(Op), ?FMT("result of ~p operation", [Op])).
+-define(
+  FROM_IMPL(Con, PrettyT),
+  ?FMT("implementing interface ~s for ~s", [utils:unqualify(Con), PrettyT])
+).
 
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
@@ -69,30 +73,48 @@
 ).
 -define(
   ERR_REDEF_TV(Con),
-  ?FMT("type variable ~s is already defined", [utils:unqualify(Con)]
+  ?FMT("Type variable ~s is already defined", [utils:unqualify(Con)]
 )).
 -define(
   ERR_REDEF_MODULE(Module),
-  ?FMT("module ~s is already defined", [Module])
+  ?FMT("Module ~s is already defined", [Module])
 ).
 -define(
   ERR_SIG_NO_DEF(Name),
-  ?FMT("expected ~s to be defined after its signature", [Name])
+  ?FMT("Expected ~s to be defined after its signature", [Name])
 ).
--define(ERR_DUP_FIELD(Name), ?FMT("duplicate field ~s in this record", [Name])).
+-define(ERR_DUP_FIELD(Name), ?FMT("Duplicate field ~s in this record", [Name])).
+-define(
+  ERR_DUP_FIELD_IMPL(Name),
+  ?FMT("Duplicate field ~s in this implementation", [Name])
+).
+-define(
+  ERR_EXTRA_FIELD_IMPL(Name, Con),
+  ?FMT(
+    "Field ~s isn't in interface ~s, so it shouldn't be implemented",
+    [Name, utils:unqualify(Con)]
+  )
+).
+-define(
+  ERR_MISSING_FIELD_IMPL(Name, Con),
+  ?FMT(
+    "Missing field ~s in implementation of interface ~s",
+    [Name, utils:unqualify(Con)]
+  )
+).
 -define(
   ERR_TV_SCOPE(V, Con),
   ?FMT(
-    "type variable ~s isn't in scope; "
-    "it must be defined as a parameter to type ~s",
+    "Type variable ~s isn't in scope; it must be defined as a parameter to "
+    "type ~s",
     [V, utils:unqualify(Con)]
   )
 ).
 -define(
   ERR_TV_IFACE(V, Exp, Actual),
   ?FMT(
-    "type variable ~s was previously given interface ~s, "
-    "but now has interface ~s; the two must be consistent",
+    "Type variable ~s was previously given interface ~s, but now has interface "
+    "~s; the two must be consistent",
     [V, Exp, Actual]
   )
 ).
@@ -103,35 +125,35 @@
 ).
 -define(
   ERR_NOT_DEF_TYPE(Con),
-  ?FMT("type ~s is not defined", [utils:unqualify(Con)])
+  ?FMT("Type ~s is not defined", [utils:unqualify(Con)])
 ).
 -define(
   ERR_NOT_DEF_TYPE(Con, Module),
-  ?FMT("type ~s is not defined in module ~s", [utils:unqualify(Con), Module])
+  ?FMT("Type ~s is not defined in module ~s", [utils:unqualify(Con), Module])
 ).
 -define(
   ERR_NOT_DEF_IFACE(Con),
-  ?FMT("interface ~s is not defined", [utils:unqualify(Con)])
+  ?FMT("Interface ~s is not defined", [utils:unqualify(Con)])
 ).
 -define(
   ERR_NOT_DEF_NATIVE(Module, Name, Arity),
-  ?FMT("native function ~s:~s/~p is not defined", [Module, Name, Arity])
+  ?FMT("Native function ~s:~s/~p is not defined", [Module, Name, Arity])
 ).
 -define(
   ERR_NOT_DEF_MODULE(Module),
-  ?FMT("module ~s is not defined or imported", [Module])
+  ?FMT("Module ~s is not defined or imported", [Module])
 ).
 -define(
   ERR_TYPE_PARAMS(Con, Exp, Actual),
   ?FMT(
-    "type ~s accepts ~p type parameters, but you gave it ~p",
+    "Type ~s accepts ~p type parameters, but you gave it ~p",
     [utils:unqualify(Con), Exp, Actual]
   )
 ).
 -define(
   ERR_DUP_KEY(Key, Con, Loc),
   ?FMT(
-    "the key ~s is already used for option ~s on line ~p, column ~p",
+    "The key ~s is already used for option ~s on line ~p, column ~p",
     [Key, utils:unqualify(Con), ?START_LINE(Loc), ?START_COL(Loc)]
   )
 ).
@@ -153,6 +175,22 @@
 -define(
   ERR_IFACE_NOT_TYPE(Con),
   ?FMT("~s is an interface, not a type", [utils:unqualify(Con)])
+).
+-define(
+  ERR_DUP_IMPL(Key, PrettyT),
+  ?FMT(
+    "Can only have one implementation that resembles a ~s for interface ~s; "
+    "an implementation already exists for type ~s",
+    [element(2, Key), utils:unqualify(element(1, Key)), PrettyT]
+  )
+).
+-define(
+  ERR_IFACE_TYPE(Name),
+  ?FMT(
+    "The type of interface field ~s must be a function, where T appears on "
+    "the left-hand side (but may also appear on the right-hand side).",
+    [Name]
+  )
 ).
 
 

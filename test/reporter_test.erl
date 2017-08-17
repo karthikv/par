@@ -132,6 +132,11 @@ expr_test_() ->
       "  foo : A bar : Atom\n"
       "}"
     )
+  , golden_prg_(
+      "p-impl-tv",
+      "interface Foo { a : T -> Int }\n"
+      "impl Foo for A { a(_) = 3 }"
+    )
   , golden_many_("p-multiple-modules-errors", [
       {"foo",
         "module Foo\n"

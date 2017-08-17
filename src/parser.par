@@ -375,19 +375,34 @@ iface(tokens) = match tokens {
 }
 
 implementation(tokens) = let for = to_list("for") in match tokens {
-  [Lexer.Impl(s), Lexer.Con(iface_l, iface_name), Lexer.Var(_, &for),
-   Lexer.Con(con_l, con_name), Lexer.LBrace(_) | t] =>
-    enclosed_brace(s, t) |> pbind(|(l, inner, rest)|
-      many(init, inner)
-        |> pmap_or(|v| v, [])
-        |> pmap(|globals|
-          let
-            iface = Con(iface_l, iface_name)
-            con = Con(con_l, con_name)
-          in
-            (Impl(l, iface, con, globals), rest)
-        )
-    )
+  [Lexer.Impl(s), Lexer.Con(mod_s, mod), Lexer.Var(_, &for) | t] =>
+    let
+      (con_node, t) =
+        if let [Lexer.Dot(_), Lexer.Con(e, con) | t] = t then
+          (Field(range(mod_s, e), Con(mod_s, mod), Con(e, con)), t)
+        else
+          (Con(mod_s, mod), t)
+    in
+      type_expr(t) |> pbind(|(te, rest)|
+        if let TV(l, _, _) = te then
+          Some(l) |> one_err("Expected concrete type, not type variable")
+        else match rest {
+          [Lexer.LBrace(brace_l) | t] =>
+            enclosed_brace(brace_l, t) |> pbind(|(l, inner, rest)|
+              many(init, inner)
+                |> pmap_or(|v| v, [])
+                |> pmap(|globals|
+                  (Impl(range(s, l), con_node, te, globals), rest)
+                )
+            )
+
+          // TODO: should we have an enclosed_brace that accepts open brace
+          // token as well and reports this error?
+          _ => head_loc(rest) |> one_err("Expected open brace '{'")
+        }
+      )
+
+  _ => head_loc(tokens) |> one_err("Expected keyword 'impl'")
 }
 
 expr : [Token] -> Parsed<(Node, [Token])>

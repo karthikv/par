@@ -22,7 +22,7 @@ norm_prg(Prefix, Prg, Name) ->
   NormT.
 
 ok_prg(Prg, Name) ->
-  type_system:pretty(norm_prg(?PRG_PREFIX, Prg, Name)).
+  utils:pretty(norm_prg(?PRG_PREFIX, Prg, Name)).
 
 bad_prg(Prg, Err) -> bad_prg(?PRG_PREFIX, Prg, Err).
 
@@ -43,7 +43,7 @@ ctx_err_prg(Prg, {ExpMsg, ExpLoc}) ->
   ?assertEqual(ExpMsg, Msg),
   ?assertEqual(ExpLoc, Loc).
 
-ok_expr(Expr) -> type_system:pretty(norm_prg(?EXPR_PREFIX, Expr, "expr")).
+ok_expr(Expr) -> utils:pretty(norm_prg(?EXPR_PREFIX, Expr, "expr")).
 
 bad_expr(Expr, Err) -> bad_prg(?EXPR_PREFIX, Expr, Err).
 
@@ -68,7 +68,7 @@ ok_many(PathPrgs, TargetPath, Name) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT, _} = norm(T, {#{}, Pid}),
   ok = tv_server:stop(Pid),
-  type_system:pretty(NormT).
+  utils:pretty(NormT).
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
   {errors, [Err], _} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
@@ -93,7 +93,7 @@ assert_err_equal(
   {NormT2, _} = norm(T2, N),
   ok = tv_server:stop(Pid),
 
-  case {type_system:pretty(NormT1), type_system:pretty(NormT2)} of
+  case {utils:pretty(NormT1), utils:pretty(NormT2)} of
     {Exp1, Exp2} -> true;
     {Exp2, Exp1} -> true;
     _ ->
@@ -102,7 +102,7 @@ assert_err_equal(
       {FlipNormT1, _} = norm(T1, FlipN),
       ok = tv_server:stop(FlipPid),
 
-      case {type_system:pretty(FlipNormT1), type_system:pretty(FlipNormT2)} of
+      case {utils:pretty(FlipNormT1), utils:pretty(FlipNormT2)} of
         {Exp1, Exp2} -> true;
         {Exp2, Exp1} -> true
       end
@@ -804,6 +804,11 @@ record_test_() ->
       "{ abs(x) = if x > 0 then x else abs(true) }",
       {"Bool -> A: Num", "A: Num -> A: Num", l(2, 39), ?FROM_FIELD_DEF("abs")}
     ))
+  % ensuring f doesn't escape its scope
+  , ?_test(ctx_err_prg(
+      "foo = { { f(x) = true }; f(3) }",
+      {?ERR_NOT_DEF("f"), l(25, 1)}
+    ))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
       {"{ foo : Atom }", "{ A | bar : B }", l(0, 17),
@@ -1126,6 +1131,85 @@ record_test_() ->
     ))
   ].
 
+interface_test_() ->
+  [ ?_test("A: ToStr -> String" = ok_prg(
+      "interface ToStr { to_str : T -> String }",
+      "to_str"
+    ))
+  , ?_test("(String, String, String, String)" = ok_prg(
+      "interface ToStr { to_str : T -> String }\n"
+      "impl ToStr for String { to_str(s) = s }\n"
+      "impl ToStr for Bool {\n"
+      "  to_str(b) = if b then \"true\" else \"false\"\n"
+      "}\n"
+      "enum Foo<A> { Foo(A) }\n"
+      "impl ToStr for Foo<A: ToStr> {\n"
+      "  to_str(Foo(a)) = \"Foo(\" ++ to_str(a) ++ \")\"\n"
+      "}\n"
+      "x = (\n"
+      "  to_str(\"hi\"),\n"
+      "  to_str(true),\n"
+      "  to_str(Foo(\"hi\")),\n"
+      "  to_str(Foo(false))\n"
+      ")",
+      "x"
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Atom { foo(a) = @hi }",
+      {"Atom -> Atom", "Atom -> Bool", l(16, 15), ?FROM_GLOBAL_SIG("foo")}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Atom { foo(a) = a == [] }",
+      {"[A]", "Atom", l(1, 34, 2), ?FROM_OP_RHS('==')}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : A -> T -> A }\n"
+      "impl Foo for A -> A { foo(a, t) = { t(a); a } }",
+      {"rigid(A)", "rigid(B)", l(1, 38, 1), ?FROM_APP}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for String { foo(_) = true foo(_) = false }",
+      {?ERR_DUP_FIELD_IMPL("foo"), l(1, 36, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for String { baz(_) = \"hi\" foo(_) = false }",
+      {?ERR_EXTRA_FIELD_IMPL("baz", "Foo"), l(1, 22, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool, bar : T -> String }\n"
+      "impl Foo for String { bar(_) = \"hi\" }",
+      {?ERR_MISSING_FIELD_IMPL("foo", "Foo"), l(1, 0, 37)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for [A] { foo(_) = true }\n"
+      "impl Foo for [Int] { foo(_) = true }",
+      {?ERR_DUP_IMPL({"Foo", "List"}, "[A]"), l(2, 13, 5)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Int -> Bool { foo(_) = true }\n"
+      "impl Foo for (Atom -> A) -> A { foo(_) = true }",
+      {?ERR_DUP_IMPL({"Foo", "Function"}, "Int -> Bool"), l(2, 13, 16)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : Bool }",
+      {?ERR_IFACE_TYPE("foo"), l(16, 10)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Int, bar : Int -> T }",
+      {?ERR_IFACE_TYPE("bar"), l(32, 14)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T, bar : T -> T }",
+      {?ERR_IFACE_TYPE("foo"), l(16, 7)}
+    ))
+  ].
+
 pattern_test_() ->
   [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
   , ?_test("A: Num" = ok_expr("let x = 3 in match x + 5 { a => a + 10 }"))
@@ -1424,6 +1508,10 @@ other_errors_test_() ->
   , ?_test(ctx_err_prg(
       "foo = 1 : A: Bar",
       {?ERR_NOT_DEF_IFACE("Bar"), l(13, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "impl Foo for Bool { a = 3 }",
+      {?ERR_NOT_DEF_IFACE("Foo"), l(5, 3)}
     ))
   , ?_test(ctx_err_many([
       {"foo", "module Foo a = 1"},

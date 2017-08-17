@@ -4,8 +4,12 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
+%   - Implement codegen for simple cases
+%   - HKTs
+%   - Implementations for builtin typeclasses?
+%   - Multiple interfaces per TV?
+%   - Extending interfaces?
 %   - Allow ifaces on struct/enum params?
-%   - Empty impl body?
 % - [2 days] Exceptions
 % - [2 days] Better pattern matching
 %   - Negative numbers and unit in patterns
@@ -51,6 +55,7 @@
 % - Type aliases
 %
 % Uncertain
+% - Allow T only on rhs of iface type sig?
 % - Operator |< to prepend an argument?
 % - Force all block expressions except last to be type ()?
 % - List indexing?
