@@ -1,7 +1,7 @@
 -module(type_system).
--export([infer_file/1, infer_prg/1, pattern_names/1]).
+-export([infer_file/1, infer_prg/1, pattern_names/1, unify/3]).
 -on_load(load/0).
--include("errors.hrl").
+-include("common.hrl").
 
 % Naming conventions:
 %
@@ -22,52 +22,6 @@
 % Scheme - a tuple {GVs, T} that represents a T generalized across GVs, a set of
 %   TV names.
 % Env - a Name => T mapping of bindings in the environment.
-
-% C - A context record for type inference with the following fields:
-%   gnr - the current gnr record that constraints are being added to; see G
-%     below
-%   gnrs - an array of finalized gnr records that need to be solved
-%   env - see Env above
-%   types - a Name => NumParams map for types in the env
-%   aliases - a Name => {Vs, T} map denoting a type alias between the type
-%     given by Name and the type T, parameterized by Vs
-%   structs - a Name => {T, SigIfaces} map for structs in the env
-%   enums - a Name => [VariantName] map for enums in the env
-%   ifaces - a Name => NumParams map for interfaces in the env
-%   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
-%   errs - an array of error messages, each of the form {Msg, Loc}
-%   pid - the process id of the TV server used to generated fresh TVs
--record(ctx, {
-  gnr = undefined,
-  gnrs = [],
-  env = #{},
-  types = #{
-    "Int" => {false, 0},
-    "Float" => {false, 0},
-    "Bool" => {false, 0},
-    "Atom" => {false, 0},
-    "Char" => {false, 0},
-    "String" => {false, 0},
-    "List" => {false, 1},
-    "Set" => {false, 1},
-    "Map" => {false, 2},
-
-    % ifaces
-    "Num" => {true, 0},
-    "Concatable" => {true, 0},
-    "Separable" => {true, 0}
-  },
-  aliases = #{},
-  structs = #{},
-  enums = #{},
-  ifaces = #{},
-  impls = #{},
-  sig_ifaces = #{},
-  errs = [],
-  modules = gb_sets:new(),
-  module,
-  pid
-}).
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -258,7 +212,7 @@ infer_comps(Comps) ->
     pid=Pid
   },
   Result = case solve(C2#ctx.gnrs, S) of
-    {ok, Schemes} ->
+    {ok, #solver{schemes=Schemes}} ->
       SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
         {tv, V, _, _} = case Value of
           % TODO: would no_dep ever happen?
@@ -268,10 +222,7 @@ infer_comps(Comps) ->
         {inst(maps:get(V, Schemes), Pid), Exported}
       end, C2#ctx.env),
 
-      FinalComps = lists:map(fun(Comp) ->
-        Comp#comp{enums=C2#ctx.enums}
-      end, Comps),
-      {ok, SubbedEnv, FinalComps};
+      {ok, Comps, C2#ctx{env=SubbedEnv}};
 
     {errors, Errs} -> {errors, Errs, Comps}
   end,
@@ -297,7 +248,7 @@ populate_env_and_types(Comps, C) ->
               {Loc_, Name_, length(ParamTEs)}
           end,
 
-          Con = qualify(Name, ModuleC),
+          Con = utils:qualify(Name, ModuleC),
           ModuleC1 = define_type(Con, false, NumParams, Loc, ModuleC),
 
           case N of
@@ -322,11 +273,11 @@ populate_env_and_types(Comps, C) ->
           end;
 
         {interface, _, {con_token, Loc, Name}, Fields} ->
-          Con = qualify(Name, ModuleC),
+          Con = utils:qualify(Name, ModuleC),
           ModuleC1 = define_type(Con, true, 0, Loc, ModuleC),
 
           Ifaces = ModuleC1#ctx.ifaces,
-          ModuleC2 = ModuleC1#ctx{ifaces=Ifaces#{Con => Fields}},
+          ModuleC2 = ModuleC1#ctx{ifaces=Ifaces#{Con => {Fields, none}}},
 
           lists:foldl(fun({sig, _, {var, VarLoc, VarName}, _}, NestedC) ->
             {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
@@ -454,7 +405,7 @@ populate_direct_imports(Deps, C) ->
           Con = lists:concat([Module, '.', Name]),
           {TypeExists, NestedC1} = case maps:find(Con, NestedC#ctx.types) of
             {ok, {IsIface, NumParams}} ->
-              NewCon = qualify(Name, NestedC),
+              NewCon = utils:qualify(Name, NestedC),
               CaseC = case NumParams of
                 0 -> add_alias(NewCon, [], {con, Con}, NestedC);
                 _ ->
@@ -631,7 +582,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
     {con_token, _, Name_} -> Name_;
     {gen_te, _, {con_token, _, Name_}, _} -> Name_
   end,
-  Con = qualify(Name, C),
+  Con = utils:qualify(Name, C),
 
   {T, SigIfaces} = maps:get(Con, C#ctx.structs),
   {{record, _, RawFieldMap}, C1} = infer_sig(
@@ -665,7 +616,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   {TV, C5};
 
 infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
-  Con = qualify(RawCon, C),
+  Con = utils:qualify(RawCon, C),
   {RawRecordT, C1} = infer_sig(
     false,
     false,
@@ -682,19 +633,28 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   C2 = lists:foldl(fun({sig, SigLoc, {var, _, Name}, _}, FoldC) ->
     #{Name := RawT} = RawFieldMap,
     FoldC1 = validate_iface_type(RawT, Name, SigLoc, FoldC),
-    % don't need to make any Vs rigid; inst still works correctly
-    T = norm_sig_type(RawT, [], FoldC1#ctx.pid),
 
-    {add_dep, TV, ID} = env_get(Name, C),
-    FoldC2 = new_gnr(TV, ID, FoldC1),
-    FoldC3 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC2),
-    finish_gnr(FoldC3, FoldC1#ctx.gnr)
+    % Don't replace T; we'll manually replace it ourselves. We need to track T's
+    % replacement for code generation.
+    FVs = gb_sets:del_element("T", fvs(RawT)),
+    NewV = tv_server:next_name(FoldC1#ctx.pid),
+    % don't need to make any Vs rigid; inst still works correctly
+    T = subs(norm_sig_type(RawT, [], FVs, FoldC1#ctx.pid), #{"T" => NewV}, #{}),
+
+    Ifaces = FoldC1#ctx.ifaces,
+    FieldsV = maps:get(Con, Ifaces),
+    FoldC2 = FoldC1#ctx{ifaces=Ifaces#{Con => setelement(2, FieldsV, NewV)}},
+
+    {add_dep, TV, ID} = env_get(Name, FoldC2),
+    FoldC3 = new_gnr(TV, ID, FoldC2),
+    FoldC4 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC3),
+    finish_gnr(FoldC4, FoldC1#ctx.gnr)
   end, C1, Fields),
 
   {none, C2};
 
 infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
-  Con = qualify(RawCon, C),
+  Con = utils:qualify(RawCon, C),
   {RawT, C1} = infer_sig(false, false, #{}, TE, C),
   ImplT = norm_sig_type(RawT, maps:keys(C1#ctx.sig_ifaces), C1#ctx.pid),
 
@@ -702,7 +662,7 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
     false -> {none, C1};
 
     true ->
-      Key = impl_key(Con, RawT),
+      Key = utils:impl_key(Con, RawT),
       Impls = C1#ctx.impls,
 
       C2 = case maps:find(Key, Impls) of
@@ -716,7 +676,7 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
         % TODO: are builtin type classes implementable?
         error -> {none, add_ctx_err(?ERR_NOT_DEF_IFACE(Con), ConLoc, C2)};
 
-        {ok, Fields} ->
+        {ok, {Fields, _}} ->
           % TODO: is there a way around inferring these sigs again?
           {Pairs, C3} = lists:mapfoldl(fun(Sig, FoldC) ->
             {sig, SigLoc, {var, _, Name}, SigTE} = Sig,
@@ -899,7 +859,7 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
 
 infer({record, Loc, RecordCon, Inits}, C) ->
   {Con, ConLoc} = case RecordCon of
-    {con_token, ConLoc_, Con_} -> {qualify(Con_, C), ConLoc_};
+    {con_token, ConLoc_, Con_} -> {utils:qualify(Con_, C), ConLoc_};
     {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
       {lists:concat([Module, '.', Con_]), ConLoc_}
   end,
@@ -934,7 +894,7 @@ infer({record, Loc, RecordCon, Inits}, C) ->
 
 infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
   {Con, ConLoc} = case RecordCon of
-    {con_token, ConLoc_, Con_} -> {qualify(Con_, C), ConLoc_};
+    {con_token, ConLoc_, Con_} -> {utils:qualify(Con_, C), ConLoc_};
     {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
       {lists:concat([Module, '.', Con_]), ConLoc_}
   end,
@@ -1184,7 +1144,7 @@ infer_sig_helper(RestrictVs, Unique, {tuple_te, _, ElemTEs}, C) ->
   {{tuple, ElemTs}, C1};
 infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, ConToken, ParamTEs}, C) ->
   {con_token, _, RawCon} = ConToken,
-  Con = qualify(RawCon, C),
+  Con = utils:qualify(RawCon, C),
 
   {Valid, C1} = case Unique of
     false -> validate_type(Con, false, length(ParamTEs), Loc, C);
@@ -1219,7 +1179,7 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
   {I, {Valid, C2}} = case TE of
     {none, _} -> {none, {true, C1}};
     {con_token, _, RawI_} ->
-      I_ = qualify(RawI_, C1),
+      I_ = utils:qualify(RawI_, C1),
       {I_, validate_type(I_, true, 0, ?LOC(TE), C1)}
   end,
 
@@ -1246,7 +1206,7 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
     false -> {{tv, V, none, false}, C2}
   end;
 infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
-  Con = qualify(RawCon, C),
+  Con = utils:qualify(RawCon, C),
   {Valid, C1} = case Unique of
     false -> validate_type(Con, false, 0, Loc, C);
     % We're inferring a new type, so don't do validation. Name conflicts for
@@ -1280,18 +1240,6 @@ infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, BaseTE, Fields}, C) ->
   ),
   {{record_ext, A, BaseT, FieldMap}, C2};
 infer_sig_helper(_, _, {none, _}, C) -> {none, C}.
-
-qualify(RawCon, C) ->
-  case maps:is_key(RawCon, C#ctx.types) of
-    % built-in type or iface
-    true -> RawCon;
-
-    false ->
-      case string:chr(RawCon, $.) of
-        0 -> lists:concat([C#ctx.module, '.', RawCon]);
-        _ -> RawCon
-      end
-  end.
 
 infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
@@ -1343,7 +1291,7 @@ lookup(Module, Name, Loc, C) ->
   case Value of
     {add_dep, EnvTV, ID} ->
       G = add_gnr_dep(ID, C1#ctx.gnr),
-
+ 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
@@ -1470,14 +1418,6 @@ norm_sig_type(SigT, RigidVs, FVs, Pid) ->
   % user can't input a type signature that needs record consolidation
   subs(SigT, Subs, #{}).
 
-impl_key(Con, {lam, _, _}) -> {Con, "Function"};
-impl_key(Con, {tuple, _}) -> {Con, "Tuple"};
-impl_key(IfaceCon, {con, Con}) -> {IfaceCon, Con};
-impl_key(IfaceCon, {gen, Con, _}) -> {IfaceCon, Con};
-impl_key(Con, {record, _, _}) -> {Con, "Record"};
-impl_key(Con, {record_ext, _, _, _}) -> {Con, "Record"};
-impl_key(Con, {none, _}) -> {Con, "()"}.
-
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
   %% ?LOG(
@@ -1521,7 +1461,7 @@ solve(Gs, S) ->
 
       {errors, SubbedErrs};
 
-    #solver{schemes=Schemes} -> {ok, Schemes}
+    FinalS -> {ok, FinalS}
   end.
 
 connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->

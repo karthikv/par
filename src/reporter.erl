@@ -1,7 +1,7 @@
 -module(reporter).
 -export([format/1]).
 
--include("errors.hrl").
+-include("common.hrl").
 -define(LINE_WIDTH, 80).
 
 format([Err | Errs]) -> [format(Err) | format(Errs)];

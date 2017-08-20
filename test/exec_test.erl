@@ -2,13 +2,13 @@
 -export([returns_fun/0]).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/errors.hrl").
+-include("../src/common.hrl").
 
 -define(TMP_MANY_DIR, "/tmp/exec-test-many").
 
 run_code_gen(Prg) ->
-  {ok, _, Comps} = type_system_test:type_check(Prg),
-  [{Mod, Binary}] = code_gen:compile_comps(Comps),
+  {ok, Comps, C} = type_system_test:type_check(Prg),
+  [{Mod, Binary}] = code_gen:compile_comps(Comps, C),
 
   remove(Mod),
   code:load_binary(Mod, "", Binary),
@@ -17,14 +17,14 @@ run_code_gen(Prg) ->
   Mod:main().
 
 run_interpreter(Prg) ->
-  {ok, _, [#comp{ast=Ast}]} = type_system_test:type_check(Prg),
+  {ok, [#comp{ast=Ast}], _} = type_system_test:type_check(Prg),
   interpreter:run_ast(Ast, []).
 
 expr_code_gen(Expr) -> run_code_gen("main() = " ++ Expr).
 expr_interpreter(Expr) -> run_interpreter("main() = " ++ Expr).
 
 many_code_gen(PathPrgs, TargetPath) ->
-  {ok, _, Comps} = type_system_test:type_check_many(
+  {ok, Comps, C} = type_system_test:type_check_many(
     ?TMP_MANY_DIR,
     PathPrgs,
     TargetPath
@@ -35,7 +35,7 @@ many_code_gen(PathPrgs, TargetPath) ->
     Path = filename:join(?TMP_MANY_DIR, lists:concat([Mod, ".beam"])),
     file:write_file(Path, Binary),
     remove(Mod)
-  end, code_gen:compile_comps(Comps)),
+  end, code_gen:compile_comps(Comps, C)),
 
   #comp{module=Module} = hd(Comps),
   Mod = list_to_atom(Module),
@@ -412,6 +412,29 @@ test_record(Expr, Run) ->
   , ?_test(7.5 = Run(
       "f(x, y) = x.foo(y.bar)\n"
       "main() = f({ foo = |x| x.baz }, { bar = { baz = 7.5 } })"
+    ))
+  ].
+
+code_gen_interface_test_() -> test_interface(fun run_code_gen/1).
+%% interpreter_interface_test_() -> test_interface(fun run_interpreter/1).
+test_interface(Run) ->
+  [ ?_test({<<"hi">>, <<"true">>, <<"Foo(hi)">>, <<"Foo(false)">>} = Run(
+      "interface ToStr { to_str : T -> String }\n"
+      "impl ToStr for String { to_str(s) = s }\n"
+      "impl ToStr for Bool {\n"
+      "  to_str(b) = if b then \"true\" else \"false\"\n"
+      "}\n"
+      "enum Foo<A> { Foo(A) }\n"
+      "impl ToStr for Foo<A: ToStr> {\n"
+      "  to_str(Foo(a)) = \"Foo(\" ++ to_str(a) ++ \")\"\n"
+      "}\n"
+      "x = (\n"
+      "  to_str(\"hi\"),\n"
+      "  to_str(true),\n"
+      "  to_str(Foo(\"hi\")),\n"
+      "  to_str(Foo(false))\n"
+      ")",
+      "x"
     ))
   ].
 

@@ -1,12 +1,39 @@
 -module(utils).
--export([unqualify/1, absolute/1, pretty_csts/1, pretty/1]).
--include("errors.hrl").
+-export([
+  qualify/2,
+  unqualify/1,
+  impl_key/2,
+  absolute/1,
+  pretty_csts/1,
+  pretty/1
+]).
+-include("common.hrl").
+
+qualify(RawCon, C) ->
+  case maps:is_key(RawCon, C#ctx.types) of
+    % built-in type or iface
+    true -> RawCon;
+
+    false ->
+      case string:chr(RawCon, $.) of
+        0 -> lists:concat([C#ctx.module, '.', RawCon]);
+        _ -> RawCon
+      end
+  end.
 
 unqualify(Con) ->
   case string:chr(Con, $.) of
     0 -> Con;
     Index -> lists:sublist(Con, Index + 1, length(Con))
   end.
+
+impl_key(Con, {lam, _, _}) -> {Con, "Function"};
+impl_key(Con, {tuple, _}) -> {Con, "Tuple"};
+impl_key(IfaceCon, {con, Con}) -> {IfaceCon, Con};
+impl_key(IfaceCon, {gen, Con, _}) -> {IfaceCon, Con};
+impl_key(Con, {record, _, _}) -> {Con, "Record"};
+impl_key(Con, {record_ext, _, _, _}) -> {Con, "Record"};
+impl_key(Con, {none, _}) -> {Con, "()"}.
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

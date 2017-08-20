@@ -1,5 +1,5 @@
--ifndef(ERRORS_HRL_).
--define(ERRORS_HRL_, 1).
+-ifndef(COMMON_HRL_).
+-define(COMMON_HRL_, 1).
 
 % a component to compile, representing a module and its metadata
 -record(comp, {
@@ -8,10 +8,54 @@
   ast,
   deps,
   path,
-  prg,
+  prg
+}).
 
-  % fields added after type inference
-  enums
+% C - A context record for type inference with the following fields:
+%   gnr - the current gnr record that constraints are being added to; see G
+%     below
+%   gnrs - an array of finalized gnr records that need to be solved
+%   env - see Env above
+%   types - a Name => NumParams map for types in the env
+%   aliases - a Name => {Vs, T} map denoting a type alias between the type
+%     given by Name and the type T, parameterized by Vs
+%   structs - a Name => {T, SigIfaces} map for structs in the env
+%   enums - a Name => [VariantName] map for enums in the env
+%   ifaces - a Name => {Fields, IV} map for interfaces in the env
+%   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
+%   errs - an array of error messages, each of the form {Msg, Loc}
+%   pid - the process id of the TV server used to generated fresh TVs
+-record(ctx, {
+  gnr = undefined,
+  gnrs = [],
+  env = #{},
+  types = #{
+    "Int" => {false, 0},
+    "Float" => {false, 0},
+    "Bool" => {false, 0},
+    "Atom" => {false, 0},
+    "Char" => {false, 0},
+    "String" => {false, 0},
+    "Ref" => {false, 0},
+    "List" => {false, 1},
+    "Set" => {false, 1},
+    "Map" => {false, 2},
+
+    % ifaces
+    "Num" => {true, 0},
+    "Concatable" => {true, 0},
+    "Separable" => {true, 0}
+  },
+  aliases = #{},
+  structs = #{},
+  enums = #{},
+  ifaces = #{},
+  impls = #{},
+  sig_ifaces = #{},
+  errs = [],
+  modules = gb_sets:new(),
+  module,
+  pid
 }).
 
 

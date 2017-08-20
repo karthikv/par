@@ -1,15 +1,25 @@
 -module(par).
 -export([main/1]).
--include("errors.hrl").
+-include("common.hrl").
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Implement codegen for simple cases
+%   - Use VarRef for globals to track types correctly
+%   - Should var_value have a ref?
+%   - Ensure recursive case is handled for inst
 %   - HKTs
 %   - Implementations for builtin typeclasses?
 %   - Multiple interfaces per TV?
 %   - Extending interfaces?
 %   - Allow ifaces on struct/enum params?
+% - Bug with recursive functions and type signatures
+%   e.g.
+%     foo : C: Collection -> Int
+%     foo(c) = if length(c) > 10 then length(c) else length([])
+% - Proper type class
+% - Ord type class for comparison and sorting
+% - Dot instead of ':' for native functions?
 % - [2 days] Exceptions
 % - [2 days] Better pattern matching
 %   - Negative numbers and unit in patterns
@@ -20,6 +30,7 @@
 % - [1 day] TV vs. Con parsing
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
+%   - Ref type?
 % - [1 week] REPL
 %   - Interpreter import implementation
 %   - Interpreter better error messages and backtraces
@@ -91,8 +102,8 @@ main(Args) ->
       end,
 
       case type_system:infer_file(Path) of
-        {ok, _, Comps} ->
-          {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps]),
+        {ok, C, Comps} ->
+          {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps, C]),
           {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
 
           lists:foreach(fun({Mod, Binary}) ->

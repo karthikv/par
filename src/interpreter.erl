@@ -1,7 +1,7 @@
 -module(interpreter).
 -export([run_ast/2, env_run/2]).
 
--include("errors.hrl").
+-include("common.hrl").
 -define(ENV_NAME, interpreter_env).
 
 run_ast(Ast, Args) ->

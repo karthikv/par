@@ -2,7 +2,7 @@
 -export([type_check/1, type_check_many/3, bad_expr/2]).
 
 -include_lib("eunit/include/eunit.hrl").
--include("../src/errors.hrl").
+-include("../src/common.hrl").
 
 -define(TMP_MANY_DIR, "/tmp/type-system-test-many").
 -define(PRG_PREFIX, "module Mod\n").
@@ -12,7 +12,7 @@ type_check(Prg) -> type_system:infer_prg(?PRG_PREFIX ++ Prg).
 type_check(Prefix, Prg) -> type_system:infer_prg(Prefix ++ Prg).
 
 norm_prg(Prefix, Prg, Name) ->
-  {ok, Env, _} = type_check(Prefix, Prg),
+  {ok, _, #ctx{env=Env}} = type_check(Prefix, Prg),
   Key = {"Mod", Name},
   #{Key := {T, _}} = Env,
 
@@ -61,7 +61,8 @@ type_check_many(Dir, PathPrgs, TargetPath) ->
   type_system:infer_file(AbsTargetPath).
 
 ok_many(PathPrgs, TargetPath, Name) ->
-  {ok, Env, Comps} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  {ok, Comps, C} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  #ctx{env=Env} = C,
   #comp{module=Module} = hd(Comps),
   {T, _} = maps:get({Module, Name}, Env),
 
