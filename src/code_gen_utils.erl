@@ -71,7 +71,7 @@
 
   Args = case Arity of
     0 ->
-      none = erlang:hd(RawArgs),
+      {} = erlang:hd(RawArgs),
       erlang:tl(RawArgs);
     _ -> RawArgs
   end,

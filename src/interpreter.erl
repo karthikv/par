@@ -23,6 +23,8 @@ init({global, _, {var, _, Name}, Expr, _}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
 init({enum, _, _, OptionTEs}, ID) ->
+  Ref = make_ref(),
+
   lists:foreach(fun({option, _, {con_token, _, Con}, ArgsTE, KeyNode}) ->
     Key = case KeyNode of
       none -> list_to_atom(Con);
@@ -30,14 +32,14 @@ init({enum, _, _, OptionTEs}, ID) ->
     end,
 
     V = if
-      length(ArgsTE) == 0 -> Key;
+      length(ArgsTE) == 0 -> {Ref, Key};
       true ->
         make_fun(length(ArgsTE), fun(Vs) ->
-          list_to_tuple([Key | Vs])
+          list_to_tuple([Ref, Key | Vs])
         end)
     end,
 
-    env_set(Con, {option, Key, V}, ID)
+    env_set(Con, {option, Ref, Key, V}, ID)
   end, OptionTEs);
 
 init({struct, _, StructTE, FieldTEs}, ID) ->
@@ -53,7 +55,7 @@ init({struct, _, StructTE, FieldTEs}, ID) ->
     maps:from_list(lists:zip(FieldAtoms, Vs))
   end),
 
-  env_set(Con, StructV, ID);
+  env_set(Con, {value, StructV}, ID);
 
 init({sig, _, _, _}, _) -> true.
 
@@ -66,7 +68,7 @@ eval({fn, _, Args, Expr}, ID) ->
         Names = gb_sets:union(lists:map(fun type_system:pattern_names/1, Args)),
 
         lists:foreach(fun(Name) ->
-          env_set(Name, {}, ChildID)
+          env_set(Name, unset, ChildID)
         end, gb_sets:to_list(Names)),
 
         lists:foreach(fun({V, Pattern}) ->
@@ -84,7 +86,7 @@ eval({fn, _, Args, Expr}, ID) ->
 
 eval({binary_op, _, ':', Expr, _}, ID) -> eval(Expr, ID);
 
-eval({none, _}, _) -> none;
+eval({unit, _}, _) -> {};
 eval({N, _, V}, _)
   when N == int; N == float; N == bool; N == char; N == str; N == atom -> V;
 
@@ -110,10 +112,10 @@ eval({N, _, Name}, ID) when N == var; N == con_token ->
   case env_get(Name, ID) of
     {lazy, Expr} ->
       V = eval(Expr, ID),
-      env_update(Name, V, ID),
+      env_update(Name, {value, V}, ID),
       V;
-    {option, _, V} -> V;
-    V -> V
+    {option, _, _, V} -> V;
+    {value, V} -> V
   end;
 
 eval({anon_record, _, Inits}, ID) ->
@@ -122,7 +124,7 @@ eval({anon_record, _, Inits}, ID) ->
       {fn, _, _, _} ->
         ChildID = env_child(ID),
         ExprV = eval(Expr, ChildID),
-        env_set(Name, ExprV, ChildID),
+        env_set(Name, {value, ExprV}, ChildID),
         ExprV;
 
       _ -> eval(Expr, ID)
@@ -157,7 +159,7 @@ eval({field, Loc, Expr, Var}, ID) ->
 eval({app, _, Expr, Args}, ID) ->
   Fun = eval(Expr, ID),
   Vs = case length(Args) of
-    0 -> [none];
+    0 -> [{}];
     _ -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
   end,
   code_gen_utils:'_@curry'(Fun, Vs, ?LINE);
@@ -171,8 +173,9 @@ eval({'if', _, Expr, Then, Else}, ID) ->
     true -> eval(Then, ID);
     false -> eval(Else, ID)
   end,
+
   case Else of
-    {none, _} -> none;
+    {unit, _} -> {};
     _ -> V
   end;
 
@@ -193,7 +196,7 @@ eval({if_let, _, Pattern, Expr, Then, Else}, ID) ->
   end,
 
   case Else of
-    {none, _} -> none;
+    {unit, _} -> {};
     _ -> V
   end;
 
@@ -202,7 +205,7 @@ eval({'match', _, Expr, Cases}, ID) ->
   match_cases(V, Cases, ID);
 
 eval({block, _, Exprs}, ID) ->
-  lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, none, Exprs);
+  lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, {}, Exprs);
 
 eval({binary_op, _, Op, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
@@ -260,19 +263,19 @@ eval({unary_op, _, Op, Expr}, ID) ->
     % $ used by the type system to treat Char as Int, but they're the same
     '$' -> V;
     '-' -> -V;
-    'discard' -> none
+    'discard' -> {}
   end.
 
 eval_pattern({var, _, Name}, {fn, _, _, _}=Expr, ID) ->
   ChildID = env_child(ID),
-  env_set(Name, eval(Expr, ChildID), ChildID),
+  env_set(Name, {value, eval(Expr, ChildID)}, ChildID),
   {true, ChildID};
 
 eval_pattern(Pattern, Expr, ID) ->
   V = eval(Expr, ID),
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
-    env_set(Name, {}, ChildID)
+    env_set(Name, unset, ChildID)
   end, gb_sets:to_list(type_system:pattern_names(Pattern))),
 
   case match(V, Pattern, ChildID) of
@@ -306,7 +309,7 @@ match_cases(V, [], _) -> error({badmatch, V});
 match_cases(V, [{'case', _, Pattern, Expr} | Rest], ID) ->
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
-    env_set(Name, {}, ChildID)
+    env_set(Name, unset, ChildID)
   end, gb_sets:to_list(type_system:pattern_names(Pattern))),
 
   case match(V, Pattern, ChildID) of
@@ -320,10 +323,10 @@ match(V1, {N, _, V2}, _) when N == int; N == float; N == bool; N == char;
 
 match(V1, {var, _, Name}, ID) ->
   case env_get(Name, ID) of
-    {} ->
-      env_update(Name, V1, ID),
+    unset ->
+      env_update(Name, {value, V1}, ID),
       true;
-    V2 -> V1 == V2
+    {value, V2} -> V1 == V2
   end;
 
 match(V1, {var_value, Loc, Name}, ID) -> V1 == eval({var, Loc, Name}, ID);
@@ -331,16 +334,18 @@ match(_, {'_', _}, _) -> true;
 
 match(V1, {con_token, _, Name}, ID) ->
   case env_get(Name, ID) of
-    {option, _, V2} -> V1 == V2;
-    V2 -> V1 == V2
+    {option, _, _, V2} -> V1 == V2;
+    {value, V2} -> V1 == V2
   end;
 
 match(V, {app, _, {con_token, Loc, Name}, Args}, ID) ->
-  {option, Key, _} = env_get(Name, ID),
+  {option, Ref, Key, _} = env_get(Name, ID),
   if
     length(Args) == 0 -> V == Key;
     true ->
-      match(tuple_to_list(V), {list, Loc, [{atom, Loc, Key} | Args]}, ID)
+      % Ref isn't an atom, but this performs a direct comparison anyway
+      Elems = [{atom, Loc, Ref}, {atom, Loc, Key} | Args],
+      match(tuple_to_list(V), {list, Loc, Elems}, ID)
   end;
 
 match(V, {list, _, List}, ID) ->

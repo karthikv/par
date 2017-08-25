@@ -21,7 +21,8 @@
 %     given by Name and the type T, parameterized by Vs
 %   structs - a Name => {T, SigIfaces} map for structs in the env
 %   enums - a Name => [VariantName] map for enums in the env
-%   ifaces - a Name => {Fields, IV} map for interfaces in the env
+%   ifaces - a Name => {Fields, FieldMetas} map for interfaces in the env
+%   impls - a ImplKey => RawT map for implementations of interfaces
 %   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   pid - the process id of the TV server used to generated fresh TVs
@@ -50,7 +51,11 @@
   structs = #{},
   enums = #{},
   ifaces = #{},
-  impls = #{},
+  impls = #{
+    "Num" => #{},
+    "Concatable" => #{},
+    "Separable" => #{}
+  },
   sig_ifaces = #{},
   errs = [],
   modules = gb_sets:new(),
@@ -221,18 +226,19 @@
   ?FMT("~s is an interface, not a type", [utils:unqualify(Con)])
 ).
 -define(
-  ERR_DUP_IMPL(Key, PrettyT),
+  ERR_DUP_IMPL(Con, Key, PrettyT),
   ?FMT(
     "Can only have one implementation that resembles a ~s for interface ~s; "
     "an implementation already exists for type ~s",
-    [element(2, Key), utils:unqualify(element(1, Key)), PrettyT]
+    [Key, utils:unqualify(Con), PrettyT]
   )
 ).
 -define(
   ERR_IFACE_TYPE(Name),
   ?FMT(
-    "The type of interface field ~s must be a function, where T appears on "
-    "the left-hand side (but may also appear on the right-hand side).",
+    "The type of interface field ~s must be a function, where one of the "
+    "arguments is precisely T (though T may also appear elsewhere in the "
+    "signature).",
     [Name]
   )
 ).

@@ -36,11 +36,11 @@
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(solver, {
   subs = #{},
-  errs = [],
+  errs,
   schemes = #{},
   bound_vs,
-  aliases = #{},
-  impls = #{},
+  aliases,
+  impls,
   t1,
   t2,
   module,
@@ -276,8 +276,9 @@ populate_env_and_types(Comps, C) ->
           Con = utils:qualify(Name, ModuleC),
           ModuleC1 = define_type(Con, true, 0, Loc, ModuleC),
 
-          Ifaces = ModuleC1#ctx.ifaces,
-          ModuleC2 = ModuleC1#ctx{ifaces=Ifaces#{Con => {Fields, none}}},
+          NewIfaces = (ModuleC1#ctx.ifaces)#{Con => {Fields, none}},
+          NewImpls = (ModuleC1#ctx.impls)#{Con => #{}},
+          ModuleC2 = ModuleC1#ctx{ifaces=NewIfaces, impls=NewImpls},
 
           lists:foldl(fun({sig, _, {var, VarLoc, VarName}, _}, NestedC) ->
             {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
@@ -483,7 +484,7 @@ infer({fn, _, Args, Expr}, C) ->
 
   {ReturnT, C3} = infer(Expr, C2),
   T = if
-    length(Args) == 0 -> {lam, none, ReturnT};
+    length(Args) == 0 -> {lam, unit, ReturnT};
     true -> lists:foldl(fun(ArgT, LastT) ->
       {lam, ArgT, LastT}
     end, ReturnT, ArgTsRev)
@@ -630,28 +631,23 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   % map for aliases
   {record, _, RawFieldMap} = subs(RawRecordT, Subs, #{}),
 
-  C2 = lists:foldl(fun({sig, SigLoc, {var, _, Name}, _}, FoldC) ->
+  {FieldMetas, C2} = lists:mapfoldl(fun(Sig, FoldC) ->
+    {sig, SigLoc, {var, _, Name}, _} = Sig,
     #{Name := RawT} = RawFieldMap,
-    FoldC1 = validate_iface_type(RawT, Name, SigLoc, FoldC),
+    {FieldMeta, FoldC1} = validate_iface_type(RawT, Name, SigLoc, FoldC),
 
-    % Don't replace T; we'll manually replace it ourselves. We need to track T's
-    % replacement for code generation.
-    FVs = gb_sets:del_element("T", fvs(RawT)),
-    NewV = tv_server:next_name(FoldC1#ctx.pid),
     % don't need to make any Vs rigid; inst still works correctly
-    T = subs(norm_sig_type(RawT, [], FVs, FoldC1#ctx.pid), #{"T" => NewV}, #{}),
+    T = norm_sig_type(RawT, [], FoldC1#ctx.pid),
 
-    Ifaces = FoldC1#ctx.ifaces,
-    FieldsV = maps:get(Con, Ifaces),
-    FoldC2 = FoldC1#ctx{ifaces=Ifaces#{Con => setelement(2, FieldsV, NewV)}},
-
-    {add_dep, TV, ID} = env_get(Name, FoldC2),
-    FoldC3 = new_gnr(TV, ID, FoldC2),
-    FoldC4 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC3),
-    finish_gnr(FoldC4, FoldC1#ctx.gnr)
+    {add_dep, TV, ID} = env_get(Name, FoldC1),
+    FoldC2 = new_gnr(TV, ID, FoldC1),
+    FoldC3 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC2),
+    {FieldMeta, finish_gnr(FoldC3, FoldC1#ctx.gnr)}
   end, C1, Fields),
 
-  {none, C2};
+  Ifaces = C2#ctx.ifaces,
+  NewIfaces = Ifaces#{Con => setelement(2, maps:get(Con, Ifaces), FieldMetas)},
+  {none, C2#ctx{ifaces=NewIfaces}};
 
 infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
   Con = utils:qualify(RawCon, C),
@@ -662,21 +658,24 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
     false -> {none, C1};
 
     true ->
-      Key = utils:impl_key(Con, RawT),
-      Impls = C1#ctx.impls,
-
-      C2 = case maps:find(Key, Impls) of
-        {ok, ExistingT} ->
-          Err = ?ERR_DUP_IMPL(Key, utils:pretty(ExistingT)),
-          add_ctx_err(Err, ?LOC(TE), C1);
-        error -> C1#ctx{impls=Impls#{Key => RawT}}
-      end,
-
-      case maps:find(Con, C2#ctx.ifaces) of
+      case maps:find(Con, C1#ctx.ifaces) of
         % TODO: are builtin type classes implementable?
-        error -> {none, add_ctx_err(?ERR_NOT_DEF_IFACE(Con), ConLoc, C2)};
+        error -> {none, add_ctx_err(?ERR_NOT_DEF_IFACE(Con), ConLoc, C1)};
 
         {ok, {Fields, _}} ->
+          Key = utils:impl_key(RawT),
+          Impls = C1#ctx.impls,
+          SubImpls = maps:get(Con, Impls),
+
+          C2 = case maps:find(Key, SubImpls) of
+            {ok, {ExistingT, _}} ->
+              Err = ?ERR_DUP_IMPL(Con, Key, utils:pretty(ExistingT)),
+              add_ctx_err(Err, ?LOC(TE), C1);
+            error ->
+              NewSubImpls = SubImpls#{Key => {RawT, Inits}},
+              C1#ctx{impls=Impls#{Con => NewSubImpls}}
+          end,
+
           % TODO: is there a way around inferring these sigs again?
           {Pairs, C3} = lists:mapfoldl(fun(Sig, FoldC) ->
             {sig, SigLoc, {var, _, Name}, SigTE} = Sig,
@@ -741,7 +740,7 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
       end
   end;
 
-infer({none, _}, C) -> {none, C};
+infer({unit, _}, C) -> {unit, C};
 infer({int, _, _}, C) -> {tv_server:fresh("Num", C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, "Float"}, C};
 infer({bool, _, _}, C) -> {{con, "Bool"}, C};
@@ -964,7 +963,7 @@ infer({app, Loc, Expr, Args}, C) ->
 
   TV = tv_server:fresh(C2#ctx.pid),
   T = if
-    length(ArgLocTsRev) == 0 -> {lam, none, TV};
+    length(ArgLocTsRev) == 0 -> {lam, unit, TV};
     true ->
       lists:foldl(fun({ArgLoc, ArgT}, LastT) ->
         {lam, ArgLoc, ArgT, LastT}
@@ -981,7 +980,7 @@ infer({native, Loc, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
   end,
 
   T = if
-    Arity == 0 -> {lam, none, tv_server:fresh(C1#ctx.pid)};
+    Arity == 0 -> {lam, unit, tv_server:fresh(C1#ctx.pid)};
     true ->
       lists:foldl(fun(_, LastT) ->
         {lam, tv_server:fresh(C1#ctx.pid), LastT}
@@ -996,7 +995,7 @@ infer({'if', _, Expr, Then, Else}, C) ->
   {ThenT, C3} = infer(Then, C2),
 
   case Else of
-    {none, _} -> {none, C3};
+    {unit, _} -> {unit, C3};
     _ ->
       {ElseT, C4} = infer(Else, C3),
       TV = tv_server:fresh(C#ctx.pid),
@@ -1020,7 +1019,7 @@ infer({if_let, _, Pattern, Expr, Then, Else}, C) ->
   C3 = C2#ctx{env=C#ctx.env},
 
   case Else of
-    {none, _} -> {none, C3};
+    {unit, _} -> {unit, C3};
     _ ->
       % must use original env without pattern bindings
       {ElseT, C4} = infer(Else, C3),
@@ -1057,7 +1056,7 @@ infer({match, _, Expr, Cases}, C) ->
 infer({block, _, Exprs}, C) ->
   {T, C1} = lists:foldl(fun(Expr, {_, FoldC}) ->
     infer(Expr, FoldC)
-  end, {none, C}, Exprs),
+  end, {unit, C}, Exprs),
   {T, C1};
 
 infer({binary_op, _, '|>', Left, Right}, C) ->
@@ -1122,7 +1121,7 @@ infer({unary_op, Loc, Op, Expr}, C) ->
     Op == '-' ->
       NumT = tv_server:fresh("Num", C1#ctx.pid),
       {NumT, NumT};
-    Op == 'discard' -> {ExprT, none}
+    Op == 'discard' -> {ExprT, unit}
   end,
 
   C2 = add_cst(ExpExprT, ExprT, ?LOC(Expr), ?FROM_UNARY_OP(Op), C1),
@@ -1161,7 +1160,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, ConToken, ParamTEs}, C) ->
     Valid -> {{gen, Con, ParamTs}, C2};
     true -> {tv_server:fresh(C2#ctx.pid), C2}
   end;
-infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
+infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
   C1 = case RestrictVs of
     false -> C;
     {T, AllowedVs} ->
@@ -1176,11 +1175,11 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, TE}, C) ->
       end
   end,
 
-  {I, {Valid, C2}} = case TE of
-    {none, _} -> {none, {true, C1}};
-    {con_token, _, RawI_} ->
+  {I, {Valid, C2}} = case MaybeTE of
+    none -> {none, {true, C1}};
+    {some, {con_token, ConLoc, RawI_}} ->
       I_ = utils:qualify(RawI_, C1),
-      {I_, validate_type(I_, true, 0, ?LOC(TE), C1)}
+      {I_, validate_type(I_, true, 0, ConLoc, C1)}
   end,
 
   case Valid of
@@ -1239,7 +1238,7 @@ infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, BaseTE, Fields}, C) ->
     C1
   ),
   {{record_ext, A, BaseT, FieldMap}, C2};
-infer_sig_helper(_, _, {none, _}, C) -> {none, C}.
+infer_sig_helper(_, _, {unit, _}, C) -> {unit, C}.
 
 infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
@@ -1291,7 +1290,7 @@ lookup(Module, Name, Loc, C) ->
   case Value of
     {add_dep, EnvTV, ID} ->
       G = add_gnr_dep(ID, C1#ctx.gnr),
- 
+
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
@@ -1385,14 +1384,18 @@ validate_type(Con, IsIface, NumParams, Loc, C) ->
   end.
 
 validate_iface_type(T, Name, Loc, C) ->
-  case T of
-    {lam, ArgT, ReturnT} ->
-      case gb_sets:is_member("T", fvs(ArgT)) of
-        true -> C;
-        _ -> validate_iface_type(ReturnT, Name, Loc, C)
-      end;
-    _ -> add_ctx_err(?ERR_IFACE_TYPE(Name), Loc, C)
+  case get_field_meta(T, 0) of
+    {none, _} -> {none, add_ctx_err(?ERR_IFACE_TYPE(Name), Loc, C)};
+    FieldMeta -> {FieldMeta, C}
   end.
+
+% don't check iface of T; it has already been validated and set
+get_field_meta({lam, {tv, "T", _, false}, ReturnT}, ArgNum) ->
+  {_, Arity} = get_field_meta(ReturnT, ArgNum + 1),
+  {ArgNum + 1, Arity};
+get_field_meta({lam, _, ReturnT}, ArgNum) ->
+  get_field_meta(ReturnT, ArgNum + 1);
+get_field_meta(_, ArgNum) -> {none, ArgNum}.
 
 add_ctx_err(Msg, Loc, C) ->
   C#ctx{errs=[{Msg, C#ctx.module, Loc} | C#ctx.errs]}.
@@ -1592,7 +1595,7 @@ resolve({record, A, FieldMap}, S) ->
 resolve({record_ext, A, BaseT, Ext}, S) ->
   ResolvedExt = maps:map(fun(_, T) -> resolve(T, S) end, Ext),
   {record_ext, A, resolve(BaseT, S), ResolvedExt};
-resolve(none, _) -> none.
+resolve(unit, _) -> unit.
 
 inst({GVs, T}, Pid) ->
   Subs = gb_sets:fold(fun(V, FoldSubs) ->
@@ -1873,18 +1876,12 @@ instance({gen, "Map", _}, "Concatable", S) -> S;
 instance({gen, "Set", _}, "Concatable", S) -> S;
 instance({gen, "List", _}, "Separable", S) -> S;
 instance({gen, "Set", _}, "Separable", S) -> S;
-instance({con, Con}, Iface, S) ->
-  case maps:find({Iface, Con}, S#solver.impls) of
-    % these should be the only two cases
-    {ok, {con, Con}} -> S;
+instance(T, Iface, S) ->
+  Key = utils:impl_key(T),
+  case maps:find(Key, maps:get(Iface, S#solver.impls)) of
+    {ok, {RawT, _}} -> sub_unify(T, norm_sig_type(RawT, [], S#solver.pid), S);
     _ -> add_err(S)
-  end;
-instance({gen, Con, _}=T, Iface, S) ->
-  case maps:find({Iface, Con}, S#solver.impls) of
-    {ok, RawT} -> sub_unify(T, norm_sig_type(RawT, [], S#solver.pid), S);
-    _ -> add_err(S)
-  end;
-instance(_, _, S) -> add_err(S).
+  end.
 
 remove_arg_locs({lam, _, ArgT, ReturnT}) ->
   {lam, ArgT, remove_arg_locs(ReturnT)};
@@ -1924,7 +1921,7 @@ subs({record_ext, A, BaseT, Ext}, Subs, Aliases) ->
       subs({record_ext, NewA, BaseT, Ext}, Subs, Aliases);
     {ok, T} -> subs(T, Subs, Aliases)
   end;
-subs(none, _, _) -> none.
+subs(unit, _, _) -> unit.
 
 shallow_subs({tv, V, I, Rigid}, Subs, Aliases) ->
   case maps:find(V, Subs) of
@@ -1937,10 +1934,10 @@ shallow_subs({tv, V, I, Rigid}, Subs, Aliases) ->
 
     {ok, Value} ->
       Sub = if
-        % Replacing with a new type entirely
-        is_tuple(Value) or (Value == none) -> Value;
         % Instantiation, so rigid resets to false
-        true -> {tv, Value, I, false}
+        is_list(Value) -> {tv, Value, I, false};
+        % Replacing with a new type entirely
+        true -> Value
       end,
       shallow_subs(Sub, Subs, Aliases)
   end;
@@ -2008,7 +2005,7 @@ fvs({record, _, FieldMap}) ->
   end, gb_sets:new(), FieldMap);
 fvs({record_ext, _, BaseT, Ext}) ->
   gb_sets:union(fvs(BaseT), fvs({record, none, Ext}));
-fvs(none) -> gb_sets:new().
+fvs(unit) -> gb_sets:new().
 
 occurs(V, T, #solver{subs=Subs, aliases=Aliases}) ->
   occurs(V, subs(T, Subs, Aliases)).
@@ -2033,4 +2030,4 @@ occurs(V, {record, _, FieldMap}) ->
   end, false, FieldMap);
 occurs(V, {record_ext, _, BaseT, Ext}) ->
   occurs(V, BaseT) or occurs(V, {record, none, Ext});
-occurs(_, none) -> false.
+occurs(_, unit) -> false.

@@ -2,7 +2,7 @@
 -export([
   qualify/2,
   unqualify/1,
-  impl_key/2,
+  impl_key/1,
   absolute/1,
   pretty_csts/1,
   pretty/1
@@ -27,13 +27,14 @@ unqualify(Con) ->
     Index -> lists:sublist(Con, Index + 1, length(Con))
   end.
 
-impl_key(Con, {lam, _, _}) -> {Con, "Function"};
-impl_key(Con, {tuple, _}) -> {Con, "Tuple"};
-impl_key(IfaceCon, {con, Con}) -> {IfaceCon, Con};
-impl_key(IfaceCon, {gen, Con, _}) -> {IfaceCon, Con};
-impl_key(Con, {record, _, _}) -> {Con, "Record"};
-impl_key(Con, {record_ext, _, _, _}) -> {Con, "Record"};
-impl_key(Con, {none, _}) -> {Con, "()"}.
+impl_key({lam, _, _}) -> "Function";
+impl_key({lam, _, _, _}) -> "Function";
+impl_key({tuple, _}) -> "Tuple";
+impl_key({con, Con}) -> Con;
+impl_key({gen, Con, _}) -> Con;
+impl_key({record, _, _}) -> "Record";
+impl_key({record_ext, _, _, _}) -> "Record";
+impl_key(unit) -> "()".
 
 absolute(Path) ->
   FullPath = filename:absname(Path),
@@ -89,7 +90,7 @@ pretty({inst, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, BaseT, Ext}) ->
   ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
-pretty(none) -> "()".
+pretty(unit) -> "()".
 
 pretty_field_map(FieldMap) ->
   FieldStrs = maps:fold(fun(Name, T, Strs) ->

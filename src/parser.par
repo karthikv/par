@@ -21,7 +21,7 @@ enum Node {
   Global(Loc, Node, Node, Bool) @global
   Fn(Loc, [Node], Node) @fn
 
-  Unit(Loc) @none
+  Unit(Loc) @unit
   LitInt(Loc, Int) @int
   LitFloat(Loc, Float) @float
   LitBool(Loc, Bool) @bool
@@ -53,7 +53,7 @@ enum Node {
   Native(Loc, Node, Node, Int) @native
 
   Con(Loc, [Char]) @con_token
-  TV(Loc, [Char], Node) @tv_te
+  TV(Loc, [Char], Maybe<Node>) @tv_te
   Gen(Loc, Node, [Node]) @gen_te
   LamTE(Loc, Node, Node) @lam_te
   TupleTE(Loc, [Node]) @tuple_te
@@ -296,7 +296,7 @@ enumeration(tokens) = match tokens {
 
 tv : [Token] -> Parsed<(Node, [Token])>
 tv(tokens) = match tokens {
-  [Lexer.TV(l, tv) | t] => parsed((TV(l, tv, Unit(l)), t))
+  [Lexer.TV(l, tv) | t] => parsed((TV(l, tv, None), t))
   _ => head_loc(tokens) |> one_err("Expected type variable")
 }
 
@@ -702,17 +702,18 @@ type_expr_r(lhs, tokens) = match lhs {
 
       [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(con_s, mod),
        Lexer.Dot(_), Lexer.Con(e, con) | t] =>
-        TV(range(s, e), tv, Con(range(con_s, e), mod ++ ['.' | con]))
-          |> flip(try_gen, t)
-          |> pbind(|(node, rest)| recurse(rest, node))
+        let iface = Con(range(con_s, e), mod ++ ['.' | con]) in
+          TV(range(s, e), tv, Some(iface))
+            |> flip(try_gen, t)
+            |> pbind(|(node, rest)| recurse(rest, node))
       [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(e, con) | t] =>
-        TV(range(s, e), tv, Con(e, con))
+        TV(range(s, e), tv, Some(Con(e, con)))
           |> flip(try_gen, t)
           |> pbind(|(node, rest)| recurse(rest, node))
       [Lexer.TV(_, _), Lexer.Colon(_) | t] =>
         head_loc(t) |> one_err("Expected capitalized name of interface")
       [Lexer.TV(l, tv) | t] =>
-        TV(l, tv, Unit(l))
+        TV(l, tv, None)
           |> flip(try_gen, t)
           |> pbind(|(node, rest)| recurse(rest, node))
 
@@ -740,7 +741,7 @@ type_expr_r(lhs, tokens) = match lhs {
           many_delim_comma_or_nl(field_sig, inner)
             |> pmap_or(|v| v, [])
             |> pmap(|field_sigs|
-              RecordExtTE(l, TV(tv_l, tv, Unit(tv_l)), field_sigs)
+              RecordExtTE(l, TV(tv_l, tv, None), field_sigs)
             )
             |> pbind(recurse(rest))
         )

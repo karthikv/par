@@ -11,7 +11,7 @@ load() -> 'Parser':'_@init'(gb_sets:new()).
 ok_prg(Prg) ->
   {ok, Tokens} = 'Lexer':tokenize(Prg),
   #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
-  Ast.
+  rewrite_refs(Ast).
 
 ok_prefix(Prefix, Prg) ->
   Ast = ok_prg(Prefix ++ Prg),
@@ -47,8 +47,17 @@ l(StartLine, StartOffset, EndLine, EndOffset) ->
     end_col => 1 + EndOffset
   }.
 
+rewrite_refs(V) when is_list(V) -> lists:map(fun rewrite_refs/1, V);
+% TODO: change this to records
+rewrite_refs({impl, Loc, _, ConToken, TE, Inits}) ->
+  {impl, Loc, ref, rewrite_refs(ConToken), rewrite_refs(TE),
+   rewrite_refs(Inits)};
+rewrite_refs(V) when is_tuple(V) ->
+  list_to_tuple(rewrite_refs(tuple_to_list(V)));
+rewrite_refs(V) -> V.
+
 expr_test_() ->
-  [ ?_assertEqual({none, l(0, 2)}, ok_expr("()"))
+  [ ?_assertEqual({unit, l(0, 2)}, ok_expr("()"))
   , ?_assertEqual({int, l(0, 1), 1}, ok_expr("1"))
   , ?_assertEqual({int, l(0, 3), 517}, ok_expr("517"))
   , ?_assertEqual({float, l(0, 3), 1.0}, ok_expr("1.0"))
@@ -607,7 +616,7 @@ expr_test_() ->
             {var, l(2, 1), "x"},
             {cons, l(5, 7), [{int, l(6, 1), 3}], {var, l(10, 1), "t"}}
           ],
-          {app, l(14, 3), {var, l(14, 1), "x"}, [{none, l(15, 2)}]}
+          {app, l(14, 3), {var, l(14, 1), "x"}, [{unit, l(15, 2)}]}
         },
         [{fn, l(19, 5), [], {int, l(23, 1), 2}}]
       },
@@ -653,7 +662,7 @@ expr_test_() ->
           {var, l(4, 15), "printable_range"},
           0
         },
-        [{none, l(22, 2)}, {int, l(26, 1), 1}, {int, l(29, 1), 2}]
+        [{unit, l(22, 2)}, {int, l(26, 1), 1}, {int, l(29, 1), 2}]
       },
       ok_expr("@io:printable_range/0((), 1, 2)")
     )
@@ -661,7 +670,7 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {binary_op, l(0, 7), ':', {none, l(0, 2)}, {none, l(5, 2)}},
+      {binary_op, l(0, 7), ':', {unit, l(0, 2)}, {unit, l(5, 2)}},
       ok_expr("() : ()")
     )
   , ?_assertEqual(
@@ -681,21 +690,21 @@ expr_test_() ->
   , ?_assertEqual(
       {binary_op, l(0, 5), ':',
         {int, l(0, 1), 1},
-        {tv_te, l(4, 1), "A", {none, l(4, 1)}}
+        {tv_te, l(4, 1), "A", none}
       },
       ok_expr("1 : A")
     )
   , ?_assertEqual(
       {binary_op, l(0, 10), ':',
         {int, l(0, 1), 1},
-        {tv_te, l(4, 6), "A", {con_token, l(7, 3), "Num"}}
+        {tv_te, l(4, 6), "A", {some, {con_token, l(7, 3), "Num"}}}
       },
       ok_expr("1 : A: Num")
     )
   , ?_assertEqual(
       {binary_op, l(0, 17), ':',
         {int, l(0, 1), 1},
-        {tv_te, l(4, 13), "A", {con_token, l(7, 10), "Module.Foo"}}
+        {tv_te, l(4, 13), "A", {some, {con_token, l(7, 10), "Module.Foo"}}}
       },
       ok_expr("1 : A: Module.Foo")
     )
@@ -703,7 +712,7 @@ expr_test_() ->
       {binary_op, l(0, 8), ':',
         {list, l(0, 2), []},
         {gen_te, l(5, 3), {con_token, l(5, 3), "List"}, [
-          {tv_te, l(6, 1), "A", {none, l(6, 1)}}
+          {tv_te, l(6, 1), "A", none}
         ]}
       },
       ok_expr("[] : [A]")
@@ -731,26 +740,26 @@ expr_test_() ->
         {map, l(0, 9), [{{atom, l(1, 2), a}, {int, l(7, 1), 3}}]},
         {gen_te, l(12, 24), {con_token, l(12, 3), "Map"}, [
           {con_token, l(16, 4), "Atom"},
-          {tv_te, l(22, 13), "A", {con_token, l(25, 10), "Concatable"}}]
-        }
+          {tv_te, l(22, 13), "A", {some, {con_token, l(25, 10), "Concatable"}}}
+        ]}
       },
       ok_expr("{@a => 3} : Map<Atom, A: Concatable>")
     )
   , ?_assertEqual(
       {binary_op, l(0, 9), ':',
-        {none, l(0, 2)},
-        {gen_te, l(5, 4), {tv_te, l(5, 1), "T", {none, l(5, 1)}}, [
-          {tv_te, l(7, 1), "A", {none, l(7, 1)}}
+        {unit, l(0, 2)},
+        {gen_te, l(5, 4), {tv_te, l(5, 1), "T", none}, [
+          {tv_te, l(7, 1), "A", none}
         ]}
       },
       ok_expr("() : T<A>")
     )
   , ?_assertEqual(
       {binary_op, l(0, 24), ':',
-        {none, l(0, 2)},
+        {unit, l(0, 2)},
         {gen_te, l(5, 19),
-          {tv_te, l(5, 11), "T", {con_token, l(8, 8), "Mappable"}}, [
-            {tv_te, l(17, 1), "A", {none, l(17, 1)}},
+          {tv_te, l(5, 11), "T", {some, {con_token, l(8, 8), "Mappable"}}}, [
+            {tv_te, l(17, 1), "A", none},
             {con_token, l(20, 3), "Int"}
           ]
         }
@@ -761,7 +770,7 @@ expr_test_() ->
       {binary_op, l(0, 26), ':',
         {tuple, l(0, 12), [{atom, l(1, 4), hey}, {str, l(7, 4), <<"hi">>}]},
         {tuple_te, l(15, 11), [
-          {tv_te, l(16, 1), "A", {none, l(16, 1)}},
+          {tv_te, l(16, 1), "A", none},
           {con_token, l(19, 6), "String"}
         ]}
       },
@@ -772,7 +781,7 @@ expr_test_() ->
         {char, l(0, 3), $c},
         {lam_te, l(6, 11),
           {con_token, l(6, 6), "String"},
-          {tv_te, l(16, 1), "A", {none, l(16, 1)}}
+          {tv_te, l(16, 1), "A", none}
         }
       },
       ok_expr("'c' : String -> A")
@@ -787,8 +796,8 @@ expr_test_() ->
             {con_token, l(14, 6), "String"}
           },
           {lam_te, l(25, 11),
-            {tv_te, l(25, 6), "A", {con_token, l(28, 3), "Num"}},
-            {tv_te, l(35, 1), "B", {none, l(35, 1)}}
+            {tv_te, l(25, 6), "A", {some, {con_token, l(28, 3), "Num"}}},
+            {tv_te, l(35, 1), "B", none}
           }
         }
       },
@@ -796,7 +805,7 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {binary_op, l(0, 17), ':',
-        {none, l(0, 2)},
+        {unit, l(0, 2)},
         {record_te, l(5, 12), [
           {sig, l(7, 8), {var, l(7, 1), "a"}, {con_token, l(11, 4), "Bool"}}
         ]}
@@ -805,8 +814,8 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {binary_op, l(0, 21), ':',
-        {none, l(0, 2)},
-        {record_ext_te, l(5, 16), {tv_te, l(7, 1), "A", {none, l(7, 1)}}, [
+        {unit, l(0, 2)},
+        {record_ext_te, l(5, 16), {tv_te, l(7, 1), "A", none}, [
           {sig, l(11, 8), {var, l(11, 1), "a"}, {con_token, l(15, 4), "Bool"}}
         ]}
       },
@@ -814,7 +823,7 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {binary_op, l(0, 28), ':',
-        {none, l(0, 2)},
+        {unit, l(0, 2)},
         {record_te, l(5, 23), [
           {sig, l(7, 10),
             {var, l(7, 3), "foo"},
@@ -822,7 +831,7 @@ expr_test_() ->
           },
           {sig, l(19, 7),
             {var, l(19, 3), "bar"},
-            {tv_te, l(25, 1), "A", {none, l(25, 1)}}
+            {tv_te, l(25, 1), "A", none}
           }
         ]}
       },
@@ -830,7 +839,7 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {binary_op, l(0, 0, 1, 9), ':',
-        {none, l(0, 2)},
+        {unit, l(0, 2)},
         {record_te, l(0, 5, 1, 9), [
           {sig, l(7, 10),
             {var, l(7, 3), "foo"},
@@ -838,7 +847,7 @@ expr_test_() ->
           },
           {sig, l(1, 0, 7),
             {var, l(1, 0, 3), "bar"},
-            {tv_te, l(1, 6, 1), "A", {none, l(1, 6, 1)}}
+            {tv_te, l(1, 6, 1), "A", none}
           }
         ]}
       },
@@ -846,15 +855,15 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {binary_op, l(0, 32), ':',
-        {none, l(0, 2)},
-        {record_ext_te, l(5, 27), {tv_te, l(7, 1), "B", {none, l(7, 1)}}, [
+        {unit, l(0, 2)},
+        {record_ext_te, l(5, 27), {tv_te, l(7, 1), "B", none}, [
           {sig, l(11, 10),
             {var, l(11, 3), "foo"},
             {con_token, l(17, 4), "Atom"}
           },
           {sig, l(23, 7),
             {var, l(23, 3), "bar"},
-            {tv_te, l(29, 1), "A", {none, l(29, 1)}}
+            {tv_te, l(29, 1), "A", none}
           }
         ]}
       },
@@ -862,16 +871,16 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {binary_op, l(0, 0, 1, 9), ':',
-        {none, l(0, 2)},
+        {unit, l(0, 2)},
         {record_ext_te, l(0, 5, 1, 9),
-          {tv_te, l(7, 1), "B", {none, l(7, 1)}}, [
+          {tv_te, l(7, 1), "B", none}, [
             {sig, l(11, 10),
               {var, l(11, 3), "foo"},
               {con_token, l(17, 4), "Atom"}
             },
             {sig, l(1, 0, 7),
               {var, l(1, 0, 3), "bar"},
-              {tv_te, l(1, 6, 1), "A", {none, l(1, 6, 1)}}
+              {tv_te, l(1, 6, 1), "A", none}
             }
           ]
         }
@@ -895,7 +904,7 @@ expr_test_() ->
       {'if', l(0, 17),
         {bool, l(3, 4), true},
         {atom, l(13, 4), foo},
-        {none, l(13, 4)}
+        {unit, l(13, 4)}
       },
       ok_expr("if true then @foo")
     )
@@ -908,7 +917,7 @@ expr_test_() ->
           {float, l(27, 3), 5.7},
           {atom, l(36, 4), foo}
         },
-        {none, l(13, 27)}
+        {unit, l(13, 27)}
       },
       ok_expr("if true then if false then 5.7 else @foo")
     )
@@ -940,7 +949,7 @@ expr_test_() ->
          }}],
         {app, l(31, 8),
           {var, l(31, 3), "inc"},
-          [{app, l(35, 3), {var, l(35, 1), "f"}, [{none, l(36, 2)}]}]
+          [{app, l(35, 3), {var, l(35, 1), "f"}, [{unit, l(36, 2)}]}]
         }
       },
       ok_expr("let f() = 3, inc(x) = x + 1 in inc(f())")
@@ -981,7 +990,7 @@ expr_test_() ->
         {'_', l(7, 1)},
         {atom, l(11, 3), hi},
         {atom, l(20, 4), foo},
-        {none, l(20, 4)}
+        {unit, l(20, 4)}
       },
       ok_expr("if let _ = @hi then @foo")
     )
@@ -1074,7 +1083,7 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {match, l(0, 19), {var, l(6, 1), "x"}, [
-        {'case', l(10, 7), {'_', l(10, 1)}, {none, l(15, 2)}}
+        {'case', l(10, 7), {'_', l(10, 1)}, {unit, l(15, 2)}}
       ]},
       ok_expr("match x { _ => () }")
     )
@@ -1399,7 +1408,7 @@ def_test_() ->
   , ?_assertEqual(
       {enum, l(0, 0, 4, 1),
         {gen_te, l(5, 10), {con_token, l(5, 7), "SumType"}, [
-          {tv_te, l(13, 1), "A", {none, l(13, 1)}}
+          {tv_te, l(13, 1), "A", none}
         ]}, [
           {option, l(1, 2, 8),
             {con_token, l(1, 2, 3), "Foo"},
@@ -1408,7 +1417,7 @@ def_test_() ->
           },
           {option, l(2, 2, 6),
             {con_token, l(2, 2, 3), "Bar"},
-            [{tv_te, l(2, 6, 1), "A", {none, l(2, 6, 1)}}],
+            [{tv_te, l(2, 6, 1), "A", none}],
             none
           },
           {option, l(3, 2, 17),
@@ -1433,8 +1442,8 @@ def_test_() ->
   , ?_assertEqual(
       {enum, l(0, 0, 4, 1),
         {gen_te, l(5, 13), {con_token, l(5, 7), "SumType"}, [
-          {tv_te, l(13, 1), "A", {none, l(13, 1)}},
-          {tv_te, l(16, 1), "B", {none, l(16, 1)}}
+          {tv_te, l(13, 1), "A", none},
+          {tv_te, l(16, 1), "B", none}
         ]}, [
           {option, l(1, 2, 3),
             {con_token, l(1, 2, 3), "Foo"},
@@ -1443,7 +1452,7 @@ def_test_() ->
           },
           {option, l(2, 2, 6),
             {con_token, l(2, 2, 3), "Bar"},
-            [{tv_te, l(2, 6, 1), "A", {none, l(2, 6, 1)}}],
+            [{tv_te, l(2, 6, 1), "A", none}],
             none
           },
           {option, l(3, 2, 18),
@@ -1451,7 +1460,7 @@ def_test_() ->
             [{con_token, l(3, 6, 3), "Int"},
              {gen_te, l(3, 11, 3),
                {con_token, l(3, 11, 3), "List"},
-               [{tv_te, l(3, 12, 1), "B", {none, l(3, 12, 1)}}]
+               [{tv_te, l(3, 12, 1), "B", none}]
              }],
             {some, {atom, l(3, 16, 4), baz}}
           }
@@ -1490,11 +1499,11 @@ def_test_() ->
   , ?_assertEqual(
       {struct, l(0, 0, 3, 1),
         {gen_te, l(7, 14), {con_token, l(7, 11), "ProductType"}, [
-          {tv_te, l(19, 1), "A", {none, l(19, 1)}}
+          {tv_te, l(19, 1), "A", none}
         ]}, [
           {sig, l(1, 2, 7),
             {var, l(1, 2, 3), "foo"},
-            {tv_te, l(1, 8, 1), "A", {none, l(1, 8, 1)}}
+            {tv_te, l(1, 8, 1), "A", none}
           },
           {sig, l(2, 2, 17),
             {var, l(2, 2, 3), "bar"},
@@ -1515,18 +1524,18 @@ def_test_() ->
   , ?_assertEqual(
       {struct, l(0, 0, 3, 1),
         {gen_te, l(7, 17), {con_token, l(7, 11), "ProductType"}, [
-          {tv_te, l(19, 1), "A", {none, l(19, 1)}},
-          {tv_te, l(22, 1), "B", {none, l(22, 1)}}
+          {tv_te, l(19, 1), "A", none},
+          {tv_te, l(22, 1), "B", none}
         ]}, [
           {sig, l(1, 2, 7),
             {var, l(1, 2, 3), "foo"},
-            {tv_te, l(1, 8, 1), "A", {none, l(1, 8, 1)}}
+            {tv_te, l(1, 8, 1), "A", none}
           },
           {sig, l(2, 2, 14),
             {var, l(2, 2, 3), "bar"},
             {tuple_te, l(2, 8, 8), [
               {con_token, l(2, 9, 3), "Int"},
-              {tv_te, l(2, 14, 1), "B", {none, l(2, 14, 1)}}
+              {tv_te, l(2, 14, 1), "B", none}
             ]}
           }
         ]
@@ -1549,7 +1558,7 @@ def_test_() ->
         {sig, l(1, 16, 14),
           {var, l(1, 16, 3), "bar"},
           {lam_te, l(1, 22, 8),
-            {tv_te, l(1, 22, 1), "T", {none, l(1, 22, 1)}},
+            {tv_te, l(1, 22, 1), "T", none},
             {con_token, l(1, 27, 3), "Int"}
           }
         }
@@ -1565,15 +1574,15 @@ def_test_() ->
         {sig, l(1, 2, 23),
           {var, l(1, 2, 3), "add"},
           {lam_te, l(1, 8, 17),
-            {tv_te, l(1, 8, 1), "A", {none, l(1, 8, 1)}},
+            {tv_te, l(1, 8, 1), "A", none},
             {lam_te, l(1, 13, 12),
               {gen_te, l(1, 13, 4),
-                {tv_te, l(1, 13, 1), "T", {none, l(1, 13, 1)}},
-                [{tv_te, l(1, 15, 1), "A", {none, l(1, 15, 1)}}]
+                {tv_te, l(1, 13, 1), "T", none},
+                [{tv_te, l(1, 15, 1), "A", none}]
               },
               {gen_te, l(1, 21, 4),
-                {tv_te, l(1, 21, 1), "T", {none, l(1, 21, 1)}},
-                [{tv_te, l(1, 23, 1), "A", {none, l(1, 23, 1)}}]
+                {tv_te, l(1, 21, 1), "T", none},
+                [{tv_te, l(1, 23, 1), "A", none}]
               }
             }
           }
@@ -1582,8 +1591,8 @@ def_test_() ->
           {var, l(2, 2, 6), "length"},
           {lam_te, l(2, 11, 11),
             {gen_te, l(2, 11, 4),
-              {tv_te, l(2, 11, 1), "T", {none, l(2, 11, 1)}},
-              [{tv_te, l(2, 13, 1), "B", {none, l(2, 13, 1)}}]
+              {tv_te, l(2, 11, 1), "T", none},
+              [{tv_te, l(2, 13, 1), "B", none}]
             },
             {con_token, l(2, 19, 3), "Int"}
           }
@@ -1621,7 +1630,7 @@ def_test_() ->
       {impl, l(0, 0, 3, 1),
         {con_token, l(5, 3), "Foo"},
         {gen_te, l(13, 8), {con_token, l(13, 8), "List"},
-          [{tv_te, l(14, 6), "A", {con_token, l(17, 3), "Foo"}}]
+          [{tv_te, l(14, 6), "A", {some, {con_token, l(17, 3), "Foo"}}}]
         }, [
           {init, l(1, 2, 11),
             {var, l(1, 2, 3), "foo"},
@@ -1648,7 +1657,7 @@ import_test_() ->
         [{import, l(0, 12), {str, l(7, 5), <<"foo">>}, []}],
         [{global, l(1, 0, 6),
            {var, l(1, 0, 1), "a"},
-           {none, l(1, 4, 2)},
+           {unit, l(1, 4, 2)},
            false
          }]
       },
@@ -1668,7 +1677,7 @@ import_test_() ->
         ],
         [{global, l(1, 0, 6),
            {var, l(1, 0, 1), "a"},
-           {none, l(1, 4, 2)},
+           {unit, l(1, 4, 2)},
            false
          }]
       },
@@ -1688,7 +1697,7 @@ import_test_() ->
         ],
         [{global, l(5, 0, 6),
            {var, l(5, 0, 1), "a"},
-           {none, l(5, 4, 2)},
+           {unit, l(5, 4, 2)},
            false
          }]
       },
@@ -1710,7 +1719,7 @@ import_test_() ->
         ],
         [{global, l(2, 0, 6),
            {var, l(2, 0, 1), "a"},
-           {none, l(2, 4, 2)},
+           {unit, l(2, 4, 2)},
            false
          }]
       },

@@ -5,18 +5,20 @@
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Implement codegen for simple cases
-%   - Use VarRef for globals to track types correctly
-%   - Should var_value have a ref?
 %   - Ensure recursive case is handled for inst
+%   - Typeclasses for different struct/record types? for characters?
+%   - Make tuple a gen type?
 %   - HKTs
 %   - Implementations for builtin typeclasses?
 %   - Multiple interfaces per TV?
 %   - Extending interfaces?
 %   - Allow ifaces on struct/enum params?
+%   - Make typeclasses work with interpreter
 % - Bug with recursive functions and type signatures
 %   e.g.
 %     foo : C: Collection -> Int
 %     foo(c) = if length(c) > 10 then length(c) else length([])
+% - Bug with referencing global variable in pattern
 % - Proper type class
 % - Ord type class for comparison and sorting
 % - Dot instead of ':' for native functions?
@@ -49,6 +51,9 @@
 %   - Show both locations for redef + other relevant errors
 %   - "Expected closing '}'" messages might have wrong start location b/c
 %     we use the keyword location!
+%   - Better message for no impl of interface
+%   - Better message for no impl of anon record type when there's a concrete
+%     record type impl that matches
 % - Website + Documentation
 %
 % Defer

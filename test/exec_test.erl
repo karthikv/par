@@ -53,7 +53,7 @@ remove(Mod) ->
 code_gen_expr_test_() -> test_expr(fun expr_code_gen/1).
 interpreter_expr_test_() -> test_expr(fun expr_interpreter/1).
 test_expr(Expr) ->
-  [ ?_test(none = Expr("()"))
+  [ ?_test({} = Expr("()"))
   , ?_test(1 = Expr("1"))
   , ?_test(3.0 = Expr("3.0"))
   , ?_test(true = Expr("true"))
@@ -92,8 +92,8 @@ test_expr(Expr) ->
   , ?_test(<<"world">> = Expr("if false then \"hello\" else \"world\""))
   , ?_test([true, false] =
              Expr("if false || true && 3.5 < 4 then [true, false] else [true]"))
-  , ?_test(none = Expr("if true then @foo"))
-  , ?_test(none = Expr("if false then @io:nl() : () else discard 3"))
+  , ?_test({} = Expr("if true then @foo"))
+  , ?_test({} = Expr("if false then @io:nl() : () else discard 3"))
   % ensures that we handle conditions that aren't valid guard clauses
   , ?_test($a = Expr("let f = |x| x == 3 in if f(3) then 'a' else 'b'"))
 
@@ -276,39 +276,39 @@ test_global(Run) ->
 code_gen_enum_test_() -> test_enum(fun run_code_gen/1).
 interpreter_enum_test_() -> test_enum(fun run_interpreter/1).
 test_enum(Run) ->
-  [ ?_test('Bar' = Run(
+  [ ?_test({_, 'Bar'} = Run(
       "enum Foo { Bar }\n"
       "main() = Bar"
     ))
-  , ?_test({'Other', 5} = Run(
+  , ?_test({_, 'Other', 5} = Run(
       "enum Foo { Bar, Other(Int) }\n"
       "main() = Other(5)"
     ))
-  , ?_test({'Bar', true, [<<"hello">>]} = (Run(
+  , ?_test({_, 'Bar', true, [<<"hello">>]} = (Run(
       "enum Foo { Bar(Bool, [String]) }\n"
       "main() = Bar(true)"
     ))([<<"hello">>]))
-  , ?_test('Bar' = Run(
+  , ?_test({_, 'Bar'} = Run(
       "enum Foo<A> { Bar }\n"
       "main() = Bar"
     ))
-  , ?_test({'Other', 3} = Run(
+  , ?_test({_, 'Other', 3} = Run(
       "enum Foo<A> { Bar, Other(A) }\n"
       "main() = Other(3)"
     ))
-  , ?_test({'Cons', 3, {'Cons', 5.0, 'End'}} = Run(
+  , ?_test({_, 'Cons', 3, {_, 'Cons', 5.0, {_, 'End'}}} = Run(
       "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
       "main() = Cons(3, Cons(5.0, End))\n"
     ))
-  , ?_test(error = Run(
+  , ?_test({_, error} = Run(
       "enum Result { Err @error }\n"
       "main() = Err"
     ))
-  , ?_test({ok, 5} = Run(
+  , ?_test({_, ok, 5} = Run(
       "enum Result<T> { Ok(T) @ok }\n"
       "main() = Ok(5)"
     ))
-  , ?_test({'==', true, <<"hi">>} = Run(
+  , ?_test({_, '==', true, <<"hi">>} = Run(
       "enum Expr { Eq(Bool, String) @\"==\" }\n"
       "main() = Eq(true, \"hi\")"
     ))
@@ -418,23 +418,32 @@ test_record(Expr, Run) ->
 code_gen_interface_test_() -> test_interface(fun run_code_gen/1).
 %% interpreter_interface_test_() -> test_interface(fun run_interpreter/1).
 test_interface(Run) ->
-  [ ?_test({<<"hi">>, <<"true">>, <<"Foo(hi)">>, <<"Foo(false)">>} = Run(
+  [ ?_test(1 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Bool {\n"
+      "  to_int(b) = if b then 1 else 1\n"
+      "}\n"
+      "main() = to_int(true)"
+    ))
+  , ?_test({<<"hi">>, <<"(no, yes)">>, <<"Foo(no)">>, <<"Foo((hey, yes))">>} = Run(
       "interface ToStr { to_str : T -> String }\n"
       "impl ToStr for String { to_str(s) = s }\n"
       "impl ToStr for Bool {\n"
-      "  to_str(b) = if b then \"true\" else \"false\"\n"
+      "  to_str(b) = if b then \"yes\" else \"no\"\n"
+      "}\n"
+      "impl ToStr for (A: ToStr, B: ToStr) {\n"
+      "  to_str((a, b)) = \"(\" ++ to_str(a) ++ \", \" ++ to_str(b) ++ \")\"\n"
       "}\n"
       "enum Foo<A> { Foo(A) }\n"
       "impl ToStr for Foo<A: ToStr> {\n"
       "  to_str(Foo(a)) = \"Foo(\" ++ to_str(a) ++ \")\"\n"
       "}\n"
-      "x = (\n"
+      "main() = (\n"
       "  to_str(\"hi\"),\n"
-      "  to_str(true),\n"
-      "  to_str(Foo(\"hi\")),\n"
-      "  to_str(Foo(false))\n"
-      ")",
-      "x"
+      "  to_str((false, true)),\n"
+      "  to_str(Foo(false)),\n"
+      "  to_str(Foo((\"hey\", true)))\n"
+      ")"
     ))
   ].
 
@@ -504,7 +513,7 @@ test_pattern(Expr, Run) ->
   , ?_test(7 = Expr("let [_, a] = [1, 3], (&a, b, &a) = (3, 7, 3) in b"))
 
 
-  , ?_test(none = Expr("if let a = 3.0 then a"))
+  , ?_test({} = Expr("if let a = 3.0 then a"))
   % to ensure env is reset appropriately
   , ?_test(true = Expr("let a = true in { if let a = 3.0 then a; a }"))
   , ?_test(true = Expr("let a = true in { if let a = 3.0 then a else 5; a }"))
@@ -563,7 +572,7 @@ test_import(Many) ->
         "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"
       }
     ], "foo"))
-  , ?_test({'BazInt', 3} = Many([
+  , ?_test({_, 'BazInt', 3} = Many([
       {"foo", "module Foo enum Baz { BazInt(Int) }"},
       {"bar",
         "module Bar\n"
@@ -609,7 +618,7 @@ test_import(Many) ->
         }
       ], "bar")
     )
-  , ?_test({'Foo', 3} = Many([
+  , ?_test({_, 'Foo', 3} = Many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -630,7 +639,7 @@ test_import(Many) ->
     ], "bar"))
   , ?_assertEqual(
       {'Baz', #{a => 3}},
-      Many([
+      erlang:delete_element(1, Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
           "module Bar\n"
@@ -640,7 +649,7 @@ test_import(Many) ->
           "x = Baz(Foo.Baz(3))\n"
           "main() = x"
         }
-      ], "bar")
+      ], "bar"))
     )
   , ?_test(4 = Many([
       {"foo",
@@ -688,7 +697,7 @@ test_import(Many) ->
         "main() = (x, y)"
       }
     ], "bar"))
-  , ?_test({'Foo', 3} = Many([
+  , ?_test({_, 'Foo', 3} = Many([
       {"foo", "module Foo enum Baz { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -698,7 +707,7 @@ test_import(Many) ->
         "main() = x"
       }
     ], "bar"))
-  , ?_test({'Foo', 3} = Many([
+  , ?_test({_, 'Foo', 3} = Many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
         "module Bar\n"

@@ -165,7 +165,7 @@ norm({record_ext, A, BaseT, Ext}, N) ->
   {NormBaseT, N1} = norm(BaseT, N),
   {{record, _, NewExt}, N2} = norm({record, none, Ext}, N1),
   {{record_ext, A, NormBaseT, NewExt}, N2};
-norm(none, N) -> {none, N}.
+norm(unit, N) -> {unit, N}.
 
 l(Offset, Len) -> l(0, Offset, Len).
 l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
@@ -1141,7 +1141,10 @@ interface_test_() ->
       "interface ToStr { to_str : T -> String }\n"
       "impl ToStr for String { to_str(s) = s }\n"
       "impl ToStr for Bool {\n"
-      "  to_str(b) = if b then \"true\" else \"false\"\n"
+      "  to_str(b) = if b then \"yes\" else \"no\"\n"
+      "}\n"
+      "impl ToStr for (A: ToStr, B: ToStr) {\n"
+      "  to_str((a, b)) = \"(\" ++ to_str(a) ++ \", \" ++ to_str(b) ++ \")\"\n"
       "}\n"
       "enum Foo<A> { Foo(A) }\n"
       "impl ToStr for Foo<A: ToStr> {\n"
@@ -1149,9 +1152,9 @@ interface_test_() ->
       "}\n"
       "x = (\n"
       "  to_str(\"hi\"),\n"
-      "  to_str(true),\n"
-      "  to_str(Foo(\"hi\")),\n"
-      "  to_str(Foo(false))\n"
+      "  to_str((false, true)),\n"
+      "  to_str(Foo(false)),\n"
+      "  to_str(Foo((\"hey\", true)))\n"
       ")",
       "x"
     ))
@@ -1189,13 +1192,13 @@ interface_test_() ->
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for [A] { foo(_) = true }\n"
       "impl Foo for [Int] { foo(_) = true }",
-      {?ERR_DUP_IMPL({"Foo", "List"}, "[A]"), l(2, 13, 5)}
+      {?ERR_DUP_IMPL("Foo", "List", "[A]"), l(2, 13, 5)}
     ))
   , ?_test(ctx_err_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for Int -> Bool { foo(_) = true }\n"
       "impl Foo for (Atom -> A) -> A { foo(_) = true }",
-      {?ERR_DUP_IMPL({"Foo", "Function"}, "Int -> Bool"), l(2, 13, 16)}
+      {?ERR_DUP_IMPL("Foo", "Function", "Int -> Bool"), l(2, 13, 16)}
     ))
   , ?_test(ctx_err_prg(
       "interface Foo { foo : Bool }",
@@ -1208,6 +1211,10 @@ interface_test_() ->
   , ?_test(ctx_err_prg(
       "interface Foo { foo : T, bar : T -> T }",
       {?ERR_IFACE_TYPE("foo"), l(16, 7)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : [T] -> T }",
+      {?ERR_IFACE_TYPE("foo"), l(16, 14)}
     ))
   ].
 
