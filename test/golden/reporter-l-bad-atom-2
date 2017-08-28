@@ -1,0 +1,6 @@
+*** file [infer-prg] ***
+
+Atom cannot start with '%':
+2: expr = @"%asdf"
+          ^^^^^^^^
+

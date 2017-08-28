@@ -5,23 +5,22 @@
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Implement codegen for simple cases
-%   - Ensure recursive case is handled for inst
-%   - Typeclasses for different struct/record types? for characters?
-%   - Make tuple a gen type?
 %   - HKTs
 %   - Implementations for builtin typeclasses?
 %   - Multiple interfaces per TV?
 %   - Extending interfaces?
 %   - Allow ifaces on struct/enum params?
-%   - Make typeclasses work with interpreter
 % - Bug with recursive functions and type signatures
 %   e.g.
 %     foo : C: Collection -> Int
 %     foo(c) = if length(c) > 10 then length(c) else length([])
 % - Bug with referencing global variable in pattern
-% - Proper type class
-% - Ord type class for comparison and sorting
+%   - Use ^ instead of & for matching existing variable
+% - Builtin typeclasses
+%   - Proper type class for non-functions
+%   - Ord type class for comparison and sorting
 % - Dot instead of ':' for native functions?
+% - Don't store indirect {external, Module} in env
 % - [2 days] Exceptions
 % - [2 days] Better pattern matching
 %   - Negative numbers and unit in patterns
@@ -33,8 +32,10 @@
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
+%   - Character type for typeclasses
 % - [1 week] REPL
-%   - Interpreter import implementation
+%   - See if interpreter is even necessary
+%   - Finish implementation of import, interfaces, records
 %   - Interpreter better error messages and backtraces
 % - [3 days] Second pass for error messages (see TODOs in code)
 %   - Specify expected type for operators
@@ -46,6 +47,7 @@
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
 %   - Struct/Enum name conflict w/ global causes hard-to-understand errors
+%   - Alias from utils:qualify because of struct/enum name conflict?
 %   - Import errors: import from same file twice, import self
 %   - More descriptive error when there's a dup import from variant
 %   - Show both locations for redef + other relevant errors

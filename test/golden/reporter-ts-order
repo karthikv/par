@@ -4,7 +4,7 @@ Mismatched types C: Num and Bool from expression type signature:
 2: expr = let a = 3 : Bool in a.field
                   ^^^^^^^^
 
-Mismatched types I: Num and { F | field : E } from accessing field field:
+Mismatched types L: Num and { I | field : H } from accessing field field:
 2: expr = let a = 3 : Bool in a.field
                               ^^^^^^^
 

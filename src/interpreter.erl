@@ -231,26 +231,8 @@ eval({binary_op, _, Op, Left, Right}, ID) ->
         '*' -> LeftV * RightV;
         '/' -> LeftV / RightV;
         '%' -> LeftV rem RightV;
-        '++' ->
-          if
-            is_binary(LeftV) -> <<LeftV/binary, RightV/binary>>;
-            is_list(LeftV) -> LeftV ++ RightV;
-            is_map(LeftV) -> maps:merge(LeftV, RightV);
-            true ->
-              true = gb_sets:is_set(LeftV),
-              gb_sets:union(LeftV, RightV)
-          end;
-        '--' ->
-          if
-            is_list(LeftV) ->
-              Set = gb_sets:from_list(RightV),
-              lists:filter(fun(Elem) ->
-                not gb_sets:is_member(Elem, Set)
-              end, LeftV);
-            true ->
-              true = gb_sets:is_set(LeftV),
-              gb_sets:subtract(LeftV, RightV)
-          end
+        '++' -> code_gen_utils:'_@concat'(LeftV, RightV);
+        '--' -> code_gen_utils:'_@separate'(LeftV, RightV)
       end
   end;
 
@@ -259,7 +241,7 @@ eval({unary_op, _, Op, Expr}, ID) ->
 
   case Op of
     '!' -> not V;
-    '#' -> gb_sets:from_list(V);
+    '#' -> {'%Set', gb_sets:from_list(V)};
     % $ used by the type system to treat Char as Int, but they're the same
     '$' -> V;
     '-' -> -V;

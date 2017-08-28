@@ -3,17 +3,25 @@
   qualify/2,
   unqualify/1,
   impl_key/1,
+  resolve_con/2,
   absolute/1,
   pretty_csts/1,
   pretty/1
 ]).
 -include("common.hrl").
 
+resolve_con(RawCon, C) ->
+  Con = utils:qualify(RawCon, C),
+  case maps:find(Con, C#ctx.aliases) of
+    {ok, {_, {con, NewCon}, false}} -> NewCon;
+    {ok, {_, {gen, NewCon, _}, false}} -> NewCon;
+    _ -> Con
+  end.
+
 qualify(RawCon, C) ->
   case maps:is_key(RawCon, C#ctx.types) of
-    % built-in type or iface
+    % existing type or iface
     true -> RawCon;
-
     false ->
       case string:chr(RawCon, $.) of
         0 -> lists:concat([C#ctx.module, '.', RawCon]);

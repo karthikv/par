@@ -7,6 +7,9 @@ enum Maybe<T> {
   None @none
 }
 
+// TODO: remove this once there's a builtin ref type
+enum Ref { DontUseThis }
+
 enum Node {
   Module(Loc, Node, [Node], [Node]) @module
   Import(Loc, Node, [Node]) @import
@@ -41,11 +44,11 @@ enum Node {
   FieldFn(Loc, Node) @field_fn
   Field(Loc, Node, Node) @field
 
-  AnonRecord(Loc, [Node]) @anon_record
+  AnonRecord(Loc, Ref, [Node]) @anon_record
   Record(Loc, Node, [Node]) @record
   Init(Loc, Node, Node) @init
 
-  AnonRecordExt(Loc, Node, [Node]) @anon_record_ext
+  AnonRecordExt(Loc, Ref, Node, [Node]) @anon_record_ext
   RecordExt(Loc, Node, Node, [Node]) @record_ext
   Ext(Loc, Node, Node) @ext
 
@@ -375,32 +378,30 @@ iface(tokens) = match tokens {
 }
 
 implementation(tokens) = let for = to_list("for") in match tokens {
-  [Lexer.Impl(s), Lexer.Con(mod_s, mod), Lexer.Var(_, &for) | t] =>
-    let
-      (con_node, t) =
-        if let [Lexer.Dot(_), Lexer.Con(e, con) | t] = t then
-          (Con(range(mod_s, e), mod ++ ['.' | con]), t)
-        else
-          (Con(mod_s, mod), t)
-    in
-      type_expr(t) |> pbind(|(te, rest)|
-        if let TV(l, _, _) = te then
-          Some(l) |> one_err("Expected concrete type, not type variable")
-        else match rest {
-          [Lexer.LBrace(brace_l) | t] =>
-            enclosed_brace(brace_l, t) |> pbind(|(l, inner, rest)|
-              many(init, inner)
-                |> pmap_or(|v| v, [])
-                |> pmap(|globals|
-                  (Impl(range(s, l), con_node, te, globals), rest)
-                )
-            )
+  [Lexer.Impl(s), Lexer.Con(con_s, mod) | t] =>
+    let (con_node, t) = qualified_con(con_s, mod, t) in match t {
+      [Lexer.Var(_, &for) | t] =>
+        type_expr(t) |> pbind(|(te, rest)|
+          if let TV(l, _, _) = te then
+            Some(l) |> one_err("Expected concrete type, not type variable")
+          else match rest {
+            [Lexer.LBrace(brace_l) | t] =>
+              enclosed_brace(brace_l, t) |> pbind(|(l, inner, rest)|
+                many(init, inner)
+                  |> pmap_or(|v| v, [])
+                  |> pmap(|globals|
+                    (Impl(range(s, l), con_node, te, globals), rest)
+                  )
+              )
 
-          // TODO: should we have an enclosed_brace that accepts open brace
-          // token as well and reports this error?
-          _ => head_loc(rest) |> one_err("Expected open brace '{'")
-        }
-      )
+            // TODO: should we have an enclosed_brace that accepts open brace
+            // token as well and reports this error?
+            _ => head_loc(rest) |> one_err("Expected open brace '{'")
+          }
+        )
+
+      _ => head_loc(t) |> one_err("Expected keyword 'for'")
+    }
 
   _ => head_loc(tokens) |> one_err("Expected keyword 'impl'")
 }
@@ -456,32 +457,36 @@ expr_r(state, stack, tokens) = match state {
 
       [Lexer.Con(s, mod) | t] =>
         let
-          (con_node, after_con) =
+          (con_node, field_node, after_con) =
             if let [Lexer.Dot(_), Lexer.Con(e, con) | t] = t then
-              (Field(range(s, e), Con(s, mod), Con(e, con)), t)
+              let
+                con_node = Con(range(s, e), mod ++ ['.' | con])
+                field_node = Field(range(s, e), Con(s, mod), Con(e, con))
+              in
+                (con_node, field_node, t)
             else
-              (Con(s, mod), t)
+              (Con(s, mod), Con(s, mod), t)
         in
           if let [Lexer.LBrace(_) | t] = after_con then
             enclosed_brace(s, t) |> pbind(|(l, inner, rest)|
               // the locations of LBrace and RBrace don't matter here
               expr([Lexer.LBrace(s) | inner] ++ [Lexer.RBrace(s)])
                 |> pbind_or(|(node, [])| match node {
-                  AnonRecord(_, fields) =>
+                  AnonRecord(_, _, fields) =>
                     Record(l, con_node, fields) |> recurse(rest)
 
-                  AnonRecordExt(_, base, fields) =>
+                  AnonRecordExt(_, _, base, fields) =>
                     RecordExt(l, con_node, base, fields) |> recurse(rest)
 
                   // could potentially parse a valid map, but this is actually
                   // the match body
-                  _ => con_node |> recurse(after_con)
+                  _ => field_node |> recurse(after_con)
 
                 // might not parse an expr if it's a match body
-                }, con_node |> recurse(after_con))
+                }, field_node |> recurse(after_con))
             )
           else
-            con_node |> recurse(after_con)
+            field_node |> recurse(after_con)
 
       [Lexer.Dot(s), Lexer.Var(e, name) | t] =>
         FieldFn(range(s, e), Var(e, name)) |> recurse(t)
@@ -497,7 +502,7 @@ expr_r(state, stack, tokens) = match state {
             parse_anon_record(_) =
               many_delim_comma_or_nl(init, inner)
                 |> pmap_or(|v| v, [])
-                |> pmap(|fields| AnonRecord(l, fields))
+                |> pmap(|fields| AnonRecord(l, make_ref(), fields))
                 |> pbind(recurse(rest))
 
             parsed_expr =
@@ -515,7 +520,7 @@ expr_r(state, stack, tokens) = match state {
                 (base, [Lexer.Bar(_) | t]) =>
                   many_delim_comma_or_nl(init_or_ext(true), t)
                     |> pmap_or(|v| v, [])
-                    |> pmap(|fields| AnonRecordExt(l, base, fields))
+                    |> pmap(|fields| AnonRecordExt(l, make_ref(), base, fields))
                     |> pbind(recurse(rest))
 
                 (node, []) => Block(l, [node]) |> recurse(rest)
@@ -691,25 +696,14 @@ type_expr_r(lhs, tokens) = match lhs {
   None =>
     let recurse(t, node) = type_expr_r(Some(node), t) in match tokens {
       [Lexer.Con(s, mod) | t] =>
-        let
-          (node, t) =
-            if let [Lexer.Dot(_), Lexer.Con(e, con) | t] = t then
-              (Con(range(s, e), mod ++ ['.' | con]), t)
-            else
-              (Con(s, mod), t)
-        in
+        let (node, t) = qualified_con(s, mod, t) in
           try_gen(node, t) |> pbind(|(node, rest)| recurse(rest, node))
 
-      [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(con_s, mod),
-       Lexer.Dot(_), Lexer.Con(e, con) | t] =>
-        let iface = Con(range(con_s, e), mod ++ ['.' | con]) in
-          TV(range(s, e), tv, Some(iface))
+      [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(con_s, mod) | t] =>
+        let (con_node, t) = qualified_con(con_s, mod, t) in
+          TV(range(s, node_loc(con_node)), tv, Some(con_node))
             |> flip(try_gen, t)
             |> pbind(|(node, rest)| recurse(rest, node))
-      [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(e, con) | t] =>
-        TV(range(s, e), tv, Some(Con(e, con)))
-          |> flip(try_gen, t)
-          |> pbind(|(node, rest)| recurse(rest, node))
       [Lexer.TV(_, _), Lexer.Colon(_) | t] =>
         head_loc(t) |> one_err("Expected capitalized name of interface")
       [Lexer.TV(l, tv) | t] =>
@@ -984,6 +978,16 @@ opa_prec_list = [
   [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Discard)],
   [Bin(Dot)]
 ]
+
+qualified_con : Loc -> [Char] -> [Token] -> (Node, [Token])
+qualified_con(s, mod, tokens) =
+  if let [Lexer.Dot(_), Lexer.Con(e, con) | t] = tokens then
+    (Con(range(s, e), mod ++ ['.' | con]), t)
+  else
+    (Con(s, mod), tokens)
+
+make_ref : () -> Ref
+make_ref = @erlang:make_ref/0
 
 parse_list : ([Token] -> Parsed<(Node, [Token])>) -> Loc -> [Token] ->
   Parsed<(Node, [Token])>

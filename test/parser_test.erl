@@ -48,10 +48,10 @@ l(StartLine, StartOffset, EndLine, EndOffset) ->
   }.
 
 rewrite_refs(V) when is_list(V) -> lists:map(fun rewrite_refs/1, V);
-% TODO: change this to records
-rewrite_refs({impl, Loc, _, ConToken, TE, Inits}) ->
-  {impl, Loc, ref, rewrite_refs(ConToken), rewrite_refs(TE),
-   rewrite_refs(Inits)};
+rewrite_refs({anon_record, Loc, _, Inits}) ->
+  {anon_record, Loc, ref, rewrite_refs(Inits)};
+rewrite_refs({anon_record_ext, Loc, _, Expr, AllInits}) ->
+  {anon_record_ext, Loc, ref, rewrite_refs(Expr), rewrite_refs(AllInits)};
 rewrite_refs(V) when is_tuple(V) ->
   list_to_tuple(rewrite_refs(tuple_to_list(V)));
 rewrite_refs(V) -> V.
@@ -180,27 +180,27 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {anon_record, l(0, 9), [
+      {anon_record, l(0, 9), ref, [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}}
       ]},
       ok_expr("{ a = 3 }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 12), [
+      {anon_record, l(0, 12), ref, [
         {init, l(2, 8), {var, l(2, 1), "f"},
           {fn, l(2, 8), [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}}
       ]},
       ok_expr("{ f(x) = 3 }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 21), [
+      {anon_record, l(0, 21), ref, [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(9, 10), {var, l(9, 3), "bar"}, {bool, l(15, 4), true}}
       ]},
       ok_expr("{ a = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 24), [
+      {anon_record, l(0, 24), ref, [
         {init, l(2, 8), {var, l(2, 1), "f"},
           {fn, l(2, 8), [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}},
         {init, l(12, 10), {var, l(12, 3), "bar"}, {bool, l(18, 4), true}}
@@ -208,7 +208,7 @@ expr_test_() ->
       ok_expr("{ f(x) = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 0, 1, 12), [
+      {anon_record, l(0, 0, 1, 12), ref, [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(1, 0, 10), {var, l(1, 0, 3), "bar"}, {bool, l(1, 6, 4), true}}
       ]},
@@ -235,15 +235,10 @@ expr_test_() ->
       ok_expr("Foo { a = 3\nbar = true }")
     )
   , ?_assertEqual(
-      {record, l(0, 32),
-        {field, l(0, 10),
-          {con_token, l(0, 6), "Module"},
-          {con_token, l(7, 3), "Foo"}
-        }, [
-          {init, l(13, 5), {var, l(13, 1), "a"}, {int, l(17, 1), 3}},
-          {init, l(20, 10), {var, l(20, 3), "bar"}, {bool, l(26, 4), true}}
-        ]
-      },
+      {record, l(0, 32), {con_token, l(0, 10), "Module.Foo"}, [
+        {init, l(13, 5), {var, l(13, 1), "a"}, {int, l(17, 1), 3}},
+        {init, l(20, 10), {var, l(20, 3), "bar"}, {bool, l(26, 4), true}}
+      ]},
       ok_expr("Module.Foo { a = 3, bar = true }")
     )
   % to ensure parsing after named record works fine
@@ -259,8 +254,8 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {anon_record_ext, l(0, 21),
-        {anon_record, l(2, 9), [
+      {anon_record_ext, l(0, 21), ref,
+        {anon_record, l(2, 9), ref, [
           {init, l(4, 5), {var, l(4, 1), "a"}, {int, l(8, 1), 3}}
         ]},
         [{init, l(14, 5), {var, l(14, 1), "a"}, {int, l(18, 1), 4}}]
@@ -268,14 +263,14 @@ expr_test_() ->
       ok_expr("{ { a = 3 } | a = 4 }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 27), {var, l(2, 1), "a"}, [
+      {anon_record_ext, l(0, 27), ref, {var, l(2, 1), "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
         {ext, l(16, 9), {var, l(16, 1), "c"}, {bool, l(21, 4), true}}
       ]},
       ok_expr("{ a | bar = @a, c := true }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 34), {var, l(2, 1), "a"}, [
+      {anon_record_ext, l(0, 34), ref, {var, l(2, 1), "a"}, [
         {init, l(6, 8), {var, l(6, 1), "f"},
           {fn, l(6, 8), [], {atom, l(12, 2), a}}},
         {ext, l(16, 16), {var, l(16, 1), "c"},
@@ -291,7 +286,7 @@ expr_test_() ->
       ok_expr("{ a | f() = @a, c(x, y) := x + y }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 0, 1, 11), {var, l(2, 1), "a"}, [
+      {anon_record_ext, l(0, 0, 1, 11), ref, {var, l(2, 1), "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
         {ext, l(1, 0, 9), {var, l(1, 0, 1), "c"}, {bool, l(1, 5, 4), true}}
       ]},
@@ -330,7 +325,7 @@ expr_test_() ->
   , ?_assertEqual(
       {app, l(0, 24),
         {field, l(0, 21),
-          {anon_record, l(0, 17), [
+          {anon_record, l(0, 17), ref, [
             {init, l(2, 13),
               {var, l(2, 3), "bar"},
               {fn, l(8, 7), [{var, l(9, 1), "x"}], {atom, l(12, 3), hi}}
@@ -1628,9 +1623,9 @@ def_test_() ->
     )
   , ?_assertEqual(
       {impl, l(0, 0, 3, 1),
-        {con_token, l(5, 3), "Foo"},
-        {gen_te, l(13, 8), {con_token, l(13, 8), "List"},
-          [{tv_te, l(14, 6), "A", {some, {con_token, l(17, 3), "Foo"}}}]
+        {con_token, l(5, 7), "Foo.Bar"},
+        {gen_te, l(17, 8), {con_token, l(17, 8), "List"},
+          [{tv_te, l(18, 6), "A", {some, {con_token, l(21, 3), "Foo"}}}]
         }, [
           {init, l(1, 2, 11),
             {var, l(1, 2, 3), "foo"},
@@ -1643,7 +1638,7 @@ def_test_() ->
         ]
       },
       ok_def(
-        "impl Foo for [A: Foo] {\n"
+        "impl Foo.Bar for [A: Foo] {\n"
         "  foo() = 'c'\n"
         "  other = @hi\n"
         "}"

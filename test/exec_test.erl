@@ -70,9 +70,9 @@ test_expr(Expr) ->
       #{<<"hello">> => <<"world">>, <<"some">> => <<"thing">>},
       Expr("{\"hello\" => \"world\", \"some\" => \"thing\"}")
     )
-  , ?_assertEqual(gb_sets:new(), Expr("#[]"))
+  , ?_assertEqual({'%Set', gb_sets:new()}, Expr("#[]"))
   , ?_assertEqual(
-      gb_sets:from_list([2, 4, 6, 8]),
+       {'%Set', gb_sets:from_list([2, 4, 6, 8])},
       Expr("#[2, 4, 2, 6, 4, 8, 6]")
     )
 
@@ -162,7 +162,7 @@ test_expr(Expr) ->
       Expr("{\"a\" => 1} ++ {\"b\" => 2.0}")
     )
   , ?_assertEqual(
-      gb_sets:from_list([1, 2, 3]),
+      {'%Set', gb_sets:from_list([1, 2, 3])},
       Expr("#[1] ++ #[2, 3]")
     )
   , ?_assertEqual(
@@ -170,7 +170,7 @@ test_expr(Expr) ->
       Expr("[5, 3, 1, 4, 5, 8, 7] -- [4, 1, 5, 7]")
     )
   , ?_assertEqual(
-      gb_sets:from_list([3]),
+      {'%Set', gb_sets:from_list([3])},
       Expr("#[3, 2, 3, 1, 2] -- #[1, 8, 6, 2]")
     )
   , ?_test(-3 = Expr("-3"))
@@ -183,10 +183,6 @@ test_expr(Expr) ->
   , ?_test([4, 6] = Expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test([6] = Expr("@lists:filter((|t, x| x > t)(5), [2, 4, 6])"))
   , ?_test([true] = Expr("@lists:map(@erlang:is_atom/1, [@a])"))
-  , ?_assertEqual(
-      gb_sets:from_list([1, 2, 3]),
-      Expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])")
-    )
   , ?_test(3 = Expr("@exec_test:returns_fun()(1)(2)"))
   , ?_test(3 = Expr("@exec_test:returns_fun/0((), 1)(2)"))
   , ?_test(3 = Expr("@exec_test:returns_fun/0((), 1, 2)"))
@@ -274,41 +270,47 @@ test_global(Run) ->
   ].
 
 code_gen_enum_test_() -> test_enum(fun run_code_gen/1).
-interpreter_enum_test_() -> test_enum(fun run_interpreter/1).
+%% interpreter_enum_test_() -> test_enum(fun run_interpreter/1).
 test_enum(Run) ->
-  [ ?_test({_, 'Bar'} = Run(
+  [ ?_test({'%Mod.Foo', 'Bar'} = Run(
       "enum Foo { Bar }\n"
       "main() = Bar"
     ))
-  , ?_test({_, 'Other', 5} = Run(
+  , ?_test({'%Mod.Foo', 'Other', 5} = Run(
       "enum Foo { Bar, Other(Int) }\n"
       "main() = Other(5)"
     ))
-  , ?_test({_, 'Bar', true, [<<"hello">>]} = (Run(
+  , ?_test({'%Mod.Foo', 'Bar', true, [<<"hello">>]} = (Run(
       "enum Foo { Bar(Bool, [String]) }\n"
       "main() = Bar(true)"
     ))([<<"hello">>]))
-  , ?_test({_, 'Bar'} = Run(
+  , ?_test({'%Mod.Foo', 'Bar'} = Run(
       "enum Foo<A> { Bar }\n"
       "main() = Bar"
     ))
-  , ?_test({_, 'Other', 3} = Run(
+  , ?_test({'%Mod.Foo', 'Other', 3} = Run(
       "enum Foo<A> { Bar, Other(A) }\n"
       "main() = Other(3)"
     ))
-  , ?_test({_, 'Cons', 3, {_, 'Cons', 5.0, {_, 'End'}}} = Run(
-      "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
-      "main() = Cons(3, Cons(5.0, End))\n"
-    ))
-  , ?_test({_, error} = Run(
+  , ?_test(
+      {'%Mod.CustomList', 'Cons', 3,
+        {'%Mod.CustomList', 'Cons', 5.0,
+          {'%Mod.CustomList', 'End'}
+        }
+      } = Run(
+        "enum CustomList<A> { Cons(A, CustomList<A>), End }\n"
+        "main() = Cons(3, Cons(5.0, End))\n"
+      )
+    )
+  , ?_test({'%Mod.Result', error} = Run(
       "enum Result { Err @error }\n"
       "main() = Err"
     ))
-  , ?_test({_, ok, 5} = Run(
+  , ?_test({'%Mod.Result', ok, 5} = Run(
       "enum Result<T> { Ok(T) @ok }\n"
       "main() = Ok(5)"
     ))
-  , ?_test({_, '==', true, <<"hi">>} = Run(
+  , ?_test({'%Mod.Expr', '==', true, <<"hi">>} = Run(
       "enum Expr { Eq(Bool, String) @\"==\" }\n"
       "main() = Eq(true, \"hi\")"
     ))
@@ -316,19 +318,28 @@ test_enum(Run) ->
 
 code_gen_record_test_() ->
   test_record(fun expr_code_gen/1, fun run_code_gen/1).
-interpreter_record_test_() ->
-  test_record(fun expr_interpreter/1, fun run_interpreter/1).
+%% interpreter_record_test_() ->
+%%   test_record(fun expr_interpreter/1, fun run_interpreter/1).
 test_record(Expr, Run) ->
-  [ ?_assertEqual(#{bar => 3}, Expr("{ bar = 3 }"))
-  , ?_assertEqual(#{bar => 3, baz => true}, Expr("{ bar = 3, baz = true }"))
+  [ ?_assertEqual({'%Record', #{bar => 3}}, Expr("{ bar = 3 }"))
+  , ?_assertEqual(
+      {'%Record', #{bar => 3, baz => true}},
+      Expr("{ bar = 3, baz = true }")
+    )
   , ?_test(8 = Expr("{ bar = |x| x + 5 }.bar(3)"))
   , ?_test(5 = Expr("{ abs(x) = if x > 0 then x else abs(-x) }.abs(-5)"))
-  , ?_assertEqual(#{bar => 4.0}, Expr("{ { bar = 3 } | bar = 4.0 }"))
-  , ?_assertEqual(#{bar => true}, Expr("{ { bar = 3 } | bar := true }"))
-  , ?_assertEqual(#{bar => true, baz => hey}, Expr(
+  , ?_assertEqual(
+      {'%Record', #{bar => 4.0}},
+      Expr("{ { bar = 3 } | bar = 4.0 }")
+    )
+  , ?_assertEqual(
+      {'%Record', #{bar => true}},
+      Expr("{ { bar = 3 } | bar := true }")
+    )
+  , ?_assertEqual({'%Record', #{bar => true, baz => hey}}, Expr(
       "{ { bar = 3, baz = @hi } | bar := true, baz = @hey }"
     ))
-  , ?_assertEqual(#{bar => true, baz => 3.0}, Expr(
+  , ?_assertEqual({'%Record', #{bar => true, baz => 3.0}}, Expr(
       "{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }"
     ))
 
@@ -345,27 +356,27 @@ test_record(Expr, Run) ->
     ))
 
   % named struct
-  , ?_assertEqual(#{bar => 3}, Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => 3}}, Run(
       "struct Foo { bar : Int }\n"
       "main() = Foo(3)"
     ))
-  , ?_assertEqual(#{bar => 3}, Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => 3}}, Run(
       "struct Foo { bar : Int }\n"
       "main() = Foo { bar = 3 }"
     ))
-  , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => 3, baz => [<<"hello">>]}}, (Run(
       "struct Foo { bar : Int, baz : [String] }\n"
       "main() = Foo(3)"
     ))([<<"hello">>]))
-  , ?_assertEqual(#{baz => [first, second], bar => 15}, Run(
+  , ?_assertEqual({'%Mod.Foo', #{baz => [first, second], bar => 15}}, Run(
       "struct Foo { bar : Int, baz : [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
     ))
-  , ?_assertEqual(#{bar => hi, baz => true}, (Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => hi, baz => true}}, (Run(
       "struct Foo<X, Y> { bar : X, baz : Y }\n"
       "main() = Foo(@hi)"
     ))(true))
-  , ?_assertEqual(#{bar => hi}, Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => hi}}, Run(
       "struct Foo<X> { bar : X }\n"
       "main() = Foo { bar = @hi }"
     ))
@@ -374,29 +385,35 @@ test_record(Expr, Run) ->
       "struct Foo { baz : Foo }\n"
       "main() = true"
     ))
-  , ?_assertEqual(#{bar => hi, baz => [#{bar => hello, baz => []}]}, Run(
-      "struct Foo { bar : Atom, baz : [Foo] }\n"
-      "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
-    ))
+  , ?_assertEqual(
+      {'%Mod.Foo', #{
+        bar => hi,
+        baz => [{'%Mod.Foo', #{bar => hello, baz => []}}]
+      }},
+      Run(
+        "struct Foo { bar : Atom, baz : [Foo] }\n"
+        "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
+      )
+    )
 
 
   % named struct updates
-  , ?_assertEqual(#{bar => 7}, Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => 7}}, Run(
       "struct Foo { bar : Int }\n"
       "f(x) = { x : Foo | bar = 7 }\n"
       "main() = f({ bar = 3 })"
     ))
-  , ?_assertEqual(#{bar => true}, Run(
+  , ?_assertEqual({'%Record', #{bar => true}}, Run(
       "struct Foo { bar : Int }\n"
       "foo = Foo { bar = 3 }\n"
       "main() = { foo | bar := true }"
     ))
-  , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
+  , ?_assertEqual({'%Record', #{bar => true, baz => [<<"hi">>]}}, Run(
       "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
       "main() = { foo | bar := true }"
     ))
-  , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
+  , ?_assertEqual({'%Mod.Foo', #{bar => true, baz => [<<"hi">>]}}, Run(
       "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
       "main() = Foo { foo | bar := true }"
@@ -418,12 +435,112 @@ test_record(Expr, Run) ->
 code_gen_interface_test_() -> test_interface(fun run_code_gen/1).
 %% interpreter_interface_test_() -> test_interface(fun run_interpreter/1).
 test_interface(Run) ->
-  [ ?_test(1 = Run(
+  [ ?_test(3 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int {\n"
+      "  to_int(i) = i\n"
+      "}\n"
+      "main() = to_int(3)"
+    ))
+  , ?_test(2 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Float {\n"
+      "  to_int(f) = @erlang:round(f)\n"
+      "}\n"
+      "main() = to_int(1.6)"
+    ))
+  , ?_test(1 = Run(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 1\n"
+      "  to_int(b) = if b then 1 else 0\n"
       "}\n"
       "main() = to_int(true)"
+    ))
+  , ?_test(5 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Atom {\n"
+      "  to_int(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
+      "}\n"
+      "main() = to_int(@hello)"
+    ))
+  , ?_test(3 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for String {\n"
+      "  to_int = @erlang:byte_size/1\n"
+      "}\n"
+      "main() = to_int(\"hey\")"
+    ))
+  , ?_test(8 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Ref {\n"
+      "  to_int(_) = 8\n"
+      "}\n"
+      "main() = to_int(@erlang:make_ref())"
+    ))
+  , ?_test(6 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for [Int] {\n"
+      "  to_int = @lists:foldl/3(|memo, num| memo + num, 0)\n"
+      "}\n"
+      "main() = to_int([1, 2, 3])"
+    ))
+  , ?_test(936 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Map<Int, V> {\n"
+      "  to_int(m) = @erlang:hd(@maps:keys(m))\n"
+      "}\n"
+      "main() = to_int({ 936 => @value })"
+    ))
+  , ?_test(-17 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for () -> Int {\n"
+      "  to_int(f) = f()\n"
+      "}\n"
+      "main() = to_int(|-| -17)"
+    ))
+  , ?_test(0 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for () {\n"
+      "  to_int(_) = 0\n"
+      "}\n"
+      "main() = to_int(())"
+    ))
+  , ?_test(28 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for { a: Int, b: Int } {\n"
+      "  to_int(r) = r.a + r.b\n"
+      "}\n"
+      "main() = to_int({ a = 7, b = 21 })"
+    ))
+  , ?_test(-3 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for { A | target: Int } {\n"
+      "  to_int(r) = r.target\n"
+      "}\n"
+      "main() = to_int({ foo = \"hi\", bar = true, target = -3 })"
+    ))
+  , ?_test(2 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Set<A> {\n"
+      "  to_int(s) = @gb_sets:size(@erlang:element(2, s))\n"
+      "}\n"
+      "main() = to_int(#['a', 'b'])"
+    ))
+  , ?_test(30 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "enum Foo<A> { Bar(A) }\n"
+      "impl ToInt for Foo<Int> {\n"
+      "  to_int(Bar(i)) = i\n"
+      "}\n"
+      "main() = to_int(Bar(30))"
+    ))
+  , ?_test(12 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "struct Foo { a : Int, b : Int }\n"
+      "impl ToInt for Foo {\n"
+      "  to_int(r) = r.a * r.b\n"
+      "}\n"
+      "main() = to_int(Foo { a = 3, b = 4 })"
     ))
   , ?_test({<<"hi">>, <<"(no, yes)">>, <<"Foo(no)">>, <<"Foo((hey, yes))">>} = Run(
       "interface ToStr { to_str : T -> String }\n"
@@ -572,7 +689,7 @@ test_import(Many) ->
         "export g(x) = if x >= 0 then 10 * Foo.f(x) else 1"
       }
     ], "foo"))
-  , ?_test({_, 'BazInt', 3} = Many([
+  , ?_test({'%Foo.Baz', 'BazInt', 3} = Many([
       {"foo", "module Foo enum Baz { BazInt(Int) }"},
       {"bar",
         "module Bar\n"
@@ -583,7 +700,7 @@ test_import(Many) ->
       }
     ], "bar"))
   , ?_assertEqual(
-      #{a => 3},
+      {'%Foo.Baz', #{a => 3}},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -596,7 +713,7 @@ test_import(Many) ->
       ], "bar")
     )
   , ?_assertEqual(
-      #{a => 3},
+      {'%Foo.Baz', #{a => 3}},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -607,7 +724,7 @@ test_import(Many) ->
       ], "bar")
     )
   , ?_assertEqual(
-      #{a => 5},
+      {'%Foo.Baz', #{a => 5}},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -618,7 +735,7 @@ test_import(Many) ->
         }
       ], "bar")
     )
-  , ?_test({_, 'Foo', 3} = Many([
+  , ?_test({'%Foo.Foo', 'Foo', 3} = Many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -638,8 +755,8 @@ test_import(Many) ->
       }
     ], "bar"))
   , ?_assertEqual(
-      {'Baz', #{a => 3}},
-      erlang:delete_element(1, Many([
+      {'%Bar.Baz', 'Baz', {'%Foo.Baz', #{a => 3}}},
+      Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
           "module Bar\n"
@@ -649,7 +766,7 @@ test_import(Many) ->
           "x = Baz(Foo.Baz(3))\n"
           "main() = x"
         }
-      ], "bar"))
+      ], "bar")
     )
   , ?_test(4 = Many([
       {"foo",
@@ -679,7 +796,7 @@ test_import(Many) ->
         "main() = x ++ twice(@b)"
       }
     ], "a/bar"))
-  , ?_assertEqual(#{a => 3}, Many([
+  , ?_assertEqual({'%Foo.Baz', #{a => 3}}, Many([
       {"foo", "module Foo struct Baz { a : Int }"},
       {"bar",
         "module Bar\n"
@@ -687,7 +804,7 @@ test_import(Many) ->
         "main() = Baz(3)"
       }
     ], "bar"))
-  , ?_assertEqual({#{a => 3}, #{a => 4}}, Many([
+  , ?_assertEqual({{'%Foo.Baz', #{a => 3}}, {'%Foo.Baz', #{a => 4}}}, Many([
       {"foo", "module Foo struct Baz { a : Int }"},
       {"bar",
         "module Bar\n"
@@ -697,7 +814,7 @@ test_import(Many) ->
         "main() = (x, y)"
       }
     ], "bar"))
-  , ?_test({_, 'Foo', 3} = Many([
+  , ?_test({'%Foo.Baz', 'Foo', 3} = Many([
       {"foo", "module Foo enum Baz { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -707,7 +824,7 @@ test_import(Many) ->
         "main() = x"
       }
     ], "bar"))
-  , ?_test({_, 'Foo', 3} = Many([
+  , ?_test({'%Foo.Foo', 'Foo', 3} = Many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -735,7 +852,7 @@ test_import(Many) ->
         "main() = f(Three)"
       }
     ], "bar"))
-  , ?_assertEqual(#{start_line => 18}, Many([
+  , ?_assertEqual({'%Foo.Loc', #{start_line => 18}}, Many([
       {"foo", "module Foo struct Loc { start_line : Int }"},
       {"bar",
         "module Bar\n"

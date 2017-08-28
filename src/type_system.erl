@@ -212,7 +212,7 @@ infer_comps(Comps) ->
     pid=Pid
   },
   Result = case solve(C2#ctx.gnrs, S) of
-    {ok, #solver{schemes=Schemes}} ->
+    {ok, #solver{subs=Subs, aliases=Aliases, schemes=Schemes}} ->
       SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
         {tv, V, _, _} = case Value of
           % TODO: would no_dep ever happen?
@@ -222,7 +222,11 @@ infer_comps(Comps) ->
         {inst(maps:get(V, Schemes), Pid), Exported}
       end, C2#ctx.env),
 
-      {ok, Comps, C2#ctx{env=SubbedEnv}};
+      SubbedRefTs = maps:map(fun(_, T) ->
+        subs(T, Subs, Aliases)
+      end, C2#ctx.ref_ts),
+
+      {ok, Comps, C2#ctx{env=SubbedEnv, ref_ts=SubbedRefTs}};
 
     {errors, Errs} -> {errors, Errs, Comps}
   end,
@@ -405,18 +409,18 @@ populate_direct_imports(Deps, C) ->
         {con_token, Loc, Name} ->
           Con = lists:concat([Module, '.', Name]),
           {TypeExists, NestedC1} = case maps:find(Con, NestedC#ctx.types) of
-            {ok, {IsIface, NumParams}} ->
+            {ok, {_, NumParams}} ->
               NewCon = utils:qualify(Name, NestedC),
               CaseC = case NumParams of
-                0 -> add_alias(NewCon, [], {con, Con}, NestedC);
+                0 -> add_alias(NewCon, [], {con, Con}, false, NestedC);
                 _ ->
                   Vs = lists:map(fun(_) ->
                     tv_server:fresh(NestedC#ctx.pid)
                   end, lists:seq(1, NumParams)),
 
-                  add_alias(NewCon, Vs, {gen, Con, Vs}, NestedC)
+                  add_alias(NewCon, Vs, {gen, Con, Vs}, false, NestedC)
               end,
-              {true, define_type(NewCon, IsIface, NumParams, Loc, CaseC)};
+              {true, CaseC};
 
             error -> {false, NestedC}
           end,
@@ -509,7 +513,12 @@ infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   C4 = add_cst(TV, NormSigT, Loc, ?FROM_EXPR_SIG, C3),
   C5 = finish_gnr(C4, add_gnr_dep(ID, G)),
 
-  {{inst, TV}, C5};
+  FinalTV = tv_server:fresh(C5#ctx.pid),
+  % We never want to return {inst, TV} directly because of the ref_ts map. We
+  % always want the T values to be fully instantiated. The from shouldn't matter
+  % here, as this constraint should never fail.
+  C6 = add_cst(FinalTV, {inst, TV}, Loc, "sig instantiation", C5),
+  {FinalTV, C6};
 
 infer({enum, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
@@ -607,7 +616,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
     {gen, _, ParamTs} ->
       lists:map(fun({tv, V, none, _}) -> V end, ParamTs)
   end,
-  C2 = add_alias(Con, Vs, {record, none, RawFieldMap}, C1),
+  C2 = add_alias(Con, Vs, {record, none, RawFieldMap}, true, C1),
 
   {add_dep, TV, ID} = env_get(Name, C2),
   C3 = new_gnr(TV, ID, C2),
@@ -650,7 +659,7 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   {none, C2#ctx{ifaces=NewIfaces}};
 
 infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
-  Con = utils:qualify(RawCon, C),
+  Con = utils:resolve_con(RawCon, C),
   {RawT, C1} = infer_sig(false, false, #{}, TE, C),
   ImplT = norm_sig_type(RawT, maps:keys(C1#ctx.sig_ifaces), C1#ctx.pid),
 
@@ -789,7 +798,7 @@ infer({N, Loc, Name}, C) when N == var; N == con_token; N == var_value ->
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
-infer({anon_record, _, Inits}, C) ->
+infer({anon_record, _, Ref, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
     {init, _, {var, Loc, Name}, Expr} = Init,
 
@@ -812,9 +821,15 @@ infer({anon_record, _, Inits}, C) ->
     end
   end, {#{}, C}, Inits),
 
-  {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
+  FinalT = {record, tv_server:next_name(C1#ctx.pid), FieldMap},
+  RefTs = C1#ctx.ref_ts,
+  NewRefTs = case Ref of
+    none -> RefTs;
+    _ -> RefTs#{Ref => FinalT}
+  end,
+  {FinalT, C1#ctx{ref_ts=NewRefTs}};
 
-infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
+infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {Inits, ExtInits} = lists:foldl(fun(InitOrExt, Memo) ->
     {FoldInits, FoldExtInits} = Memo,
@@ -827,7 +842,7 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
   C3 = if
     length(Inits) == 0 -> C1;
     true ->
-      {{record, A, FieldMap}, C2} = infer({anon_record, Loc, Inits}, C1),
+      {{record, A, FieldMap}, C2} = infer({anon_record, Loc, none, Inits}, C1),
       add_cst(
         ExprT,
         {record_ext, A, tv_server:fresh(C2#ctx.pid), FieldMap},
@@ -837,10 +852,10 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
       )
   end,
 
-  if
+  {FinalT, FinalC} = if
     length(ExtInits) == 0 -> {ExprT, C3};
     true ->
-      {{record, ExtA, Ext}, C4} = infer({anon_record, Loc, ExtInits}, C3),
+      {{record, ExtA, Ext}, C4} = infer({anon_record, Loc, none, ExtInits}, C3),
       % ExprT needs to have every field in ext, but the types can be different
       % because it's a record extension.
       RelaxedExt = maps:map(fun(_, _) -> tv_server:fresh(C4#ctx.pid) end, Ext),
@@ -854,27 +869,31 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
       ),
 
       {{record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext}, C5}
-  end;
-
-infer({record, Loc, RecordCon, Inits}, C) ->
-  {Con, ConLoc} = case RecordCon of
-    {con_token, ConLoc_, Con_} -> {utils:qualify(Con_, C), ConLoc_};
-    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
-      {lists:concat([Module, '.', Con_]), ConLoc_}
   end,
 
+  RefTs = FinalC#ctx.ref_ts,
+  NewRefTs = case Ref of
+    none -> RefTs;
+    _ -> RefTs#{Ref => FinalT}
+  end,
+  {FinalT, FinalC#ctx{ref_ts=NewRefTs}};
+
+infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
+  Con = utils:resolve_con(RawCon, C),
   case maps:find(Con, C#ctx.types) of
     {ok, {false, NumParams}} ->
       ExpT = case NumParams of
-        0 -> {con, Con};
+        % if we've directly imported a struct type and are creating it here,
+        % we need to unalias
+        0 -> unalias_except_struct({con, Con}, C#ctx.aliases);
         _ ->
           Vs = lists:map(fun(_) ->
             tv_server:fresh(C#ctx.pid)
           end, lists:seq(1, NumParams)),
-          {gen, Con, Vs}
+          unalias_except_struct({gen, Con, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
       From = ?FROM_RECORD_CREATE(Con),
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -883,33 +902,28 @@ infer({record, Loc, RecordCon, Inits}, C) ->
       {TV, C3};
 
     {ok, {true, _}} ->
-      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
-infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
-  {Con, ConLoc} = case RecordCon of
-    {con_token, ConLoc_, Con_} -> {utils:qualify(Con_, C), ConLoc_};
-    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
-      {lists:concat([Module, '.', Con_]), ConLoc_}
-  end,
-
+infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
+  Con = utils:resolve_con(RawCon, C),
   case maps:find(Con, C#ctx.types) of
     {ok, {false, NumParams}} ->
       ExpT = case NumParams of
-        0 -> {con, Con};
+        0 -> unalias_except_struct({con, Con}, C#ctx.aliases);
         _ ->
           Vs = lists:map(fun(_) ->
             tv_server:fresh(C#ctx.pid)
           end, lists:seq(1, NumParams)),
-          {gen, Con, Vs}
+          unalias_except_struct({gen, Con, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
       From = ?FROM_RECORD_UPDATE,
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -918,11 +932,11 @@ infer({record_ext, Loc, RecordCon, Expr, AllInits}, C) ->
       {TV, C3};
 
     {ok, {true, _}} ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
@@ -1143,7 +1157,7 @@ infer_sig_helper(RestrictVs, Unique, {tuple_te, _, ElemTEs}, C) ->
   {{tuple, ElemTs}, C1};
 infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, ConToken, ParamTEs}, C) ->
   {con_token, _, RawCon} = ConToken,
-  Con = utils:qualify(RawCon, C),
+  Con = utils:resolve_con(RawCon, C),
 
   {Valid, C1} = case Unique of
     false -> validate_type(Con, false, length(ParamTEs), Loc, C);
@@ -1157,7 +1171,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, ConToken, ParamTEs}, C) ->
   end, C1, ParamTEs),
 
   if
-    Valid -> {{gen, Con, ParamTs}, C2};
+    Valid -> {unalias_except_struct({gen, Con, ParamTs}, C2#ctx.aliases), C2};
     true -> {tv_server:fresh(C2#ctx.pid), C2}
   end;
 infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
@@ -1178,7 +1192,7 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
   {I, {Valid, C2}} = case MaybeTE of
     none -> {none, {true, C1}};
     {some, {con_token, ConLoc, RawI_}} ->
-      I_ = utils:qualify(RawI_, C1),
+      I_ = utils:resolve_con(RawI_, C1),
       {I_, validate_type(I_, true, 0, ConLoc, C1)}
   end,
 
@@ -1205,7 +1219,7 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
     false -> {{tv, V, none, false}, C2}
   end;
 infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
-  Con = utils:qualify(RawCon, C),
+  Con = utils:resolve_con(RawCon, C),
   {Valid, C1} = case Unique of
     false -> validate_type(Con, false, 0, Loc, C);
     % We're inferring a new type, so don't do validation. Name conflicts for
@@ -1214,7 +1228,7 @@ infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
   end,
 
   case Valid of
-    true -> {{con, Con}, C1};
+    true -> {unalias_except_struct({con, Con}, C1#ctx.aliases), C1};
     false -> {tv_server:fresh(C1#ctx.pid), C1}
   end;
 infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
@@ -1289,12 +1303,18 @@ lookup(Module, Name, Loc, C) ->
   {Value, C1} = raw_lookup(Module, Name, Loc, C),
   case Value of
     {add_dep, EnvTV, ID} ->
-      G = add_gnr_dep(ID, C1#ctx.gnr),
+      FinalTV = tv_server:fresh(C1#ctx.pid),
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
-      {{inst, EnvTV}, C1#ctx{gnr=G}};
+      %
+      % We never want to return {inst, TV} directly because of the ref_ts map.
+      % We always want the T values to be fully instantiated. The from shouldn't
+      % matter here, as this constraint should never fail.
+      C2 = add_cst(FinalTV, {inst, EnvTV}, Loc, "lookup instantiation", C1),
+
+      {FinalTV, C2#ctx{gnr=add_gnr_dep(ID, C2#ctx.gnr)}};
 
     {no_dep, EnvTV} -> {EnvTV, C1}
   end.
@@ -1402,7 +1422,8 @@ add_ctx_err(Msg, Loc, C) ->
 
 no_ctx_errs(C1, C2) -> length(C1#ctx.errs) == length(C2#ctx.errs).
 
-add_alias(Con, Vs, T, C) -> C#ctx{aliases=(C#ctx.aliases)#{Con => {Vs, T}}}.
+add_alias(Con, Vs, T, IsStruct, C) ->
+  C#ctx{aliases=(C#ctx.aliases)#{Con => {Vs, T, IsStruct}}}.
 
 norm_sig_type(SigT, RigidVs, Pid) ->
   norm_sig_type(SigT, RigidVs, fvs(SigT), Pid).
@@ -1454,7 +1475,7 @@ solve(Gs, S) ->
 
           {FinalT1, FinalT2} = case {IsRecord1, IsRecord2} of
             {true, false} -> {SubbedT1, unalias(SubbedT2, Aliases)};
-            {false, true} -> {unalias(SubbedT1, S#solver.aliases), SubbedT2};
+            {false, true} -> {unalias(SubbedT1, Aliases), SubbedT2};
             _ -> {SubbedT1, SubbedT2}
           end,
           {FinalT1, FinalT2, Module, Loc, From};
@@ -1856,17 +1877,31 @@ no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
 unalias({con, Con}, Aliases) ->
   case maps:find(Con, Aliases) of
-    {ok, {[], T}} -> unalias(T, Aliases);
+    {ok, {[], T, _}} -> unalias(T, Aliases);
     error -> {con, Con}
   end;
 unalias({gen, Con, ParamTs}, Aliases) ->
   case maps:find(Con, Aliases) of
-    {ok, {Vs, T}} ->
+    {ok, {Vs, T, _}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       unalias(subs(T, Subs, Aliases), Aliases);
     error -> {gen, Con, ParamTs}
   end;
 unalias(T, _) -> T.
+
+unalias_except_struct({con, Con}, Aliases) ->
+  case maps:find(Con, Aliases) of
+    {ok, {[], T, false}} -> unalias(T, Aliases);
+    _ -> {con, Con}
+  end;
+unalias_except_struct({gen, Con, ParamTs}, Aliases) ->
+  case maps:find(Con, Aliases) of
+    {ok, {Vs, T, false}} ->
+      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
+      unalias_except_struct(subs(T, Subs, Aliases), Aliases);
+    _ -> {gen, Con, ParamTs}
+  end;
+unalias_except_struct(T, _) -> T.
 
 instance({con, "Int"}, "Num", S) -> S;
 instance({con, "Float"}, "Num", S) -> S;
