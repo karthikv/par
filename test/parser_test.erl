@@ -743,7 +743,7 @@ expr_test_() ->
   , ?_assertEqual(
       {binary_op, l(0, 9), ':',
         {unit, l(0, 2)},
-        {gen_te, l(5, 4), {tv_te, l(5, 1), "T", none}, [
+        {gen_te, l(5, 4), {tv_te, l(5, 4), "T", none}, [
           {tv_te, l(7, 1), "A", none}
         ]}
       },
@@ -753,13 +753,13 @@ expr_test_() ->
       {binary_op, l(0, 24), ':',
         {unit, l(0, 2)},
         {gen_te, l(5, 19),
-          {tv_te, l(5, 11), "T", {some, {con_token, l(8, 8), "Mappable"}}}, [
-            {tv_te, l(17, 1), "A", none},
-            {con_token, l(20, 3), "Int"}
+          {tv_te, l(5, 19), "T", {some, {con_token, l(16, 8), "Mappable"}}}, [
+            {tv_te, l(7, 1), "A", none},
+            {con_token, l(10, 3), "Int"}
           ]
         }
       },
-      ok_expr("() : T: Mappable<A, Int>")
+      ok_expr("() : T<A, Int>: Mappable")
     )
   , ?_assertEqual(
       {binary_op, l(0, 26), ':',
@@ -1572,11 +1572,11 @@ def_test_() ->
             {tv_te, l(1, 8, 1), "A", none},
             {lam_te, l(1, 13, 12),
               {gen_te, l(1, 13, 4),
-                {tv_te, l(1, 13, 1), "T", none},
+                {tv_te, l(1, 13, 4), "T", none},
                 [{tv_te, l(1, 15, 1), "A", none}]
               },
               {gen_te, l(1, 21, 4),
-                {tv_te, l(1, 21, 1), "T", none},
+                {tv_te, l(1, 21, 4), "T", none},
                 [{tv_te, l(1, 23, 1), "A", none}]
               }
             }
@@ -1586,7 +1586,7 @@ def_test_() ->
           {var, l(2, 2, 6), "length"},
           {lam_te, l(2, 11, 11),
             {gen_te, l(2, 11, 4),
-              {tv_te, l(2, 11, 1), "T", none},
+              {tv_te, l(2, 11, 4), "T", none},
               [{tv_te, l(2, 13, 1), "B", none}]
             },
             {con_token, l(2, 19, 3), "Int"}

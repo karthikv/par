@@ -6,6 +6,7 @@
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Implement codegen for simple cases
 %   - HKTs
+%     - Validation to prevent struct/enum TE from being a gen TV
 %   - Implementations for builtin typeclasses?
 %   - Multiple interfaces per TV?
 %   - Extending interfaces?

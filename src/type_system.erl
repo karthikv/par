@@ -272,7 +272,7 @@ populate_env_and_types(Comps, C) ->
               ModuleC2 = define(Name, {add_dep, TV, ID}, true, Loc, ModuleC1),
 
               {T, ModuleC3} = infer_sig(false, true, #{}, TE, ModuleC2),
-              StructInfo = {T, ModuleC3#ctx.sig_ifaces},
+              StructInfo = {T, ModuleC3#ctx.sig_vs},
               ModuleC3#ctx{structs=(ModuleC3#ctx.structs)#{Con => StructInfo}}
           end;
 
@@ -499,7 +499,7 @@ infer({fn, _, Args, Expr}, C) ->
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
-  {norm_sig_type(SigT, maps:keys(C1#ctx.sig_ifaces), C#ctx.pid), C1};
+  {norm_sig_type(SigT, maps:keys(C1#ctx.sig_vs), C#ctx.pid), C1};
 
 infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   G = C#ctx.gnr,
@@ -507,7 +507,7 @@ infer({binary_op, Loc, ':', Expr, Sig}, C) ->
 
   {ExprT, C1} = infer(Expr, new_gnr(TV, ID, C)),
   {SigT, C2} = infer_sig(false, false, #{}, Sig, C1),
-  NormSigT = norm_sig_type(SigT, maps:keys(C2#ctx.sig_ifaces), C2#ctx.pid),
+  NormSigT = norm_sig_type(SigT, maps:keys(C2#ctx.sig_vs), C2#ctx.pid),
 
   C3 = add_cst(TV, ExprT, ?LOC(Expr), ?FROM_EXPR_SIG, C2),
   C4 = add_cst(TV, NormSigT, Loc, ?FROM_EXPR_SIG, C3),
@@ -530,7 +530,7 @@ infer({enum, _, EnumTE, Options}, C) ->
       {ArgT, NestedC1} = infer_sig(
         {T, FVs},
         false,
-        NestedC#ctx.sig_ifaces,
+        NestedC#ctx.sig_vs,
         ArgTE,
         NestedC
       ),
@@ -613,8 +613,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
 
   Vs = case T of
     {con, _} -> [];
-    {gen, _, ParamTs} ->
-      lists:map(fun({tv, V, none, _}) -> V end, ParamTs)
+    {gen, _, ParamTs} -> lists:map(fun({tv, V, none, _}) -> V end, ParamTs)
   end,
   C2 = add_alias(Con, Vs, {record, none, RawFieldMap}, true, C1),
 
@@ -630,7 +629,7 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   {RawRecordT, C1} = infer_sig(
     false,
     false,
-    #{"T" => none},
+    #{"T" => {none, 0}},
     {record_te, Loc, Fields},
     C
   ),
@@ -661,7 +660,7 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
 infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
   Con = utils:resolve_con(RawCon, C),
   {RawT, C1} = infer_sig(false, false, #{}, TE, C),
-  ImplT = norm_sig_type(RawT, maps:keys(C1#ctx.sig_ifaces), C1#ctx.pid),
+  ImplT = norm_sig_type(RawT, maps:keys(C1#ctx.sig_vs), C1#ctx.pid),
 
   case no_ctx_errs(C1, C) of
     false -> {none, C1};
@@ -688,7 +687,7 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
           % TODO: is there a way around inferring these sigs again?
           {Pairs, C3} = lists:mapfoldl(fun(Sig, FoldC) ->
             {sig, SigLoc, {var, _, Name}, SigTE} = Sig,
-            {SigT, FoldC1} = infer_sig(false, false, #{"T" => none}, SigTE,
+            {SigT, FoldC1} = infer_sig(false, false, #{"T" => {none, 0}}, SigTE,
               FoldC),
             {{Name, {SigLoc, SigT}}, FoldC1}
           end, C2, Fields),
@@ -1142,8 +1141,8 @@ infer({unary_op, Loc, Op, Expr}, C) ->
   C3 = add_cst(ResultT, TV, Loc, ?FROM_OP_RESULT(Op), C2),
   {TV, C3}.
 
-infer_sig(RestrictVs, Unique, SigIfaces, Sig, C) ->
-  C1 = C#ctx{sig_ifaces=SigIfaces},
+infer_sig(RestrictVs, Unique, SigVs, Sig, C) ->
+  C1 = C#ctx{sig_vs=SigVs},
   infer_sig_helper(RestrictVs, Unique, Sig, C1).
 
 infer_sig_helper(RestrictVs, Unique, {lam_te, _, ArgTE, ReturnTE}, C) ->
@@ -1155,23 +1154,29 @@ infer_sig_helper(RestrictVs, Unique, {tuple_te, _, ElemTEs}, C) ->
     infer_sig_helper(RestrictVs, Unique, TE, FoldC)
   end, C, ElemTEs),
   {{tuple, ElemTs}, C1};
-infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, ConToken, ParamTEs}, C) ->
-  {con_token, _, RawCon} = ConToken,
-  Con = utils:resolve_con(RawCon, C),
+infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, GenTE, ParamTEs}, C) ->
+  {Gen, C1} = case GenTE of
+    {con_token, _, RawCon} ->
+      Con = utils:resolve_con(RawCon, C),
+      case Unique of
+        false -> {Con, validate_type(Con, false, length(ParamTEs), Loc, C)};
+        % We're inferring a new type, so don't do validation. Name conflicts for
+        % new types are handled prior to beginning inference.
+        true -> {Con, C}
+      end;
 
-  {Valid, C1} = case Unique of
-    false -> validate_type(Con, false, length(ParamTEs), Loc, C);
-    % We're inferring a new type, so don't do validation. Name conflicts for
-    % new types are handled prior to beginning inference.
-    true -> {true, C}
+    {tv_te, _, _, _} ->
+      NumParams = length(ParamTEs),
+      infer_sig_helper(RestrictVs, Unique, GenTE, C#ctx{num_params=NumParams})
   end,
+  Valid = no_ctx_errs(C, C1),
 
   {ParamTs, C2} = lists:mapfoldl(fun(TE, FoldC) ->
     infer_sig_helper(RestrictVs, Unique, TE, FoldC)
   end, C1, ParamTEs),
 
   if
-    Valid -> {unalias_except_struct({gen, Con, ParamTs}, C2#ctx.aliases), C2};
+    Valid -> {unalias_except_struct({gen, Gen, ParamTs}, C2#ctx.aliases), C2};
     true -> {tv_server:fresh(C2#ctx.pid), C2}
   end;
 infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
@@ -1189,27 +1194,35 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
       end
   end,
 
-  {I, {Valid, C2}} = case MaybeTE of
-    none -> {none, {true, C1}};
+  {I, C2} = case MaybeTE of
+    none -> {none, C1};
     {some, {con_token, ConLoc, RawI_}} ->
       I_ = utils:resolve_con(RawI_, C1),
       {I_, validate_type(I_, true, 0, ConLoc, C1)}
   end,
 
-  case Valid of
+  case no_ctx_errs(C1, C2) of
     true ->
-      SigIfaces = C2#ctx.sig_ifaces,
-      C3 = case maps:find(V, SigIfaces) of
-        {ok, ExpI} ->
-          case {Unique, ExpI} of
-            % TODO: include location of other TV
-            {true, _} -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
-            {false, I} -> C2;
-            {false, _} ->
-              % TODO: include location of other iface
-              add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), Loc, C2)
+      NumParams = case C2#ctx.num_params of
+        undefined -> 0;
+        NumParams_ -> NumParams_
+      end,
+
+      SigVs = C2#ctx.sig_vs,
+      C3 = case maps:find(V, SigVs) of
+        {ok, {ExpI, ExpNumParams}} ->
+          if
+            Unique -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
+            ExpI /= I ->
+              % TODO: include location of other v w/ iface
+              add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), Loc, C2);
+            ExpNumParams /= NumParams ->
+              % TODO: include location of other v w/ params
+              add_ctx_err(?ERR_TV_NUM_PARAMS(V, ExpNumParams, NumParams), Loc, C2);
+            true -> C2
           end;
-        error -> C2#ctx{sig_ifaces=SigIfaces#{V => I}}
+
+        error -> C2#ctx{sig_vs=SigVs#{V => {I, NumParams}}}
       end,
 
       % This TV should be rigid in signatures, but it'll be reset to flex in
@@ -1220,14 +1233,14 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
   end;
 infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
   Con = utils:resolve_con(RawCon, C),
-  {Valid, C1} = case Unique of
+  C1 = case Unique of
     false -> validate_type(Con, false, 0, Loc, C);
     % We're inferring a new type, so don't do validation. Name conflicts for
     % new types are handled prior to beginning inference.
-    true -> {true, C}
+    true -> C
   end,
 
-  case Valid of
+  case no_ctx_errs(C, C1) of
     true -> {unalias_except_struct({con, Con}, C1#ctx.aliases), C1};
     false -> {tv_server:fresh(C1#ctx.pid), C1}
   end;
@@ -1384,23 +1397,21 @@ make_cst(T1, T2, Loc, From, C) ->
 
 validate_type(Con, IsIface, NumParams, Loc, C) ->
   case maps:find(Con, C#ctx.types) of
-    {ok, {IsIface, NumParams}} -> {true, C};
+    {ok, {IsIface, NumParams}} -> C;
 
     {ok, {false, _}} when IsIface ->
-      {false, add_ctx_err(?ERR_TYPE_NOT_IFACE(Con), Loc, C)};
+      add_ctx_err(?ERR_TYPE_NOT_IFACE(Con), Loc, C);
     {ok, {true, _}} when not IsIface ->
-      {false, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), Loc, C)};
+      add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), Loc, C);
 
     {ok, {_, ExpNumParams}} ->
       Msg = ?ERR_TYPE_PARAMS(Con, ExpNumParams, NumParams),
-      {false, add_ctx_err(Msg, Loc, C)};
+      add_ctx_err(Msg, Loc, C);
 
     % TODO: better messages when module is not defined (e.g. Bad.Type) and
     % module is defined but no such type exists (e.g. Module.Bad)
-    error when IsIface ->
-      {false, add_ctx_err(?ERR_NOT_DEF_IFACE(Con), Loc, C)};
-    error when not IsIface ->
-      {false, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Loc, C)}
+    error when IsIface -> add_ctx_err(?ERR_NOT_DEF_IFACE(Con), Loc, C);
+    error when not IsIface -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Loc, C)
   end.
 
 validate_iface_type(T, Name, Loc, C) ->
@@ -1602,8 +1613,12 @@ resolve({tuple, ElemTs}, S) ->
   {tuple, lists:map(fun(T) -> resolve(T, S) end, ElemTs)};
 resolve({tv, V, I, Rigid}, _) -> {tv, V, I, Rigid};
 resolve({con, Con}, _) -> {con, Con};
-resolve({gen, Con, ParamTs}, S) ->
-  {gen, Con, lists:map(fun(T) -> resolve(T, S) end, ParamTs)};
+resolve({gen, Gen, ParamTs}, S) ->
+  ResolvedGen = case Gen of
+    {tv, _, _, _} -> resolve(Gen, S);
+    _ -> Gen
+  end,
+  {gen, ResolvedGen, lists:map(fun(T) -> resolve(T, S) end, ParamTs)};
 resolve({inst, TV}, S) ->
   {tv, V, _, _} = TV,
   ResolvedT = case maps:find(V, S#solver.schemes) of
@@ -1880,26 +1895,29 @@ unalias({con, Con}, Aliases) ->
     {ok, {[], T, _}} -> unalias(T, Aliases);
     error -> {con, Con}
   end;
-unalias({gen, Con, ParamTs}, Aliases) ->
-  case maps:find(Con, Aliases) of
+unalias({gen, Gen, ParamTs}, Aliases) ->
+  case maps:find(Gen, Aliases) of
     {ok, {Vs, T, _}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       unalias(subs(T, Subs, Aliases), Aliases);
-    error -> {gen, Con, ParamTs}
+    % no need to unalias ParamTs because we'll sub_unify them
+    error -> {gen, Gen, ParamTs}
   end;
 unalias(T, _) -> T.
 
 unalias_except_struct({con, Con}, Aliases) ->
   case maps:find(Con, Aliases) of
-    {ok, {[], T, false}} -> unalias(T, Aliases);
+    {ok, {[], T, false}} -> unalias_except_struct(T, Aliases);
     _ -> {con, Con}
   end;
-unalias_except_struct({gen, Con, ParamTs}, Aliases) ->
-  case maps:find(Con, Aliases) of
+unalias_except_struct({gen, Gen, ParamTs}, Aliases) ->
+  case maps:find(Gen, Aliases) of
     {ok, {Vs, T, false}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       unalias_except_struct(subs(T, Subs, Aliases), Aliases);
-    _ -> {gen, Con, ParamTs}
+    % no need to unalias ParamTs because we'll recursively unalias them if
+    % necessary in infer_sig_helper
+    _ -> {gen, Gen, ParamTs}
   end;
 unalias_except_struct(T, _) -> T.
 
@@ -1934,8 +1952,13 @@ subs({tv, _, _, _}=TV, Subs, Aliases) ->
     NewT -> subs(NewT, Subs, Aliases)
   end;
 subs({con, Con}, _, _) -> {con, Con};
-subs({gen, Con, ParamTs}, Subs, Aliases) ->
-  {gen, Con, lists:map(fun(T) -> subs(T, Subs, Aliases) end, ParamTs)};
+subs({gen, Gen, ParamTs}, Subs, Aliases) ->
+  SubbedGen = case Gen of
+    {tv, _, _, _} -> subs(Gen, Subs, Aliases);
+    _ -> Gen
+  end,
+  SubbedParamTs = lists:map(fun(T) -> subs(T, Subs, Aliases) end, ParamTs),
+  {gen, SubbedGen, SubbedParamTs};
 subs({record, A, FieldMap}, Subs, Aliases) ->
   case maps:find(A, Subs) of
     error ->
@@ -2029,10 +2052,14 @@ fvs({tuple, ElemTs}) ->
   end, gb_sets:new(), ElemTs);
 fvs({tv, V, _, _}) -> gb_sets:singleton(V);
 fvs({con, _}) -> gb_sets:new();
-fvs({gen, _, ParamTs}) ->
+fvs({gen, Gen, ParamTs}) ->
+  GenFVs = case Gen of
+    {tv, _, _, _} -> fvs(Gen);
+    _ -> gb_sets:new()
+  end,
   lists:foldl(fun(T, FVs) ->
     gb_sets:union(FVs, fvs(T))
-  end, gb_sets:new(), ParamTs);
+  end, GenFVs, ParamTs);
 % fvs({inst, ...}) ommitted; they should be resolved
 fvs({record, _, FieldMap}) ->
   maps:fold(fun(_, T, S) ->
@@ -2054,10 +2081,14 @@ occurs(V, {tuple, ElemTs}) ->
   end, false, ElemTs);
 occurs(V, {tv, V1, _, Rigid}) -> (V == Rigid) or (V == V1);
 occurs(_, {con, _}) -> false;
-occurs(V, {gen, _, ParamTs}) ->
+occurs(V, {gen, Gen, ParamTs}) ->
+  GenOccurs = case Gen of
+    {tv, _, _, _} -> occurs(V, Gen);
+    _ -> false
+  end,
   lists:foldl(fun(T, Occurs) ->
     Occurs or occurs(V, T)
-  end, false, ParamTs);
+  end, GenOccurs, ParamTs);
 % occurs({inst, ...}) ommitted; they should be resolved
 occurs(V, {record, _, FieldMap}) ->
   maps:fold(fun(_, T, Occurs) ->

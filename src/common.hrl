@@ -28,7 +28,7 @@
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(ctx, {
-  gnr = undefined,
+  gnr,
   gnrs = [],
   env = #{},
   types = #{
@@ -57,7 +57,8 @@
     "Concatable" => #{},
     "Separable" => #{}
   },
-  sig_ifaces = #{},
+  sig_vs = #{},
+  num_params,
   ref_ts = #{},
   errs = [],
   modules = gb_sets:new(),
@@ -167,6 +168,14 @@
     "Type variable ~s was previously given interface ~s, but now has interface "
     "~s; the two must be consistent",
     [V, Exp, Actual]
+  )
+).
+-define(
+  ERR_TV_NUM_PARAMS(V, ExpNum, Num),
+  ?FMT(
+    "Type variable ~s was previously given ~p type parameters, but now has ~s; "
+    "the two must be consistent",
+    [V, ExpNum, Num]
   )
 ).
 -define(ERR_NOT_DEF(Name), ?FMT("~s is not defined", [Name])).

@@ -697,19 +697,35 @@ type_expr_r(lhs, tokens) = match lhs {
     let recurse(t, node) = type_expr_r(Some(node), t) in match tokens {
       [Lexer.Con(s, mod) | t] =>
         let (node, t) = qualified_con(s, mod, t) in
-          try_gen(node, t) |> pbind(|(node, rest)| recurse(rest, node))
+          type_params(node_loc(node), t) |> pbind(|(l, params, rest)|
+            if length(params) == 0 then
+              recurse(rest, node)
+            else
+              recurse(rest, Gen(l, node, params))
+          )
 
-      [Lexer.TV(s, tv), Lexer.Colon(_), Lexer.Con(con_s, mod) | t] =>
-        let (con_node, t) = qualified_con(con_s, mod, t) in
-          TV(range(s, node_loc(con_node)), tv, Some(con_node))
-            |> flip(try_gen, t)
-            |> pbind(|(node, rest)| recurse(rest, node))
-      [Lexer.TV(_, _), Lexer.Colon(_) | t] =>
-        head_loc(t) |> one_err("Expected capitalized name of interface")
-      [Lexer.TV(l, tv) | t] =>
-        TV(l, tv, None)
-          |> flip(try_gen, t)
-          |> pbind(|(node, rest)| recurse(rest, node))
+      [Lexer.TV(tv_l, tv) | t] =>
+        type_params(tv_l, t) |> pbind(|(l, params, rest)| match rest {
+          [Lexer.Colon(_), Lexer.Con(con_s, mod) | t] =>
+            let
+              (con_node, t) = qualified_con(con_s, mod, t)
+              l = range(l, node_loc(con_node))
+              tv_node = TV(l, tv, Some(con_node))
+            in
+              if length(params) == 0 then
+                tv_node |> recurse(t)
+              else
+                Gen(l, tv_node, params) |> recurse(t)
+
+          [Lexer.Colon(_) | t] =>
+            head_loc(t) |> one_err("Expected capitalized name of interface")
+
+          _ =>
+            if length(params) == 0 then
+              TV(l, tv, None) |> recurse(rest)
+            else
+              Gen(l, TV(l, tv, None), params) |> recurse(rest)
+        })
 
       [Lexer.LBracket(s) | t] =>
         enclosed_bracket(s, t) |> pbind(|(l, inner, rest)|
@@ -760,16 +776,16 @@ type_expr_r(lhs, tokens) = match lhs {
   }
 }
 
-try_gen : Node -> [Token] -> Parsed<(Node, [Token])>
-try_gen(node, tokens) = match tokens {
-  [Lexer.Lt(_) | t] =>
-    enclosed_tag(node_loc(node), t) |> pbind(|(l, inner, rest)|
+type_params : Loc -> [Token] -> Parsed<(Loc, [Node], [Token])>
+type_params(l, tokens) = match tokens {
+  [Lexer.Lt(s) | t] =>
+    enclosed_tag(s, t) |> pbind(|(params_l, inner, rest)|
       many_delim_comma(type_expr, inner)
         |> pmap_or(|v| v, [])
-        |> pmap(|params| (Gen(l, node, params), rest))
+        |> pmap(|params| (range(l, params_l), params, rest))
     )
 
-  _ => parsed((node, tokens))
+  _ => parsed((l, [], tokens))
 }
 
 field_sig : [Token] -> Parsed<(Node, [Token])>
@@ -1287,9 +1303,6 @@ head = @erlang:hd/1
 
 tail : [A] -> [A]
 tail = @erlang:tl/1
-
-flip : (A -> B -> C) -> B -> A -> C
-flip(f, b, a) = f(a, b)
 
 reverse : [A] -> [A]
 reverse = @lists:reverse/1
