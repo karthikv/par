@@ -71,7 +71,7 @@ pretty({lam, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
 pretty({tuple, ElemTs}) ->
   PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
   ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);
-pretty({tv, RawV, I, Rigid}) ->
+pretty({tv, RawV, Is, Rigid}) ->
   % all generated Vs are prefixed with *, but user-inputted ones in signatures
   % lack the leading *
   V = case RawV of
@@ -79,8 +79,13 @@ pretty({tv, RawV, I, Rigid}) ->
     _ -> RawV
   end,
   Str = if
-    I == none -> V;
-    true -> ?FMT("~s: ~s", [V, utils:unqualify(I)])
+    Is == none -> V;
+    true ->
+      % TODO: keep qualified when ambiguous
+      Unqualified = lists:map(fun(I) ->
+        utils:unqualify(I)
+      end, gb_sets:to_list(Is)),
+      ?FMT("~s ~~ ~s", [V, string:join(Unqualified, " ~ ")])
   end,
 
   case Rigid of

@@ -163,11 +163,11 @@
   )
 ).
 -define(
-  ERR_TV_IFACE(V, Exp, Actual),
+  ERR_TV_IFACE(V, ExpIs, Is),
   ?FMT(
-    "Type variable ~s was previously given interface ~s, but now has interface "
-    "~s; the two must be consistent",
-    [V, Exp, Actual]
+    "Type variable ~s was previously ~s, but is now ~s; the interfaces must "
+    "must be consistent",
+    [V, utils:pretty({tv, V, ExpIs, false}), utils:pretty({tv, V, Is, false})]
   )
 ).
 -define(

@@ -634,7 +634,7 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
     C
   ),
 
-  Subs = #{"T" => {set_iface, Con}},
+  Subs = #{"T" => {set_ifaces, gb_sets:from_list([Con])}},
   % user can't input type signature that needs consolidation, so pass empty
   % map for aliases
   {record, _, RawFieldMap} = subs(RawRecordT, Subs, #{}),
@@ -1179,7 +1179,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, GenTE, ParamTEs}, C) ->
     Valid -> {unalias_except_struct({gen, Gen, ParamTs}, C2#ctx.aliases), C2};
     true -> {tv_server:fresh(C2#ctx.pid), C2}
   end;
-infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
+infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, Ifaces}, C) ->
   C1 = case RestrictVs of
     false -> C;
     {T, AllowedVs} ->
@@ -1194,11 +1194,13 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
       end
   end,
 
-  {I, C2} = case MaybeTE of
-    none -> {none, C1};
-    {some, {con_token, ConLoc, RawI_}} ->
-      I_ = utils:resolve_con(RawI_, C1),
-      {I_, validate_type(I_, true, 0, ConLoc, C1)}
+  {Is, C2} = case Ifaces of
+    [] -> {none, C1};
+    _ ->
+      lists:foldl(fun({con_token, ConLoc, RawI_}, {FoldIs, FoldC}) ->
+        I = utils:resolve_con(RawI_, C1),
+        {gb_sets:add(I, FoldIs), validate_type(I, true, 0, ConLoc, FoldC)}
+      end, {gb_sets:new(), C1}, Ifaces)
   end,
 
   case no_ctx_errs(C1, C2) of
@@ -1210,24 +1212,24 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, MaybeTE}, C) ->
 
       SigVs = C2#ctx.sig_vs,
       C3 = case maps:find(V, SigVs) of
-        {ok, {ExpI, ExpNumParams}} ->
+        {ok, {ExpIs, ExpNumParams}} ->
           if
             Unique -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
-            ExpI /= I ->
+            ExpIs /= Is ->
               % TODO: include location of other v w/ iface
-              add_ctx_err(?ERR_TV_IFACE(V, ExpI, I), Loc, C2);
+              add_ctx_err(?ERR_TV_IFACE(V, ExpIs, Is), Loc, C2);
             ExpNumParams /= NumParams ->
               % TODO: include location of other v w/ params
               add_ctx_err(?ERR_TV_NUM_PARAMS(V, ExpNumParams, NumParams), Loc, C2);
             true -> C2
           end;
 
-        error -> C2#ctx{sig_vs=SigVs#{V => {I, NumParams}}}
+        error -> C2#ctx{sig_vs=SigVs#{V => {Is, NumParams}}}
       end,
 
       % This TV should be rigid in signatures, but it'll be reset to flex in
       % norm_sig_type. Hence, we don't set rigid here.
-      {{tv, V, I, false}, C3};
+      {{tv, V, Is, false}, C3};
 
     false -> {{tv, V, none, false}, C2}
   end;
@@ -1611,7 +1613,7 @@ resolve({lam, Loc, ArgT, ReturnT}, S) ->
   {lam, Loc, resolve(ArgT, S), resolve(ReturnT, S)};
 resolve({tuple, ElemTs}, S) ->
   {tuple, lists:map(fun(T) -> resolve(T, S) end, ElemTs)};
-resolve({tv, V, I, Rigid}, _) -> {tv, V, I, Rigid};
+resolve({tv, V, Is, Rigid}, _) -> {tv, V, Is, Rigid};
 resolve({con, Con}, _) -> {con, Con};
 resolve({gen, Gen, ParamTs}, S) ->
   ResolvedGen = case Gen of
@@ -1769,9 +1771,9 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
     false -> S3
   end;
 
-unify({tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}, S) ->
-  TV1 = {tv, V1, I1, Rigid1},
-  TV2 = {tv, V2, I2, Rigid2},
+unify({tv, V1, Is1, Rigid1}, {tv, V2, Is2, Rigid2}, S) ->
+  TV1 = {tv, V1, Is1, Rigid1},
+  TV2 = {tv, V2, Is2, Rigid2},
 
   Bound1 = gb_sets:is_member(V1, S#solver.bound_vs),
   Bound2 = gb_sets:is_member(V2, S#solver.bound_vs),
@@ -1781,27 +1783,37 @@ unify({tv, V1, I1, Rigid1}, {tv, V2, I2, Rigid2}, S) ->
     Occurs -> add_err(S);
 
     not Rigid1, not Bound1, Rigid2 ->
+      IsSubset = Is1 == none orelse
+        (Is2 /= none andalso gb_sets:is_subset(Is1, Is2)),
       if
-        I1 == none; I1 == I2 -> add_sub(V1, TV2, S);
+        IsSubset -> add_sub(V1, TV2, S);
         true -> add_err(S)
       end;
 
     not Rigid2, not Bound2, Rigid1 ->
+      IsSubset = Is2 == none orelse
+        (Is1 /= none andalso gb_sets:is_subset(Is2, Is1)),
       if
-        I2 == none; I1 == I2 -> add_sub(V2, TV1, S);
+        IsSubset -> add_sub(V2, TV1, S);
         true -> add_err(S)
       end;
 
     not Rigid1, not Rigid2 ->
       if
-        I1 == none; I1 == I2 -> add_sub(V1, TV2, S);
-        I2 == none -> add_sub(V2, TV1, S);
-        true -> add_err(S)
+        Is1 == none; Is1 == Is2 -> add_sub(V1, TV2, S);
+        Is2 == none -> add_sub(V2, TV1, S);
+        true ->
+          % TODO: error case??
+          %   if we're unifying A: Num with B: Something, how to fix?
+          %   how to deal with 1 being considered an int, but not a float?
+          %     i.e. what if we did 1 : Float??
+          Merged = gb_sets:union(Is1, Is2),
+          add_sub(V2, {set_ifaces, Merged}, add_sub(V1, TV2, S))
       end;
 
     true -> add_err(S)
   end;
-unify({tv, V, I, Rigid}, T, S) ->
+unify({tv, V, Is, Rigid}, T, S) ->
   Occurs = occurs(V, T, S),
   Bound = gb_sets:is_member(V, S#solver.bound_vs),
   WouldEscape = Bound and occurs(true, T, S),
@@ -1809,15 +1821,15 @@ unify({tv, V, I, Rigid}, T, S) ->
   if
     Occurs -> add_err(S);
     Rigid or WouldEscape -> add_err(S);
-    I == none -> add_sub(V, T, S);
+    Is == none -> add_sub(V, T, S);
     true ->
-      S1 = instance(T, I, S),
+      S1 = gb_sets:fold(fun(I, FoldS) -> instance(T, I, FoldS) end, S, Is),
       case no_errs(S1, S) of
         true -> add_sub(V, T, S1);
         false -> S1
       end
   end;
-unify(T, {tv, V, I, Rigid}, S) -> sub_unify({tv, V, I, Rigid}, T, S);
+unify(T, {tv, V, Is, Rigid}, S) -> sub_unify({tv, V, Is, Rigid}, T, S);
 
 unify({gen, Con, ParamTs1}, {gen, Con, ParamTs2}, S) ->
   if
@@ -1864,15 +1876,15 @@ add_sub(V, RawSub, S) ->
 
   S1 = case maps:find(V, S#solver.subs) of
     error -> S#solver{subs=(S#solver.subs)#{V => Sub}};
-    % we're allowed to override set_iface to another value
-    {ok, {set_iface, _}} -> S#solver{subs=(S#solver.subs)#{V => Sub}};
+    % we're allowed to override set_ifaces to another value
+    {ok, {set_ifaces, _}} -> S#solver{subs=(S#solver.subs)#{V => Sub}};
     {ok, Existing} -> error({badarg, V, Existing, Sub})
   end,
 
   BoundVs = S1#solver.bound_vs,
   case {Sub, gb_sets:is_member(V, BoundVs)} of
     % no change in fvs
-    {{set_iface, _}, _} -> S1;
+    {{set_ifaces, _}, _} -> S1;
     % when subbing a tv not in env or an anchor
     {_, false} -> S1;
     {_, true} ->
@@ -1981,19 +1993,19 @@ subs({record_ext, A, BaseT, Ext}, Subs, Aliases) ->
   end;
 subs(unit, _, _) -> unit.
 
-shallow_subs({tv, V, I, Rigid}, Subs, Aliases) ->
+shallow_subs({tv, V, Is, Rigid}, Subs, Aliases) ->
   case maps:find(V, Subs) of
-    error -> {tv, V, I, Rigid};
-    {ok, {rigid, V1}} -> {tv, V1, I, true};
+    error -> {tv, V, Is, Rigid};
+    {ok, {rigid, V1}} -> {tv, V1, Is, true};
 
-    {ok, {set_iface, I1}} ->
+    {ok, {set_ifaces, NewIs}} ->
       false = Rigid,
-      {tv, V, I1, Rigid};
+      {tv, V, NewIs, Rigid};
 
     {ok, Value} ->
       Sub = if
         % Instantiation, so rigid resets to false
-        is_list(Value) -> {tv, Value, I, false};
+        is_list(Value) -> {tv, Value, Is, false};
         % Replacing with a new type entirely
         true -> Value
       end,

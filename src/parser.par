@@ -56,7 +56,7 @@ enum Node {
   Native(Loc, Node, Node, Int) @native
 
   Con(Loc, [Char]) @con_token
-  TV(Loc, [Char], Maybe<Node>) @tv_te
+  TV(Loc, [Char], [Node]) @tv_te
   Gen(Loc, Node, [Node]) @gen_te
   LamTE(Loc, Node, Node) @lam_te
   TupleTE(Loc, [Node]) @tuple_te
@@ -299,7 +299,7 @@ enumeration(tokens) = match tokens {
 
 tv : [Token] -> Parsed<(Node, [Token])>
 tv(tokens) = match tokens {
-  [Lexer.TV(l, tv) | t] => parsed((TV(l, tv, None), t))
+  [Lexer.TV(l, tv) | t] => parsed((TV(l, tv, []), t))
   _ => head_loc(tokens) |> one_err("Expected type variable")
 }
 
@@ -705,27 +705,14 @@ type_expr_r(lhs, tokens) = match lhs {
           )
 
       [Lexer.TV(tv_l, tv) | t] =>
-        type_params(tv_l, t) |> pbind(|(l, params, rest)| match rest {
-          [Lexer.Colon(_), Lexer.Con(con_s, mod) | t] =>
-            let
-              (con_node, t) = qualified_con(con_s, mod, t)
-              l = range(l, node_loc(con_node))
-              tv_node = TV(l, tv, Some(con_node))
-            in
-              if length(params) == 0 then
-                tv_node |> recurse(t)
-              else
-                Gen(l, tv_node, params) |> recurse(t)
-
-          [Lexer.Colon(_) | t] =>
-            head_loc(t) |> one_err("Expected capitalized name of interface")
-
-          _ =>
+        type_params(tv_l, t) |> pbind(|(params_l, params, rest)|
+          ifaces(params_l, rest) |> pbind(|(l, ifaces, rest)|
             if length(params) == 0 then
-              TV(l, tv, None) |> recurse(rest)
+              TV(l, tv, ifaces) |> recurse(rest)
             else
-              Gen(l, TV(l, tv, None), params) |> recurse(rest)
-        })
+              Gen(l, TV(l, tv, ifaces), params) |> recurse(rest)
+          )
+        )
 
       [Lexer.LBracket(s) | t] =>
         enclosed_bracket(s, t) |> pbind(|(l, inner, rest)|
@@ -751,7 +738,7 @@ type_expr_r(lhs, tokens) = match lhs {
           many_delim_comma_or_nl(field_sig, inner)
             |> pmap_or(|v| v, [])
             |> pmap(|field_sigs|
-              RecordExtTE(l, TV(tv_l, tv, None), field_sigs)
+              RecordExtTE(l, TV(tv_l, tv, []), field_sigs)
             )
             |> pbind(recurse(rest))
         )
@@ -786,6 +773,23 @@ type_params(l, tokens) = match tokens {
     )
 
   _ => parsed((l, [], tokens))
+}
+
+ifaces : Loc -> [Token] -> Parsed<(Loc, [Node], [Token])>
+ifaces(l, tokens) = ifaces_r(l, tokens, [])
+
+ifaces_r : Loc -> [Token] -> [Node] -> Parsed<(Loc, [Node], [Token])>
+ifaces_r(l, tokens, ifaces) = match tokens {
+  [Lexer.Tilde(_), Lexer.Con(con_s, mod) | t] =>
+    let
+      (con_node, t) = qualified_con(con_s, mod, t)
+      l = range(l, node_loc(con_node))
+    in ifaces_r(l, t, [con_node | ifaces])
+
+  [Lexer.Tilde(_) | t] =>
+    head_loc(t) |> one_err("Expected capitalized name of interface")
+
+  _ => parsed((l, reverse(ifaces), tokens))
 }
 
 field_sig : [Token] -> Parsed<(Node, [Token])>

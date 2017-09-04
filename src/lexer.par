@@ -53,6 +53,7 @@ enum Token {
   Semi(Loc) @";"
   Dollar(Loc) @"$"
   Pound(Loc) @"#"
+  Tilde(Loc) @"~"
 
   Module(Loc) @module
   Import(Loc) @import
@@ -168,6 +169,7 @@ tokenize_r(chs, line, col, tokens) =
         [';' | t] => (Semi(inc(loc, 1)), t)
         ['$' | t] => (Dollar(inc(loc, 1)), t)
         ['#' | t] => (Pound(inc(loc, 1)), t)
+        ['~' | t] => (Tilde(inc(loc, 1)), t)
 
         ['\'', '\\', ch, '\'' | t] => (LitChar(inc(loc, 4), unesc(ch)), t)
         ['\'', ch, '\'' | t] => (LitChar(inc(loc, 3), ch), t)

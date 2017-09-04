@@ -11,6 +11,9 @@
 %   - Multiple interfaces per TV?
 %   - Extending interfaces?
 %   - Allow ifaces on struct/enum params?
+%   - How do we ensure that we get appropriate errors when A: Num and B:
+%     Something are unified?
+%   - Bootstrap, fix, and ensure everything still works
 % - Bug with recursive functions and type signatures
 %   e.g.
 %     foo : C: Collection -> Int
