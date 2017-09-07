@@ -6,7 +6,7 @@
 -define(EXCLUDER_NAME, code_gen_excluder).
 -define(INIT_FN_ATOM, '_@init').
 
--record(cg, {env, in_pattern = false, ctx}).
+-record(cg, {env, in_pattern = false, in_impl = false, ctx}).
 
 compile_comps(Comps, C) ->
   CG = #cg{env=#{}, ctx=C},
@@ -27,7 +27,7 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
   % populate env and aggregate exports
   lists:mapfoldl(fun(Node, ModuleCG) ->
     case Node of
-      {global, _, {var, _, Name}, {fn, _, Args, _}, Exported} ->
+      {global, _, {var, _, Name}, {fn, _, _, Args, _}, Exported} ->
         Atom = list_to_atom(Name),
         Arity = length(Args),
         Value = {{global_fn, Atom}, Arity},
@@ -49,13 +49,7 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
           false -> {[], ModuleCG1}
         end;
 
-      {enum, _, EnumTE, OptionTEs} ->
-        EnumCon = case EnumTE of
-          {con_token, _, EnumCon_} -> EnumCon_;
-          {gen_te, _, {con_token, _, EnumCon_}, _} -> EnumCon_
-        end,
-        IDAtom = id_atom(EnumCon, ModuleCG),
-
+      {enum, _, _, OptionTEs} ->
         {Exports, ModuleCG1} = lists:mapfoldl(fun(OptionTE, FoldCG) ->
           {option, _, {con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
 
@@ -68,10 +62,10 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
 
           case Arity of
             0 ->
-              Value = {{option, IDAtom, Key}, badarity},
+              Value = {{option, Key}, badarity},
               {[], env_set(Con, Value, FoldCG)};
             _ ->
-              Value = {{option, IDAtom, Key, Atom}, Arity},
+              Value = {{option, Key, Atom}, Arity},
               {[{Atom, Arity}], env_set(Con, Value, FoldCG)}
           end
         end, ModuleCG, OptionTEs),
@@ -93,29 +87,28 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
       {interface, _, {con_token, _, RawCon}, Fields} ->
         #cg{ctx=#ctx{ifaces=Ifaces, impls=Impls}=C} = ModuleCG,
         Con = utils:qualify(RawCon, C),
-        {_, FieldMetas} = maps:get(Con, Ifaces),
+        {_, FieldTs} = maps:get(Con, Ifaces),
         SubImpls = maps:get(Con, Impls),
 
-        {Exports, ModuleCG1} = lists:mapfoldl(fun({Sig, FieldMeta}, FoldCG) ->
+        {Exports, ModuleCG1} = lists:mapfoldl(fun({Sig, RawT}, FoldCG) ->
           {sig, _, {var, _, Name}, _} = Sig,
           Atom = list_to_atom(Name),
-          {_, Arity} = FieldMeta,
+          Arity = length(utils:arg_ts(RawT)),
 
           Value = {{global_fn, Atom}, Arity},
           {{Atom, Arity}, env_set(Name, Value, FoldCG)}
-        end, ModuleCG, lists:zip(Fields, FieldMetas)),
+        end, ModuleCG, lists:zip(Fields, FieldTs)),
 
-        ModuleCG2 = lists:foldl(fun({Key, {_, Inits}}, FoldCG) ->
-          lists:foldl(fun({init, _, {var, _, Name}, Expr}, NestedCG) ->
-            FieldName = impl_field_name(Con, Key, Name),
-            FieldAtom = list_to_atom(FieldName),
+        ModuleCG2 = lists:foldl(fun({Key, {_, InstT, _}}, FoldCG) ->
+          ImplName = impl_name(Con, Key),
+          ImplAtom = list_to_atom(ImplName),
+          Arity = length(utils:ivs(InstT)),
 
-            Value = case Expr of
-              {fn, _, Args, _} -> {{global_fn, FieldAtom}, length(Args)};
-              _ -> {{global, FieldAtom}, unknown}
-            end,
-            env_set(FieldName, Value, NestedCG)
-          end, FoldCG, Inits)
+          Value = case Arity of
+            0 -> {{global, ImplAtom}, badarity};
+            _ -> {{global_fn, ImplAtom}, Arity}
+          end,
+          env_set(ImplName, Value, FoldCG)
         end, ModuleCG1, maps:to_list(SubImpls)),
 
         {Exports, ModuleCG2};
@@ -124,83 +117,8 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
     end
   end, set_module(Module, CG), Defs).
 
-impl_clauses(Con, Name, Args, ArgsRep, TargetRep, Loc, CG) ->
-  Line = ?START_LINE(Loc),
-  ImplMap = maps:get(Con, CG#cg.ctx#ctx.impls),
-  Keys = maps:keys(ImplMap),
-  Enums = CG#cg.ctx#ctx.enums,
-  Structs = CG#cg.ctx#ctx.structs,
-
-  Conds = lists:filtermap(fun(Key) ->
-    ElementRep = call(erlang, element, [eabs(1, Line), TargetRep], Line),
-
-    When = case Key of
-      "()" -> {op, Line, '==', TargetRep, {tuple, Line, []}};
-      "Record" -> {op, Line, '==', ElementRep, eabs('%Record', Line)};
-      "Set" -> {op, Line, '==', ElementRep, eabs('%Set', Line)};
-      _ ->
-        case maps:is_key(Key, Enums) orelse maps:is_key(Key, Structs) of
-          true ->
-            IDRep = eabs(id_atom(Key, CG), Line),
-            {op, Line, '==', ElementRep, IDRep};
-          false -> false
-        end
-    end,
-
-    case When of
-      false -> false;
-      _ ->
-        Body = impl_field_body(Con, Key, Name, Args, Loc, CG),
-        {true, {clause, Line, [], [[When]], Body}}
-    end
-  end, Keys),
-
-  TupleConds = case maps:is_key("Tuple", ImplMap) of
-    true ->
-      TupleBody = impl_field_body(Con, "Tuple", Name, Args, Loc, CG),
-      Conds ++ [{clause, Line, [], [[{atom, Line, true}]], TupleBody}];
-    false -> Conds
-  end,
-
-  IsTuple = call(erlang, is_tuple, [TargetRep], Line),
-  TupleIf = {'if', Line, TupleConds},
-  TupleClause = {clause, Line, ArgsRep, [[IsTuple]], [TupleIf]},
-
-  OtherClauses = lists:filtermap(fun(Key) ->
-    FnAtom = case Key of
-      "Int" -> is_integer;
-      "Float" -> is_float;
-      "Bool" -> is_boolean;
-      "Atom" -> is_atom;
-      "String" -> is_binary;
-      "Ref" -> is_reference;
-      "List" -> is_list;
-      "Map" -> is_map;
-      "Function" -> is_function;
-      _ -> false
-    end,
-
-    case FnAtom of
-      false -> false;
-      _ ->
-        When = call(erlang, FnAtom, [TargetRep], Line),
-        Body = impl_field_body(Con, Key, Name, Args, Loc, CG),
-        {true, {clause, Line, ArgsRep, [[When]], Body}}
-    end
-  end, Keys),
-
-  [TupleClause | OtherClauses].
-
-id_atom(RawCon, CG) ->
-  Con = utils:resolve_con(RawCon, CG#cg.ctx),
-  list_to_atom([$% | Con]).
-
-impl_field_body(Con, Key, Name, Args, Loc, CG) ->
-  FieldName = impl_field_name(Con, Key, Name),
-  [rep({app, Loc, {var, Loc, FieldName}, Args}, CG)].
-
-impl_field_name(Con, Key, Name) ->
-  lists:concat(["_@impl@", Con, [$@ | Key], [$@ | Name]]).
+impl_name(I, Key) -> lists:concat(["_@impl@", I, [$@ | Key]]).
+bound_impl_name(I, V) -> lists:concat(["_@bound_impl@", I, [$@ | V]]).
 
 populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
   Enums = CG#cg.ctx#ctx.enums,
@@ -273,7 +191,7 @@ rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
   Line = ?START_LINE(Loc),
 
   case Expr of
-    {fn, _, Args, _} ->
+    {fn, _, _, Args, _} ->
       {'fun', _, {clauses, Clauses}} = rep(Expr, CG),
       {function, Line, list_to_atom(Name), length(Args), Clauses};
 
@@ -299,23 +217,14 @@ rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
       {function, Line, list_to_atom(Name), 0, [Clause]}
   end;
 
-rep({enum, _, EnumTE, OptionTEs}, CG) ->
+rep({enum, _, _, OptionTEs}, _) ->
   FnOptionTEs = lists:filter(fun({option, _, _, ArgsTE, _}) ->
     length(ArgsTE) > 0
   end, OptionTEs),
 
-  EnumCon = case EnumTE of
-    {con_token, _, EnumCon_} -> EnumCon_;
-    {gen_te, _, {con_token, _, EnumCon_}, _} -> EnumCon_
-  end,
-  IDAtom = id_atom(EnumCon, CG),
-
   lists:map(fun({option, _, {con_token, ConLoc, Con}, ArgsTE, KeyNode}) ->
     Line = ?START_LINE(ConLoc),
-    ArgsRep = lists:map(fun(_) ->
-      Atom = unique("_@Arg"),
-      {var, Line, Atom}
-    end, ArgsTE),
+    ArgsRep = lists:map(fun(_) -> {var, Line, unique("_@Arg")} end, ArgsTE),
 
     ConAtom = list_to_atom(Con),
     {KeyLine, Key} = case KeyNode of
@@ -323,8 +232,7 @@ rep({enum, _, EnumTE, OptionTEs}, CG) ->
       {some, {atom, KeyLoc, Key_}} -> {?START_LINE(KeyLoc), Key_}
     end,
 
-    IDRep = eabs(IDAtom, Line),
-    Body = [{tuple, Line, [IDRep, {atom, KeyLine, Key} | ArgsRep]}],
+    Body = [{tuple, Line, [{atom, KeyLine, Key} | ArgsRep]}],
     Clause = {clause, Line, ArgsRep, [], Body},
     {function, Line, ConAtom, length(ArgsTE), [Clause]}
   end, FnOptionTEs);
@@ -344,38 +252,88 @@ rep({struct, Loc, StructTE, FieldTEs}, CG) ->
   Pairs = lists:map(fun({sig, _, {var, FieldLoc, FieldName}=Var, _}) ->
     {{atom, FieldLoc, list_to_atom(FieldName)}, Var}
   end, FieldTEs),
-  IDRep = eabs(id_atom(Con, CG), Line),
-  Body = [{tuple, Line, [IDRep, rep({map, Loc, Pairs}, CG1)]}],
+  Body = [rep({map, Loc, Pairs}, CG1)],
 
   Clause = {clause, Line, ArgsRep, [], Body},
   {function, Line, list_to_atom(Con), length(FieldTEs), [Clause]};
 
 rep({interface, _, {con_token, _, RawCon}, Fields}, CG) ->
-  #cg{ctx=#ctx{ifaces=Ifaces, impls=Impls}=C} = CG,
+  #cg{ctx=#ctx{
+    ifaces=Ifaces,
+    impls=Impls,
+    inst_refs=InstRefs,
+    fn_refs=FnRefs
+  }=C} = CG,
+
   Con = utils:qualify(RawCon, C),
-  {_, FieldMetas} = maps:get(Con, Ifaces),
+  {_, FieldTs} = maps:get(Con, Ifaces),
   SubImpls = maps:get(Con, Impls),
 
-  IfaceReps = lists:map(fun({{sig, Loc, {var, _, Name}, _}, {ArgNum, Arity}}) ->
-    Line = ?START_LINE(Loc),
-    {Args, CG1} = lists:mapfoldl(fun(Num, FoldCG) ->
-      ArgName = lists:concat(["_@Arg", Num]),
-      FoldCG1 = bind(ArgName, unknown, FoldCG),
-      {{var, Loc, ArgName}, FoldCG1}
-    end, CG, lists:seq(1, Arity)),
+  IfaceReps = lists:map(fun({Sig, RawT}) ->
+    {sig, Loc, {var, _, Name}, _} = Sig,
+    ArgTs = utils:arg_ts(RawT),
+    Arity = length(ArgTs),
 
-    ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG1) end, Args),
-    TargetRep = lists:nth(ArgNum, ArgsRep),
+    Args = lists:map(fun(Num) ->
+      {var, Loc, lists:concat(["Arg", Num])}
+    end, lists:seq(1, Arity)),
 
-    Clauses = impl_clauses(Con, Name, Args, ArgsRep, TargetRep, Loc, CG1),
-    {function, Line, list_to_atom(Name), Arity, Clauses}
-  end, lists:zip(Fields, FieldMetas)),
+    RecordVar = {var, Loc, bound_impl_name(Con, "T")},
+    Field = {field, Loc, RecordVar, {var, Loc, Name}},
 
-  ImplReps = lists:flatmap(fun({Key, {_, Inits}}) ->
-    lists:map(fun({init, Loc, {var, VarLoc, Name}, Expr}) ->
-      FieldName = impl_field_name(Con, Key, Name),
-      rep({global, Loc, {var, VarLoc, FieldName}, Expr, false}, CG)
-    end, Inits)
+    InstRef = make_ref(),
+    FnRef = make_ref(),
+    SubbedVs = lists:foldl(fun({Is, V}, FoldSubbedVs) ->
+      case V of
+        % We don't want to pass T's impl to the impl functions; they assume
+        % T has been replaced with the instance type. Hence, we omit T from
+        % SubbedVs.
+        "T" -> FoldSubbedVs;
+        _ -> FoldSubbedVs#{V => {tv, V, Is, false}}
+      end
+    end, #{}, utils:ivs(RawT)),
+
+    ArgIVs = lists:map(fun utils:ivs/1, ArgTs),
+    C1 = C#ctx{
+      inst_refs=InstRefs#{InstRef => {RawT, SubbedVs}},
+      fn_refs=FnRefs#{FnRef => ArgIVs}
+    },
+    CG1 = CG#cg{ctx=C1},
+
+    FnName = "Fn",
+    App = {app, Loc, {var_ref, Loc, InstRef, FnName}, Args},
+    Let = {'let', Loc, [{binding, Loc, {var, Loc, FnName}, Field}], App},
+    Fn = {fn, Loc, FnRef, Args, Let},
+    rep({global, Loc, {var, Loc, Name}, Fn, true}, CG1)
+  end, lists:zip(Fields, FieldTs)),
+
+  ImplReps = lists:map(fun({Key, {_, ImplT, Inits}}) ->
+    {init, InitLoc, _, _} = hd(Inits),
+    AnonRecord = {anon_record, InitLoc, Inits},
+    ImplVar = {var, InitLoc, impl_name(Con, Key)},
+
+    IVs = utils:ivs(ImplT),
+    {Expr, CG1} = case IVs of
+      [] -> {AnonRecord, CG};
+      _ ->
+        Args = lists:foldl(fun({Is, V}, FoldArgs) ->
+          gb_sets:fold(fun(I, NestedArgs) ->
+            [{var, InitLoc, bound_impl_name(I, V)} | NestedArgs]
+          end, FoldArgs, Is)
+        end, [], IVs),
+
+        FnRef = make_ref(),
+        % rep({fn, ...}) will transform each argument with IVs into a tuple
+        % containing the impls. We don't want this transformation to occur here,
+        % as our arguments *are* impls themselves. Hence, we specify that each
+        % arg has no IVs.
+        ArgIVs = lists:map(fun(_) -> [] end, Args),
+
+        C1 = C#ctx{fn_refs=FnRefs#{FnRef => ArgIVs}},
+        {{fn, InitLoc, FnRef, Args, AnonRecord}, CG#cg{ctx=C1}}
+    end,
+
+    rep({global, InitLoc, ImplVar, Expr, false}, CG1#cg{in_impl=true})
   end, maps:to_list(SubImpls)),
 
   [IfaceReps, ImplReps];
@@ -383,18 +341,51 @@ rep({interface, _, {con_token, _, RawCon}, Fields}, CG) ->
 rep({impl, _, _, _, _}, _) -> [];
 rep({sig, _, _, _}, _) -> [];
 
-rep({fn, Loc, Args, Expr}, CG) ->
+rep({fn, Loc, Ref, Args, Expr}, CG) ->
   Names = gb_sets:union(lists:map(fun type_system:pattern_names/1, Args)),
   CG1 = gb_sets:fold(fun(Name, FoldCG) ->
     bind(Name, unknown, FoldCG)
   end, CG, Names),
 
-  Patterns = lists:map(fun(Pattern) ->
-    rep(Pattern, CG1#cg{in_pattern=true})
-  end, Args),
+  % length(AllArgIVs) can be greater than length(Args) if this fn returns
+  % another fn. We only need to process this fn's args here, so clamp.
+  AllArgIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
+  ArgIVs = lists:sublist(AllArgIVs, length(Args)),
+
+  {Patterns, CG2} = lists:mapfoldl(fun({Pattern, IVs}, OuterCG) ->
+    PatternLoc = ?LOC(Pattern),
+
+    {_, ImplReps, OuterCG1} = lists:foldl(fun({Is, V}, Memo) ->
+      {SeenVs, FoldImplReps, FoldCG} = Memo,
+      case gb_sets:is_member(V, SeenVs) of
+        true -> Memo;
+        false ->
+          NewSeenVs = gb_sets:add(V, SeenVs),
+
+          {NewImplReps, NewCG} = gb_sets:fold(fun(I, NestedMemo) ->
+            {NestedImplReps, NestedCG} = NestedMemo,
+            ImplName = bound_impl_name(I, V),
+            NestedCG1 = bind(ImplName, badarity, NestedCG),
+
+            ImplRep = rep({var, PatternLoc, ImplName}, NestedCG1),
+            {[ImplRep | NestedImplReps], NestedCG1}
+          end, {FoldImplReps, FoldCG}, Is),
+
+          {NewSeenVs, NewImplReps, NewCG}
+      end
+    end, {gb_sets:new(), [], OuterCG}, IVs),
+
+    PatternRep = rep(Pattern, OuterCG1#cg{in_pattern=true}),
+    case ImplReps of
+      [] -> {PatternRep, OuterCG1};
+      _ ->
+        PatternLine = ?START_LINE(PatternLoc),
+        {{tuple, PatternLine, [PatternRep | ImplReps]}, OuterCG1}
+    end
+  end, CG1, lists:zip(Args, ArgIVs)),
 
   Line = ?START_LINE(Loc),
-  Clause = {clause, Line, Patterns, [], [rep(Expr, CG1)]},
+  Clause = {clause, Line, Patterns, [], [rep(Expr, CG2)]},
   {'fun', Line, {clauses, [Clause]}};
 
 rep({binary_op, _, ':', Expr, _}, CG) -> rep(Expr, CG);
@@ -438,29 +429,70 @@ rep({N, Loc, Name}, CG) when N == var; N == con_token; N == var_value ->
   case env_get(Name, CG) of
     % global variable handled by the global manager
     {{global, Atom}, _} -> {call, Line, {atom, Line, Atom}, []};
-    {{option, IDAtom, Key}, _} ->
-      {tuple, Line, [eabs(IDAtom, Line), {atom, Line, Key}]};
-    {{option, _, _, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
+    {{option, Key}, _} -> {atom, Line, Key};
+    {{option, _, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {{global_fn, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {{external, Module}, _} ->
-      rep({field, Loc, {con_token, Loc, Module}, {N, Loc, Name}}, CG);
+      Mod = list_to_atom(Module),
+      case maps:get({Module, Name}, CG#cg.env) of
+        % global variable handled by the global manager
+        {{global, Atom}, _} -> call(Mod, Atom, [], Line);
+        {{option, Key}, _} -> {atom, Line, Key};
+        {{option, _, Atom}, Arity} ->
+          Fn = {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)},
+          {'fun', Line, Fn};
+        {{global_fn, Atom}, Arity} ->
+          Fn = {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)},
+          {'fun', Line, Fn}
+      end;
     {Atom, _} when is_atom(Atom) -> {var, Line, Atom}
   end;
 
-rep({anon_record, Loc, Ref, Inits}, CG) ->
+rep({var_ref, Loc, Ref, Name}, CG) ->
+  Line = ?START_LINE(Loc),
+  Rep = rep({var, Loc, Name}, CG),
+
+  % rewrite() expects a single var rep as a parameter, whereas Rep might be
+  % a call or something more complex; store the result.
+  NewVar = {var, Line, unique("Var")},
+  Match = {match, Line, NewVar, Rep},
+
+  InstRefs = CG#cg.ctx#ctx.inst_refs,
+  {Stmts, ResultRep} = case maps:find(Ref, InstRefs) of
+    {ok, {T, SubbedVs}} -> rewrite(T, NewVar, Loc, SubbedVs, CG);
+    error -> {[], Rep}
+  end,
+
+  case Stmts of
+    [] -> Rep;
+    _ -> {block, Line, [Match | Stmts] ++ [ResultRep]}
+  end;
+
+rep({anon_record, Loc, Inits}, CG) ->
   PairsRep = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
     Line = ?START_LINE(VarLoc),
 
     ExprRep = case Expr of
-      {fn, _, Args, _} ->
-        % We're unsure whether the named fun is going to be used (i.e. whether
-        % the named fun is recursive), so we give it a name prefixed with an
-        % underscore to prevent unused errors.
-        Atom = unique([$_ | Name]),
-        CG1 = env_set(Name, {Atom, length(Args)}, CG),
+      {fn, _, _, Args, _} ->
+        case CG#cg.in_impl of
+          false ->
+            % We're unsure whether the named fun is going to be used (i.e.
+            % whether the named fun is recursive), so we give it a name prefixed
+            % with an underscore to prevent unused errors.
+            Atom = unique([$_ | Name]),
+            CG1 = env_set(Name, {Atom, length(Args)}, CG),
 
-        {'fun', FunLine, {clauses, Clauses}} = rep(Expr, CG1),
-        {named_fun, FunLine, Atom, Clauses};
+            {'fun', FunLine, {clauses, Clauses}} = rep(Expr, CG1),
+            {named_fun, FunLine, Atom, Clauses};
+
+          true ->
+            % We can't used a named fun in this case, since recursive calls
+            % should use the global iface function.
+            %
+            % Also, any nested records can still be recursive, so unset in_impl.
+            CG1 = CG#cg{in_impl=false},
+            rep(Expr, CG1)
+        end;
 
       _ -> rep(Expr, CG)
     end,
@@ -468,78 +500,53 @@ rep({anon_record, Loc, Ref, Inits}, CG) ->
     {map_field_assoc, Line, eabs(list_to_atom(Name), Line), ExprRep}
   end, Inits),
 
-  Line = ?START_LINE(Loc),
-  MapRep = {map, Line, PairsRep},
-  case maps:find(Ref, CG#cg.ctx#ctx.ref_ts) of
-    {ok, T} when element(1, T) == con; element(1, T) == gen ->
-      Con = element(2, T),
-      IDAtom = id_atom(Con, CG),
-      {tuple, Line, [eabs(IDAtom, Line), MapRep]};
+  {map, ?START_LINE(Loc), PairsRep};
 
-    _ -> {tuple, Line, [eabs('%Record', Line), MapRep]}
-  end;
-
-rep({anon_record_ext, Loc, Ref, Expr, AllInits}, CG) ->
+rep({anon_record_ext, Loc, Expr, AllInits}, CG) ->
   ExprRep = rep(Expr, CG),
-  ExprLine = element(2, ExprRep),
-  ExprMapRep = call(erlang, element, [eabs(2, ExprLine), ExprRep], ExprLine),
-
   Inits = lists:map(fun(InitOrExt) ->
     setelement(1, InitOrExt, init)
   end, AllInits),
+  ExtRep = rep({anon_record, Loc, Inits}, CG),
+  call(maps, merge, [ExprRep, ExtRep], ?START_LINE(Loc));
 
-  {tuple, Line, [IDRep, ExtMapRep]} = rep({anon_record, Loc, Ref, Inits}, CG),
-  {tuple, Line, [IDRep, call(maps, merge, [ExprMapRep, ExtMapRep], Line)]};
+rep({record, Loc, _, Inits}, CG) -> rep({anon_record, Loc, Inits}, CG);
 
-rep({record, Loc, {con_token, _, RawCon}, Inits}, CG) ->
-  {tuple, Line, [_, MapRep]} = rep({anon_record, Loc, none, Inits}, CG),
-  IDRep = eabs(id_atom(RawCon, CG), Line),
-  {tuple, Line, [IDRep, MapRep]};
-
-rep({record_ext, Loc, {con_token, _, RawCon}, Expr, AllInits}, CG) ->
-  AnonRecordExt = {anon_record_ext, Loc, none, Expr, AllInits},
-  {tuple, Line, [_, MapRep]} = rep(AnonRecordExt, CG),
-  IDRep = eabs(id_atom(RawCon, CG), Line),
-  {tuple, Line, [IDRep, MapRep]};
+rep({record_ext, Loc, _, Expr, AllInits}, CG) ->
+  rep({anon_record_ext, Loc, Expr, AllInits}, CG);
 
 rep({field_fn, _, {var, Loc, Name}}, _) ->
   Line = ?START_LINE(Loc),
-  RecordRep = {var, Line, 'Record'},
-  MapRep = call(erlang, element, [eabs(2, Line), RecordRep], Line),
-
+  RecordRep = {var, Line, unique("_@Record")},
   AtomRep = eabs(list_to_atom(Name), Line),
-  Body = [call(maps, get, [AtomRep, MapRep], Line)],
+
+  Body = [call(maps, get, [AtomRep, RecordRep], Line)],
   Clause = {clause, Line, [RecordRep], [], Body},
   {'fun', Line, {clauses, [Clause]}};
 
 % N can be var_value if we're called by rep({var_value, _, _}, _) above
-rep({field, Loc, Expr, {N, _, Name}}, CG) when N == var; N == con_token ->
+rep({field, Loc, Expr, Prop}, CG) ->
   Line = ?START_LINE(Loc),
   case Expr of
     {con_token, _, Module} ->
-      Mod = list_to_atom(Module),
-      case maps:get({Module, Name}, CG#cg.env) of
-        % global variable handled by the global manager
-        {{global, Atom}, _} -> call(Mod, Atom, [], Line);
-        {{option, IDAtom, Key}, _} ->
-          {tuple, Line, [eabs(IDAtom, Line), {atom, Line, Key}]};
-        {{option, _, _, Atom}, Arity} ->
-          Fn = {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)},
-          {'fun', Line, Fn};
-        {{global_fn, Atom}, Arity} ->
-          Fn = {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)},
-          {'fun', Line, Fn}
-      end;
+      Name = case Prop of
+        {var_ref, _, _, Name_} -> Name_;
+        {con_token, _, Name_} -> Name_
+      end,
+
+      {_, Arity} = maps:get({Module, Name}, CG#cg.env),
+      CG1 = env_set(Name, {{external, Module}, Arity}, CG),
+      rep(Prop, CG1);
 
     _ ->
       ExprRep = rep(Expr, CG),
-      MapRep = call(erlang, element, [eabs(2, Line), ExprRep], Line),
+      {var, _, Name} = Prop,
       AtomRep = eabs(list_to_atom(Name), Line),
-      call(maps, get, [AtomRep, MapRep], Line)
+      call(maps, get, [AtomRep, ExprRep], Line)
   end;
 
 rep({app, _, {con_token, Loc, Name}, Args}, #cg{in_pattern=true}=CG) ->
-  {{option, IDAtom, Key, _}, _} = env_get(Name, CG),
+  {{option, Key, _}, _} = env_get(Name, CG),
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
 
   Line = ?START_LINE(Loc),
@@ -547,11 +554,11 @@ rep({app, _, {con_token, Loc, Name}, Args}, #cg{in_pattern=true}=CG) ->
   % successfully pattern match a newly generated function anyway, so as long as
   % our pattern fails (which it will, because a function won't match a tuple),
   % we're good.
-  {tuple, Line, [eabs(IDAtom, Line), {atom, Line, Key} | ArgsRep]};
+  {tuple, Line, [{atom, Line, Key} | ArgsRep]};
 
 rep({app, _, {field, Loc, {con_token, _, Module}, {con_token, _, Name}}, Args},
     #cg{in_pattern=true}=CG) ->
-  {{option, IDAtom, Key, _}, _} = maps:get({Module, Name}, CG#cg.env),
+  {{option, Key, _}, _} = maps:get({Module, Name}, CG#cg.env),
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
 
   Line = ?START_LINE(Loc),
@@ -559,7 +566,7 @@ rep({app, _, {field, Loc, {con_token, _, Module}, {con_token, _, Name}}, Args},
   % successfully pattern match a newly generated function anyway, so as long as
   % our pattern fails (which it will, because a function won't match a tuple),
   % we're good.
-  {tuple, Line, [eabs(IDAtom, Line), {atom, Line, Key} | ArgsRep]};
+  {tuple, Line, [{atom, Line, Key} | ArgsRep]};
 
 rep({app, Loc, Expr, RawArgs}, CG) ->
   ExprRep = rep(Expr, CG),
@@ -723,9 +730,7 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
 
   case Op of
     '!' -> {op, Line, 'not', ExprRep};
-    '#' ->
-      Call = call(gb_sets, from_list, [ExprRep], Line),
-      {tuple, Line, [eabs('%Set', Line), Call]};
+    '#' -> call(gb_sets, from_list, [ExprRep], Line);
     % $ used by the type system to treat Char as Int, but they're the same
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
@@ -733,7 +738,7 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
   end.
 
 % recursive definitions allowed for simple pattern functions
-rep_pattern({var, _, Name}=Pattern, {fn, _, Args, _}=Expr, CG) ->
+rep_pattern({var, _, Name}=Pattern, {fn, _, _, Args, _}=Expr, CG) ->
   CG1 = bind(Name, length(Args), CG),
   PatternRep = rep(Pattern, CG1#cg{in_pattern=true}),
 
@@ -771,7 +776,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   end, Deps),
 
   GlobalVarNames = lists:filtermap(fun
-    ({global, _, _, {fn, _, _, _}, _}) -> false;
+    ({global, _, _, {fn, _, _, _, _}, _}) -> false;
     ({global, _, {var, _, Name}, _, _}) -> {true, Name};
     (_) -> false
   end, Defs),
@@ -794,6 +799,83 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   Clause = {clause, 1, [ArgVar], [], [Case]},
   {function, 1, '_@init', 1, [Clause]}.
 
+rep_impls(IVs, Loc, InitSubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+  #cg{env=Env, ctx=#ctx{module=Module, nested_ivs=NestedIVs}} = CG,
+
+  {_, ImplReps} = lists:foldl(fun({Is, V}, {SubbedVs, FoldImplReps}) ->
+    % V will not be in SubbedVs if it is bound in the env or if it has been seen
+    % before. In both these cases, we don't want to add impls.
+    case maps:find(V, SubbedVs) of
+      error -> {SubbedVs, FoldImplReps};
+
+      {ok, T} ->
+        NewImplReps = case T of
+          {tv, NewV, _, _} ->
+            {FirstI, _} = gb_sets:next(gb_sets:iterator(Is)),
+            FirstImplName = bound_impl_name(FirstI, NewV),
+
+            case maps:is_key({Module, FirstImplName}, Env) of
+              % If we can't find an impl, this is not a bound variable and
+              % hasn't yet been solved for. We shouldn't touch this argument.
+              false -> FoldImplReps;
+              true ->
+                gb_sets:fold(fun(I, NestedImplReps) ->
+                  ImplName = bound_impl_name(I, NewV),
+                  [rep({var, Loc, ImplName}, CG) | NestedImplReps]
+                end, FoldImplReps, Is)
+            end;
+
+          _ ->
+            Key = utils:impl_key(T),
+            gb_sets:fold(fun(I, NestedImplReps) ->
+              ImplVar = rep({var, Loc, impl_name(I, Key)}, CG),
+              ImplRep = case maps:find({I, V}, NestedIVs) of
+                error -> ImplVar;
+                {ok, IVsNested} ->
+                  % We don't need to curry here; we know the implementation
+                  % accepts all arguments directly; i.e. it doesn't return
+                  % another function that accepts more arguments.
+                  {call, Line, ImplVar, rep_impls(IVsNested, Loc, SubbedVs, CG)}
+              end,
+
+              [ImplRep | NestedImplReps]
+            end, FoldImplReps, Is)
+        end,
+
+        {maps:remove(V, SubbedVs), NewImplReps}
+    end
+  end, {InitSubbedVs, []}, IVs),
+
+  ImplReps.
+
+rewrite({lam, _, _}=LamT, Var, Loc, SubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+  ArgTs = utils:arg_ts(LamT),
+
+  ArgsRep = lists:map(fun(_) -> {var, Line, unique("Arg")} end, ArgTs),
+  NewArgsRep = lists:map(fun({ArgRep, ArgT}) ->
+    ImplReps = rep_impls(utils:ivs(ArgT), Loc, SubbedVs, CG),
+    case ImplReps of
+      [] -> ArgRep;
+      _ -> {tuple, Line, [ArgRep | ImplReps]}
+    end
+  end, lists:zip(ArgsRep, ArgTs)),
+
+  case NewArgsRep of
+    ArgsRep -> {[], Var};
+    _ ->
+      ResultRep = {var, Line, unique("Lam")},
+      Call = {call, Line, Var, NewArgsRep},
+      Clause = {clause, Line, ArgsRep, [], [Call]},
+      Fun = {'fun', Line, {clauses, [Clause]}},
+      {[{match, Line, ResultRep, Fun}], ResultRep}
+  end;
+
+% TODO: fix this
+rewrite({gen, "List", _}, Var, _, _, _) -> {[], Var};
+rewrite({tv, _, _, _}, Var, _, _, _) -> {[], Var}.
+
 eabs(Lit, Line) -> erl_parse:abstract(Lit, Line).
 gm(Module) -> list_to_atom(Module ++ "_gm").
 
@@ -805,9 +887,12 @@ env_get(Name, #cg{env=Env, ctx=#ctx{module=Module}}) ->
 
 set_module(Module, CG) -> CG#cg{ctx=CG#cg.ctx#ctx{module=Module}}.
 
-arity({fn, _, Args, _}, _) -> length(Args);
+arity({fn, _, _, Args, _}, _) -> length(Args);
 arity({binary_op, _, ':', Expr, _}, CG) -> arity(Expr, CG);
-arity({N, _, Name}, CG) when N == var; N == con_token ->
+arity({con_token, _, Name}, CG) ->
+  {_, Arity} = env_get(Name, CG),
+  Arity;
+arity({var_ref, _, _, Name}, CG) ->
   {_, Arity} = env_get(Name, CG),
   Arity;
 arity({field_fn, _, _}, _) -> 1;

@@ -119,9 +119,8 @@
     erlang:is_list(Left) -> Left ++ Right;
     erlang:is_map(Left) -> maps:merge(Left, Right);
     true ->
-      {'%Set', LeftSet} = Left,
-      {'%Set', RightSet} = Right,
-      {'%Set', gb_sets:union(LeftSet, RightSet)}
+      true = gb_sets:is_set(Left),
+      gb_sets:union(Left, Right)
   end.
 
 '_@separate'(Left, Right) ->
@@ -132,7 +131,6 @@
         not gb_sets:is_member(Elem, Set)
       end, Left);
     true ->
-      {'%Set', LeftSet} = Left,
-      {'%Set', RightSet} = Right,
-      {'%Set', gb_sets:subtract(LeftSet, RightSet)}
+      true = gb_sets:is_set(Left),
+      gb_sets:subtract(Left, Right)
   end.

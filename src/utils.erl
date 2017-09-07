@@ -1,9 +1,12 @@
 -module(utils).
 -export([
+  resolve_con/2,
   qualify/2,
   unqualify/1,
   impl_key/1,
-  resolve_con/2,
+  ivs/1,
+  ivs/2,
+  arg_ts/1,
   absolute/1,
   pretty_csts/1,
   pretty/1
@@ -43,6 +46,47 @@ impl_key({gen, Con, _}) -> Con;
 impl_key({record, _, _}) -> "Record";
 impl_key({record_ext, _, _, _}) -> "Record";
 impl_key(unit) -> "()".
+
+ivs(T) -> ivs(T, gb_sets:new()).
+
+ivs(T, InitSeenVs) ->
+  {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
+    case gb_sets:is_member(V, SeenVs) of
+      true -> {IVs, SeenVs};
+      false -> {[IV | IVs], gb_sets:add(V, SeenVs)}
+    end
+  end, {[], InitSeenVs}, ivs_list(T)),
+  IVs.
+
+ivs_list({lam, ArgT, ReturnT}) -> ivs_list(ArgT) ++ ivs_list(ReturnT);
+ivs_list({lam, _, ArgT, ReturnT}) -> ivs_list({lam, ArgT, ReturnT});
+ivs_list({tuple, ElemTs}) -> lists:flatmap(fun ivs_list/1, ElemTs);
+ivs_list({tv, _, none, _}) -> [];
+ivs_list({tv, V, AllIs, _}) ->
+  Is = gb_sets:delete_any("Num", AllIs),
+  case gb_sets:is_empty(Is) of
+    true -> [];
+    false -> [{Is, V}]
+  end;
+ivs_list({con, _}) -> [];
+ivs_list({gen, Gen, ParamTs}) ->
+  GenIVs = case Gen of
+    {tv, _, _, _} -> ivs_list(Gen);
+    _ -> []
+  end,
+  GenIVs ++ lists:flatmap(fun ivs_list/1, ParamTs);
+% ivs_list({inst, ...}) ommitted; they should be resolved
+ivs_list({record, _, FieldMap}) ->
+  SortedKeys = lists:sort(maps:keys(FieldMap)),
+  lists:flatmap(fun(Key) ->
+    ivs_list(maps:get(Key, FieldMap))
+  end, SortedKeys);
+ivs_list({record_ext, _, BaseT, Ext}) ->
+  ivs_list(BaseT) ++ ivs_list({record, none, Ext});
+ivs_list(unit) -> [].
+
+arg_ts({lam, ArgT, ReturnT}) -> [ArgT | arg_ts(ReturnT)];
+arg_ts(_) -> [].
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

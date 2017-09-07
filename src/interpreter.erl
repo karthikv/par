@@ -23,8 +23,6 @@ init({global, _, {var, _, Name}, Expr, _}, ID) ->
   env_set(Name, {lazy, Expr}, ID);
 
 init({enum, _, _, OptionTEs}, ID) ->
-  Ref = make_ref(),
-
   lists:foreach(fun({option, _, {con_token, _, Con}, ArgsTE, KeyNode}) ->
     Key = case KeyNode of
       none -> list_to_atom(Con);
@@ -32,14 +30,14 @@ init({enum, _, _, OptionTEs}, ID) ->
     end,
 
     V = if
-      length(ArgsTE) == 0 -> {Ref, Key};
+      length(ArgsTE) == 0 -> Key;
       true ->
         make_fun(length(ArgsTE), fun(Vs) ->
-          list_to_tuple([Ref, Key | Vs])
+          list_to_tuple([Key | Vs])
         end)
     end,
 
-    env_set(Con, {option, Ref, Key, V}, ID)
+    env_set(Con, {option, Key, V}, ID)
   end, OptionTEs);
 
 init({struct, _, StructTE, FieldTEs}, ID) ->
@@ -59,7 +57,7 @@ init({struct, _, StructTE, FieldTEs}, ID) ->
 
 init({sig, _, _, _}, _) -> true.
 
-eval({fn, _, Args, Expr}, ID) ->
+eval({fn, _, _, Args, Expr}, ID) ->
   make_fun(length(Args), fun(Vs) ->
     NewID = if
       length(Args) == 0 -> ID;
@@ -114,14 +112,16 @@ eval({N, _, Name}, ID) when N == var; N == con_token ->
       V = eval(Expr, ID),
       env_update(Name, {value, V}, ID),
       V;
-    {option, _, _, V} -> V;
+    {option, _, V} -> V;
     {value, V} -> V
   end;
+
+eval({var_ref, Loc, _, Name}, ID) -> eval({var, Loc, Name}, ID);
 
 eval({anon_record, _, Inits}, ID) ->
   Pairs = lists:map(fun({init, _, {var, _, Name}, Expr}) ->
     V = case Expr of
-      {fn, _, _, _} ->
+      {fn, _, _, _, _} ->
         ChildID = env_child(ID),
         ExprV = eval(Expr, ChildID),
         env_set(Name, {value, ExprV}, ChildID),
@@ -241,14 +241,14 @@ eval({unary_op, _, Op, Expr}, ID) ->
 
   case Op of
     '!' -> not V;
-    '#' -> {'%Set', gb_sets:from_list(V)};
+    '#' -> gb_sets:from_list(V);
     % $ used by the type system to treat Char as Int, but they're the same
     '$' -> V;
     '-' -> -V;
     'discard' -> {}
   end.
 
-eval_pattern({var, _, Name}, {fn, _, _, _}=Expr, ID) ->
+eval_pattern({var, _, Name}, {fn, _, _, _, _}=Expr, ID) ->
   ChildID = env_child(ID),
   env_set(Name, {value, eval(Expr, ChildID)}, ChildID),
   {true, ChildID};
@@ -316,17 +316,16 @@ match(_, {'_', _}, _) -> true;
 
 match(V1, {con_token, _, Name}, ID) ->
   case env_get(Name, ID) of
-    {option, _, _, V2} -> V1 == V2;
+    {option, _, V2} -> V1 == V2;
     {value, V2} -> V1 == V2
   end;
 
 match(V, {app, _, {con_token, Loc, Name}, Args}, ID) ->
-  {option, Ref, Key, _} = env_get(Name, ID),
+  {option, Key, _} = env_get(Name, ID),
   if
     length(Args) == 0 -> V == Key;
     true ->
-      % Ref isn't an atom, but this performs a direct comparison anyway
-      Elems = [{atom, Loc, Ref}, {atom, Loc, Key} | Args],
+      Elems = [{atom, Loc, Key} | Args],
       match(tuple_to_list(V), {list, Loc, Elems}, ID)
   end;
 

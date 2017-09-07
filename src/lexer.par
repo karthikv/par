@@ -178,15 +178,7 @@ tokenize_r(chs, line, col, tokens) =
 
         ['@', '"' | t] =>
           match tokenize_str(loc, ['"' | t]) {
-            (LitStr(loc, str), t) =>
-              if @erlang:byte_size(str) > 0 && @binary:first(str) == $'%' then
-                let token = Unexpected(
-                  inc(loc, 1),
-                  to_list(str),
-                  "Atom cannot start with '%'"
-                ) in (token, t)
-              else
-                (LitAtom(inc(loc, 1), str_to_atom(str)), t)
+            (LitStr(loc, str), t) => (LitAtom(inc(loc, 1), str_to_atom(str)), t)
 
             // bad string literal; make the error start at the opening quote
             (Unexpected(loc, token, msg), t) =>

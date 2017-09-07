@@ -29,7 +29,12 @@
 %   schemes - the schemes of env variables that have been solved for and
 %     generalized
 %   bound_vs - the set of TV names in the environment
+%   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated variables
+%   v_to_ref - a V => Ref mapping for TV names coming from instantiated vars
 %   aliases - see aliases in ctx record
+%   impls - a I => {RawT, InstT, Inits} mapping of impls
+%   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
+%   t1/t2 - the two types currently being unified
 %   module - the module of the current constraint that's being unified
 %   loc - the location of the current constraint that's being unified
 %   from - a string describing where the current constraint is from
@@ -39,8 +44,11 @@
   errs,
   schemes = #{},
   bound_vs,
+  inst_refs = #{},
+  v_to_ref = #{},
   aliases,
   impls,
+  nested_ivs = #{},
   t1,
   t2,
   module,
@@ -204,15 +212,23 @@ infer_comps(Comps) ->
 
   C1 = populate_env_and_types(Comps, C),
   C2 = infer_defs(Comps, C1),
-
   S = #solver{
     errs=C2#ctx.errs,
     aliases=C2#ctx.aliases,
     impls=C2#ctx.impls,
     pid=Pid
   },
+
   Result = case solve(C2#ctx.gnrs, S) of
-    {ok, #solver{subs=Subs, aliases=Aliases, schemes=Schemes}} ->
+    {ok, FinalS} ->
+      #solver{
+        subs=Subs,
+        aliases=Aliases,
+        schemes=Schemes,
+        inst_refs=InstRefs,
+        nested_ivs=NestedIVs
+      } = FinalS,
+
       SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
         {tv, V, _, _} = case Value of
           % TODO: would no_dep ever happen?
@@ -222,11 +238,28 @@ infer_comps(Comps) ->
         {inst(maps:get(V, Schemes), Pid), Exported}
       end, C2#ctx.env),
 
-      SubbedRefTs = maps:map(fun(_, T) ->
-        subs(T, Subs, Aliases)
-      end, C2#ctx.ref_ts),
+      SubbedInstRefs = maps:map(fun(_, {T, SubbedVs}) ->
+        FinalSubbedVs = maps:map(fun(_, TV) ->
+          subs(TV, Subs, Aliases)
+        end, SubbedVs),
 
-      {ok, Comps, C2#ctx{env=SubbedEnv, ref_ts=SubbedRefTs}};
+        % We want the original IVs to stay intact, so don't sub T.
+        {T, FinalSubbedVs}
+      end, InstRefs),
+
+      SubbedFnRefs = maps:map(fun(_, {T, Env}) ->
+        BoundVs = bound_vs(Env, FinalS),
+        ArgTs = utils:arg_ts(subs(T, Subs, Aliases)),
+        lists:map(fun(ArgT) -> utils:ivs(ArgT, BoundVs) end, ArgTs)
+      end, C2#ctx.fn_refs),
+
+      FinalC = C2#ctx{
+        env=SubbedEnv,
+        inst_refs=SubbedInstRefs,
+        fn_refs=SubbedFnRefs,
+        nested_ivs=NestedIVs
+      },
+      {ok, Comps, FinalC};
 
     {errors, Errs} -> {errors, Errs, Comps}
   end,
@@ -346,7 +379,7 @@ infer_defs(Comps, C) ->
         {global, _, {var, _, Name}, Expr, _} ->
           {add_dep, TV, ID} = env_get(Name, ModuleC1),
           ModuleC2 = case Expr of
-            {fn, _, _, _} -> ModuleC1;
+            {fn, _, _, _, _} -> ModuleC1;
             _ -> env_remove(Name, ModuleC1)
           end,
 
@@ -474,7 +507,7 @@ infer_csts_first(Csts, UntilGs, C) ->
   end, false, C2#ctx.gnrs),
   finish_gnr(C2#ctx{gnrs=Gs}, C#ctx.gnr).
 
-infer({fn, _, Args, Expr}, C) ->
+infer({fn, Loc, Ref, Args, Expr}, C) ->
   Names = gb_sets:union(lists:map(fun pattern_names/1, Args)),
   C1 = gb_sets:fold(fun(Name, FoldC) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
@@ -494,8 +527,17 @@ infer({fn, _, Args, Expr}, C) ->
     end, ReturnT, ArgTsRev)
   end,
 
+  % T might contain an {inst, ...}; we want a fully resolved type, so we create
+  % an intermediate TV. From doesn't matter because this constraint won't fail.
+  TV = tv_server:fresh(C3#ctx.pid),
+  C4 = add_cst(TV, T, Loc, "intermediate TV", C3),
+
+  FnRefs = C4#ctx.fn_refs,
+  % keep reference of original env to find bound variables
+  C5 = C4#ctx{fn_refs=FnRefs#{Ref => {TV, C#ctx.env}}},
+
   % restore original env
-  {T, C3#ctx{env=C#ctx.env}};
+  {T, C5#ctx{env=C#ctx.env}};
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
@@ -513,12 +555,8 @@ infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   C4 = add_cst(TV, NormSigT, Loc, ?FROM_EXPR_SIG, C3),
   C5 = finish_gnr(C4, add_gnr_dep(ID, G)),
 
-  FinalTV = tv_server:fresh(C5#ctx.pid),
-  % We never want to return {inst, TV} directly because of the ref_ts map. We
-  % always want the T values to be fully instantiated. The from shouldn't matter
-  % here, as this constraint should never fail.
-  C6 = add_cst(FinalTV, {inst, TV}, Loc, "sig instantiation", C5),
-  {FinalTV, C6};
+  % TODO: add a ref here
+  {{inst, none, TV}, C5};
 
 infer({enum, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
@@ -639,10 +677,10 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   % map for aliases
   {record, _, RawFieldMap} = subs(RawRecordT, Subs, #{}),
 
-  {FieldMetas, C2} = lists:mapfoldl(fun(Sig, FoldC) ->
+  {FieldTs, C2} = lists:mapfoldl(fun(Sig, FoldC) ->
     {sig, SigLoc, {var, _, Name}, _} = Sig,
     #{Name := RawT} = RawFieldMap,
-    {FieldMeta, FoldC1} = validate_iface_type(RawT, Name, SigLoc, FoldC),
+    FoldC1 = validate_iface_type(RawT, Name, SigLoc, FoldC),
 
     % don't need to make any Vs rigid; inst still works correctly
     T = norm_sig_type(RawT, [], FoldC1#ctx.pid),
@@ -650,11 +688,11 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
     {add_dep, TV, ID} = env_get(Name, FoldC1),
     FoldC2 = new_gnr(TV, ID, FoldC1),
     FoldC3 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC2),
-    {FieldMeta, finish_gnr(FoldC3, FoldC1#ctx.gnr)}
+    {RawT, finish_gnr(FoldC3, FoldC1#ctx.gnr)}
   end, C1, Fields),
 
   Ifaces = C2#ctx.ifaces,
-  NewIfaces = Ifaces#{Con => setelement(2, maps:get(Con, Ifaces), FieldMetas)},
+  NewIfaces = Ifaces#{Con => setelement(2, maps:get(Con, Ifaces), FieldTs)},
   {none, C2#ctx{ifaces=NewIfaces}};
 
 infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
@@ -676,11 +714,11 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
           SubImpls = maps:get(Con, Impls),
 
           C2 = case maps:find(Key, SubImpls) of
-            {ok, {ExistingT, _}} ->
+            {ok, {ExistingT, _, _}} ->
               Err = ?ERR_DUP_IMPL(Con, Key, utils:pretty(ExistingT)),
               add_ctx_err(Err, ?LOC(TE), C1);
             error ->
-              NewSubImpls = SubImpls#{Key => {RawT, Inits}},
+              NewSubImpls = SubImpls#{Key => {RawT, ImplT, Inits}},
               C1#ctx{impls=Impls#{Con => NewSubImpls}}
           end,
 
@@ -707,8 +745,7 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
                 NewNames = gb_sets:add(Name, Names),
                 NewC = case maps:find(Name, FieldLocTs) of
                   error ->
-                    add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, Con), VarLoc,
-                      FoldC);
+                    add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, Con), VarLoc, FoldC);
 
                   {ok, {SigLoc, RawSigT}} ->
                     FVs = gb_sets:delete("T", fvs(RawSigT)),
@@ -719,19 +756,35 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
                     % so pass empty map for aliases
                     SigT = subs(NormT, #{"T" => ImplT}, #{}),
 
-                    {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
-                    FoldC2 = finish_gnr(FoldC1, FoldC#ctx.gnr),
+                    % All IVs within ImplT will be in the environment during
+                    % code gen. To make sure they're treated as bound variables,
+                    % whose impls shouldn't be passed to the Expr here, we
+                    % add ImplT in the env under some fake variable name.
+                    FoldC1 = env_add("_@Impl", {no_dep, ImplT}, false, FoldC),
+                    {ExprT, FoldC2} = infer(Expr, new_gnr(FoldC1)),
+                    FoldC3 = finish_gnr(FoldC2, FoldC1#ctx.gnr),
+                    FoldC4 = FoldC3#ctx{env=FoldC#ctx.env},
 
-                    TV = tv_server:fresh(FoldC2#ctx.pid),
+                    TV = tv_server:fresh(FoldC4#ctx.pid),
                     % the from here doesn't really matter; this cst is always
                     % inferred first, so it'll never fail
-                    ExprCst = make_cst(TV, ExprT, ?LOC(Expr),
-                      ?FROM_GLOBAL_DEF(Name), FoldC2),
-                    SigCst = make_cst(TV, SigT, SigLoc, ?FROM_GLOBAL_SIG(Name),
-                      FoldC2),
+                    ExprCst = make_cst(
+                      TV,
+                      ExprT,
+                      ?LOC(Expr),
+                      ?FROM_GLOBAL_DEF(Name),
+                      FoldC4
+                    ),
+                    SigCst = make_cst(
+                      TV,
+                      SigT,
+                      SigLoc,
+                      ?FROM_GLOBAL_SIG(Name),
+                      FoldC4
+                    ),
 
                     % infer ExprCst first; inference is in reverse order
-                    infer_csts_first([SigCst, ExprCst], FoldC#ctx.gnrs, FoldC2)
+                    infer_csts_first([SigCst, ExprCst], FoldC1#ctx.gnrs, FoldC4)
                 end,
 
                 {NewNames, NewC}
@@ -792,17 +845,19 @@ infer({map, _, Pairs}, C) ->
   {{gen, "Map", [KeyTV, ValueTV]}, C1};
 
 infer({N, Loc, Name}, C) when N == var; N == con_token; N == var_value ->
-  lookup(C#ctx.module, Name, Loc, C);
+  lookup(C#ctx.module, Name, Loc, none, C);
+
+infer({var_ref, Loc, Ref, Name}, C) -> lookup(C#ctx.module, Name, Loc, Ref, C);
 
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
-infer({anon_record, _, Ref, Inits}, C) ->
+infer({anon_record, _, Inits}, C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
     {init, _, {var, Loc, Name}, Expr} = Init,
 
     {T, FoldC1} = case Expr of
-      {fn, FnLoc, _, _} ->
+      {fn, FnLoc, _, _, _} ->
         TV = tv_server:fresh(FoldC#ctx.pid),
         CaseC = env_add(Name, {no_dep, TV}, false, FoldC),
         {ExprT, CaseC1} = infer(Expr, CaseC),
@@ -820,15 +875,9 @@ infer({anon_record, _, Ref, Inits}, C) ->
     end
   end, {#{}, C}, Inits),
 
-  FinalT = {record, tv_server:next_name(C1#ctx.pid), FieldMap},
-  RefTs = C1#ctx.ref_ts,
-  NewRefTs = case Ref of
-    none -> RefTs;
-    _ -> RefTs#{Ref => FinalT}
-  end,
-  {FinalT, C1#ctx{ref_ts=NewRefTs}};
+  {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
 
-infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
+infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {Inits, ExtInits} = lists:foldl(fun(InitOrExt, Memo) ->
     {FoldInits, FoldExtInits} = Memo,
@@ -841,7 +890,7 @@ infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
   C3 = if
     length(Inits) == 0 -> C1;
     true ->
-      {{record, A, FieldMap}, C2} = infer({anon_record, Loc, none, Inits}, C1),
+      {{record, A, FieldMap}, C2} = infer({anon_record, Loc, Inits}, C1),
       add_cst(
         ExprT,
         {record_ext, A, tv_server:fresh(C2#ctx.pid), FieldMap},
@@ -851,10 +900,10 @@ infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
       )
   end,
 
-  {FinalT, FinalC} = if
+  if
     length(ExtInits) == 0 -> {ExprT, C3};
     true ->
-      {{record, ExtA, Ext}, C4} = infer({anon_record, Loc, none, ExtInits}, C3),
+      {{record, ExtA, Ext}, C4} = infer({anon_record, Loc, ExtInits}, C3),
       % ExprT needs to have every field in ext, but the types can be different
       % because it's a record extension.
       RelaxedExt = maps:map(fun(_, _) -> tv_server:fresh(C4#ctx.pid) end, Ext),
@@ -868,14 +917,7 @@ infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
       ),
 
       {{record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext}, C5}
-  end,
-
-  RefTs = FinalC#ctx.ref_ts,
-  NewRefTs = case Ref of
-    none -> RefTs;
-    _ -> RefTs#{Ref => FinalT}
-  end,
-  {FinalT, FinalC#ctx{ref_ts=NewRefTs}};
+  end;
 
 infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
   Con = utils:resolve_con(RawCon, C),
@@ -892,7 +934,7 @@ infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
           unalias_except_struct({gen, Con, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
       From = ?FROM_RECORD_CREATE(Con),
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -901,11 +943,11 @@ infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
       {TV, C3};
 
     {ok, {true, _}} ->
-      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
@@ -922,7 +964,7 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
           unalias_except_struct({gen, Con, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
       From = ?FROM_RECORD_UPDATE,
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -931,11 +973,11 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
       {TV, C3};
 
     {ok, {true, _}} ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
@@ -948,12 +990,16 @@ infer({field_fn, _, {var, _, Name}}, C) ->
 
 % TODO: ensure this is parsed correctly or add error cases (e.g. when var is
 % a con_token, expr must be a con_token)
-infer({field, Loc, Expr, {N, _, Name}=Var}, C)
-    when N == var; N == con_token ->
+infer({field, Loc, Expr, Prop}, C) ->
   case Expr of
     {con_token, ConLoc, Module} ->
+      {Ref, Name} = case Prop of
+        {var_ref, _, Ref_, Name_} -> {Ref_, Name_};
+        {con_token, _, Name_} -> {none, Name_}
+      end,
+
       case gb_sets:is_member(Module, C#ctx.modules) of
-        true -> lookup(Module, Name, Loc, C);
+        true -> lookup(Module, Name, Loc, Ref, C);
         false ->
           TV = tv_server:fresh(C#ctx.pid),
           {TV, add_ctx_err(?ERR_NOT_DEF_MODULE(Module), ConLoc, C)}
@@ -961,8 +1007,11 @@ infer({field, Loc, Expr, {N, _, Name}=Var}, C)
 
     _ ->
       {ExprT, C1} = infer(Expr, C),
-      {{lam, RecordExtT, ResultT}, C2} = infer({field_fn, ?LOC(Var), Var}, C1),
-      From = ?FROM_FIELD_ACCESS(element(3, Var)),
+      {var, PropLoc, Name} = Prop,
+      FieldFn = {field_fn, PropLoc, Prop},
+      {{lam, RecordExtT, ResultT}, C2} = infer(FieldFn, C1),
+
+      From = ?FROM_FIELD_ACCESS(Name),
       C3 = add_cst(ExprT, RecordExtT, Loc, From, C2),
       {ResultT, C3}
   end;
@@ -1269,7 +1318,7 @@ infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, BaseTE, Fields}, C) ->
   {{record_ext, A, BaseT, FieldMap}, C2};
 infer_sig_helper(_, _, {unit, _}, C) -> {unit, C}.
 
-infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _}=Expr, From, C) ->
+infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
   C1 = env_add(Name, {add_dep, TV, ID}, false, C),
   {PatternT, C2} = infer(Pattern, new_gnr(TV, ID, C1)),
@@ -1314,22 +1363,16 @@ pattern_names({cons, _, Elems, Tail}) ->
   gb_sets:union(pattern_names(Elems), pattern_names(Tail));
 pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 
-lookup(Module, Name, Loc, C) ->
+lookup(Module, Name, Loc, Ref, C) ->
   {Value, C1} = raw_lookup(Module, Name, Loc, C),
   case Value of
     {add_dep, EnvTV, ID} ->
-      FinalTV = tv_server:fresh(C1#ctx.pid),
+      C2 = C1#ctx{gnr=add_gnr_dep(ID, C1#ctx.gnr)},
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
-      %
-      % We never want to return {inst, TV} directly because of the ref_ts map.
-      % We always want the T values to be fully instantiated. The from shouldn't
-      % matter here, as this constraint should never fail.
-      C2 = add_cst(FinalTV, {inst, EnvTV}, Loc, "lookup instantiation", C1),
-
-      {FinalTV, C2#ctx{gnr=add_gnr_dep(ID, C2#ctx.gnr)}};
+      {{inst, Ref, EnvTV}, C2};
 
     {no_dep, EnvTV} -> {EnvTV, C1}
   end.
@@ -1416,19 +1459,13 @@ validate_type(Con, IsIface, NumParams, Loc, C) ->
     error when not IsIface -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con), Loc, C)
   end.
 
-validate_iface_type(T, Name, Loc, C) ->
-  case get_field_meta(T, 0) of
-    {none, _} -> {none, add_ctx_err(?ERR_IFACE_TYPE(Name), Loc, C)};
-    FieldMeta -> {FieldMeta, C}
-  end.
-
-% don't check iface of T; it has already been validated and set
-get_field_meta({lam, {tv, "T", _, false}, ReturnT}, ArgNum) ->
-  {_, Arity} = get_field_meta(ReturnT, ArgNum + 1),
-  {ArgNum + 1, Arity};
-get_field_meta({lam, _, ReturnT}, ArgNum) ->
-  get_field_meta(ReturnT, ArgNum + 1);
-get_field_meta(_, ArgNum) -> {none, ArgNum}.
+validate_iface_type({lam, ArgT, ReturnT}, Name, Loc, C) ->
+  case gb_sets:is_member("T", fvs(ArgT)) of
+    true -> C;
+    false -> validate_iface_type(ReturnT, Name, Loc, C)
+  end;
+validate_iface_type(_, Name, Loc, C) ->
+  add_ctx_err(?ERR_IFACE_TYPE(Name), Loc, C).
 
 add_ctx_err(Msg, Loc, C) ->
   C#ctx{errs=[{Msg, C#ctx.module, Loc} | C#ctx.errs]}.
@@ -1590,13 +1627,13 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
   % rather than can't unify Float with Bool, can't unify Set<Float> with
   % Set<Bool>), so we process the list in reverse order here.
   lists:foldr(fun({T1, T2, Module, Loc, From}, FoldS) ->
-    ResolvedT1 = resolve(T1, FoldS),
-    ResolvedT2 = resolve(T2, FoldS),
-    #solver{subs=Subs, aliases=Aliases} = FoldS,
+    {ResolvedT1, FoldS1} = resolve(T1, FoldS),
+    {ResolvedT2, FoldS2} = resolve(T2, FoldS1),
+    #solver{subs=Subs, aliases=Aliases} = FoldS2,
 
     SubbedT1 = shallow_subs(ResolvedT1, Subs, Aliases),
     SubbedT2 = shallow_subs(ResolvedT2, Subs, Aliases),
-    FoldS1 = FoldS#solver{
+    FoldS3 = FoldS2#solver{
       t1=SubbedT1,
       t2=SubbedT2,
       module=Module,
@@ -1604,36 +1641,81 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
       from=From
     },
 
-    unify(SubbedT1, SubbedT2, FoldS1)
+    unify(SubbedT1, SubbedT2, FoldS3)
   end, S#solver{bound_vs=BoundVs}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
-  {lam, resolve(ArgT, S), resolve(ReturnT, S)};
+  {ResArgT, S1} = resolve(ArgT, S),
+  {ResReturnT, S2} = resolve(ReturnT, S1),
+  {{lam, ResArgT, ResReturnT}, S2};
 resolve({lam, Loc, ArgT, ReturnT}, S) ->
-  {lam, Loc, resolve(ArgT, S), resolve(ReturnT, S)};
+  {ResArgT, S1} = resolve(ArgT, S),
+  {ResReturnT, S2} = resolve(ReturnT, S1),
+  {{lam, Loc, ResArgT, ResReturnT}, S2};
 resolve({tuple, ElemTs}, S) ->
-  {tuple, lists:map(fun(T) -> resolve(T, S) end, ElemTs)};
-resolve({tv, V, Is, Rigid}, _) -> {tv, V, Is, Rigid};
-resolve({con, Con}, _) -> {con, Con};
+  {ResElemTs, S1} = lists:mapfoldl(fun(T, FoldS) ->
+    resolve(T, FoldS)
+  end, S, ElemTs),
+  {{tuple, ResElemTs}, S1};
+resolve({tv, V, Is, Rigid}, S) -> {{tv, V, Is, Rigid}, S};
+resolve({con, Con}, S) -> {{con, Con}, S};
 resolve({gen, Gen, ParamTs}, S) ->
-  ResolvedGen = case Gen of
+  {ResGen, S1} = case Gen of
     {tv, _, _, _} -> resolve(Gen, S);
-    _ -> Gen
+    _ -> {Gen, S}
   end,
-  {gen, ResolvedGen, lists:map(fun(T) -> resolve(T, S) end, ParamTs)};
-resolve({inst, TV}, S) ->
-  {tv, V, _, _} = TV,
-  ResolvedT = case maps:find(V, S#solver.schemes) of
-    {ok, Scheme} -> inst(Scheme, S#solver.pid);
-    error -> TV
+
+  {ResParamTs, S2} = lists:mapfoldl(fun(T, FoldS) ->
+    resolve(T, FoldS)
+  end, S1, ParamTs),
+  {{gen, ResGen, ResParamTs}, S2};
+resolve({inst, Ref, {tv, V, _, _}=TV}, S) ->
+  {InstT, S1} = case maps:find(V, S#solver.schemes) of
+    error -> {TV, S};
+
+    {ok, {_, T}=Scheme} ->
+      InstT_ = inst(Scheme, S#solver.pid),
+      NewS = case Ref of
+        none -> S;
+        _ ->
+          % Every V of T that can be generalized won't be in InstT_. Only bound,
+          % non-generalizable Vs will remain, which shouldn't be in SubbedVs.
+          IVs = utils:ivs(InstT_, fvs(T)),
+          #solver{inst_refs=InstRefs, v_to_ref=VToRef} = S,
+
+          CaseS = case IVs of
+            [] -> S;
+            _ ->
+              {SubbedVs, NewVToRef} = add_nested_ivs(IVs, #{}, VToRef, Ref),
+              S#solver{
+                inst_refs=InstRefs#{Ref => {InstT_, SubbedVs}},
+                v_to_ref=NewVToRef
+              }
+          end,
+          CaseS
+      end,
+
+      {InstT_, NewS}
   end,
-  resolve(ResolvedT, S);
+
+  resolve(InstT, S1);
 resolve({record, A, FieldMap}, S) ->
-  {record, A, maps:map(fun(_, T) -> resolve(T, S) end, FieldMap)};
+  Pairs = maps:to_list(FieldMap),
+  {ResPairs, S1} = lists:mapfoldl(fun({Name, T}, FoldS) ->
+    {ResT, FoldS1} = resolve(T, FoldS),
+    {{Name, ResT}, FoldS1}
+  end, S, Pairs),
+  {{record, A, maps:from_list(ResPairs)}, S1};
 resolve({record_ext, A, BaseT, Ext}, S) ->
-  ResolvedExt = maps:map(fun(_, T) -> resolve(T, S) end, Ext),
-  {record_ext, A, resolve(BaseT, S), ResolvedExt};
-resolve(unit, _) -> unit.
+  {ResBaseT, S1} = resolve(BaseT, S),
+  Pairs = maps:to_list(Ext),
+
+  {ResPairs, S2} = lists:mapfoldl(fun({Name, T}, FoldS) ->
+    {ResT, FoldS1} = resolve(T, FoldS),
+    {{Name, ResT}, FoldS1}
+  end, S1, Pairs),
+  {{record_ext, A, ResBaseT, maps:from_list(ResPairs)}, S2};
+resolve(unit, S) -> {unit, S}.
 
 inst({GVs, T}, Pid) ->
   Subs = gb_sets:fold(fun(V, FoldSubs) ->
@@ -1823,7 +1905,7 @@ unify({tv, V, Is, Rigid}, T, S) ->
     Rigid or WouldEscape -> add_err(S);
     Is == none -> add_sub(V, T, S);
     true ->
-      S1 = gb_sets:fold(fun(I, FoldS) -> instance(T, I, FoldS) end, S, Is),
+      S1 = gb_sets:fold(fun(I, FoldS) -> instance(T, I, V, FoldS) end, S, Is),
       case no_errs(S1, S) of
         true -> add_sub(V, T, S1);
         false -> S1
@@ -1933,20 +2015,58 @@ unalias_except_struct({gen, Gen, ParamTs}, Aliases) ->
   end;
 unalias_except_struct(T, _) -> T.
 
-instance({con, "Int"}, "Num", S) -> S;
-instance({con, "Float"}, "Num", S) -> S;
-instance({con, "String"}, "Concatable", S) -> S;
-instance({gen, "List", _}, "Concatable", S) -> S;
-instance({gen, "Map", _}, "Concatable", S) -> S;
-instance({gen, "Set", _}, "Concatable", S) -> S;
-instance({gen, "List", _}, "Separable", S) -> S;
-instance({gen, "Set", _}, "Separable", S) -> S;
-instance(T, Iface, S) ->
+instance({con, "Int"}, "Num", _, S) -> S;
+instance({con, "Float"}, "Num", _, S) -> S;
+instance({con, "String"}, "Concatable", _, S) -> S;
+instance({gen, "List", _}, "Concatable", _, S) -> S;
+instance({gen, "Map", _}, "Concatable", _, S) -> S;
+instance({gen, "Set", _}, "Concatable", _, S) -> S;
+instance({gen, "List", _}, "Separable", _, S) -> S;
+instance({gen, "Set", _}, "Separable", _, S) -> S;
+instance(T, I, V, S) ->
   Key = utils:impl_key(T),
-  case maps:find(Key, maps:get(Iface, S#solver.impls)) of
-    {ok, {RawT, _}} -> sub_unify(T, norm_sig_type(RawT, [], S#solver.pid), S);
+  case maps:find(Key, maps:get(I, S#solver.impls)) of
+    {ok, {RawT, _, _}} ->
+      NormT = norm_sig_type(RawT, [], S#solver.pid),
+      IVs = utils:ivs(NormT),
+
+      S1 = case IVs of
+        [] -> S;
+        _ ->
+          #solver{
+            inst_refs=InstRefs,
+            v_to_ref=VToRef,
+            nested_ivs=NestedIVs
+          } = S,
+
+          % TODO: is there a case where this fails?
+          Ref = maps:get(V, VToRef),
+          {InstT, SubbedVs} = maps:get(Ref, InstRefs),
+
+          {NewSubbedVs, NewVToRef} = add_nested_ivs(IVs, SubbedVs, VToRef, Ref),
+          NewInstRefs = InstRefs#{Ref => {InstT, NewSubbedVs}},
+          NewNestedIVs = NestedIVs#{{I, V} => IVs},
+
+          S#solver{
+            inst_refs=NewInstRefs,
+            v_to_ref=NewVToRef,
+            nested_ivs=NewNestedIVs
+          }
+      end,
+
+      sub_unify(T, NormT, S1);
+
     _ -> add_err(S)
   end.
+
+add_nested_ivs(IVs, SubbedVs, VToRef, Ref) ->
+  lists:foldl(fun({Is, NestedV}, Memo) ->
+    {FoldSubbedVs, FoldVToRef} = Memo,
+    NestedTV = {tv, NestedV, Is, false},
+    % Rigid doesn't matter here, but note that these Vs are non-rigid
+    % anyway because they're instantiated.
+    {FoldSubbedVs#{NestedV => NestedTV}, FoldVToRef#{NestedV => Ref}}
+  end, {SubbedVs, VToRef}, IVs).
 
 remove_arg_locs({lam, _, ArgT, ReturnT}) ->
   {lam, ArgT, remove_arg_locs(ReturnT)};

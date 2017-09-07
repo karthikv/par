@@ -22,7 +22,7 @@ enum Node {
   Impl(Loc, Node, Node, [Node]) @impl
   Sig(Loc, Node, Node) @sig
   Global(Loc, Node, Node, Bool) @global
-  Fn(Loc, [Node], Node) @fn
+  Fn(Loc, Ref, [Node], Node) @fn
 
   Unit(Loc) @unit
   LitInt(Loc, Int) @int
@@ -33,6 +33,7 @@ enum Node {
   LitAtom(Loc, Atom) @atom
 
   Var(Loc, [Char]) @var
+  VarRef(Loc, Ref, [Char]) @var_ref
   VarValue(Loc, [Char]) @var_value
   Underscore(Loc) @"_"
 
@@ -44,11 +45,11 @@ enum Node {
   FieldFn(Loc, Node) @field_fn
   Field(Loc, Node, Node) @field
 
-  AnonRecord(Loc, Ref, [Node]) @anon_record
+  AnonRecord(Loc, [Node]) @anon_record
   Record(Loc, Node, [Node]) @record
   Init(Loc, Node, Node) @init
 
-  AnonRecordExt(Loc, Ref, Node, [Node]) @anon_record_ext
+  AnonRecordExt(Loc, Node, [Node]) @anon_record_ext
   RecordExt(Loc, Node, Node, [Node]) @record_ext
   Ext(Loc, Node, Node) @ext
 
@@ -217,14 +218,14 @@ init_or_ext(allow_ext, tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_), Lexer.Assign(_) | t] =>
     expr(t) |> pmap(|(node, rest)|
       let l = range(s, node_loc(node)) in
-        (Init(l, Var(s, name), Fn(l, [], node)), rest)
+        (Init(l, Var(s, name), Fn(l, make_ref(), [], node)), rest)
     )
 
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_), Lexer.Ext(ext_l) | t] =>
     if allow_ext then
       expr(t) |> pmap(|(node, rest)|
         let l = range(s, node_loc(node)) in
-          (Ext(l, Var(s, name), Fn(l, [], node)), rest)
+          (Ext(l, Var(s, name), Fn(l, make_ref(), [], node)), rest)
       )
     else
       Some(ext_l) |> one_err("Expected equals '='")
@@ -241,7 +242,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
         if allow_ext then
           expr(t) |> pmap(|(node, rest)|
             let l = range(s, node_loc(node)) in
-              (Ext(l, Var(s, name), Fn(l, args, node)), rest)
+              (Ext(l, Var(s, name), Fn(l, make_ref(), args, node)), rest)
           )
         else
           Some(ext_l) |> one_err("Expected equals '='")
@@ -249,7 +250,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
       (_, args, [Lexer.Assign(_) | t]) =>
         expr(t) |> pmap(|(node, rest)|
           let l = range(s, node_loc(node)) in
-            (Init(l, Var(s, name), Fn(l, args, node)), rest)
+            (Init(l, Var(s, name), Fn(l, make_ref(), args, node)), rest)
         )
 
       (_, _, t) => head_loc(t) |> one_err("Expected equals '='")
@@ -443,7 +444,7 @@ expr_r(state, stack, tokens) = match state {
         }
       [Lexer.LitAtom(l, atom) | t] => LitAtom(l, atom) |> recurse(t)
 
-      [Lexer.Var(l, name) | t] => Var(l, name) |> recurse(t)
+      [Lexer.Var(l, name) | t] => VarRef(l, make_ref(), name) |> recurse(t)
 
       [Lexer.LBracket(s), Lexer.RBracket(e) | t] =>
         List(range(s, e), []) |> recurse(t)
@@ -472,10 +473,10 @@ expr_r(state, stack, tokens) = match state {
               // the locations of LBrace and RBrace don't matter here
               expr([Lexer.LBrace(s) | inner] ++ [Lexer.RBrace(s)])
                 |> pbind_or(|(node, [])| match node {
-                  AnonRecord(_, _, fields) =>
+                  AnonRecord(_, fields) =>
                     Record(l, con_node, fields) |> recurse(rest)
 
-                  AnonRecordExt(_, _, base, fields) =>
+                  AnonRecordExt(_, base, fields) =>
                     RecordExt(l, con_node, base, fields) |> recurse(rest)
 
                   // could potentially parse a valid map, but this is actually
@@ -502,7 +503,7 @@ expr_r(state, stack, tokens) = match state {
             parse_anon_record(_) =
               many_delim_comma_or_nl(init, inner)
                 |> pmap_or(|v| v, [])
-                |> pmap(|fields| AnonRecord(l, make_ref(), fields))
+                |> pmap(|fields| AnonRecord(l, fields))
                 |> pbind(recurse(rest))
 
             parsed_expr =
@@ -520,7 +521,7 @@ expr_r(state, stack, tokens) = match state {
                 (base, [Lexer.Bar(_) | t]) =>
                   many_delim_comma_or_nl(init_or_ext(true), t)
                     |> pmap_or(|v| v, [])
-                    |> pmap(|fields| AnonRecordExt(l, make_ref(), base, fields))
+                    |> pmap(|fields| AnonRecordExt(l, base, fields))
                     |> pbind(recurse(rest))
 
                 (node, []) => Block(l, [node]) |> recurse(rest)
@@ -539,7 +540,7 @@ expr_r(state, stack, tokens) = match state {
       [Lexer.Bar(s), Lexer.Sub(_), Lexer.Bar(_) | t] =>
         // lam is the lowest precedence, so it's fine to just recurse here
         expr(t) |> pbind(|(body, rest)|
-          Fn(range(s, node_loc(body)), [], body) |> recurse(rest)
+          Fn(range(s, node_loc(body)), make_ref(), [], body) |> recurse(rest)
         )
       [Lexer.Bar(s) | t] =>
         let
@@ -552,7 +553,8 @@ expr_r(state, stack, tokens) = match state {
           parsed_args |> pbind(|(args, rest)|
             // lam is the lowest precedence, so it's fine to just recurse here
             expr(rest) |> pbind(|(body, rest)|
-              Fn(range(s, node_loc(body)), args, body) |> recurse(rest)
+              Fn(range(s, node_loc(body)), make_ref(), args, body)
+                |> recurse(rest)
             )
           )
 
@@ -670,7 +672,14 @@ expr_r(state, stack, tokens) = match state {
         let
           // field access and app have equal precedence above all else
           [Node(node) | left] = reduce(get(Bin(Dot), opa_prec), stack)
-          field = Field(range(node_loc(node), e), node, Var(e, name))
+          prop =
+            if let Con(_, _) = node then
+              // accessing a variable from a module
+              VarRef(e, make_ref(), name)
+            else
+              // accessing a field from a record
+              Var(e, name)
+          field = Field(range(node_loc(node), e), node, prop)
         in
           expr_r(AcceptOp, [Node(field) | left], t)
       [Lexer.Dot(_) | t] =>
@@ -864,7 +873,7 @@ binding(tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_) | t] =>
     if let [Lexer.Assign(_) | t] = t then
       expr(t) |> pmap(|(body, rest)|
-        let e = node_loc(body), lam = Fn(range(s, e), [], body) in
+        let e = node_loc(body), lam = Fn(range(s, e), make_ref(), [], body) in
           (Binding(range(s, e), Var(s, name), lam), rest)
       )
     else
@@ -874,8 +883,10 @@ binding(tokens) = match tokens {
     parse_args(pattern, s, t) |> pbind(|v| match v {
       (_, args, [Lexer.Assign(_) | t]) =>
         expr(t) |> pmap(|(body, rest)|
-          let e = node_loc(body), lam = Fn(range(s, e), args, body) in
-            (Binding(range(s, e), Var(s, name), lam), rest)
+          let
+            e = node_loc(body)
+            lam = Fn(range(s, e), make_ref(), args, body)
+          in (Binding(range(s, e), Var(s, name), lam), rest)
         )
 
       (_, _, t) => head_loc(t) |> one_err("Expected equals '='")
@@ -1005,9 +1016,6 @@ qualified_con(s, mod, tokens) =
     (Con(range(s, e), mod ++ ['.' | con]), t)
   else
     (Con(s, mod), tokens)
-
-make_ref : () -> Ref
-make_ref = @erlang:make_ref/0
 
 parse_list : ([Token] -> Parsed<(Node, [Token])>) -> Loc -> [Token] ->
   Parsed<(Node, [Token])>
@@ -1311,11 +1319,14 @@ tail = @erlang:tl/1
 reverse : [A] -> [A]
 reverse = @lists:reverse/1
 
-length : [A] -> B: Num
+length : [A] -> Int
 length = @erlang:length/1
 
 to_list : String -> [Char]
 to_list = @erlang:binary_to_list/1
+
+make_ref : () -> Ref
+make_ref = @erlang:make_ref/0
 
 print : String -> A -> A
 print(prefix, a) = { @io:format(prefix ++ ": ~p~n", [a]); a }

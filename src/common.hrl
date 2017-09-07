@@ -24,8 +24,13 @@
 %   ifaces - a Name => {Fields, FieldMetas} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
-%   ref_ts - a map of Ref => T to communicate types to code gen
+%   fn_refs - a Ref => T mapping for fns
+%   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated vars
+%   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
 %   errs - an array of error messages, each of the form {Msg, Loc}
+%   num_params - the number of type params for the TV being processed
+%   modules - the set of accessible modules from the current module
+%   module - the current module
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(ctx, {
   gnr,
@@ -58,8 +63,10 @@
     "Separable" => #{}
   },
   sig_vs = #{},
+  fn_refs = #{},
+  inst_refs,
+  nested_ivs,
   num_params,
-  ref_ts = #{},
   errs = [],
   modules = gb_sets:new(),
   module,

@@ -48,10 +48,10 @@ l(StartLine, StartOffset, EndLine, EndOffset) ->
   }.
 
 rewrite_refs(V) when is_list(V) -> lists:map(fun rewrite_refs/1, V);
-rewrite_refs({anon_record, Loc, _, Inits}) ->
-  {anon_record, Loc, ref, rewrite_refs(Inits)};
-rewrite_refs({anon_record_ext, Loc, _, Expr, AllInits}) ->
-  {anon_record_ext, Loc, ref, rewrite_refs(Expr), rewrite_refs(AllInits)};
+rewrite_refs({fn, Loc, Ref, Args, Expr}) when is_reference(Ref) ->
+  {fn, Loc, ref, rewrite_refs(Args), rewrite_refs(Expr)};
+rewrite_refs({var_ref, Loc, Ref, Name}) when is_reference(Ref) ->
+  {var_ref, Loc, ref, Name};
 rewrite_refs(V) when is_tuple(V) ->
   list_to_tuple(rewrite_refs(tuple_to_list(V)));
 rewrite_refs(V) -> V.
@@ -98,7 +98,10 @@ expr_test_() ->
     )
   , ?_assertEqual({list, l(0, 6), [{bool, l(1, 4), true}]}, ok_expr("[true]"))
   , ?_assertEqual(
-      {list, l(0, 7), [{var, l(1, 1), "a"}, {var, l(4, 1), "b"}]},
+      {list, l(0, 7), [
+        {var_ref, l(1, 1), ref, "a"},
+        {var_ref, l(4, 1), ref, "b"}
+      ]},
       ok_expr("[a, b,]")
     )
 
@@ -180,35 +183,35 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {anon_record, l(0, 9), ref, [
+      {anon_record, l(0, 9), [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}}
       ]},
       ok_expr("{ a = 3 }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 12), ref, [
+      {anon_record, l(0, 12), [
         {init, l(2, 8), {var, l(2, 1), "f"},
-          {fn, l(2, 8), [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}}
+          {fn, l(2, 8), ref, [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}}
       ]},
       ok_expr("{ f(x) = 3 }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 21), ref, [
+      {anon_record, l(0, 21), [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(9, 10), {var, l(9, 3), "bar"}, {bool, l(15, 4), true}}
       ]},
       ok_expr("{ a = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 24), ref, [
+      {anon_record, l(0, 24), [
         {init, l(2, 8), {var, l(2, 1), "f"},
-          {fn, l(2, 8), [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}},
+          {fn, l(2, 8), ref, [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}},
         {init, l(12, 10), {var, l(12, 3), "bar"}, {bool, l(18, 4), true}}
       ]},
       ok_expr("{ f(x) = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 0, 1, 12), ref, [
+      {anon_record, l(0, 0, 1, 12), [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(1, 0, 10), {var, l(1, 0, 3), "bar"}, {bool, l(1, 6, 4), true}}
       ]},
@@ -254,8 +257,8 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {anon_record_ext, l(0, 21), ref,
-        {anon_record, l(2, 9), ref, [
+      {anon_record_ext, l(0, 21),
+        {anon_record, l(2, 9), [
           {init, l(4, 5), {var, l(4, 1), "a"}, {int, l(8, 1), 3}}
         ]},
         [{init, l(14, 5), {var, l(14, 1), "a"}, {int, l(18, 1), 4}}]
@@ -263,22 +266,22 @@ expr_test_() ->
       ok_expr("{ { a = 3 } | a = 4 }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 27), ref, {var, l(2, 1), "a"}, [
+      {anon_record_ext, l(0, 27), {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
         {ext, l(16, 9), {var, l(16, 1), "c"}, {bool, l(21, 4), true}}
       ]},
       ok_expr("{ a | bar = @a, c := true }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 34), ref, {var, l(2, 1), "a"}, [
+      {anon_record_ext, l(0, 34), {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 1), "f"},
-          {fn, l(6, 8), [], {atom, l(12, 2), a}}},
+          {fn, l(6, 8), ref, [], {atom, l(12, 2), a}}},
         {ext, l(16, 16), {var, l(16, 1), "c"},
-          {fn, l(16, 16),
+          {fn, l(16, 16), ref,
             [{var, l(18, 1), "x"}, {var, l(21, 1), "y"}],
             {binary_op, l(27, 5), '+',
-              {var, l(27, 1), "x"},
-              {var, l(31, 1), "y"}
+              {var_ref, l(27, 1), ref, "x"},
+              {var_ref, l(31, 1), ref, "y"}
             }
           }
         }
@@ -286,7 +289,7 @@ expr_test_() ->
       ok_expr("{ a | f() = @a, c(x, y) := x + y }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 0, 1, 11), ref, {var, l(2, 1), "a"}, [
+      {anon_record_ext, l(0, 0, 1, 11), {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
         {ext, l(1, 0, 9), {var, l(1, 0, 1), "c"}, {bool, l(1, 5, 4), true}}
       ]},
@@ -295,7 +298,7 @@ expr_test_() ->
   , ?_assertEqual(
       {record_ext, l(0, 31),
         {con_token, l(0, 3), "Foo"},
-        {var, l(6, 1), "a"}, [
+        {var_ref, l(6, 1), ref, "a"}, [
           {init, l(10, 8), {var, l(10, 3), "bar"}, {atom, l(16, 2), a}},
           {ext, l(20, 9), {var, l(20, 1), "c"}, {bool, l(25, 4), true}}
         ]
@@ -305,7 +308,7 @@ expr_test_() ->
   , ?_assertEqual(
       {record_ext, l(0, 0, 1, 11),
         {con_token, l(0, 3), "Foo"},
-        {var, l(6, 1), "a"}, [
+        {var_ref, l(6, 1), ref, "a"}, [
           {init, l(10, 8), {var, l(10, 3), "bar"}, {atom, l(16, 2), a}},
           {ext, l(1, 0, 9), {var, l(1, 0, 1), "c"}, {bool, l(1, 5, 4), true}}
         ]
@@ -319,16 +322,23 @@ expr_test_() ->
       ok_expr(".bar")
     )
   , ?_assertEqual(
-      {field, l(0, 5), {var, l(0, 1), "a"}, {var, l(2, 3), "bar"}},
+      {field, l(0, 5), {var_ref, l(0, 1), ref, "a"}, {var, l(2, 3), "bar"}},
       ok_expr("a.bar")
+    )
+  , ?_assertEqual(
+      {field, l(0, 10),
+        {con_token, l(0, 6), "Module"},
+        {var_ref, l(7, 3), ref, "bar"}
+      },
+      ok_expr("Module.bar")
     )
   , ?_assertEqual(
       {app, l(0, 24),
         {field, l(0, 21),
-          {anon_record, l(0, 17), ref, [
+          {anon_record, l(0, 17), [
             {init, l(2, 13),
               {var, l(2, 3), "bar"},
-              {fn, l(8, 7), [{var, l(9, 1), "x"}], {atom, l(12, 3), hi}}
+              {fn, l(8, 7), ref, [{var, l(9, 1), "x"}], {atom, l(12, 3), hi}}
             }
           ]},
           {var, l(18, 3), "bar"}
@@ -562,21 +572,21 @@ expr_test_() ->
   , ?_assertEqual(
       {binary_op, l(0, 9), '|>',
         {atom, l(0, 2), a},
-        {var, l(6, 3), "foo"}
+        {var_ref, l(6, 3), ref, "foo"}
       },
       ok_expr("@a |> foo")
     )
   , ?_assertEqual(
       {binary_op, l(0, 27), '|>',
         {int, l(0, 1), 5},
-        {fn, l(5, 22), [{var, l(6, 1), "x"}],
+        {fn, l(5, 22), ref, [{var, l(6, 1), "x"}],
           {binary_op, l(9, 18), '|>',
             {binary_op, l(9, 5), '*',
               {int, l(9, 1), 2},
-              {var, l(13, 1), "x"}
+              {var_ref, l(13, 1), ref, "x"}
             },
             {binary_op, l(18, 9), '*',
-              {var, l(18, 3), "inc"},
+              {var_ref, l(18, 3), ref, "inc"},
               {float, l(24, 3), 7.5}
             }
           }
@@ -587,42 +597,42 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {fn, l(0, 5), [], {int, l(4, 1), 3}},
+      {fn, l(0, 5), ref, [], {int, l(4, 1), 3}},
       ok_expr("|-| 3")
     )
   , ?_assertEqual(
-      {fn, l(0, 5), [{var, l(1, 1), "x"}], {var, l(4, 1), "x"}},
+      {fn, l(0, 5), ref, [{var, l(1, 1), "x"}], {var_ref, l(4, 1), ref, "x"}},
       ok_expr("|x| x")
     )
   , ?_assertEqual(
-      {fn, l(0, 16), [
+      {fn, l(0, 16), ref, [
           {tuple, l(1, 9), [
             {var, l(2, 4), "left"},
             {'_', l(8, 1)}
           ]}
         ],
-        {var, l(12, 4), "left"}
+        {var_ref, l(12, 4), ref, "left"}
       },
       ok_expr("|(left, _)| left")
     )
   , ?_assertEqual(
       {app, l(0, 25),
-        {fn, l(0, 18), [
+        {fn, l(0, 18), ref, [
             {var, l(2, 1), "x"},
             {cons, l(5, 7), [{int, l(6, 1), 3}], {var, l(10, 1), "t"}}
           ],
-          {app, l(14, 3), {var, l(14, 1), "x"}, [{unit, l(15, 2)}]}
+          {app, l(14, 3), {var_ref, l(14, 1), ref, "x"}, [{unit, l(15, 2)}]}
         },
-        [{fn, l(19, 5), [], {int, l(23, 1), 2}}]
+        [{fn, l(19, 5), ref, [], {int, l(23, 1), 2}}]
       },
       ok_expr("(|x, [3 | t]| x())(|-| 2)")
     )
   , ?_assertEqual(
-      {fn, l(0, 13), [{var, l(1, 1), "x"}],
-        {fn, l(4, 9), [{var, l(5, 1), "y"}],
+      {fn, l(0, 13), ref, [{var, l(1, 1), "x"}],
+        {fn, l(4, 9), ref, [{var, l(5, 1), "y"}],
           {binary_op, l(8, 5), '+',
-            {var, l(8, 1), "x"},
-            {var, l(12, 1), "y"}
+            {var_ref, l(8, 1), ref, "x"},
+            {var_ref, l(12, 1), ref, "y"}
           }
         }
       },
@@ -644,9 +654,13 @@ expr_test_() ->
           {atom, l(0, 6), lists},
           {var, l(7, 6), "filter"},
           2
-        },
-        [{fn, l(14, 5), [{var, l(15, 1), "x"}], {var, l(18, 1), "x"}},
-         {list, l(21, 2), []}]
+        }, [
+          {fn, l(14, 5), ref,
+            [{var, l(15, 1), "x"}],
+            {var_ref, l(18, 1), ref, "x"}
+          },
+          {list, l(21, 2), []}
+        ]
       },
       ok_expr("@lists:filter(|x| x, [])")
     )
@@ -932,7 +946,7 @@ expr_test_() ->
       {'let', l(0, 20),
         [{binding, l(4, 7), {var, l(4, 1), "x"}, {float, l(8, 3), 3.0}}],
         {binary_op, l(15, 5), '+',
-          {var, l(15, 1), "x"},
+          {var_ref, l(15, 1), ref, "x"},
           {int, l(19, 1), 5}
         }
       },
@@ -942,19 +956,19 @@ expr_test_() ->
       {'let', l(0, 39),
         [{binding, l(4, 7),
            {var, l(4, 1), "f"},
-           {fn, l(4, 7), [], {int, l(10, 1), 3}}
+           {fn, l(4, 7), ref, [], {int, l(10, 1), 3}}
          },
          {binding, l(13, 14),
            {var, l(13, 3), "inc"},
-           {fn, l(13, 14), [{var, l(17, 1), "x"}],
+           {fn, l(13, 14), ref, [{var, l(17, 1), "x"}],
            {binary_op, l(22, 5), '+',
-             {var, l(22, 1), "x"},
+             {var_ref, l(22, 1), ref, "x"},
              {int, l(26, 1), 1}
            }
          }}],
         {app, l(31, 8),
-          {var, l(31, 3), "inc"},
-          [{app, l(35, 3), {var, l(35, 1), "f"}, [{unit, l(36, 2)}]}]
+          {var_ref, l(31, 3), ref, "inc"},
+          [{app, l(35, 3), {var_ref, l(35, 1), ref, "f"}, [{unit, l(36, 2)}]}]
         }
       },
       ok_expr("let f() = 3, inc(x) = x + 1 in inc(f())")
@@ -963,13 +977,13 @@ expr_test_() ->
       {'let', l(0, 0, 1, 10),
         [{binding, l(4, 7),
            {var, l(4, 1), "f"},
-           {fn, l(4, 7), [], {var, l(10, 1), "x"}}
+           {fn, l(4, 7), ref, [], {var_ref, l(10, 1), ref, "x"}}
          },
          {binding, l(1, 0, 5),
            {var, l(1, 0, 1), "y"},
            {int, l(1, 4, 1), 3}
          }],
-        {var, l(1, 9, 1), "y"}
+        {var_ref, l(1, 9, 1), ref, "y"}
       },
       ok_expr("let f() = x\ny = 3 in y")
     )
@@ -978,13 +992,13 @@ expr_test_() ->
       {'let', l(0, 0, 1, 12),
         [{binding, l(4, 7),
            {var, l(4, 1), "f"},
-           {fn, l(4, 7), [], {var, l(10, 1), "x"}}
+           {fn, l(4, 7), ref, [], {var_ref, l(10, 1), ref, "x"}}
          },
          {binding, l(1, 0, 7),
            {var, l(1, 0, 3), "y"},
            {int, l(1, 6, 1), 3}
          }],
-        {var, l(1, 11, 1), "y"}
+        {var_ref, l(1, 11, 1), ref, "y"}
       },
       ok_expr("let f() = x\n(y) = 3 in y")
     )
@@ -1019,7 +1033,7 @@ expr_test_() ->
              {int, l(33, 1), 2}
            }
          }],
-        {var, l(38, 1), "x"}
+        {var_ref, l(38, 1), ref, "x"}
       },
       ok_expr("let x = if let 1 = 1 then 1 else 2 in x")
     )
@@ -1027,23 +1041,41 @@ expr_test_() ->
 
   , ?_assertEqual(
       {match, l(0, 28), {int, l(6, 1), 1}, [
-        {'case', l(10, 6), {int, l(10, 1), 1}, {var, l(15, 1), "x"}},
-        {'case', l(18, 8), {float, l(18, 3), 5.7}, {var, l(25, 1), "y"}}
+        {'case', l(10, 6),
+          {int, l(10, 1), 1},
+          {var_ref, l(15, 1), ref, "x"}
+        },
+        {'case', l(18, 8),
+          {float, l(18, 3), 5.7},
+          {var_ref, l(25, 1), ref, "y"}
+        }
       ]},
       ok_expr("match 1 { 1 => x, 5.7 => y }")
     )
   , ?_assertEqual(
       {match, l(0, 0, 1, 10), {int, l(6, 1), 1}, [
-        {'case', l(10, 6), {int, l(10, 1), 1}, {var, l(15, 1), "x"}},
-        {'case', l(1, 0, 8), {float, l(1, 0, 3), 5.7}, {var, l(1, 7, 1), "y"}}
+        {'case', l(10, 6),
+          {int, l(10, 1), 1},
+          {var_ref, l(15, 1), ref, "x"}
+        },
+        {'case', l(1, 0, 8),
+          {float, l(1, 0, 3), 5.7},
+          {var_ref, l(1, 7, 1), ref, "y"}
+        }
       ]},
       ok_expr("match 1 { 1 => x\n5.7 => y }")
     )
   % ensure no ambiguity with app
   , ?_assertEqual(
       {match, l(0, 0, 1, 12), {int, l(6, 1), 1}, [
-        {'case', l(10, 6), {int, l(10, 1), 1}, {var, l(15, 1), "x"}},
-        {'case', l(1, 0, 10), {float, l(1, 0, 5), 5.7}, {var, l(1, 9, 1), "y"}}
+        {'case', l(10, 6),
+          {int, l(10, 1), 1},
+          {var_ref, l(15, 1), ref, "x"}
+        },
+        {'case', l(1, 0, 10),
+          {float, l(1, 0, 5), 5.7},
+          {var_ref, l(1, 9, 1), ref, "y"}
+        }
       ]},
       ok_expr("match 1 { 1 => x\n(5.7) => y }")
     )
@@ -1075,19 +1107,25 @@ expr_test_() ->
       ok_expr("match @hi { @hey => @\"\" }")
     )
   , ?_assertEqual(
-      {match, l(0, 18), {var, l(6, 1), "x"}, [
-        {'case', l(10, 6), {var, l(10, 1), "y"}, {var, l(15, 1), "z"}}
+      {match, l(0, 18), {var_ref, l(6, 1), ref, "x"}, [
+        {'case', l(10, 6),
+          {var, l(10, 1), "y"},
+          {var_ref, l(15, 1), ref, "z"}
+        }
       ]},
       ok_expr("match x { y => z }")
     )
   , ?_assertEqual(
-      {match, l(0, 19), {var, l(6, 1), "x"}, [
-        {'case', l(10, 7), {var_value, l(10, 2), "y"}, {var, l(16, 1), "z"}}
+      {match, l(0, 19), {var_ref, l(6, 1), ref, "x"}, [
+        {'case', l(10, 7),
+          {var_value, l(10, 2), "y"},
+          {var_ref, l(16, 1), ref, "z"}
+        }
       ]},
       ok_expr("match x { &y => z }")
     )
   , ?_assertEqual(
-      {match, l(0, 19), {var, l(6, 1), "x"}, [
+      {match, l(0, 19), {var_ref, l(6, 1), ref, "x"}, [
         {'case', l(10, 7), {'_', l(10, 1)}, {unit, l(15, 2)}}
       ]},
       ok_expr("match x { _ => () }")
@@ -1124,7 +1162,10 @@ expr_test_() ->
       {match, l(0, 37),
         {record, l(6, 16), {con_token, l(6, 3), "Bar"}, [
           {init, l(12, 8), {var, l(12, 1), "f"},
-            {fn, l(12, 8), [{var, l(14, 1), "x"}], {var, l(19, 1), "x"}}
+            {fn, l(12, 8), ref,
+              [{var, l(14, 1), "x"}],
+              {var_ref, l(19, 1), ref, "x"}
+            }
           }
         ]}, [
           {'case', l(25, 10),
@@ -1139,7 +1180,7 @@ expr_test_() ->
       {match, l(0, 38),
         {record_ext, l(6, 17),
           {con_token, l(6, 3), "Bar"},
-          {var, l(12, 1), "a"},
+          {var_ref, l(12, 1), ref, "a"},
           [{init, l(16, 5), {var, l(16, 1), "b"}, {int, l(20, 1), 3}}]
         }, [
           {'case', l(26, 10),
@@ -1237,7 +1278,7 @@ expr_test_() ->
       {match, l(0, 24), {list, l(6, 3), [{int, l(7, 1), 1}]}, [
         {'case', l(12, 10),
           {list, l(12, 3), [{var, l(13, 1), "x"}]},
-          {list, l(19, 3), [{var, l(20, 1), "x"}]}
+          {list, l(19, 3), [{var_ref, l(20, 1), ref, "x"}]}
         }
       ]},
       ok_expr("match [1] { [x] => [x] }")
@@ -1246,7 +1287,7 @@ expr_test_() ->
       {match, l(0, 27), {list, l(6, 3), [{int, l(7, 1), 1}]}, [
         {'case', l(12, 13),
           {list, l(12, 6), [{var, l(13, 1), "x"}, {int, l(16, 1), 1}]},
-          {list, l(22, 3), [{var, l(23, 1), "x"}]}
+          {list, l(22, 3), [{var_ref, l(23, 1), ref, "x"}]}
         }
       ]},
       ok_expr("match [1] { [x, 1] => [x] }")
@@ -1255,7 +1296,7 @@ expr_test_() ->
       {match, l(0, 26), {list, l(6, 3), [{int, l(7, 1), 1}]}, [
         {'case', l(12, 12),
           {cons, l(12, 7), [{'_', l(13, 1)}], {var, l(17, 1), "t"}},
-          {var, l(23, 1), "t"}
+          {var_ref, l(23, 1), ref, "t"}
         }
       ]},
       ok_expr("match [1] { [_ | t] => t }")
@@ -1306,7 +1347,10 @@ expr_test_() ->
   , ?_assertEqual(
       {block, l(0, 30), [
         {atom, l(2, 4), foo},
-        {map, l(8, 13), [{{str, l(9, 4), <<"hi">>}, {var, l(17, 3), "var"}}]},
+        {map, l(8, 13), [{
+          {str, l(9, 4), <<"hi">>},
+          {var_ref, l(17, 3), ref, "var"}
+        }]},
         {bool, l(23, 5), false}
       ]},
       ok_expr("{ @foo; {\"hi\" => var}; false }")
@@ -1317,7 +1361,7 @@ def_test_() ->
   [ ?_assertEqual(
       {global, l(0, 11),
         {var, l(0, 1), "f"},
-        {fn, l(0, 11), [],
+        {fn, l(0, 11), ref, [],
           {binary_op, l(6, 5), '+',
             {int, l(6, 1), 3},
             {int, l(10, 1), 5}
@@ -1330,9 +1374,9 @@ def_test_() ->
   , ?_assertEqual(
       {global, l(0, 12),
         {var, l(0, 1), "f"},
-        {fn, l(0, 12), [{var, l(2, 1), "x"}],
+        {fn, l(0, 12), ref, [{var, l(2, 1), "x"}],
           {binary_op, l(7, 5), '+',
-            {var, l(7, 1), "x"},
+            {var_ref, l(7, 1), ref, "x"},
             {int, l(11, 1), 5}
           }
         },
@@ -1343,10 +1387,10 @@ def_test_() ->
   , ?_assertEqual(
       {global, l(0, 15),
         {var, l(0, 1), "f"},
-        {fn, l(0, 15), [{var, l(2, 1), "x"}, {var, l(5, 1), "y"}],
+        {fn, l(0, 15), ref, [{var, l(2, 1), "x"}, {var, l(5, 1), "y"}],
           {binary_op, l(10, 5), '+',
-            {var, l(10, 1), "x"},
-            {var, l(14, 1), "y"}
+            {var_ref, l(10, 1), ref, "x"},
+            {var_ref, l(14, 1), ref, "y"}
           }
         },
         false
@@ -1362,7 +1406,7 @@ def_test_() ->
   , ?_assertEqual(
       {global, l(0, 18),
         {var, l(7, 1), "f"},
-        {fn, l(7, 11), [],
+        {fn, l(7, 11), ref, [],
           {binary_op, l(13, 5), '+',
             {int, l(13, 1), 3},
             {int, l(17, 1), 5}
@@ -1618,9 +1662,9 @@ def_test_() ->
         {con_token, l(15, 4), "Bool"}, [
           {init, l(1, 2, 17),
             {var, l(1, 2, 4), "to_s"},
-            {fn, l(1, 2,  17),
+            {fn, l(1, 2,  17), ref,
               [{var, l(1, 7, 4), "bool"}],
-              {var, l(1, 15, 4), "bool"}
+              {var_ref, l(1, 15, 4), ref, "bool"}
             }
           }
         ]
@@ -1639,7 +1683,7 @@ def_test_() ->
         }, [
           {init, l(1, 2, 11),
             {var, l(1, 2, 3), "foo"},
-            {fn, l(1, 2, 11), [], {char, l(1, 10, 3), $c}}
+            {fn, l(1, 2, 11), ref, [], {char, l(1, 10, 3), $c}}
           },
           {init, l(2, 2, 11),
             {var, l(2, 2, 5), "other"},

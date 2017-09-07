@@ -1132,6 +1132,10 @@ interface_test_() ->
       "interface ToStr { to_str : T -> String }",
       "to_str"
     ))
+  , ?_test("[A ~ Foo] -> A ~ Foo" = ok_prg(
+      "interface Foo { foo : [T] -> T }",
+      "foo"
+    ))
   , ?_test("(String, String, String, String)" = ok_prg(
       "interface ToStr { to_str : T -> String }\n"
       "impl ToStr for String { to_str(s) = s }\n"
@@ -1206,10 +1210,6 @@ interface_test_() ->
   , ?_test(ctx_err_prg(
       "interface Foo { foo : T, bar : T -> T }",
       {?ERR_IFACE_TYPE("foo"), l(16, 7)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : [T] -> T }",
-      {?ERR_IFACE_TYPE("foo"), l(16, 14)}
     ))
   ].
 
