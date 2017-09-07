@@ -4,30 +4,24 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Implement codegen for simple cases
-%     - Handle complex iface functions with multiple Ts or other ifaces
-%     - Recursive impls (e.g. impl ToStr for [A ~ ToStr])
-%     - Handle currying correctly
-%     - Recursive case of instantiation
-%     - passing iface fn to native fn; e.g. @lists:map(to_int, l)?
-%     - fix ordering issue with sets
-%     - Optimize simple app case
-%     - Handle more rewrite cases
-%     - Ensure necessary TVs are solved in type system
-%     - In code gen, rewrite var_ref that comes from Module.field
-%     - sig instantiation
-%     - impls across modules?
-%   - HKTs
-%     - Validation to prevent struct/enum TE from being a gen TV
-%   - Implementations for builtin typeclasses?
-%   - Multiple interfaces per TV?
+%   - Handle currying correctly
+%   - Recursive case of instantiation
+%   - passing iface fn to native fn; e.g. @lists:map(to_int, l)?
+%   - Optimize simple app case
+%   - Handle more rewrite cases
+%   - Ensure necessary TVs are solved in type system
+%   - In code gen, rewrite var_ref that comes from Module.field
+%   - sig instantiation
+%   - impls across modules?
+%   - Multiple interface unification. How to get errors w/ A: Num <=> B: Other?
+%   - HKT unification and typeclasses
+%   - Validation to prevent struct/enum TE from being a gen TV from HKT?
 %   - Extending interfaces?
+%   - Implementations for builtin typeclasses?
 %   - Allow ifaces on struct/enum params?
 %   - Port exec interface tests to type system tests
-%   - How do we ensure that we get appropriate errors when A: Num and B:
-%     Something are unified?
 %   - Bootstrap, fix, and ensure everything still works
-%   - Rename -Var to -VarRep when necessary
+% - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
 % - Bug with recursive functions and type signatures
 %   e.g.
