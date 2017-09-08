@@ -38,6 +38,7 @@
 %   module - the module of the current constraint that's being unified
 %   loc - the location of the current constraint that's being unified
 %   from - a string describing where the current constraint is from
+%   env - the env of the current gnr
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(solver, {
   subs = #{},
@@ -54,6 +55,7 @@
   module,
   loc,
   from,
+  env,
   pid
 }).
 
@@ -238,14 +240,33 @@ infer_comps(Comps) ->
         {inst(maps:get(V, Schemes), Pid), Exported}
       end, C2#ctx.env),
 
-      SubbedInstRefs = maps:map(fun(_, {T, SubbedVs}) ->
-        FinalSubbedVs = maps:map(fun(_, TV) ->
-          subs(TV, Subs, Aliases)
-        end, SubbedVs),
+      SubbedInstRefsPairs = lists:filtermap(fun
+        % In the case of a (mutually) recursive function, we defer computing the
+        % SubbedVs until now, as we couldn't inst it earlier.
+        ({Ref, {deferred, TV, Env}}) ->
+          T = subs(TV, Subs, Aliases),
+          BoundVs = bound_vs(Env, FinalS),
+          IVs = utils:ivs(T, BoundVs),
 
-        % We want the original IVs to stay intact, so don't sub T.
-        {T, FinalSubbedVs}
-      end, InstRefs),
+          case IVs of
+            [] -> false;
+            _ ->
+              SubbedVsPairs = lists:map(fun({Is, V}) ->
+                % rigid doesn't matter here
+                {V, {tv, V, Is, false}}
+              end, IVs),
+              {true, {Ref, {T, maps:from_list(SubbedVsPairs)}}}
+          end;
+
+        ({Ref, {T, SubbedVs}}) ->
+          FinalSubbedVs = maps:map(fun(_, TV) ->
+            subs(TV, Subs, Aliases)
+          end, SubbedVs),
+
+          % We want the original IVs to stay intact, so don't sub T.
+          {true, {Ref, {T, FinalSubbedVs}}}
+      end, maps:to_list(InstRefs)),
+      SubbedInstRefs = maps:from_list(SubbedInstRefsPairs),
 
       SubbedFnRefs = maps:map(fun(_, {T, Env}) ->
         BoundVs = bound_vs(Env, FinalS),
@@ -1642,7 +1663,7 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
     },
 
     unify(SubbedT1, SubbedT2, FoldS3)
-  end, S#solver{bound_vs=BoundVs}, Csts).
+  end, S#solver{bound_vs=BoundVs, env=Env}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {ResArgT, S1} = resolve(ArgT, S),
@@ -1669,9 +1690,15 @@ resolve({gen, Gen, ParamTs}, S) ->
     resolve(T, FoldS)
   end, S1, ParamTs),
   {{gen, ResGen, ResParamTs}, S2};
-resolve({inst, Ref, {tv, V, _, _}=TV}, S) ->
+resolve({inst, Ref, {tv, V, _, _}=TV}, #solver{inst_refs=InstRefs}=S) ->
   {InstT, S1} = case maps:find(V, S#solver.schemes) of
-    error -> {TV, S};
+    error ->
+      % We can't compute the final inst T and SubbedVs right now, since we're
+      % processing a (mutually) recursive function. Defer the computation until
+      % we're done with all unification. Keep a reference to the env to find
+      % bound variables.
+      NewInstRefs = InstRefs#{Ref => {deferred, TV, S#solver.env}},
+      {TV, S#solver{inst_refs=NewInstRefs}};
 
     {ok, {_, T}=Scheme} ->
       InstT_ = inst(Scheme, S#solver.pid),
@@ -1681,7 +1708,7 @@ resolve({inst, Ref, {tv, V, _, _}=TV}, S) ->
           % Every V of T that can be generalized won't be in InstT_. Only bound,
           % non-generalizable Vs will remain, which shouldn't be in SubbedVs.
           IVs = utils:ivs(InstT_, fvs(T)),
-          #solver{inst_refs=InstRefs, v_to_ref=VToRef} = S,
+          #solver{v_to_ref=VToRef} = S,
 
           CaseS = case IVs of
             [] -> S;

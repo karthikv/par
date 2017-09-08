@@ -435,6 +435,7 @@ test_interface(Run) ->
       "proxy(b) = to_int(b)\n"
       "main() = proxy(false)"
     ))
+  % to test fns with multiple arguments having the same iv pair
   , ?_test(7 = Run(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Float {\n"
@@ -442,6 +443,32 @@ test_interface(Run) ->
       "}\n"
       "foo(a, b) = if a == b then to_int(a) * 2 else to_int(a) + to_int(b)\n"
       "main() = foo(3.7, 3.1)"
+    ))
+  % to test recursive fns that we can't inst
+  , ?_test(2 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Bool {\n"
+      "  to_int(b) = if b then 1 else 0\n"
+      "}\n"
+      "foo(twice, b) = if twice then 2 * foo(false, b) else to_int(b)\n"
+      "main() = foo(true, true)"
+    ))
+  % this time, a fn that's both recursive and with bound variables
+  , ?_test(4 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Bool {\n"
+      "  to_int(b) = if b then 1 else 0\n"
+      "}\n"
+      "foo(t, b) =\n"
+      "  let bar(twice, c) =\n"
+      "    if twice then\n"
+      "      2 * bar(false, c)\n"
+      "    else if b == c then\n"
+      "      2 * to_int(c)\n"
+      "    else\n"
+      "      to_int(c)\n"
+      "  in bar(t, b)\n"
+      "main() = foo(true, true)"
     ))
   , ?_test({2, 3} = Run(
       "interface ToInt { to_int : T -> Int }\n"

@@ -4,11 +4,10 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Recursive case of instantiation
+%   - Ensure necessary TVs are solved in type system
 %   - passing iface fn to native fn; e.g. @lists:map(to_int, l)?
 %   - Optimize simple app case
 %   - Handle more rewrite cases
-%   - Ensure necessary TVs are solved in type system
 %   - In code gen, rewrite var_ref that comes from Module.field
 %   - sig instantiation
 %   - impls across modules?
