@@ -4,7 +4,6 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Handle currying correctly
 %   - Recursive case of instantiation
 %   - passing iface fn to native fn; e.g. @lists:map(to_int, l)?
 %   - Optimize simple app case

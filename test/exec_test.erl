@@ -435,6 +435,14 @@ test_interface(Run) ->
       "proxy(b) = to_int(b)\n"
       "main() = proxy(false)"
     ))
+  , ?_test(7 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Float {\n"
+      "  to_int(n) = @erlang:round(n)\n"
+      "}\n"
+      "foo(a, b) = if a == b then to_int(a) * 2 else to_int(a) + to_int(b)\n"
+      "main() = foo(3.7, 3.1)"
+    ))
   , ?_test({2, 3} = Run(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for [A] { to_int(l) = @erlang:length(l) }\n"
@@ -443,6 +451,32 @@ test_interface(Run) ->
       "  foo(a, (b, c)) = if b && a then 2 * to_int(c) else to_int(c)\n"
       "}\n"
       "main() = (foo(true, (true, [1])), foo(false, (true, ['a', 'b', 'c'])))"
+    ))
+  , ?_test({{ok, <<"combine">>}, false} = Run(
+      "filename = \"/tmp/par-combine-1\"\n"
+      "interface Combine { combine : T -> T -> T }\n"
+      "impl Combine for Bool {\n"
+      "  combine(a) = {\n"
+      "    @file:write_file(filename, \"combine\");\n"
+      "    |b| a && b\n"
+      "  }\n"
+      "}\n"
+      "main() = let f = combine(true), result = @file:read_file(filename) in\n"
+      "  { @file:delete(filename); (result, f(false)) }"
+    ))
+  % We can only call combine() after we receive the second argument, which
+  % determines the implementation, so the file isn't created.
+  , ?_test({error, enoent} = Run(
+      "filename = \"/tmp/par-combine-2\"\n"
+      "interface Combine { combine : Int -> T -> T -> T }\n"
+      "impl Combine for Bool {\n"
+      "  combine(_) = {\n"
+      "    @file:write_file(filename, \"combine\");\n"
+      "    |a, b| a && b\n"
+      "  }\n"
+      "}\n"
+      "main() = let _ = combine(1), result = @file:read_file(filename) in\n"
+      "  { @file:delete(filename); result }"
     ))
   , ?_test(10 = Run(
       "interface ToInt { to_int : T -> Int }\n"
