@@ -404,7 +404,13 @@ infer_defs(Comps, C) ->
             _ -> env_remove(Name, ModuleC1)
           end,
 
-          {ExprT, ModuleC3} = infer(Expr, new_gnr(TV, ID, ModuleC2)),
+          {GnrArgs, {ExprT, ModuleC3}} = case Sig of
+            undefined -> {[], infer(Expr, new_gnr(TV, ID, ModuleC2))};
+
+            % We'll generalize immediately after the sig and expr csts are
+            % unified in a separate gnr.
+            _ -> {[TV, ID], infer(Expr, new_gnr(ModuleC2))}
+          end,
           ExprCst = make_cst(
             TV,
             ExprT,
@@ -430,7 +436,13 @@ infer_defs(Comps, C) ->
 
           ModuleC5 = finish_gnr(ModuleC4, ModuleC2#ctx.gnr),
           ModuleC6 = ModuleC5#ctx{env=ModuleC#ctx.env},
-          {undefined, infer_csts_first(Csts, ModuleC2#ctx.gnrs, ModuleC6)};
+          ModuleC7 = infer_csts_first(
+            Csts,
+            ModuleC2#ctx.gnrs,
+            GnrArgs,
+            ModuleC6
+          ),
+          {undefined, ModuleC7};
 
         {sig, _, _, _} -> {Node, ModuleC1};
 
@@ -502,12 +514,14 @@ populate_direct_imports(Deps, C) ->
     end, ModuleC, Idents)
   end, C, Deps).
 
-infer_csts_first(Csts, UntilGs, C) ->
+infer_csts_first(Csts, UntilGs, GnrArgs, C) ->
   % Unifying the expr and sig constraints first generally gives better
   % error messages. To do this, we create a new gnr containing just
-  % these constraints, and make all other gnrs for this global depend
-  % on it.
-  C1 = new_gnr(C),
+  % these constraints, and make the necessary gnrs depend on it.
+  C1 = case GnrArgs of
+    [] -> new_gnr(C);
+    [TV, ID] -> new_gnr(TV, ID, C)
+  end,
   C2 = C1#ctx{gnr=C1#ctx.gnr#gnr{csts=Csts}},
 
   DepID = C2#ctx.gnr#gnr.id,
@@ -804,8 +818,18 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
                       FoldC4
                     ),
 
-                    % infer ExprCst first; inference is in reverse order
-                    infer_csts_first([SigCst, ExprCst], FoldC1#ctx.gnrs, FoldC4)
+                    % Infer ExprCst first, as inference is in reverse order.
+                    %
+                    % We don't need to pass any GnrArgs, as we don't need to
+                    % do any generalization. Recursive calls will actually
+                    % call the iface function, which will have already been
+                    % generalized appropriately.
+                    infer_csts_first(
+                      [SigCst, ExprCst],
+                      FoldC1#ctx.gnrs,
+                      [],
+                      FoldC4
+                    )
                 end,
 
                 {NewNames, NewC}

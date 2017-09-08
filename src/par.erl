@@ -21,10 +21,6 @@
 %   - Bootstrap, fix, and ensure everything still works
 % - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
-% - Bug with recursive functions and type signatures
-%   e.g.
-%     foo : C: Collection -> Int
-%     foo(c) = if length(c) > 10 then length(c) else foo([])
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Builtin typeclasses

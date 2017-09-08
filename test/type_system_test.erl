@@ -545,6 +545,13 @@ recur_test_() ->
       "g(x) = if x >= 0 && f(x) then 10 else 1",
       "f"
     ))
+  , ?_test("A ~ ToInt -> Int" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Float { to_int(f) = @erlang:round(f) }\n"
+      "f : A ~ ToInt -> Int\n"
+      "f(a) = if to_int(a) < 10 then to_int(a) else f(1.0)",
+      "f"
+    ))
   , ?_test(bad_prg(
       "f(x) = if x == 0 then 0 else f(x - 1)\n"
       "h(x) = g(true)\n"
