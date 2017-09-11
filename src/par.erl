@@ -64,6 +64,7 @@
 %   - Better message for no impl of interface
 %   - Better message for no impl of anon record type when there's a concrete
 %     record type impl that matches
+%   - Fix other_errors_test that ensures sig cst is unified first
 % - Website + Documentation
 %
 % Defer

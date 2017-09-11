@@ -111,6 +111,7 @@
   FROM_IMPL(Con, PrettyT),
   ?FMT("implementing interface ~s for ~s", [utils:unqualify(Con), PrettyT])
 ).
+-define(FROM_INST, "instantiation").
 
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).

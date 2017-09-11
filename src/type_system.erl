@@ -385,14 +385,14 @@ infer_defs(Comps, C) ->
 
     {LastSig, FoldC2} = lists:foldl(fun(Node, {UncheckedSig, ModuleC}) ->
       {Sig, ModuleC1} = if
-        UncheckedSig == undefined -> {undefined, ModuleC};
+        UncheckedSig == none -> {none, ModuleC};
         true ->
           {sig, _, {var, _, SigName}, _} = UncheckedSig,
           case Node of
             {global, _, {var, _, SigName}, _, _} -> {UncheckedSig, ModuleC};
             _ ->
               Err = ?ERR_SIG_NO_DEF(SigName),
-              {undefined, add_ctx_err(Err, ?LOC(UncheckedSig), ModuleC)}
+              {none, add_ctx_err(Err, ?LOC(UncheckedSig), ModuleC)}
           end
       end,
 
@@ -404,53 +404,56 @@ infer_defs(Comps, C) ->
             _ -> env_remove(Name, ModuleC1)
           end,
 
-          {GnrArgs, {ExprT, ModuleC3}} = case Sig of
-            undefined -> {[], infer(Expr, new_gnr(TV, ID, ModuleC2))};
+          {ExprCstLoc, ExprCstFrom, ExprT, ModuleC3} = case Sig of
+            none ->
+              {ExprT_, ModuleC3_} = infer(Expr, new_gnr(TV, ID, ModuleC2)),
+              {?LOC(Expr), ?FROM_GLOBAL_DEF(Name), ExprT_, ModuleC3_};
 
             % We'll generalize immediately after the sig and expr csts are
             % unified in a separate gnr.
-            _ -> {[TV, ID], infer(Expr, new_gnr(ModuleC2))}
+            _ ->
+              {ExprT_, ModuleC3_} = infer(Expr, new_gnr(ModuleC2)),
+              {?LOC(Sig), ?FROM_GLOBAL_SIG(Name), ExprT_, ModuleC3_}
           end,
-          ExprCst = make_cst(
-            TV,
-            ExprT,
-            ?LOC(Expr),
-            ?FROM_GLOBAL_DEF(Name),
+
+          % Unify expr constraint first for better error messages.
+          ModuleC4 = append_csts(
+            [make_cst(TV, ExprT, ExprCstLoc, ExprCstFrom, ModuleC3)],
             ModuleC3
           ),
+          ModuleC5 = finish_gnr(ModuleC4, ModuleC2#ctx.gnr),
+          ModuleC6 = ModuleC5#ctx{env=ModuleC#ctx.env},
 
-          {Csts, ModuleC4} = case Sig of
-            undefined -> {[ExprCst], ModuleC3};
+          case Sig of
+            none -> {none, ModuleC6};
             _ ->
-              {SigT, CaseC} = infer(Sig, ModuleC3),
+              % There's no active gnr right now. Inferring a signature doesn't
+              % add any constraints, so this is OK.
+              {SigT, ModuleC7} = infer(Sig, ModuleC6),
               SigCst = make_cst(
                 TV,
                 SigT,
                 ?LOC(Sig),
                 ?FROM_GLOBAL_SIG(Name),
-                CaseC
+                ModuleC7
               ),
-              % infer ExprCst first; inference is in reverse order
-              {[SigCst, ExprCst], CaseC}
-          end,
 
-          ModuleC5 = finish_gnr(ModuleC4, ModuleC2#ctx.gnr),
-          ModuleC6 = ModuleC5#ctx{env=ModuleC#ctx.env},
-          ModuleC7 = infer_csts_first(
-            Csts,
-            ModuleC2#ctx.gnrs,
-            GnrArgs,
-            ModuleC6
-          ),
-          {undefined, ModuleC7};
+              ModuleC8 = infer_csts_first(
+                [SigCst],
+                ModuleC2#ctx.gnrs,
+                [TV, ID],
+                ModuleC7
+              ),
+              {none, ModuleC8}
+          end;
 
         {sig, _, _, _} -> {Node, ModuleC1};
 
         _ ->
           {_, ModuleC2} = infer(Node, ModuleC1),
-          {undefined, ModuleC2}
+          {none, ModuleC2}
       end
-    end, {undefined, FoldC1}, Defs),
+    end, {none, FoldC1}, Defs),
 
     % Remove direct imports from env. We don't want modules trying to import
     % recursively through other modules, as this would make the order in
@@ -458,7 +461,7 @@ infer_defs(Comps, C) ->
     FoldC3 = FoldC2#ctx{env=FoldC#ctx.env},
 
     case LastSig of
-      undefined -> FoldC3;
+      none -> FoldC3;
       {sig, _, {var, _, SigName}, _} ->
         add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC3)
     end
@@ -590,8 +593,17 @@ infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   C4 = add_cst(TV, NormSigT, Loc, ?FROM_EXPR_SIG, C3),
   C5 = finish_gnr(C4, add_gnr_dep(ID, G)),
 
+  % We don't want to return {inst, ...} directly; if it's added to two separate
+  % constraints, that will cause two separate instantiations. Additionally, we
+  % want all returned types to be fully resolved in case they're associated with
+  % a reference. To accomplish this, introduce an intermediate TV that will get
+  % assigned the inst. Note that from doesn't matter here; this constraint
+  % should always succeed.
+  InstTV = tv_server:fresh(C5#ctx.pid),
   % TODO: add a ref here
-  {{inst, none, TV}, C5};
+  C6 = add_cst(InstTV, {inst, none, TV}, Loc, ?FROM_INST, C5),
+
+  {InstTV, C6};
 
 infer({enum, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
@@ -797,10 +809,8 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
                     % add ImplT in the env under some fake variable name.
                     FoldC1 = env_add("_@Impl", {no_dep, ImplT}, false, FoldC),
                     {ExprT, FoldC2} = infer(Expr, new_gnr(FoldC1)),
-                    FoldC3 = finish_gnr(FoldC2, FoldC1#ctx.gnr),
-                    FoldC4 = FoldC3#ctx{env=FoldC#ctx.env},
 
-                    TV = tv_server:fresh(FoldC4#ctx.pid),
+                    TV = tv_server:fresh(FoldC2#ctx.pid),
                     % the from here doesn't really matter; this cst is always
                     % inferred first, so it'll never fail
                     ExprCst = make_cst(
@@ -808,28 +818,20 @@ infer({impl, Loc, {con_token, ConLoc, RawCon}, TE, Inits}, C) ->
                       ExprT,
                       ?LOC(Expr),
                       ?FROM_GLOBAL_DEF(Name),
-                      FoldC4
+                      FoldC2
                     ),
                     SigCst = make_cst(
                       TV,
                       SigT,
                       SigLoc,
                       ?FROM_GLOBAL_SIG(Name),
-                      FoldC4
+                      FoldC2
                     ),
 
                     % Infer ExprCst first, as inference is in reverse order.
-                    %
-                    % We don't need to pass any GnrArgs, as we don't need to
-                    % do any generalization. Recursive calls will actually
-                    % call the iface function, which will have already been
-                    % generalized appropriately.
-                    infer_csts_first(
-                      [SigCst, ExprCst],
-                      FoldC1#ctx.gnrs,
-                      [],
-                      FoldC4
-                    )
+                    FoldC3 = append_csts([SigCst, ExprCst], FoldC2),
+                    FoldC4 = finish_gnr(FoldC3, FoldC1#ctx.gnr),
+                    FoldC4#ctx{env=FoldC#ctx.env}
                 end,
 
                 {NewNames, NewC}
@@ -1411,15 +1413,24 @@ pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 lookup(Module, Name, Loc, Ref, C) ->
   {Value, C1} = raw_lookup(Module, Name, Loc, C),
   case Value of
-    {add_dep, EnvTV, ID} ->
+    {add_dep, TV, ID} ->
       C2 = C1#ctx{gnr=add_gnr_dep(ID, C1#ctx.gnr)},
+
+      % We don't want to return {inst, ...} directly; if it's added to two
+      % separate constraints, that will cause two separate instantiations.
+      % Additionally, we want all returned types to be fully resolved in case
+      % they're associated with a reference. To accomplish this, introduce an
+      % intermediate TV that will get assigned the inst. Note that from doesn't
+      % matter here; this constraint should always succeed.
+      InstTV = tv_server:fresh(C2#ctx.pid),
+      C3 = add_cst(InstTV, {inst, Ref, TV}, Loc, ?FROM_INST, C2),
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
-      {{inst, Ref, EnvTV}, C2};
+      {InstTV, C3};
 
-    {no_dep, EnvTV} -> {EnvTV, C1}
+    {no_dep, TV} -> {TV, C1}
   end.
 
 raw_lookup(Module, Name, Loc, C) ->
@@ -1480,6 +1491,12 @@ add_gnr_dep(ID, G) -> G#gnr{deps=gb_sets:add(ID, G#gnr.deps)}.
 add_cst(T1, T2, Loc, From, C) ->
   G = C#ctx.gnr,
   G1 = G#gnr{csts=[make_cst(T1, T2, Loc, From, C) | G#gnr.csts]},
+  C#ctx{gnr=G1}.
+
+% Expensive operation, since it copies all previous csts; use this sparingly.
+append_csts(Csts, C) ->
+  G = C#ctx.gnr,
+  G1 = G#gnr{csts=G#gnr.csts ++ Csts},
   C#ctx{gnr=G1}.
 
 make_cst(T1, T2, Loc, From, C) ->
@@ -1638,7 +1655,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
       %% PrettySubs = maps:map(
       %%   fun
       %%     (_, {anchor, A}) -> ?FMT("anchor(~s)", [A]);
-      %%     (_, T) -> pretty(T)
+      %%     (_, T) -> utils:pretty(T)
       %%   end,
       %%   S3#solver.subs
       %% ),
@@ -1668,9 +1685,8 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
 
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
-  % deepest expression's constraints first to have better error messages (e.g.
-  % rather than can't unify Float with Bool, can't unify Set<Float> with
-  % Set<Bool>), so we process the list in reverse order here.
+  % deepest expression's constraints first to have better error messages, so we
+  % process the list in reverse order here.
   lists:foldr(fun({T1, T2, Module, Loc, From}, FoldS) ->
     {ResolvedT1, FoldS1} = resolve(T1, FoldS),
     {ResolvedT2, FoldS2} = resolve(T2, FoldS1),
@@ -2107,7 +2123,7 @@ instance(T, I, V, S) ->
 
       sub_unify(T, NormT, S1);
 
-    _ -> add_err(S)
+    error -> add_err(S)
   end.
 
 add_nested_ivs(IVs, SubbedVs, VToRef, Ref) ->

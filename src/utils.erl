@@ -143,7 +143,7 @@ pretty({gen, "List", [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
 pretty({gen, Con, ParamTs}) ->
   PrettyParamTs = lists:map(fun(T) -> pretty(T) end, ParamTs),
   ?FMT("~s<~s>", [utils:unqualify(Con), string:join(PrettyParamTs, ", ")]);
-pretty({inst, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
+pretty({inst, _, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, BaseT, Ext}) ->
   ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
