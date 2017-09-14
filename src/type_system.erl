@@ -30,10 +30,12 @@
 %     generalized
 %   bound_vs - the set of TV names in the environment
 %   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated variables
-%   v_to_ref - a V => Ref mapping for TV names coming from instantiated vars
+%   iv_origins - a {I, V} => Origins mapping for TV names coming from inst vars
 %   aliases - see aliases in ctx record
 %   impls - a I => {RawT, InstT, Inits} mapping of impls
-%   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
+%   nested_ivs - a {I, V} => IVs mapping for impls depending on other impls
+%   passed_vs - a V => {Is, ArgT, Module, Loc} mapping of Vs that have args
+%               passed in for them
 %   t1/t2 - the two types currently being unified
 %   module - the module of the current constraint that's being unified
 %   loc - the location of the current constraint that's being unified
@@ -46,10 +48,12 @@
   schemes = #{},
   bound_vs,
   inst_refs = #{},
-  v_to_ref = #{},
+  iv_origins = #{},
   aliases,
   impls,
   nested_ivs = #{},
+  passed_vs = [],
+  err_vs = gb_sets:new(),
   t1,
   t2,
   module,
@@ -545,7 +549,7 @@ infer_csts_first(Csts, UntilGs, GnrArgs, C) ->
   end, false, C2#ctx.gnrs),
   finish_gnr(C2#ctx{gnrs=Gs}, C#ctx.gnr).
 
-infer({fn, Loc, Ref, Args, Expr}, C) ->
+infer({fn, _, Ref, Args, Expr}, C) ->
   Names = gb_sets:union(lists:map(fun pattern_names/1, Args)),
   C1 = gb_sets:fold(fun(Name, FoldC) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
@@ -565,17 +569,12 @@ infer({fn, Loc, Ref, Args, Expr}, C) ->
     end, ReturnT, ArgTsRev)
   end,
 
-  % T might contain an {inst, ...}; we want a fully resolved type, so we create
-  % an intermediate TV. From doesn't matter because this constraint won't fail.
-  TV = tv_server:fresh(C3#ctx.pid),
-  C4 = add_cst(TV, T, Loc, "intermediate TV", C3),
-
-  FnRefs = C4#ctx.fn_refs,
+  FnRefs = C3#ctx.fn_refs,
   % keep reference of original env to find bound variables
-  C5 = C4#ctx{fn_refs=FnRefs#{Ref => {TV, C#ctx.env}}},
+  C4 = C3#ctx{fn_refs=FnRefs#{Ref => {T, C#ctx.env}}},
 
   % restore original env
-  {T, C5#ctx{env=C#ctx.env}};
+  {T, C4#ctx{env=C#ctx.env}};
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
@@ -670,7 +669,7 @@ infer({enum, _, EnumTE, Options}, C) ->
     end
   end, {#{}, C1}, Options),
 
-  {T, C2};
+  {none, C2};
 
 infer({struct, Loc, StructTE, Fields}, C) ->
   Name = case StructTE of
@@ -707,7 +706,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   C4 = add_cst(TV, NormFnT, Loc, ?FROM_STRUCT_CTOR, C3),
   C5 = finish_gnr(C4, C2#ctx.gnr),
 
-  {TV, C5};
+  {none, C5};
 
 infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   Con = utils:qualify(RawCon, C),
@@ -1075,7 +1074,7 @@ infer({app, Loc, Expr, Args}, C) ->
     length(ArgLocTsRev) == 0 -> {lam, unit, TV};
     true ->
       lists:foldl(fun({ArgLoc, ArgT}, LastT) ->
-        {lam, ArgLoc, ArgT, LastT}
+        {lam, C2#ctx.env, ArgLoc, ArgT, LastT}
       end, TV, ArgLocTsRev)
   end,
 
@@ -1569,8 +1568,66 @@ solve(Gs, S) ->
     end
   end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
 
-  case T#tarjan.solver of
-    #solver{errs=Errs, subs=Subs, aliases=Aliases} when length(Errs) > 0 ->
+  #solver{
+    subs=Subs,
+    aliases=Aliases,
+    iv_origins=IVOrigins,
+    passed_vs=PassedVs,
+    err_vs=ErrVs
+  }=S1 = T#tarjan.solver,
+
+  RefVsSet = maps:fold(fun({I, OrigV}, _, FoldRefVsSet) ->
+    % Rigid doesn't matter for subs. We specify the iface I so IVs still
+    % contains OrigV even if there are no subs.
+    SubbedT = subs({tv, OrigV, gb_sets:singleton(I), false}, Subs, Aliases),
+    IVs = utils:ivs(SubbedT),
+    NewVs = gb_sets:from_list(lists:map(fun({_, V}) -> V end, IVs)),
+    gb_sets:union(FoldRefVsSet, NewVs)
+  end, gb_sets:new(), IVOrigins),
+
+  SubbedErrVs = gb_sets:fold(fun(ErrV, FoldErrVs) ->
+    % Is and Rigid don't matter for subs.
+    case subs({tv, ErrV, none, false}, Subs, Aliases) of
+      % If NewV is rigid, it shouldn't be in ErrVs, as it can't be unified with
+      % a concrete type.
+      {tv, NewV, _, false} -> gb_sets:add(NewV, FoldErrVs);
+      _ -> FoldErrVs
+    end
+  end, gb_sets:new(), ErrVs),
+
+  {_, FinalS} = lists:foldl(fun(PassedV, {FoldReportedVs, FoldS}) ->
+    {OrigV, ArgT, Module, Loc, Env} = PassedV,
+    % Is and Rigid don't matter for subs.
+    SubbedT = subs({tv, OrigV, none, false}, Subs, Aliases),
+    BoundVs = bound_vs(Env, FoldS),
+
+    gb_sets:fold(fun(V, {NestedReportedVs, NestedS}) ->
+      IsRefV = gb_sets:is_member(V, RefVsSet),
+      IsErrV = gb_sets:is_member(V, SubbedErrVs),
+      Bound = gb_sets:is_member(V, BoundVs),
+      Reported = gb_sets:is_member(V, NestedReportedVs),
+
+      if
+        IsRefV and not IsErrV and not Bound and not Reported ->
+          SubbedArgT = subs(ArgT, Subs, Aliases),
+          {Is, _} = lists:keyfind(V, 2, utils:all_ivs(SubbedArgT)),
+          TV = {tv, V, Is, false},
+
+          Msg = ?ERR_MUST_SOLVE(utils:pretty(TV), utils:pretty(SubbedArgT)),
+          NewErrs = [{Msg, Module, Loc} | NestedS#solver.errs],
+
+          NewReportedVs = gb_sets:add(V, NestedReportedVs),
+          {NewReportedVs, NestedS#solver{errs=NewErrs}};
+
+        true -> {NestedReportedVs, NestedS}
+      end
+    end, {FoldReportedVs, FoldS}, fvs(SubbedT))
+  end, {gb_sets:new(), S1}, PassedVs),
+
+  case FinalS#solver.errs of
+    [] -> {ok, FinalS};
+
+    Errs ->
       SubbedErrs = lists:map(fun
         ({T1, T2, Module, Loc, From}) ->
           SubbedT1 = subs(T1, Subs, Aliases),
@@ -1595,9 +1652,7 @@ solve(Gs, S) ->
         ({_, _, _}=Err) -> Err
       end, Errs),
 
-      {errors, SubbedErrs};
-
-    FinalS -> {ok, FinalS}
+      {errors, SubbedErrs}
   end.
 
 connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
@@ -1709,10 +1764,10 @@ resolve({lam, ArgT, ReturnT}, S) ->
   {ResArgT, S1} = resolve(ArgT, S),
   {ResReturnT, S2} = resolve(ReturnT, S1),
   {{lam, ResArgT, ResReturnT}, S2};
-resolve({lam, Loc, ArgT, ReturnT}, S) ->
+resolve({lam, Env, Loc, ArgT, ReturnT}, S) ->
   {ResArgT, S1} = resolve(ArgT, S),
   {ResReturnT, S2} = resolve(ReturnT, S1),
-  {{lam, Loc, ResArgT, ResReturnT}, S2};
+  {{lam, Env, Loc, ResArgT, ResReturnT}, S2};
 resolve({tuple, ElemTs}, S) ->
   {ResElemTs, S1} = lists:mapfoldl(fun(T, FoldS) ->
     resolve(T, FoldS)
@@ -1730,13 +1785,19 @@ resolve({gen, Gen, ParamTs}, S) ->
     resolve(T, FoldS)
   end, S1, ParamTs),
   {{gen, ResGen, ResParamTs}, S2};
-resolve({inst, Ref, {tv, V, _, _}=TV}, #solver{inst_refs=InstRefs}=S) ->
-  {InstT, S1} = case maps:find(V, S#solver.schemes) of
+resolve({inst, Ref, {tv, InstV, _, _}=TV}, #solver{inst_refs=InstRefs}=S) ->
+  {InstT, S1} = case maps:find(InstV, S#solver.schemes) of
     error ->
       % We can't compute the final inst T and SubbedVs right now, since we're
       % processing a (mutually) recursive function. Defer the computation until
       % we're done with all unification. Keep a reference to the env to find
       % bound variables.
+      %
+      % It might seem odd that we're storing the gnr env here, not the ctx env
+      % at the point of this inst. This is intentional; if we have a recursive
+      % fn bar(x), where X ~ I, and we call bar(x) from within it, we *don't*
+      % want x to be in the env. If x is in the env, it'll be consider bound,
+      % and no impl will be passed.
       NewInstRefs = InstRefs#{Ref => {deferred, TV, S#solver.env}},
       {TV, S#solver{inst_refs=NewInstRefs}};
 
@@ -1748,15 +1809,23 @@ resolve({inst, Ref, {tv, V, _, _}=TV}, #solver{inst_refs=InstRefs}=S) ->
           % Every V of T that can be generalized won't be in InstT_. Only bound,
           % non-generalizable Vs will remain, which shouldn't be in SubbedVs.
           IVs = utils:ivs(InstT_, fvs(T)),
-          #solver{v_to_ref=VToRef} = S,
+          #solver{iv_origins=IVOrigins} = S,
 
           CaseS = case IVs of
             [] -> S;
             _ ->
-              {SubbedVs, NewVToRef} = add_nested_ivs(IVs, #{}, VToRef, Ref),
+              SubbedVs = add_subbed_vs(IVs, #{}),
+              NewIVOrigins = lists:foldl(fun({Is, V}, FoldIVOrigins) ->
+                Origins = gb_sets:singleton({Ref, V}),
+
+                gb_sets:fold(fun(I, NestedIVOrigins) ->
+                  NestedIVOrigins#{{I, V} => Origins}
+                end, FoldIVOrigins, Is)
+              end, IVOrigins, IVs),
+
               S#solver{
                 inst_refs=InstRefs#{Ref => {InstT_, SubbedVs}},
-                v_to_ref=NewVToRef
+                iv_origins=NewIVOrigins
               }
           end,
           CaseS
@@ -1799,25 +1868,37 @@ unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     true -> sub_unify(ReturnT1, ReturnT2, S1);
     false -> S1
   end;
-unify({lam, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
-  #solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2} = S,
-  S1 = sub_unify(ArgT1, ArgT2, S#solver{loc=Loc, t1=ArgT1, t2=ArgT2}),
-  S2 = S1#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2},
+unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
+  #solver{
+    module=Module,
+    loc=OrigLoc,
+    t1=OrigT1,
+    t2=OrigT2,
+    passed_vs=PassedVs
+  } = S,
+
+  NewPassedVs = gb_sets:fold(fun(V, FoldPassedVs) ->
+    [{V, ArgT2, Module, Loc, Env} | FoldPassedVs]
+  end, PassedVs, fvs(ArgT2)),
+
+  S1 = S#solver{loc=Loc, t1=ArgT1, t2=ArgT2, passed_vs=NewPassedVs},
+  S2 = sub_unify(ArgT1, ArgT2, S1),
+  S3 = S2#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2},
 
   case {ReturnT1, ReturnT2} of
     % We're continuing to unify arguments passed in a function application.
     % Retain the same t1/t2 as before, so if an error occurs between a lam and
     % a non-lam type, the entire lam types will be included in the error,
     % thereby allowing the reporter to report too many arguments.
-    {{lam, _, _, _}, _} -> sub_unify(ReturnT1, ReturnT2, S2);
+    {{lam, _, _, _, _}, _} -> sub_unify(ReturnT1, ReturnT2, S3);
 
     % We're done with the arguments of the function application. We shouldn't
     % include the full lam types in errors between the return types (not only
     % is it confusing to the user, but it'll also be misconstrued by the
     % reporter as too many arguments), so set the return types to be t1/t2.
-    _ -> sub_unify(ReturnT1, ReturnT2, S2#solver{t1=ReturnT1, t2=ReturnT2})
+    _ -> sub_unify(ReturnT1, ReturnT2, S3#solver{t1=ReturnT1, t2=ReturnT2})
   end;
-unify({lam, _, _}=T1, {lam, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
+unify({lam, _, _}=T1, {lam, _, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
 
 unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   if
@@ -1949,15 +2030,24 @@ unify({tv, V1, Is1, Rigid1}, {tv, V2, Is2, Rigid2}, S) ->
 
     not Rigid1, not Rigid2 ->
       if
-        Is1 == none; Is1 == Is2 -> add_sub(V1, TV2, S);
+        Is1 == none -> add_sub(V1, TV2, S);
         Is2 == none -> add_sub(V2, TV1, S);
         true ->
-          % TODO: error case??
-          %   if we're unifying A: Num with B: Something, how to fix?
-          %   how to deal with 1 being considered an int, but not a float?
-          %     i.e. what if we did 1 : Float??
-          Merged = gb_sets:union(Is1, Is2),
-          add_sub(V2, {set_ifaces, Merged}, add_sub(V1, TV2, S))
+          MergedIs = {set_ifaces, gb_sets:union(Is1, Is2)},
+          S1 = add_sub(V1, MergedIs, add_sub(V2, TV1, S)),
+
+          Is2ExceptNum = gb_sets:delete_any("Num", Is2),
+          NewIVOrigins = gb_sets:fold(fun(I, FoldIVOrigins) ->
+            V2Origins = maps:get({I, V2}, FoldIVOrigins),
+            case maps:find({I, V1}, FoldIVOrigins) of
+              {ok, V1Origins} ->
+                MergedOrigins = gb_sets:union(V1Origins, V2Origins),
+                FoldIVOrigins#{{I, V1} => MergedOrigins};
+              error -> FoldIVOrigins#{{I, V1} => V2Origins}
+            end
+          end, S#solver.iv_origins, Is2ExceptNum),
+
+          S1#solver{iv_origins=NewIVOrigins}
       end;
 
     true -> add_err(S)
@@ -1968,14 +2058,17 @@ unify({tv, V, Is, Rigid}, T, S) ->
   WouldEscape = Bound and occurs(true, T, S),
 
   if
-    Occurs -> add_err(S);
-    Rigid or WouldEscape -> add_err(S);
+    % Don't add V to ErrVs here because it can't actually be unified with
+    % a concrete type.
+    Rigid -> add_err(S);
+
+    Occurs or WouldEscape -> add_err_v(V, add_err(S));
     Is == none -> add_sub(V, T, S);
     true ->
       S1 = gb_sets:fold(fun(I, FoldS) -> instance(T, I, V, FoldS) end, S, Is),
       case no_errs(S1, S) of
         true -> add_sub(V, T, S1);
-        false -> S1
+        false -> add_err_v(V, S1)
       end
   end;
 unify(T, {tv, V, Is, Rigid}, S) -> sub_unify({tv, V, Is, Rigid}, T, S);
@@ -2019,7 +2112,7 @@ add_sub(V, RawSub, S) ->
     % We don't want to keep the locations of arguments if we're subbing for
     % a function application. This aids comprehension: we can only ever
     % unify a function application (a 4-tuple lam) with a regular 3-tuple lam.
-    {lam, _, _, _} -> remove_arg_locs(RawSub);
+    {lam, _, _, _, _} -> remove_app_meta(RawSub);
     _ -> RawSub
   end,
 
@@ -2048,6 +2141,9 @@ add_err(S) ->
   #solver{t1=T1, t2=T2, module=Module, loc=Loc, from=From} = S,
   Err = {T1, T2, Module, Loc, From},
   S#solver{errs=[Err | S#solver.errs]}.
+
+add_err_v(V, #solver{err_vs=ErrVs}=S) ->
+  S#solver{err_vs=gb_sets:add(V, ErrVs)}.
 
 no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
@@ -2102,21 +2198,36 @@ instance(T, I, V, S) ->
         _ ->
           #solver{
             inst_refs=InstRefs,
-            v_to_ref=VToRef,
+            iv_origins=IVOrigins,
             nested_ivs=NestedIVs
           } = S,
 
           % TODO: is there a case where this fails?
-          Ref = maps:get(V, VToRef),
-          {InstT, SubbedVs} = maps:get(Ref, InstRefs),
+          Origins = maps:get({I, V}, IVOrigins),
 
-          {NewSubbedVs, NewVToRef} = add_nested_ivs(IVs, SubbedVs, VToRef, Ref),
-          NewInstRefs = InstRefs#{Ref => {InstT, NewSubbedVs}},
-          NewNestedIVs = NestedIVs#{{I, V} => IVs},
+          {NewInstRefs, NewNestedIVs} = gb_sets:fold(fun({Ref, OrigV}, Memo) ->
+            {FoldInstRefs, FoldNestedIVs} = Memo,
+            {InstT, SubbedVs} = maps:get(Ref, FoldInstRefs),
+            SubbedVs1 = add_subbed_vs(IVs, SubbedVs),
+
+            FoldInstRefs1 = FoldInstRefs#{Ref => {InstT, SubbedVs1}},
+            FoldNestedIVs1 = FoldNestedIVs#{{I, OrigV} => IVs},
+            {FoldInstRefs1, FoldNestedIVs1}
+          end, {InstRefs, NestedIVs}, Origins),
+
+          NewIVOrigins = lists:foldl(fun({NestedIs, NestedV}, FoldIVOrigins) ->
+            NestedOrigins = gb_sets:fold(fun({Ref, _}, FoldOrigins) ->
+              gb_sets:add({Ref, NestedV}, FoldOrigins)
+            end, gb_sets:new(), Origins),
+
+            gb_sets:fold(fun(NestedI, NestedIVOrigins) ->
+              NestedIVOrigins#{{NestedI, NestedV} => NestedOrigins}
+            end, FoldIVOrigins, NestedIs)
+          end, IVOrigins, IVs),
 
           S#solver{
             inst_refs=NewInstRefs,
-            v_to_ref=NewVToRef,
+            iv_origins=NewIVOrigins,
             nested_ivs=NewNestedIVs
           }
       end,
@@ -2126,23 +2237,21 @@ instance(T, I, V, S) ->
     error -> add_err(S)
   end.
 
-add_nested_ivs(IVs, SubbedVs, VToRef, Ref) ->
-  lists:foldl(fun({Is, NestedV}, Memo) ->
-    {FoldSubbedVs, FoldVToRef} = Memo,
-    NestedTV = {tv, NestedV, Is, false},
+add_subbed_vs(IVs, SubbedVs) ->
+  lists:foldl(fun({Is, V}, FoldSubbedVs) ->
     % Rigid doesn't matter here, but note that these Vs are non-rigid
     % anyway because they're instantiated.
-    {FoldSubbedVs#{NestedV => NestedTV}, FoldVToRef#{NestedV => Ref}}
-  end, {SubbedVs, VToRef}, IVs).
+    FoldSubbedVs#{V => {tv, V, Is, false}}
+  end, SubbedVs, IVs).
 
-remove_arg_locs({lam, _, ArgT, ReturnT}) ->
-  {lam, ArgT, remove_arg_locs(ReturnT)};
-remove_arg_locs(T) -> T.
+remove_app_meta({lam, _, _, ArgT, ReturnT}) ->
+  {lam, ArgT, remove_app_meta(ReturnT)};
+remove_app_meta(T) -> T.
 
 subs({lam, ArgT, ReturnT}, Subs, Aliases) ->
   {lam, subs(ArgT, Subs, Aliases), subs(ReturnT, Subs, Aliases)};
-subs({lam, Loc, ArgT, ReturnT}, Subs, Aliases) ->
-  {lam, Loc, subs(ArgT, Subs, Aliases), subs(ReturnT, Subs, Aliases)};
+subs({lam, Env, Loc, ArgT, ReturnT}, Subs, Aliases) ->
+  {lam, Env, Loc, subs(ArgT, Subs, Aliases), subs(ReturnT, Subs, Aliases)};
 subs({tuple, ElemTs}, Subs, Aliases) ->
   {tuple, lists:map(fun(T) -> subs(T, Subs, Aliases) end, ElemTs)};
 subs({tv, _, _, _}=TV, Subs, Aliases) ->
@@ -2244,7 +2353,7 @@ bound_vs(Env, #solver{subs=Subs, aliases=Aliases, schemes=Schemes}) ->
   end, gb_sets:new(), Env).
 
 fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
-fvs({lam, _, ArgT, ReturnT}) -> fvs({lam, ArgT, ReturnT});
+fvs({lam, _, _, ArgT, ReturnT}) -> fvs({lam, ArgT, ReturnT});
 fvs({tuple, ElemTs}) ->
   lists:foldl(fun(T, FVs) ->
     gb_sets:union(FVs, fvs(T))
@@ -2273,7 +2382,7 @@ occurs(V, T, #solver{subs=Subs, aliases=Aliases}) ->
 
 occurs(V, {lam, ArgT, ReturnT}) ->
   occurs(V, ArgT) or occurs(V, ReturnT);
-occurs(V, {lam, _, ArgT, ReturnT}) -> occurs(V, {lam, ArgT, ReturnT});
+occurs(V, {lam, _, _, ArgT, ReturnT}) -> occurs(V, {lam, ArgT, ReturnT});
 occurs(V, {tuple, ElemTs}) ->
   lists:foldl(fun(T, Occurs) ->
     Occurs or occurs(V, T)

@@ -121,10 +121,10 @@ norm({lam, ArgT, ReturnT}, N) ->
   {NormArgT, N1} = norm(ArgT, N),
   {NormReturnT, N2} = norm(ReturnT, N1),
   {{lam, NormArgT, NormReturnT}, N2};
-norm({lam, Loc, ArgT, ReturnT}, N) ->
+norm({lam, Env, Loc, ArgT, ReturnT}, N) ->
   {NormArgT, N1} = norm(ArgT, N),
   {NormReturnT, N2} = norm(ReturnT, N1),
-  {{lam, Loc, NormArgT, NormReturnT}, N2};
+  {{lam, Env, Loc, NormArgT, NormReturnT}, N2};
 norm({tuple, ElemTs}, N) ->
   {NormElemTs, N1} = lists:mapfoldl(fun(T, FoldN) ->
     norm(T, FoldN)
@@ -1184,6 +1184,12 @@ interface_test_() ->
       "impl Foo for A -> A { foo(a, t) = { t(a); a } }",
       {"rigid(A)", "rigid(B)", l(1, 38, 1), ?FROM_APP}
     ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Atom { foo(a) = a == @hi }\n"
+      "bar = foo(\"hi\")",
+      {"String", "A ~ Foo", l(2, 10, 4), ?FROM_APP}
+    ))
   , ?_test(ctx_err_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for String { foo(_) = true foo(_) = false }",
@@ -1223,14 +1229,39 @@ interface_test_() ->
       "interface Foo { foo : T, bar : T -> T }",
       {?ERR_IFACE_TYPE("foo"), l(16, 7)}
     ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = to_int(@erlang:round(5.3))",
+      {?ERR_MUST_SOLVE("L ~ ToInt", "L ~ ToInt"), l(2, 13, 18)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = to_int(3)",
+      {?ERR_MUST_SOLVE("H ~ ToInt ~ Num", "H ~ ToInt ~ Num"), l(2, 13, 1)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = (|x| to_int(x))(@erlang:round(5.3))",
+      {?ERR_MUST_SOLVE("N ~ ToInt", "N ~ ToInt"), l(2, 22, 18)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = let to_i(x) = to_int(x) in to_i(3)",
+      {?ERR_MUST_SOLVE("M ~ ToInt ~ Num", "M ~ ToInt ~ Num"), l(2, 38, 1)}
+    ))
   ].
 
 pattern_test_() ->
   [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
   , ?_test("A ~ Num" = ok_expr("let x = 3 in match x + 5 { a => a + 10 }"))
   , ?_test("Atom" = ok_expr("match 'x' { 'y' => @hi, 'x' => @hello }"))
-  , ?_test("Float" =
-             ok_expr("match |x| x { id => let y = id(true) in id(5.0) }"))
+  , ?_test("Float" = ok_expr(
+      "match |x| x { id => let y = id(true) in id(5.0) }"
+    ))
   , ?_test("(Int, Float, Int, Float)" = ok_expr(
       "match (3, 4) {\n"
       "  (a, b) => (a + 3 : Int, a + 3.0, b + 4 : Int, b + 4.0)\n"

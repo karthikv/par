@@ -261,6 +261,16 @@
     [Name]
   )
 ).
+-define(
+  ERR_MUST_SOLVE(PrettyTV, PrettyArgT),
+  ?FMT(
+    "Ambiguous argument of type ~s. I need to know the concrete type of the "
+    "type variable ~s so I can ensure its interfaces are satisifed. Please "
+    "provide a type signature for this argument that specifies the concrete "
+    "type.",
+    [PrettyArgT, PrettyTV]
+  )
+).
 
 
 -define(LOC(Node), element(2, Node)).

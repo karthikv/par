@@ -4,9 +4,7 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Ensure necessary TVs are solved in type system
 %   - passing iface fn to native fn; e.g. @lists:map(to_int, l)?
-%   - Optimize simple app case
 %   - Handle more rewrite cases
 %   - In code gen, rewrite var_ref that comes from Module.field
 %   - sig instantiation
@@ -16,6 +14,7 @@
 %   - Validation to prevent struct/enum TE from being a gen TV from HKT?
 %   - Extending interfaces?
 %   - Implementations for builtin typeclasses?
+%     - Should we also exclude concatable, separable, etc. from sets?
 %   - Allow ifaces on struct/enum params?
 %   - Port exec interface tests to type system tests
 %   - Bootstrap, fix, and ensure everything still works
@@ -51,7 +50,7 @@
 %   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
 %     - Error message with context when there's no else clause
-%   - Norm types for error messages
+%   - Norm types for error messages and for ERR_MUST_SOLVE ctx err
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
 %   - Struct/Enum name conflict w/ global causes hard-to-understand errors
@@ -80,6 +79,8 @@
 % - [2 weeks] Editor tooling for vim, atom, emacs, sublime
 %   - Fix syntax highlighting for comments in enum for vim
 % - Type aliases
+% - Use tuple for struct representation rather than map
+% - Optimize simple app case for interfaces to not rewrite
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

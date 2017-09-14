@@ -100,9 +100,9 @@ format({errors, Errs, Comps}) ->
     Code = extract_code(Loc, StrLines),
 
     Str = case Err of
-      {{lam, _, _, _}=T1, {lam, _, _}=T2, _, _, From} ->
+      {{lam, _, _, _, _}=T1, {lam, _, _}=T2, _, _, From} ->
         format_arity(T1, T2, From);
-      {{lam, _, _}=T1, {lam, _, _, _}=T2, _, _, From} ->
+      {{lam, _, _}=T1, {lam, _, _, _, _}=T2, _, _, From} ->
         format_arity(T2, T1, From);
 
       {T1, T2, _, _, From} ->
@@ -161,12 +161,12 @@ format_arity(T1, T2, From) ->
   ).
 
 given_arity(T) -> given_arity(T, 0).
-given_arity({lam, _, _, ReturnT}, Arity) -> given_arity(ReturnT, Arity + 1);
+given_arity({lam, _, _, _, ReturnT}, Arity) -> given_arity(ReturnT, Arity + 1);
 given_arity(_, Arity) -> Arity.
 
 max_arity(T) -> max_arity(T, 0).
 max_arity({lam, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
-max_arity({lam, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
+max_arity({lam, _, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
 max_arity(_, Arity) -> Arity.
 
 type_system_err_lte(Err1, Err2) ->

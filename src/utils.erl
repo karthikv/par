@@ -6,6 +6,7 @@
   impl_key/1,
   ivs/1,
   ivs/2,
+  all_ivs/1,
   arg_ts/1,
   absolute/1,
   pretty_csts/1,
@@ -39,7 +40,7 @@ unqualify(Con) ->
   end.
 
 impl_key({lam, _, _}) -> "Function";
-impl_key({lam, _, _, _}) -> "Function";
+impl_key({lam, _, _, _, _}) -> "Function";
 impl_key({tuple, _}) -> "Tuple";
 impl_key({con, Con}) -> Con;
 impl_key({gen, Con, _}) -> Con;
@@ -50,24 +51,32 @@ impl_key(unit) -> "()".
 ivs(T) -> ivs(T, gb_sets:new()).
 
 ivs(T, InitSeenVs) ->
-  {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
-    case gb_sets:is_member(V, SeenVs) of
-      true -> {IVs, SeenVs};
-      false -> {[IV | IVs], gb_sets:add(V, SeenVs)}
+  {IVs, _} = lists:foldl(fun({AllIs, V}, {IVs, SeenVs}) ->
+    Is = gb_sets:delete_any("Num", AllIs),
+    Seen = gb_sets:is_member(V, SeenVs),
+    Empty = gb_sets:is_empty(Is),
+
+    if
+      not Seen and not Empty -> {[{Is, V} | IVs], gb_sets:add(V, SeenVs)};
+      true -> {IVs, SeenVs}
     end
   end, {[], InitSeenVs}, ivs_list(T)),
   IVs.
 
+all_ivs(T) ->
+  {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
+    case gb_sets:is_member(V, SeenVs) of
+      true -> {IVs, SeenVs};
+      _ -> {[IV | IVs], gb_sets:add(V, SeenVs)}
+    end
+  end, {[], gb_sets:new()}, ivs_list(T)),
+  IVs.
+
 ivs_list({lam, ArgT, ReturnT}) -> ivs_list(ArgT) ++ ivs_list(ReturnT);
-ivs_list({lam, _, ArgT, ReturnT}) -> ivs_list({lam, ArgT, ReturnT});
+ivs_list({lam, _, _, ArgT, ReturnT}) -> ivs_list({lam, ArgT, ReturnT});
 ivs_list({tuple, ElemTs}) -> lists:flatmap(fun ivs_list/1, ElemTs);
 ivs_list({tv, _, none, _}) -> [];
-ivs_list({tv, V, AllIs, _}) ->
-  Is = gb_sets:delete_any("Num", AllIs),
-  case gb_sets:is_empty(Is) of
-    true -> [];
-    false -> [{Is, V}]
-  end;
+ivs_list({tv, V, Is, _}) -> [{Is, V}];
 ivs_list({con, _}) -> [];
 ivs_list({gen, Gen, ParamTs}) ->
   GenIVs = case Gen of
@@ -107,11 +116,11 @@ pretty_csts([{T1, T2, Module, Loc, From} | Rest]) ->
 pretty({lam, ArgT, ReturnT}) ->
   Format = case ArgT of
     {lam, _, _} -> "(~s) -> ~s";
-    {lam, _, _, _} -> "(~s) -> ~s";
+    {lam, _, _, _, _} -> "(~s) -> ~s";
     _ -> "~s -> ~s"
   end,
   ?FMT(Format, [pretty(ArgT), pretty(ReturnT)]);
-pretty({lam, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
+pretty({lam, _, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
 pretty({tuple, ElemTs}) ->
   PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
   ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);
@@ -136,7 +145,11 @@ pretty({tv, RawV, Is, Rigid}) ->
     false -> Str;
     true -> ?FMT("rigid(~s)", [Str])
   end;
-pretty({set_iface, I}) -> ?FMT("I = ~s", [utils:unqualify(I)]);
+pretty({set_ifaces, Is}) ->
+  Unqualified = lists:map(fun(I) ->
+    utils:unqualify(I)
+  end, gb_sets:to_list(Is)),
+  ?FMT("set ifaces ~s", [string:join(Unqualified, " ~ ")]);
 % TODO: keep qualified when ambiguous
 pretty({con, Con}) -> utils:unqualify(Con);
 pretty({gen, "List", [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);

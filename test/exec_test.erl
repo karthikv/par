@@ -435,6 +435,15 @@ test_interface(Run) ->
       "proxy(b) = to_int(b)\n"
       "main() = proxy(false)"
     ))
+  % to ensure no impl arg is added to lambda |c| ... because of bound impl b
+  , ?_test(1 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Bool {\n"
+      "  to_int(b) = if b then 1 else 0\n"
+      "}\n"
+      "foo(b) = |c| if b == c then to_int(c) else -1\n"
+      "main() = foo(true, true)"
+    ))
   % to test fns with multiple arguments having the same iv pair
   , ?_test(7 = Run(
       "interface ToInt { to_int : T -> Int }\n"
@@ -538,16 +547,28 @@ test_interface(Run) ->
       "  to_str(Foo((\"hey\", true)))\n"
       ")"
     ))
-
-
-  %% , ?_test(1 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for Bool {\n"
-  %%     "  to_int(b) = if b then 1 else 0\n"
-  %%     "}\n"
-  %%     "proxy(a) = let f = |b| if a == b then to_int(b) else -1 in f(a)\n"
-  %%     "main() = proxy(true)"
-  %%   ))
+  % to ensure code gen works even with iv unification
+  , ?_test({true, $b} = Run(
+      "interface Foo { foo : T -> T }\n"
+      "interface Bar { bar : T -> T }\n"
+      "impl Foo for Atom { foo(a) = a }\n"
+      "impl Foo for (A ~ Foo, B) { foo((a, b)) = (foo(a), b) }\n"
+      "baz(a, b) = let x = foo(a), y = foo(b), same = x == y in\n"
+      "  (same, match x { (@hi, _) => 'a', _ => 'b' })\n"
+      "main() = baz((@hey, 4), (@hey, 4))"
+    ))
+  % this time with multiple different ifaces
+  , ?_test({false, $a} = Run(
+      "interface Foo { foo : T -> T }\n"
+      "interface Bar { bar : T -> T }\n"
+      "impl Foo for Atom { foo(a) = a }\n"
+      "impl Foo for (A ~ Foo, B) { foo((a, b)) = (foo(a), b) }\n"
+      "impl Bar for Atom { bar(a) = a }\n"
+      "impl Bar for (A ~ Bar, B) { bar((a, b)) = (bar(a), b) }\n"
+      "baz(a, b) = let x = foo(a), y = bar(b), same = x == y in\n"
+      "  (same, match x { (@hi, _) => 'a', _ => 'b' })\n"
+      "main() = baz((@hi, 3), (@hey, 4))"
+    ))
 
   %% , ?_test(3 = Run(
   %%     "interface ToInt { to_int : T -> Int }\n"
