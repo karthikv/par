@@ -1149,6 +1149,13 @@ interface_test_() ->
       "interface Foo { foo : [T] -> T }",
       "foo"
     ))
+  , ?_test("(Int, Int)" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
+      "impl ToInt for (Int, Bool, Int) { to_int((a, _, c)) = a + c }\n"
+      "bar = (to_int((1, true)), to_int((1, false, 2)))",
+      "bar"
+    ))
   , ?_test("(A -> B) -> C<A> ~ Mappable -> C<B> ~ Mappable" = ok_prg(
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }",
       "map"
@@ -1280,7 +1287,7 @@ interface_test_() ->
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for Int -> Bool { foo(_) = true }\n"
       "impl Foo for (Atom -> A) -> A { foo(_) = true }",
-      {?ERR_DUP_IMPL("Foo", "Function", "Int -> Bool"), l(2, 13, 16)}
+      {?ERR_DUP_IMPL("Foo", "function", "Int -> Bool"), l(2, 13, 16)}
     ))
   , ?_test(ctx_err_prg(
       "interface Foo { foo : Bool }",

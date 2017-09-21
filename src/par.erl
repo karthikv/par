@@ -11,7 +11,6 @@
 %   - Validation to prevent struct/enum TE from being a gen TV from HKT?
 %     - And to prevent impl type from being a HKT
 %   - Extending interfaces?
-%   - Impl key for tuples of different sizes
 %   - Port exec interface tests to type system tests
 %     - Port gen TV test cases to exec tests
 %   - Bootstrap, fix, and ensure everything still works

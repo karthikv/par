@@ -514,6 +514,12 @@ test_interface(Run) ->
       "main() = let _ = combine(1), result = @file:read_file(filename) in\n"
       "  { @file:delete(filename); result }"
     ))
+  , ?_test({1, 3} = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
+      "impl ToInt for (Int, Bool, Int) { to_int((a, _, c)) = a + c }\n"
+      "main() = (to_int((1, true)), to_int((1, false, 2)))"
+    ))
   , ?_test(10 = Run(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Atom {\n"

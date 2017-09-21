@@ -40,13 +40,15 @@ unqualify(Con) ->
     Index -> lists:sublist(Con, Index + 1, length(Con))
   end.
 
-impl_key({lam, _, _}) -> "Function";
-impl_key({lam, _, _, _, _}) -> "Function";
-impl_key({tuple, _}) -> "Tuple";
+% The keys function, tuple, and record are in lowercase so they don't conflict
+% with the name of a Con.
+impl_key({lam, _, _}) -> "function";
+impl_key({lam, _, _, _, _}) -> "function";
+impl_key({tuple, Elems}) -> lists:concat([length(Elems), "-element tuple"]);
 impl_key({con, Con}) -> Con;
 impl_key({gen, {con, Con}, _}) -> Con;
-impl_key({record, _, _}) -> "Record";
-impl_key({record_ext, _, _, _}) -> "Record";
+impl_key({record, _, _}) -> "record";
+impl_key({record_ext, _, _, _}) -> "record";
 impl_key(unit) -> "()".
 
 ivs(T) -> ivs(T, gb_sets:new()).
