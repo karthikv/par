@@ -4,22 +4,17 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - passing iface fn to native fn; e.g. @lists:map(to_int, l)?
 %   - Handle more rewrite cases
 %   - In code gen, rewrite var_ref that comes from Module.field
 %   - sig instantiation
 %   - impls across modules?
-%   - Multiple interface unification. How to get errors w/ A: Num <=> B: Other?
-%   - HKT unification and typeclasses
 %   - Validation to prevent struct/enum TE from being a gen TV from HKT?
+%     - And to prevent impl type from being a HKT
 %   - Extending interfaces?
-%   - Implementations for builtin typeclasses?
-%     - Should we also exclude concatable, separable, etc. from sets?
-%   - Allow ifaces on struct/enum params?
+%   - Impl key for tuples of different sizes
 %   - Port exec interface tests to type system tests
+%     - Port gen TV test cases to exec tests
 %   - Bootstrap, fix, and ensure everything still works
-% - Rename -Var to -VarRep when necessary
-% - Rename var to id and var_ref to var?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Builtin typeclasses
@@ -27,15 +22,9 @@
 %   - Make pattern matching with var_value use proper type class
 %   - Ord type class for comparison and sorting
 % - Dot instead of ':' for native functions?
-% - Put solver record into CG to avoid duplication of fields like nested_ivs?
 % - [2 days] Exceptions
-% - [2 days] Better pattern matching
-%   - Negative numbers and unit in patterns
-%   - Record types
-%   - '=' sign
-%   - Disallow pattern matching w/ struct Con(...) fn?
-%   - Allow when clause and or?
-% - [1 day] TV vs. Con parsing
+% - Negative numbers and unit in patterns
+% - Ensure con is fully applied in patterns
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
@@ -64,6 +53,11 @@
 %   - Better message for no impl of anon record type when there's a concrete
 %     record type impl that matches
 %   - Fix other_errors_test that ensures sig cst is unified first
+%   - Suppress dup errors if multiple params/elems don't unify
+%   - Better messages for indirect errors from T<B> due to T<A> being unified
+%     - Better messages for bad impl type that has wrong # of params; might
+%       be fixed by better indirect errors
+%   - Improve error when iface needs HKT and impl type has wrong # of params
 % - Website + Documentation
 %
 % Defer
@@ -81,6 +75,20 @@
 % - Type aliases
 % - Use tuple for struct representation rather than map
 % - Optimize simple app case for interfaces to not rewrite
+% - Prevent passing iface fn to native fn; e.g. @lists:map(to_int, l)?
+% - Rename ifaces to is unless referring to actual {interface, ...}
+% - Rename -Var to -VarRep when necessary
+% - Rename var to id and var_ref to var?
+% - Put solver record into CG to avoid duplication of fields like nested_ivs?
+% - [1 day] TV vs. Con parsing
+% - Allow ifaces on struct/enum params?
+% - Implementations for builtin typeclasses?
+%   - Should we also exclude concatable, separable, etc. from sets?
+% - [2 days] Better pattern matching
+%   - Record types
+%   - '=' sign
+%   - Disallow pattern matching w/ struct Con(...) fn?
+%   - Allow when clause and or?
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

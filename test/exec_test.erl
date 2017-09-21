@@ -547,6 +547,13 @@ test_interface(Run) ->
       "  to_str(Foo((\"hey\", true)))\n"
       ")"
     ))
+  , ?_test([false, false, true] = Run(
+      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+      "list_map : (A -> B) -> [A] -> [B]\n"
+      "list_map = @lists:map/2\n"
+      "impl Mappable for List { map = list_map }\n"
+      "main() = map(|x| x == 3, [1, 2, 3])"
+    ))
   % to ensure code gen works even with iv unification
   , ?_test({true, $b} = Run(
       "interface Foo { foo : T -> T }\n"

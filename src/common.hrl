@@ -2,14 +2,7 @@
 -define(COMMON_HRL_, 1).
 
 % a component to compile, representing a module and its metadata
--record(comp, {
-  % fields added prior to type inference
-  module,
-  ast,
-  deps,
-  path,
-  prg
-}).
+-record(comp, {module, ast, deps, path, prg}).
 
 % C - A context record for type inference with the following fields:
 %   gnr - the current gnr record that constraints are being added to; see G
@@ -29,6 +22,7 @@
 %   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   num_params - the number of type params for the TV being processed
+%   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
 %   modules - the set of accessible modules from the current module
 %   module - the current module
 %   pid - the process id of the TV server used to generated fresh TVs
@@ -68,6 +62,7 @@
   nested_ivs,
   num_params,
   errs = [],
+  gen_vs = #{},
   modules = gb_sets:new(),
   module,
   pid
@@ -112,6 +107,7 @@
   ?FMT("implementing interface ~s for ~s", [utils:unqualify(Con), PrettyT])
 ).
 -define(FROM_INST, "instantiation").
+-define(FROM_IMPL_TYPE, "impl type").
 
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
@@ -181,7 +177,7 @@
 -define(
   ERR_TV_NUM_PARAMS(V, ExpNum, Num),
   ?FMT(
-    "Type variable ~s was previously given ~p type parameters, but now has ~s; "
+    "Type variable ~s was previously given ~p type parameters, but now has ~p; "
     "the two must be consistent",
     [V, ExpNum, Num]
   )
@@ -269,6 +265,15 @@
     "provide a type signature for this argument that specifies the concrete "
     "type.",
     [PrettyArgT, PrettyTV]
+  )
+).
+-define(
+  ERR_IMPL_TYPE(Con),
+  ?FMT(
+    "The interface ~s must be implemented for a type constructor. Please "
+    "specify a type constructor as a single, capitalized name, like List or "
+    "Set.",
+    [utils:unqualify(Con)]
   )
 ).
 

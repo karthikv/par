@@ -139,16 +139,17 @@ norm({tv, V, Is, Cat}, {Subs, Pid}) ->
   end,
   {{tv, NewV, Is, Cat}, N1};
 norm({con, Con}, N) -> {{con, Con}, N};
-norm({gen, Con, ParamTs}, N) ->
-  {NormParamTs, N1} = lists:mapfoldl(fun(T, FoldN) ->
+norm({gen, ConT, ParamTs}, N) ->
+  {NormConT, N1} = norm(ConT, N),
+  {NormParamTs, N2} = lists:mapfoldl(fun(T, FoldN) ->
     norm(T, FoldN)
-  end, N, ParamTs),
-  {{gen, Con, NormParamTs}, N1};
-norm({A, Options}, N) when A == either; A == ambig ->
-  {NormOptions, N1} = lists:mapfoldl(fun(O, FoldN) ->
-    norm(O, FoldN)
-  end, N, Options),
-  {{A, NormOptions}, N1};
+  end, N1, ParamTs),
+  {{gen, NormConT, NormParamTs}, N2};
+norm({gen, V, Is, BaseT, ParamTs}, N) ->
+  % Don't need to norm V; it isn't displayed.
+  {NormBaseT, N1} = norm(BaseT, N),
+  {{gen, _, NormParamTs}, N2} = norm({gen, {con, ""}, ParamTs}, N1),
+  {{gen, V, Is, NormBaseT, NormParamTs}, N2};
 norm({record, A, FieldMap}, N) ->
   {NewFieldMap, N1} = maps:fold(fun(Name, FieldT, {FoldMap, FoldN}) ->
     {NormT, FoldN1} = norm(FieldT, FoldN),
@@ -1148,6 +1149,10 @@ interface_test_() ->
       "interface Foo { foo : [T] -> T }",
       "foo"
     ))
+  , ?_test("(A -> B) -> C<A> ~ Mappable -> C<B> ~ Mappable" = ok_prg(
+      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }",
+      "map"
+    ))
   , ?_test("(String, String, String, String)" = ok_prg(
       "interface ToStr { to_str : T -> String }\n"
       "impl ToStr for String { to_str(s) = s }\n"
@@ -1169,6 +1174,50 @@ interface_test_() ->
       ")",
       "x"
     ))
+  , ?_test("[Bool]" = ok_prg(
+      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+      "list_map : (A -> B) -> [A] -> [B]\n"
+      "list_map = @lists:map/2\n"
+      "impl Mappable for List { map = list_map }\n"
+      "foo = map(|x| x == 3, [1, 2, 3])",
+      "foo"
+    ))
+  , ?_test("Map<Atom, Char>" = ok_prg(
+      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+      "map_map : ((A, B) -> (C, D)) -> Map<A, B> -> Map<C, D>\n"
+      "map_map(f, m) =\n"
+      "  let cb = |k, v, new_m|\n"
+      "    let (new_k, new_v) = f((k, v)) in @maps:put(new_k, new_v, new_m)\n"
+      "  in @maps:fold(cb, {}, m)\n"
+      "impl Mappable for Map { map = map_map }\n"
+      "foo = map(|(k, v)| (v, k), { 'a' => @a })",
+      "foo"
+    ))
+  , ?_test("A<(Int, Bool)> ~ Foo -> Char" = ok_prg(
+      "interface Foo { foo : T<(Int, Bool)> -> Char }\n"
+      "impl Foo for Map { foo(_) = 'a' }",
+      "foo"
+    ))
+  , ?_test("Bool" = ok_prg(
+      "interface Foo { foo : T -> T }\n"
+      "impl Foo for Int { foo(i) = 2 * i }\n"
+      "impl Foo for [A ~ Foo] {\n"
+      "  foo(l) = match l { [] => l, [h | t] => [foo(h) | foo(t)] }\n"
+      "}\n"
+      "bar = foo(@lists:seq(1, 2) : T<Int>) == [2, 4]",
+      "bar"
+    ))
+  , ?_test("A<B> ~ ToInt -> Int" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo(x) = { @io:printable_range() : T<A> == x; to_int(x) }",
+      "foo"
+    ))
+  , ?_test("A<B> ~ ToInt -> Int" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo : T<A> ~ ToInt -> Int\n"
+      "foo(x) = to_int(x)",
+      "foo"
+    ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for Atom { foo(a) = @hi }",
@@ -1189,6 +1238,22 @@ interface_test_() ->
       "impl Foo for Atom { foo(a) = a == @hi }\n"
       "bar = foo(\"hi\")",
       {"String", "A ~ Foo", l(2, 10, 4), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T<Int> -> Char }\n"
+      "impl Foo for Map { foo(_) = 'a' }",
+      {"A<Int>", "Map<B, C>", l(1, 13, 3), ?FROM_IMPL_TYPE}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T<(Int, Bool, Char)> -> Char }\n"
+      "impl Foo for Map { foo(_) = 'a' }",
+      {"A<(Int, Bool, Char)>", "Map<B, C>", l(1, 13, 3), ?FROM_IMPL_TYPE}
+    ))
+  , ?_test(bad_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo : T<A> -> Int\n"
+      "foo(x) = to_int(x)",
+      {"rigid(A)<rigid(B)>", "C ~ ToInt", l(2, 16, 1), ?FROM_APP}
     ))
   , ?_test(ctx_err_prg(
       "interface Foo { foo : T -> Bool }\n"
@@ -1230,28 +1295,147 @@ interface_test_() ->
       {?ERR_IFACE_TYPE("foo"), l(16, 7)}
     ))
   , ?_test(ctx_err_prg(
+      "interface Foo { foo : T<A> -> Int }\n"
+      "impl Foo for [A] { foo(_) = 3 }",
+      {?ERR_IMPL_TYPE("Foo"), l(1, 13, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T<A> -> Int }\n"
+      "impl Foo for Int { foo(_) = 3 }",
+      {?ERR_TYPE_PARAMS("Int", 0, 1), l(1, 13, 3)}
+    ))
+  , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE("L ~ ToInt", "L ~ ToInt"), l(2, 13, 18)}
+      {?ERR_MUST_SOLVE("M ~ ToInt", "M ~ ToInt"), l(2, 13, 18)}
     ))
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(3)",
-      {?ERR_MUST_SOLVE("H ~ ToInt ~ Num", "H ~ ToInt ~ Num"), l(2, 13, 1)}
+      {?ERR_MUST_SOLVE("I ~ ToInt ~ Num", "I ~ ToInt ~ Num"), l(2, 13, 1)}
     ))
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = (|x| to_int(x))(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE("N ~ ToInt", "N ~ ToInt"), l(2, 22, 18)}
+      {?ERR_MUST_SOLVE("O ~ ToInt", "O ~ ToInt"), l(2, 22, 18)}
     ))
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = let to_i(x) = to_int(x) in to_i(3)",
-      {?ERR_MUST_SOLVE("M ~ ToInt ~ Num", "M ~ ToInt ~ Num"), l(2, 38, 1)}
+      {?ERR_MUST_SOLVE("N ~ ToInt ~ Num", "N ~ ToInt ~ Num"), l(2, 38, 1)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo = to_int(@io:printable_range() : T<A>)",
+      {?ERR_MUST_SOLVE("R<Q> ~ ToInt", "R<Q> ~ ToInt"), l(1, 13, 28)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T<A> -> Int }\n"
+      "foo = to_int(@io:printable_range())",
+      {?ERR_MUST_SOLVE("N ~ ToInt", "N<M> ~ ToInt"), l(1, 13, 21)}
+    ))
+  ].
+
+gen_tv_test_() ->
+  [ ?_test("([A ~ Num], Set<Atom>)" = ok_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar = (foo([1, 2, 3]), foo(#[@hey, @hi]))",
+      "bar"
+    ))
+  , ?_test("[Int]" = ok_prg(
+      "foo : T<Int> -> T<Int>\n"
+      "foo(x) = x\n"
+      "bar = foo([1])",
+      "bar"
+    ))
+  , ?_test("([A ~ Num], Set<Atom>)" = ok_prg(
+      "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
+      "foo(x) = x\n"
+      "bar = (foo([1, 2, 3]), foo(#[@hey, @hi]))",
+      "bar"
+    ))
+  , ?_test("A<B> ~ Concatable -> A<B> ~ Concatable -> Char" = ok_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar(y, z) = let _ = foo(y), _ = foo(z), _ = y ++ z in 'a'",
+      "bar"
+    ))
+  , ?_test("[A] -> [A] -> [A]" = ok_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar(y, z) = let _ = foo(y), _ = foo(z), _ = y ++ z in z ++ []",
+      "bar"
+    ))
+  , ?_test("Map<Atom, Float>" = ok_prg(
+      "foo : A -> T<A> -> T<A>\n"
+      "foo(_, x) = x\n"
+      "bar = foo((@hi, 3.7), { @hello => 5.1 })",
+      "bar"
+    ))
+  , ?_test("A<B, C> -> A<B, C> -> Bool" = ok_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar : T<B, C> -> T<B, C>\n"
+      "bar(x) = x\n"
+      "baz(y, z) = { foo(y); bar(z); y == z }\n",
+      "baz"
+    ))
+  , ?_test("Map<Char, Bool> -> Map<Char, Bool> -> Bool" = ok_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar : T<B, C> -> T<B, C>\n"
+      "bar(x) = x\n"
+      "baz(y, z) = { foo(y); bar(z); y == z; z == { 'c' => true } }\n",
+      "baz"
+    ))
+  , ?_test(bad_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar = foo('c')",
+      {"Char", "A<B>", l(2, 10, 3), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<Int> -> T<Int>\n"
+      "foo(x) = x\n"
+      "bar = foo({})",
+      {"A<Int>", "Map<B, C>", l(2, 10, 2), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar(y, z) = let _ = foo(y), _ = foo(z), _ = y ++ z in z ++ \"hi\"",
+      {"String", "A<B> ~ Concatable", l(2, 59, 4), ?FROM_OP_RHS('++')}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<A> ~ Num -> Float\n"
+      "foo(x) = 3.7\n"
+      "bar = foo([1, 2, 3])",
+      {"[A ~ Num]", "B<A ~ Num> ~ Num", l(2, 10, 9), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<A> -> T<B>\n"
+      "foo(_) = @io:printable_range()\n"
+      "bar(x) = let y = foo(x), _ = y + 3 in x == []",
+      {"B<A> ~ Num", "[A]", l(2, 43, 2), ?FROM_OP_RHS('==')}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<A, B> -> T<A, B>\n"
+      "foo(x) = x\n"
+      "bar = foo([@hey])",
+      {"[Atom]", "A<B, C>", l(2, 10, 6), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<Int> -> T<Int>\n"
+      "foo(x) = x\n"
+      "bar : T<B, C> -> T<B, C>\n"
+      "bar(x) = x\n"
+      "baz(y, z) = { foo(y); bar(z); y == z }\n",
+      {"A<Int>", "B<C, D>", l(4, 35, 1), ?FROM_OP_RHS('==')}
     ))
   ].
 
@@ -1543,6 +1727,11 @@ other_errors_test_() ->
         ),
         l(17, 14)
       }
+    ))
+  , ?_test(ctx_err_prg(
+      "foo : T<A> -> T\n"
+      "foo(a) = @io:printable_range()",
+      {?ERR_TV_NUM_PARAMS("T", 1, 0), l(14, 1)}
     ))
   , ?_test(ctx_err_prg("\n\n\nfoo = a\n", {?ERR_NOT_DEF("a"), l(3, 6, 1)}))
   , ?_test(ctx_err_prg("foo = 3 + foo", {?ERR_NOT_DEF("foo"), l(10, 3)}))

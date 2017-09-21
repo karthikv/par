@@ -6,6 +6,7 @@
   impl_key/1,
   ivs/1,
   ivs/2,
+  builtin_is/0,
   all_ivs/1,
   arg_ts/1,
   absolute/1,
@@ -18,7 +19,7 @@ resolve_con(RawCon, C) ->
   Con = utils:qualify(RawCon, C),
   case maps:find(Con, C#ctx.aliases) of
     {ok, {_, {con, NewCon}, false}} -> NewCon;
-    {ok, {_, {gen, NewCon, _}, false}} -> NewCon;
+    {ok, {_, {gen, {con, NewCon}, _}, false}} -> NewCon;
     _ -> Con
   end.
 
@@ -43,7 +44,7 @@ impl_key({lam, _, _}) -> "Function";
 impl_key({lam, _, _, _, _}) -> "Function";
 impl_key({tuple, _}) -> "Tuple";
 impl_key({con, Con}) -> Con;
-impl_key({gen, Con, _}) -> Con;
+impl_key({gen, {con, Con}, _}) -> Con;
 impl_key({record, _, _}) -> "Record";
 impl_key({record_ext, _, _, _}) -> "Record";
 impl_key(unit) -> "()".
@@ -52,7 +53,7 @@ ivs(T) -> ivs(T, gb_sets:new()).
 
 ivs(T, InitSeenVs) ->
   {IVs, _} = lists:foldl(fun({AllIs, V}, {IVs, SeenVs}) ->
-    Is = gb_sets:delete_any("Num", AllIs),
+    Is = gb_sets:difference(AllIs, builtin_is()),
     Seen = gb_sets:is_member(V, SeenVs),
     Empty = gb_sets:is_empty(Is),
 
@@ -62,6 +63,8 @@ ivs(T, InitSeenVs) ->
     end
   end, {[], InitSeenVs}, ivs_list(T)),
   IVs.
+
+builtin_is() -> gb_sets:from_list(["Num", "Concatable", "Separable"]).
 
 all_ivs(T) ->
   {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
@@ -78,12 +81,13 @@ ivs_list({tuple, ElemTs}) -> lists:flatmap(fun ivs_list/1, ElemTs);
 ivs_list({tv, _, none, _}) -> [];
 ivs_list({tv, V, Is, _}) -> [{Is, V}];
 ivs_list({con, _}) -> [];
-ivs_list({gen, Gen, ParamTs}) ->
-  GenIVs = case Gen of
-    {tv, _, _, _} -> ivs_list(Gen);
-    _ -> []
+ivs_list({gen, _, ParamTs}) -> lists:flatmap(fun ivs_list/1, ParamTs);
+ivs_list({gen, V, Is, BaseT, ParamTs}) ->
+  BaseIVs = case Is of
+    none -> ivs_list(BaseT);
+    _ -> [{Is, V} | ivs_list(BaseT)]
   end,
-  GenIVs ++ lists:flatmap(fun ivs_list/1, ParamTs);
+  BaseIVs ++ ivs_list({gen, {con, ""}, ParamTs});
 % ivs_list({inst, ...}) ommitted; they should be resolved
 ivs_list({record, _, FieldMap}) ->
   SortedKeys = lists:sort(maps:keys(FieldMap)),
@@ -152,10 +156,33 @@ pretty({set_ifaces, Is}) ->
   ?FMT("set ifaces ~s", [string:join(Unqualified, " ~ ")]);
 % TODO: keep qualified when ambiguous
 pretty({con, Con}) -> utils:unqualify(Con);
-pretty({gen, "List", [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
-pretty({gen, Con, ParamTs}) ->
+pretty({gen, {con, "List"}, [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
+pretty({gen, ConT, ParamTs}) ->
   PrettyParamTs = lists:map(fun(T) -> pretty(T) end, ParamTs),
-  ?FMT("~s<~s>", [utils:unqualify(Con), string:join(PrettyParamTs, ", ")]);
+  ?FMT("~s<~s>", [pretty(ConT), string:join(PrettyParamTs, ", ")]);
+pretty({gen, _, Is, BaseT, ParamTs}) ->
+  PrettyParamTs = lists:map(fun(T) -> pretty(T) end, ParamTs),
+  {PrettyBaseT, AllIs} = case BaseT of
+    {tv, V, BaseIs, Rigid} ->
+      MergedIs = if
+        Is == none -> BaseIs;
+        BaseIs == none -> Is;
+        true -> gb_sets:union(Is, BaseIs)
+      end,
+      {pretty({tv, V, none, Rigid}), MergedIs};
+
+    _ -> {pretty(BaseT), Is}
+  end,
+
+  PrettyIs = case AllIs of
+    none -> "";
+    _ ->
+      Unqualified = lists:map(fun(I) ->
+        utils:unqualify(I)
+      end, gb_sets:to_list(AllIs)),
+      ?FMT(" ~~ ~s", [string:join(Unqualified, " ~ ")])
+  end,
+  ?FMT("~s<~s>~s", [PrettyBaseT, string:join(PrettyParamTs, ", "), PrettyIs]);
 pretty({inst, _, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, BaseT, Ext}) ->
