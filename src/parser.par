@@ -19,7 +19,7 @@ enum Node {
   Option(Loc, Node, [Node], Maybe<Node>) @option
   Struct(Loc, Node, [Node]) @struct
   Interface(Loc, Node, [Node]) @interface
-  Impl(Loc, Node, Node, [Node]) @impl
+  Impl(Loc, Ref, Node, Node, [Node]) @impl
   Sig(Loc, Node, Node) @sig
   Global(Loc, Node, Node, Bool) @global
   Fn(Loc, Ref, [Node], Node) @fn
@@ -391,7 +391,7 @@ implementation(tokens) = let for = to_list("for") in match tokens {
                 many(init, inner)
                   |> pmap_or(|v| v, [])
                   |> pmap(|globals|
-                    (Impl(range(s, l), con_node, te, globals), rest)
+                    (Impl(range(s, l), make_ref(), con_node, te, globals), rest)
                   )
               )
 

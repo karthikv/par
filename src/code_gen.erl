@@ -85,12 +85,11 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
         {[{Atom, Arity}], env_set(Con, Value, ModuleCG)};
 
       {interface, _, {con_token, _, RawCon}, Fields} ->
-        #cg{ctx=#ctx{ifaces=Ifaces, impls=Impls}=C} = ModuleCG,
+        #cg{ctx=#ctx{ifaces=Ifaces}=C} = ModuleCG,
         Con = utils:qualify(RawCon, C),
         {_, FieldTs} = maps:get(Con, Ifaces),
-        SubImpls = maps:get(Con, Impls),
 
-        {Exports, ModuleCG1} = lists:mapfoldl(fun({Sig, RawT}, FoldCG) ->
+        lists:mapfoldl(fun({Sig, RawT}, FoldCG) ->
           {sig, _, {var, _, Name}, _} = Sig,
           Atom = list_to_atom(Name),
           ArgTs = utils:arg_ts(RawT),
@@ -104,21 +103,25 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
 
           Value = {{global_fn, Atom}, Arity},
           {{Atom, Arity}, env_set(Name, Value, FoldCG)}
-        end, ModuleCG, lists:zip(Fields, FieldTs)),
+        end, ModuleCG, lists:zip(Fields, FieldTs));
 
-        ModuleCG2 = lists:foldl(fun({Key, {_, InstT, _}}, FoldCG) ->
-          ImplName = impl_name(Con, Key),
-          ImplAtom = list_to_atom(ImplName),
-          Arity = length(utils:ivs(InstT)),
+      {impl, _, Ref, {con_token, _, RawCon}, _, _} ->
+        #cg{ctx=#ctx{impls=Impls, impl_refs=ImplRefs}=C} = ModuleCG,
+        Con = utils:resolve_con(RawCon, C),
+        Key = maps:get(Ref, ImplRefs),
+        {_, InstT, _, _} = maps:get(Key, maps:get(Con, Impls)),
 
-          Value = case Arity of
-            0 -> {{global, ImplAtom}, badarity};
-            _ -> {{global_fn, ImplAtom}, Arity}
-          end,
-          env_set(ImplName, Value, FoldCG)
-        end, ModuleCG1, maps:to_list(SubImpls)),
+        Name = impl_name(Con, Key),
+        Atom = list_to_atom(Name),
+        Arity = length(utils:ivs(InstT)),
 
-        {Exports, ModuleCG2};
+        Value = case Arity of
+          0 -> {{global, Atom}, badarity};
+          _ -> {{global_fn, Atom}, Arity}
+        end,
+
+        ModuleCG1 = env_set(Name, Value, ModuleCG),
+        {[{Atom, Arity}], ModuleCG1};
 
       _ -> {[], ModuleCG}
     end
@@ -268,16 +271,14 @@ rep({struct, Loc, StructTE, FieldTEs}, CG) ->
 rep({interface, _, {con_token, _, RawCon}, Fields}, CG) ->
   #cg{ctx=#ctx{
     ifaces=Ifaces,
-    impls=Impls,
     inst_refs=InstRefs,
     fn_refs=FnRefs
   }=C} = CG,
 
   Con = utils:qualify(RawCon, C),
   {_, FieldTs} = maps:get(Con, Ifaces),
-  SubImpls = maps:get(Con, Impls),
 
-  IfaceReps = lists:map(fun({Sig, RawT}) ->
+  lists:map(fun({Sig, RawT}) ->
     {sig, Loc, {var, _, Name}, _} = Sig,
     AllArgTs = utils:arg_ts(RawT),
     AllArgIVs = lists:map(fun utils:ivs/1, AllArgTs),
@@ -329,40 +330,41 @@ rep({interface, _, {con_token, _, RawCon}, Fields}, CG) ->
     Let = {'let', Loc, [{binding, Loc, {var, Loc, FnName}, Field}], App},
     Fn = {fn, Loc, FnRef, Args, Let},
     rep({global, Loc, {var, Loc, Name}, Fn, true}, CG1)
-  end, lists:zip(Fields, FieldTs)),
+  end, lists:zip(Fields, FieldTs));
 
-  ImplReps = lists:map(fun({Key, {_, ImplT, Inits}}) ->
-    {init, InitLoc, _, _} = hd(Inits),
-    AnonRecord = {anon_record, InitLoc, Inits},
-    ImplVar = {var, InitLoc, impl_name(Con, Key)},
+rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
+  #cg{ctx=#ctx{impls=Impls, impl_refs=ImplRefs, fn_refs=FnRefs}=C} = CG,
+  Con = utils:resolve_con(RawCon, C),
+  Key = maps:get(Ref, ImplRefs),
+  {_, ImplT, Inits, _} = maps:get(Key, maps:get(Con, Impls)),
 
-    IVs = utils:ivs(ImplT),
-    {Expr, CG1} = case IVs of
-      [] -> {AnonRecord, CG};
-      _ ->
-        Args = lists:foldl(fun({Is, V}, FoldArgs) ->
-          gb_sets:fold(fun(I, NestedArgs) ->
-            [{var, InitLoc, bound_impl_name(I, V)} | NestedArgs]
-          end, FoldArgs, Is)
-        end, [], IVs),
+  {init, InitLoc, _, _} = hd(Inits),
+  AnonRecord = {anon_record, InitLoc, Inits},
+  ImplVar = {var, InitLoc, impl_name(Con, Key)},
 
-        FnRef = make_ref(),
-        % rep({fn, ...}) will transform each argument with IVs into a tuple
-        % containing the impls. We don't want this transformation to occur here,
-        % as our arguments *are* impls themselves. Hence, we specify that each
-        % arg has no IVs.
-        ArgIVs = lists:map(fun(_) -> [] end, Args),
+  IVs = utils:ivs(ImplT),
+  {Expr, CG1} = case IVs of
+    [] -> {AnonRecord, CG};
+    _ ->
+      Args = lists:foldl(fun({Is, V}, FoldArgs) ->
+        gb_sets:fold(fun(I, NestedArgs) ->
+          [{var, InitLoc, bound_impl_name(I, V)} | NestedArgs]
+        end, FoldArgs, Is)
+      end, [], IVs),
 
-        C1 = C#ctx{fn_refs=FnRefs#{FnRef => ArgIVs}},
-        {{fn, InitLoc, FnRef, Args, AnonRecord}, CG#cg{ctx=C1}}
-    end,
+      FnRef = make_ref(),
+      % rep({fn, ...}) will transform each argument with IVs into a tuple
+      % containing the impls. We don't want this transformation to occur here,
+      % as our arguments *are* impls themselves. Hence, we specify that each
+      % arg has no IVs.
+      ArgIVs = lists:map(fun(_) -> [] end, Args),
 
-    rep({global, InitLoc, ImplVar, Expr, false}, CG1#cg{in_impl=true})
-  end, maps:to_list(SubImpls)),
+      C1 = C#ctx{fn_refs=FnRefs#{FnRef => ArgIVs}},
+      {{fn, InitLoc, FnRef, Args, AnonRecord}, CG#cg{ctx=C1}}
+  end,
 
-  [IfaceReps, ImplReps];
+  rep({global, InitLoc, ImplVar, Expr, false}, CG1#cg{in_impl=true});
 
-rep({impl, _, _, _, _}, _) -> [];
 rep({sig, _, _, _}, _) -> [];
 
 rep({fn, Loc, Ref, Args, Expr}, CG) ->
@@ -826,7 +828,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
 
 rep_impls(IVs, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
-  #cg{env=Env, ctx=#ctx{module=Module, nested_ivs=NestedIVs}} = CG,
+  #cg{env=Env, ctx=#ctx{module=Module, nested_ivs=NestedIVs, impls=Impls}} = CG,
 
   lists:foldl(fun({Is, V}, {FoldImplReps, FoldSubbedVs}) ->
     % V will not be in SubbedVs if it is bound in the env or if it has been seen
@@ -856,7 +858,17 @@ rep_impls(IVs, Loc, SubbedVs, CG) ->
         Key = utils:impl_key(T),
 
         gb_sets:fold(fun(I, {NestedImplReps, NestedSubbedVs}) ->
-          ImplVar = rep({var, Loc, impl_name(I, Key)}, CG),
+          {_, _, _, ImplModule} = maps:get(Key, maps:get(I, Impls)),
+          ImplName = impl_name(I, Key),
+
+          CG1 = case ImplModule of
+            Module -> CG;
+            _ ->
+              {_, Arity} = maps:get({ImplModule, ImplName}, CG#cg.env),
+              env_set(ImplName, {{external, ImplModule}, Arity}, CG)
+          end,
+          ImplVar = rep({var, Loc, ImplName}, CG1),
+
           case maps:find({I, V}, NestedIVs) of
             error -> {[ImplVar | NestedImplReps], NestedSubbedVs};
 

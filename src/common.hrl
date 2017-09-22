@@ -16,6 +16,7 @@
 %   enums - a Name => [VariantName] map for enums in the env
 %   ifaces - a Name => {Fields, FieldMetas} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
+%   impl_refs - a Ref => ImplKey map for implementations of interfaces
 %   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
 %   fn_refs - a Ref => T mapping for fns
 %   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated vars
@@ -56,6 +57,7 @@
     "Concatable" => #{},
     "Separable" => #{}
   },
+  impl_refs = #{},
   sig_vs = #{},
   fn_refs = #{},
   inst_refs,

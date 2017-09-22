@@ -2126,4 +2126,87 @@ import_test_() ->
         "z = 5"
       }
     ], "foo", {?ERR_NOT_DEF("x", "Bar"), "Baz", l(16, 1)}))
+
+
+  , ?_test("Int" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "interface ToInt { to_int : T -> Int }\n"
+        "impl ToInt for Char { to_int(c) = $c }\n"
+        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
+        "  to_int((a, b)) = to_int(a) + to_int(b)\n"
+        "}"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "a = Foo.to_int(('a', 'b'))"
+      }
+    ], "bar", "a"))
+  , ?_test("Int" = ok_many([
+      {"foo", "module Foo interface ToInt { to_int : T -> Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "impl Foo.ToInt for Char { to_int(c) = $c }\n"
+        "impl Foo.ToInt for (A ~ Foo.ToInt, B ~ Foo.ToInt) {\n"
+        "  to_int((a, b)) = Foo.to_int(a) + Foo.to_int(b)\n"
+        "}\n"
+        "a = Foo.to_int(('a', 'b'))"
+      }
+    ], "bar", "a"))
+  , ?_test("Int" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "interface ToInt { to_int : T -> Int }\n"
+        "impl ToInt for Char { to_int(c) = $c }"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "impl Foo.ToInt for (A ~ Foo.ToInt, B ~ Foo.ToInt) {\n"
+        "  to_int((a, b)) = Foo.to_int(a) + Foo.to_int(b)\n"
+        "}\n"
+        "a = Foo.to_int(('a', 'b'))"
+      }
+    ], "bar", "a"))
+  , ?_test("Int" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "interface ToInt { to_int : T -> Int }\n"
+        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
+        "  to_int((a, b)) = to_int(a) + to_int(b)\n"
+        "}"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "impl Foo.ToInt for Char { to_int(c) = $c }\n"
+        "a = Foo.to_int(('a', 'b'))"
+      }
+    ], "bar", "a"))
+  , ?_test("Int" = ok_many([
+      {"foo", "module Foo interface ToInt { to_int : T -> Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (ToInt)\n"
+        "impl ToInt for Char { to_int(c) = $c }\n"
+        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
+        "  to_int((a, b)) = Foo.to_int(a) + Foo.to_int(b)\n"
+        "}\n"
+        "a = Foo.to_int(('a', 'b'))"
+      }
+    ], "bar", "a"))
+  , ?_test("Int" = ok_many([
+      {"foo", "module Foo interface ToInt { to_int : T -> Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (ToInt, to_int)\n"
+        "impl ToInt for Char { to_int(c) = $c }\n"
+        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
+        "  to_int((a, b)) = to_int(a) + to_int(b)\n"
+        "}\n"
+        "a = to_int(('a', 'b'))"
+      }
+    ], "bar", "a"))
   ].

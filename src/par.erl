@@ -5,9 +5,7 @@
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Handle more rewrite cases
-%   - In code gen, rewrite var_ref that comes from Module.field
 %   - sig instantiation
-%   - impls across modules?
 %   - Validation to prevent struct/enum TE from being a gen TV from HKT?
 %     - And to prevent impl type from being a HKT
 %   - Extending interfaces?

@@ -52,6 +52,9 @@ rewrite_refs({fn, Loc, Ref, Args, Expr}) when is_reference(Ref) ->
   {fn, Loc, ref, rewrite_refs(Args), rewrite_refs(Expr)};
 rewrite_refs({var_ref, Loc, Ref, Name}) when is_reference(Ref) ->
   {var_ref, Loc, ref, Name};
+rewrite_refs({impl, Loc, Ref, ConToken, TE, Inits}) when is_reference(Ref) ->
+  {impl, Loc, ref, rewrite_refs(ConToken), rewrite_refs(TE),
+   rewrite_refs(Inits)};
 rewrite_refs(V) when is_tuple(V) ->
   list_to_tuple(rewrite_refs(tuple_to_list(V)));
 rewrite_refs(V) -> V.
@@ -1657,7 +1660,7 @@ def_test_() ->
 
 
   , ?_assertEqual(
-      {impl, l(0, 0, 2, 1),
+      {impl, l(0, 0, 2, 1), ref,
         {con_token, l(5, 5), "ToStr"},
         {con_token, l(15, 4), "Bool"}, [
           {init, l(1, 2, 17),
@@ -1676,7 +1679,7 @@ def_test_() ->
       )
     )
   , ?_assertEqual(
-      {impl, l(0, 0, 3, 1),
+      {impl, l(0, 0, 3, 1), ref,
         {con_token, l(5, 7), "Foo.Bar"},
         {gen_te, l(17, 9), {con_token, l(17, 9), "List"},
           [{tv_te, l(18, 7), "A", [{con_token, l(22, 3), "Foo"}]}]

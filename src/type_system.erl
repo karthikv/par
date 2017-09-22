@@ -785,7 +785,7 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   NewIfaces = Ifaces#{Con => setelement(2, maps:get(Con, Ifaces), FieldTs)},
   {none, C2#ctx{ifaces=NewIfaces}};
 
-infer({impl, Loc, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
+infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
   ImplLoc = ?LOC(ImplTE),
   IfaceCon = utils:resolve_con(RawIfaceCon, C),
 
@@ -827,11 +827,12 @@ infer({impl, Loc, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
           SubImpls = maps:get(IfaceCon, Impls),
 
           C2 = case maps:find(Key, SubImpls) of
-            {ok, {ExistingT, _, _}} ->
+            {ok, {ExistingT, _, _, _}} ->
               DupErr = ?ERR_DUP_IMPL(IfaceCon, Key, utils:pretty(ExistingT)),
               add_ctx_err(DupErr, ImplLoc, C1);
             error ->
-              NewSubImpls = SubImpls#{Key => {RawT, ImplT, Inits}},
+              Value = {RawT, ImplT, Inits, C1#ctx.module},
+              NewSubImpls = SubImpls#{Key => Value},
               C1#ctx{impls=Impls#{IfaceCon => NewSubImpls}}
           end,
 
@@ -868,7 +869,8 @@ infer({impl, Loc, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
           C6 = gb_sets:fold(fun(Name, FoldC) ->
             add_ctx_err(?ERR_MISSING_FIELD_IMPL(Name, IfaceCon), Loc, FoldC)
           end, C5, MissingNames),
-          {none, C6}
+          ImplRefs = C6#ctx.impl_refs,
+          {none, C6#ctx{impl_refs=ImplRefs#{Ref => Key}}}
       end
   end;
 
@@ -2553,7 +2555,7 @@ instance({gen, {con, "Set"}, _}, "Separable", _, S) -> S;
 instance(T, I, V, S) ->
   Key = utils:impl_key(T),
   case maps:find(Key, maps:get(I, S#solver.impls)) of
-    {ok, {RawT, _, _}} ->
+    {ok, {RawT, _, _, _}} ->
       NormT = norm_sig_type(RawT, [], S#solver.pid),
       IVs = utils:ivs(NormT),
 
