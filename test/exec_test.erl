@@ -427,6 +427,20 @@ test_interface(Run) ->
       "}\n"
       "main() = to_int(true)"
     ))
+  , ?_test(1 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Bool {\n"
+      "  to_int(b) = if b then 1 else 0\n"
+      "}\n"
+      "main() = (to_int : Bool -> Int)(true)"
+    ))
+  , ?_test(1 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Bool {\n"
+      "  to_int(b) = if b then 1 else 0\n"
+      "}\n"
+      "main() = (to_int : T ~ ToInt -> Int)(true)"
+    ))
   , ?_test(0 = Run(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Bool {\n"
@@ -532,6 +546,19 @@ test_interface(Run) ->
       "  }\n"
       "}\n"
       "main() = to_int([@hello, @hey, @hi])"
+    ))
+  , ?_test(10 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Atom {\n"
+      "  to_int(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
+      "}\n"
+      "impl ToInt for [A ~ ToInt] {\n"
+      "  to_int(l) = match l {\n"
+      "    [h | t] => to_int(h) + to_int(t)\n"
+      "    [] => 0\n"
+      "  }\n"
+      "}\n"
+      "main() = (to_int : [A ~ ToInt] -> Int)([@hello, @hey, @hi])"
     ))
   , ?_test({<<"hi">>, <<"(no, yes)">>, <<"Foo(no)">>, <<"Foo((hey, yes))">>} = Run(
       "interface ToStr { to_str : T -> String }\n"

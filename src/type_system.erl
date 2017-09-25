@@ -624,7 +624,7 @@ infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
   {norm_sig_type(SigT, maps:keys(C1#ctx.sig_vs), C#ctx.pid), C1};
 
-infer({binary_op, Loc, ':', Expr, Sig}, C) ->
+infer({expr_sig, Loc, Ref, Expr, Sig}, C) ->
   G = C#ctx.gnr,
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
 
@@ -643,8 +643,7 @@ infer({binary_op, Loc, ':', Expr, Sig}, C) ->
   % assigned the inst. Note that from doesn't matter here; this constraint
   % should always succeed.
   InstTV = tv_server:fresh(C5#ctx.pid),
-  % TODO: add a ref here
-  C6 = add_cst(InstTV, {inst, none, TV}, Loc, ?FROM_INST, C5),
+  C6 = add_cst(InstTV, {inst, Ref, TV}, Loc, ?FROM_INST, C5),
 
   {InstTV, C6};
 

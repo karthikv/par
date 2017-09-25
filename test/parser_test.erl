@@ -55,6 +55,8 @@ rewrite_refs({var_ref, Loc, Ref, Name}) when is_reference(Ref) ->
 rewrite_refs({impl, Loc, Ref, ConToken, TE, Inits}) when is_reference(Ref) ->
   {impl, Loc, ref, rewrite_refs(ConToken), rewrite_refs(TE),
    rewrite_refs(Inits)};
+rewrite_refs({expr_sig, Loc, Ref, Expr, Sig}) when is_reference(Ref) ->
+  {expr_sig, Loc, ref, rewrite_refs(Expr), rewrite_refs(Sig)};
 rewrite_refs(V) when is_tuple(V) ->
   list_to_tuple(rewrite_refs(tuple_to_list(V)));
 rewrite_refs(V) -> V.
@@ -682,46 +684,46 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {binary_op, l(0, 7), ':', {unit, l(0, 2)}, {unit, l(5, 2)}},
+      {expr_sig, l(0, 7), ref, {unit, l(0, 2)}, {unit, l(5, 2)}},
       ok_expr("() : ()")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 11), ':',
+      {expr_sig, l(0, 11), ref,
         {bool, l(0, 4), true},
         {con_token, l(7, 4), "Bool"}
       },
       ok_expr("true : Bool")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 17), ':',
+      {expr_sig, l(0, 17), ref,
         {bool, l(0, 4), true},
         {con_token, l(7, 10), "Module.Foo"}
       },
       ok_expr("true : Module.Foo")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 5), ':',
+      {expr_sig, l(0, 5), ref,
         {int, l(0, 1), 1},
         {tv_te, l(4, 1), "A", []}
       },
       ok_expr("1 : A")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 11), ':',
+      {expr_sig, l(0, 11), ref,
         {int, l(0, 1), 1},
         {tv_te, l(4, 7), "A", [{con_token, l(8, 3), "Num"}]}
       },
       ok_expr("1 : A ~ Num")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 18), ':',
+      {expr_sig, l(0, 18), ref,
         {int, l(0, 1), 1},
         {tv_te, l(4, 14), "A", [{con_token, l(8, 10), "Module.Foo"}]}
       },
       ok_expr("1 : A ~ Module.Foo")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 24), ':',
+      {expr_sig, l(0, 24), ref,
         {int, l(0, 1), 1},
         {tv_te, l(4, 20), "A", [
           {con_token, l(8, 3), "Num"},
@@ -731,7 +733,7 @@ expr_test_() ->
       ok_expr("1 : A ~ Num ~ Module.Foo")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 8), ':',
+      {expr_sig, l(0, 8), ref,
         {list, l(0, 2), []},
         {gen_te, l(5, 3), {con_token, l(5, 3), "List"}, [
           {tv_te, l(6, 1), "A", []}
@@ -740,7 +742,7 @@ expr_test_() ->
       ok_expr("[] : [A]")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 19), ':',
+      {expr_sig, l(0, 19), ref,
         {unary_op, l(0, 7), '#', {list, l(1, 6), [{bool, l(2, 4), true}]}},
         {gen_te, l(10, 9), {con_token, l(10, 3), "Set"}, [
           {con_token, l(14, 4), "Bool"}
@@ -749,7 +751,7 @@ expr_test_() ->
       ok_expr("#[true] : Set<Bool>")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 25), ':',
+      {expr_sig, l(0, 25), ref,
         {unary_op, l(0, 7), '#', {list, l(1, 6), [{bool, l(2, 4), true}]}},
         {gen_te, l(10, 15), {con_token, l(10, 9), "Other.Bar"}, [
           {con_token, l(20, 4), "Bool"}
@@ -758,7 +760,7 @@ expr_test_() ->
       ok_expr("#[true] : Other.Bar<Bool>")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 37), ':',
+      {expr_sig, l(0, 37), ref,
         {map, l(0, 9), [{{atom, l(1, 2), a}, {int, l(7, 1), 3}}]},
         {gen_te, l(12, 25), {con_token, l(12, 3), "Map"}, [
           {con_token, l(16, 4), "Atom"},
@@ -768,7 +770,7 @@ expr_test_() ->
       ok_expr("{@a => 3} : Map<Atom, A ~ Concatable>")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 9), ':',
+      {expr_sig, l(0, 9), ref,
         {unit, l(0, 2)},
         {gen_te, l(5, 4), {tv_te, l(5, 4), "T", []}, [
           {tv_te, l(7, 1), "A", []}
@@ -777,7 +779,7 @@ expr_test_() ->
       ok_expr("() : T<A>")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 25), ':',
+      {expr_sig, l(0, 25), ref,
         {unit, l(0, 2)},
         {gen_te, l(5, 20),
           {tv_te, l(5, 20), "T", [{con_token, l(17, 8), "Mappable"}]}, [
@@ -789,7 +791,7 @@ expr_test_() ->
       ok_expr("() : T<A, Int> ~ Mappable")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 26), ':',
+      {expr_sig, l(0, 26), ref,
         {tuple, l(0, 12), [{atom, l(1, 4), hey}, {str, l(7, 4), <<"hi">>}]},
         {tuple_te, l(15, 11), [
           {tv_te, l(16, 1), "A", []},
@@ -799,7 +801,7 @@ expr_test_() ->
       ok_expr("(@hey, \"hi\") : (A, String)")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 17), ':',
+      {expr_sig, l(0, 17), ref,
         {char, l(0, 3), $c},
         {lam_te, l(6, 11),
           {con_token, l(6, 6), "String"},
@@ -810,7 +812,7 @@ expr_test_() ->
     )
   % -> is right associative
   , ?_assertEqual(
-      {binary_op, l(0, 37), ':',
+      {expr_sig, l(0, 37), ref,
         {char, l(0, 3), $c},
         {lam_te, l(6, 31),
           {lam_te, l(6, 15),
@@ -826,7 +828,7 @@ expr_test_() ->
       ok_expr("'c' : (Int -> String) -> A ~ Num -> B")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 17), ':',
+      {expr_sig, l(0, 17), ref,
         {unit, l(0, 2)},
         {record_te, l(5, 12), [
           {sig, l(7, 8), {var, l(7, 1), "a"}, {con_token, l(11, 4), "Bool"}}
@@ -835,7 +837,7 @@ expr_test_() ->
       ok_expr("() : { a : Bool }")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 21), ':',
+      {expr_sig, l(0, 21), ref,
         {unit, l(0, 2)},
         {record_ext_te, l(5, 16), {tv_te, l(7, 1), "A", []}, [
           {sig, l(11, 8), {var, l(11, 1), "a"}, {con_token, l(15, 4), "Bool"}}
@@ -844,7 +846,7 @@ expr_test_() ->
       ok_expr("() : { A | a : Bool }")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 28), ':',
+      {expr_sig, l(0, 28), ref,
         {unit, l(0, 2)},
         {record_te, l(5, 23), [
           {sig, l(7, 10),
@@ -860,7 +862,7 @@ expr_test_() ->
       ok_expr("() : { foo : Atom, bar : A }")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 0, 1, 9), ':',
+      {expr_sig, l(0, 0, 1, 9), ref,
         {unit, l(0, 2)},
         {record_te, l(0, 5, 1, 9), [
           {sig, l(7, 10),
@@ -876,7 +878,7 @@ expr_test_() ->
       ok_expr("() : { foo : Atom\nbar : A }")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 32), ':',
+      {expr_sig, l(0, 32), ref,
         {unit, l(0, 2)},
         {record_ext_te, l(5, 27), {tv_te, l(7, 1), "B", []}, [
           {sig, l(11, 10),
@@ -892,7 +894,7 @@ expr_test_() ->
       ok_expr("() : { B | foo : Atom, bar : A }")
     )
   , ?_assertEqual(
-      {binary_op, l(0, 0, 1, 9), ':',
+      {expr_sig, l(0, 0, 1, 9), ref,
         {unit, l(0, 2)},
         {record_ext_te, l(0, 5, 1, 9),
           {tv_te, l(7, 1), "B", []}, [

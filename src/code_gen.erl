@@ -415,7 +415,9 @@ rep({fn, Loc, Ref, Args, Expr}, CG) ->
   Clause = {clause, Line, PatternReps, [], [rep(Expr, CG2)]},
   {'fun', Line, {clauses, [Clause]}};
 
-rep({binary_op, _, ':', Expr, _}, CG) -> rep(Expr, CG);
+rep({expr_sig, Loc, Ref, Expr, _}, CG) ->
+  Rep = rep(Expr, CG),
+  rewrite_ref(Rep, Ref, Loc, CG);
 
 rep({unit, Loc}, _) -> eabs({}, ?START_LINE(Loc));
 rep({N, Loc, V}, _)
@@ -476,24 +478,8 @@ rep({N, Loc, Name}, CG) when N == var; N == con_token; N == var_value ->
   end;
 
 rep({var_ref, Loc, Ref, Name}, CG) ->
-  Line = ?START_LINE(Loc),
   Rep = rep({var, Loc, Name}, CG),
-
-  % rewrite() expects a single var rep as a parameter, whereas Rep might be
-  % a call or something more complex; store the result.
-  NewVar = {var, Line, unique("Var")},
-  Match = {match, Line, NewVar, Rep},
-
-  InstRefs = CG#cg.ctx#ctx.inst_refs,
-  {Stmts, ResultRep} = case maps:find(Ref, InstRefs) of
-    {ok, {T, SubbedVs}} -> rewrite(T, NewVar, Loc, SubbedVs, CG);
-    error -> {[], Rep}
-  end,
-
-  case Stmts of
-    [] -> Rep;
-    _ -> {block, Line, [Match | Stmts] ++ [ResultRep]}
-  end;
+  rewrite_ref(Rep, Ref, Loc, CG);
 
 rep({anon_record, Loc, Inits}, CG) ->
   PairsRep = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
@@ -890,6 +876,24 @@ rep_impls(IVs, Loc, SubbedVs, CG) ->
     end
   end, {[], SubbedVs}, IVs).
 
+rewrite_ref(Rep, Ref, Loc, CG) ->
+  % rewrite() expects a single var rep as a parameter, whereas Rep might be
+  % a call or something more complex; store the result.
+  Line = ?START_LINE(Loc),
+  NewVar = {var, Line, unique("Var")},
+  Match = {match, Line, NewVar, Rep},
+
+  InstRefs = CG#cg.ctx#ctx.inst_refs,
+  {Stmts, ResultRep} = case maps:find(Ref, InstRefs) of
+    {ok, {T, SubbedVs}} -> rewrite(T, NewVar, Loc, SubbedVs, CG);
+    error -> {[], Rep}
+  end,
+
+  case Stmts of
+    [] -> Rep;
+    _ -> {block, Line, [Match | Stmts] ++ [ResultRep]}
+  end.
+
 rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   ArgTs = utils:arg_ts(LamT),
@@ -932,7 +936,7 @@ env_get(Name, #cg{env=Env, ctx=#ctx{module=Module}}) ->
 set_module(Module, CG) -> CG#cg{ctx=CG#cg.ctx#ctx{module=Module}}.
 
 arity({fn, _, _, Args, _}, _) -> length(Args);
-arity({binary_op, _, ':', Expr, _}, CG) -> arity(Expr, CG);
+arity({expr_sig, _, _, Expr, _}, CG) -> arity(Expr, CG);
 arity({con_token, _, Name}, CG) ->
   {_, Arity} = env_get(Name, CG),
   Arity;
