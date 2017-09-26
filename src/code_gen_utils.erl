@@ -5,7 +5,7 @@
   '_@gm_find'/2,
   '_@gm_set'/3,
   '_@curry'/3,
-  '_@wrap_with_impls'/3,
+  '_@wrap_with_impls'/5,
   '_@concat'/2,
   '_@separate'/2
 ]).
@@ -81,7 +81,7 @@
   if
     NumArgs < Arity ->
       NewArgsRep = lists:map(fun(Num) ->
-        {var, Line, erlang:list_to_atom(lists:concat(['_@Arg', Num]))}
+        {var, Line, erlang:list_to_atom(lists:concat(["_@Arg", Num]))}
       end, lists:seq(NumArgs + 1, Arity)),
       NewArgsListRep = lists:foldr(fun(FoldArgRep, FoldListRep) ->
         {cons, Line, FoldArgRep, FoldListRep}
@@ -114,62 +114,60 @@
       end
   end.
 
-'_@wrap_with_impls'(Fun, AllImpls, Line) ->
-  {arity, Arity} = erlang:fun_info(Fun, arity),
-  NumImpls = erlang:length(AllImpls),
+'_@wrap_with_impls'(Fun, PatternReps, ImplReps, BindList, Line) ->
+  Bindings = lists:foldl(fun({Atom, Value}, FoldBindings) ->
+    erl_eval:add_binding(Atom, Value, FoldBindings)
+  end, erl_eval:new_bindings(), BindList),
 
-  TargetImpls = lists:sublist(AllImpls, Arity),
-  {TargetImplsRep, {Bindings, _}} = lists:mapfoldl(fun(ArgImpls, Memo) ->
-    lists:mapfoldl(fun(Impl, {FoldBindings, FoldNum}) ->
-      Name = lists:concat(['_@Impl', FoldNum]),
-      Atom = erlang:list_to_atom(Name),
-      VarRep = {var, Line, Atom},
-
-      NewBindings = erl_eval:add_binding(Atom, Impl, FoldBindings),
-      NewNum = FoldNum + 1,
-      {VarRep, {NewBindings, NewNum}}
-    end, Memo, ArgImpls)
-  end, {erl_eval:new_bindings(), 0}, TargetImpls),
-
-  ArgsRep = lists:map(fun(Num) ->
-    {var, Line, erlang:list_to_atom(lists:concat(['_@Arg', Num]))}
-  end, lists:seq(1, Arity)),
-
-  ArgsWithImplsRep = lists:map(fun({ArgRep, ArgImplsRep}) ->
-    case ArgImplsRep of
+  ArgsWithImplsRep = lists:map(fun({PatternRep, ArgImplReps}) ->
+    ArgRep = case PatternRep of
+      {tuple, _, [ArgRep_ | _]} -> ArgRep_;
+      _ -> PatternRep
+    end,
+    case ArgImplReps of
       [] -> ArgRep;
-      _ -> {tuple, Line, [ArgRep | ArgImplsRep]}
+      _ -> {tuple, Line, [ArgRep | ArgImplReps]}
     end
-  end, lists:zip(ArgsRep, TargetImplsRep)),
+  end, lists:zip(PatternReps, ImplReps)),
+
+  '_@wrap_with_impls_r'(Fun, PatternReps, ArgsWithImplsRep, Bindings, Line).
+
+'_@wrap_with_impls_r'(Fun, PatternReps, ArgsWithImplsRep, Bindings, Line) ->
+  {arity, Arity} = erlang:fun_info(Fun, arity),
+  FullArity = erlang:length(PatternReps),
 
   FunAtom = '_@Fun',
-  Bindings1 = erl_eval:add_binding(FunAtom, Fun, Bindings),
   FunVarRep = {var, Line, FunAtom},
+  Bindings1 = erl_eval:add_binding(FunAtom, Fun, Bindings),
+  Call = {call, Line, FunVarRep, lists:sublist(ArgsWithImplsRep, Arity)},
 
-  Call = {call, Line, FunVarRep, ArgsWithImplsRep},
   {Body, FinalBindings} = if
-    NumImpls == Arity -> {[Call], Bindings1};
+    FullArity == Arity -> {[Call], Bindings1};
 
-    NumImpls > Arity ->
-      LeftImpls = lists:sublist(AllImpls, Arity + 1, NumImpls),
-      LeftAtom = '_@LeftImpls',
-      LeftVarRep = {var, Line, LeftAtom},
-      Bindings2 = erl_eval:add_binding(LeftAtom, LeftImpls, Bindings1),
+    FullArity > Arity ->
+      BindingsToAdd = [
+        {'_@Recur', fun '_@wrap_with_impls_r'/5},
+        {'_@PatternReps', lists:sublist(PatternReps, Arity + 1, FullArity)},
+        {'_@ArgsWithImplsRep', lists:sublist(ArgsWithImplsRep, Arity + 1, FullArity)},
+        {'_@Bindings', Bindings},
+        {'_@Line', Line}
+      ],
 
-      RecurAtom = '_@Recur',
-      RecurVarRep = {var, Line, RecurAtom},
-      RecurFun = fun '_@wrap_with_impls'/3,
-      Bindings3 = erl_eval:add_binding(RecurAtom, RecurFun, Bindings2),
+      {BindingReps, Bindings2} = lists:mapfoldl(fun({Atom, Value}, FoldBindings) ->
+        Var = {var, Line, Atom},
+        {Var, erl_eval:add_binding(Atom, Value, FoldBindings)}
+      end, Bindings1, BindingsToAdd),
 
-      RecurArgsRep = [Call, LeftVarRep, erl_parse:abstract(Line, Line)],
+      RecurVarRep = erlang:hd(BindingReps),
+      RecurArgsRep = [Call | erlang:tl(BindingReps)],
       RecurCall = {call, Line, RecurVarRep, RecurArgsRep},
-      {[RecurCall], Bindings3}
+      {[RecurCall], Bindings2}
 
-    % NumImpls is the *most* number of args Fun could have; it should never be
+    % FullArity is the *most* number of args Fun could have; it should never be
     % less than Arity.
   end,
 
-  Clause = {clause, Line, ArgsRep, [], Body},
+  Clause = {clause, Line, lists:sublist(PatternReps, Arity), [], Body},
   Expr = {'fun', Line, {clauses, [Clause]}},
   {value, Value, _} = erl_eval:expr(Expr, FinalBindings),
   Value.

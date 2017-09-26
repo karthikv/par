@@ -168,6 +168,7 @@ compile_ast(Comp, Exports, CG) ->
     '_@gm_set',
     '_@curry',
     '_@wrap_with_impls',
+    '_@wrap_with_impls_r',
     '_@concat',
     '_@separate'
   ])),
@@ -378,39 +379,11 @@ rep({fn, Loc, Ref, Args, Expr}, CG) ->
   AllArgIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
   ArgIVs = lists:sublist(AllArgIVs, length(Args)),
 
-  Result = lists:mapfoldl(fun({Pattern, IVs}, {SeenVs, OuterCG}) ->
-    PatternLoc = ?LOC(Pattern),
+  ArgsRep = lists:map(fun(Pattern) ->
+    rep(Pattern, CG1#cg{in_pattern=true})
+  end, Args),
+  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgIVs, true, CG1),
 
-    {ImplReps, NewSeenVs, NewOuterCG} = lists:foldl(fun({Is, V}, Memo) ->
-      {FoldImplReps, FoldSeenVs, FoldCG} = Memo,
-      case gb_sets:is_member(V, FoldSeenVs) of
-        true -> Memo;
-        false ->
-          {NewImplReps, NewCG} = gb_sets:fold(fun(I, NestedMemo) ->
-            {NestedImplReps, NestedCG} = NestedMemo,
-            ImplName = bound_impl_name(I, V),
-            NestedCG1 = bind(ImplName, badarity, NestedCG),
-
-            ImplRep = rep({var, PatternLoc, ImplName}, NestedCG1),
-            {[ImplRep | NestedImplReps], NestedCG1}
-          end, {FoldImplReps, FoldCG}, Is),
-
-          {NewImplReps, gb_sets:add(V, FoldSeenVs), NewCG}
-      end
-    end, {[], SeenVs, OuterCG}, IVs),
-
-    PatternRep = rep(Pattern, NewOuterCG#cg{in_pattern=true}),
-    FinalPatternRep = case ImplReps of
-      [] -> PatternRep;
-      _ ->
-        PatternLine = ?START_LINE(PatternLoc),
-        {tuple, PatternLine, [PatternRep | ImplReps]}
-    end,
-
-    {FinalPatternRep, {NewSeenVs, NewOuterCG}}
-  end, {gb_sets:new(), CG1}, lists:zip(Args, ArgIVs)),
-
-  {PatternReps, {_, CG2}} = Result,
   Line = ?START_LINE(Loc),
   Clause = {clause, Line, PatternReps, [], [rep(Expr, CG2)]},
   {'fun', Line, {clauses, [Clause]}};
@@ -812,56 +785,120 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   Clause = {clause, 1, [ArgVar], [], [Case]},
   {function, 1, '_@init', 1, [Clause]}.
 
-rep_impls(IVs, Loc, SubbedVs, CG) ->
+rep_arg_iv_patterns(ArgsRep, ArgIVs, Bind, CG) ->
+  {PatternReps, {_, CG1}} = lists:mapfoldl(fun({PatternRep, IVs}, OuterMemo) ->
+    {SeenVs, OuterCG} = OuterMemo,
+    PatternLine = element(2, PatternRep),
+
+    {ImplReps, NewSeenVs, NewOuterCG} = lists:foldl(fun({Is, V}, Memo) ->
+      {FoldImplReps, FoldSeenVs, FoldCG} = Memo,
+      case gb_sets:is_member(V, FoldSeenVs) of
+        true -> Memo;
+        false ->
+          {NewImplReps, NewCG} = gb_sets:fold(fun(I, NestedMemo) ->
+            {NestedImplReps, NestedCG} = NestedMemo,
+            ImplName = bound_impl_name(I, V),
+
+            case Bind of
+              true ->
+                NestedCG1 = bind(ImplName, badarity, NestedCG),
+                {ImplAtom, _} = env_get(ImplName, NestedCG1),
+                ImplRep = {var, PatternLine, ImplAtom},
+                {[ImplRep | NestedImplReps], NestedCG1};
+
+              false ->
+                ImplRep = {var, PatternLine, list_to_atom(ImplName)},
+                {[ImplRep | NestedImplReps], NestedCG}
+            end
+          end, {FoldImplReps, FoldCG}, Is),
+
+          {NewImplReps, gb_sets:add(V, FoldSeenVs), NewCG}
+      end
+    end, {[], SeenVs, OuterCG}, IVs),
+
+    FinalPatternRep = case ImplReps of
+      [] -> PatternRep;
+      _ -> {tuple, PatternLine, [PatternRep | ImplReps]}
+    end,
+
+    {FinalPatternRep, {NewSeenVs, NewOuterCG}}
+  end, {gb_sets:new(), CG}, lists:zip(ArgsRep, ArgIVs)),
+
+  {PatternReps, CG1}.
+
+rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   #cg{env=Env, ctx=#ctx{module=Module, nested_ivs=NestedIVs, impls=Impls}} = CG,
 
-  lists:foldl(fun({Is, V}, {FoldImplReps, FoldSubbedVs}) ->
+  {FinalArgIVs, FinalMemo} = lists:mapfoldl(fun({Is, V}, Memo) ->
+    {FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
+
     % V will not be in SubbedVs if it is bound in the env or if it has been seen
     % before. In both these cases, we don't want to add impls.
     case maps:find(V, FoldSubbedVs) of
-      error -> {FoldImplReps, FoldSubbedVs};
+      error -> {[], Memo};
 
       {ok, {tv, NewV, _, _}} ->
-        NewSubbedVs = maps:remove(V, FoldSubbedVs),
         {FirstI, _} = gb_sets:next(gb_sets:iterator(Is)),
         FirstImplName = bound_impl_name(FirstI, NewV),
 
-        NewImplReps = case maps:is_key({Module, FirstImplName}, Env) of
-          % If we can't find an impl, this is not a bound variable and
-          % hasn't yet been solved for. We shouldn't touch this argument.
-          false -> FoldImplReps;
-          true ->
-            gb_sets:fold(fun(I, NestedImplReps) ->
-              ImplName = bound_impl_name(I, NewV),
-              [rep({var, Loc, ImplName}, CG) | NestedImplReps]
-            end, FoldImplReps, Is)
+        IsBound = maps:is_key({Module, FirstImplName}, Env),
+        ArgIVs = if
+          IsBound -> [];
+          % Not a bound TV, so we must introduce IVs as arguments.
+          true -> [{Is, NewV}]
         end,
 
-        {NewImplReps, NewSubbedVs};
+        {NewImplReps, NewBindMap} = gb_sets:fold(
+          fun(I, {NestedImplReps, NestedBindMap}) ->
+            ImplName = bound_impl_name(I, NewV),
+            ImplAtom = list_to_atom(ImplName),
+            ImplRep = {var, Line, ImplAtom},
+
+            NestedBindMap1 = if
+              IsBound ->
+                NestedBindMap#{ImplAtom => rep({var, Loc, ImplName}, CG)};
+              true -> NestedBindMap
+            end,
+            {[ImplRep | NestedImplReps], NestedBindMap1}
+          end,
+          {FoldImplReps, FoldBindMap},
+          Is
+        ),
+
+        NewSubbedVs = maps:remove(V, FoldSubbedVs),
+        {ArgIVs, {NewImplReps, NewBindMap, NewSubbedVs}};
 
       {ok, T} ->
         Key = utils:impl_key(T),
 
-        gb_sets:fold(fun(I, {NestedImplReps, NestedSubbedVs}) ->
+        Result = gb_sets:fold(fun(I, FoldMemo) ->
+          {NestedArgIVs, NestedImplReps, NestedBindMap, NestedSubbedVs} = FoldMemo,
           {_, _, _, ImplModule} = maps:get(Key, maps:get(I, Impls)),
           ImplName = impl_name(I, Key),
+          ImplAtom = list_to_atom(ImplName),
 
-          CG1 = case ImplModule of
+          ImplVarCG = case ImplModule of
             Module -> CG;
             _ ->
               {_, Arity} = maps:get({ImplModule, ImplName}, CG#cg.env),
               env_set(ImplName, {{external, ImplModule}, Arity}, CG)
           end,
-          ImplVar = rep({var, Loc, ImplName}, CG1),
+          NestedBindMap1 = NestedBindMap#{
+            ImplAtom => rep({var, Loc, ImplName}, ImplVarCG)
+          },
+          ImplVarRep = {var, Line, ImplAtom},
 
           case maps:find({I, V}, NestedIVs) of
-            error -> {[ImplVar | NestedImplReps], NestedSubbedVs};
+            error ->
+              NewImplReps = [ImplVarRep | NestedImplReps],
+              {NestedArgIVs, NewImplReps, NestedBindMap1, NestedSubbedVs};
 
             {ok, IVsNested} ->
-              {ImplArgsRep, NewSubbedVs} = rep_impls(
+              {NewArgIVs, ImplArgsRep, NewBindMap, NewSubbedVs} = rep_impls(
                 IVsNested,
                 Loc,
+                NestedBindMap1,
                 NestedSubbedVs,
                 CG
               ),
@@ -869,12 +906,22 @@ rep_impls(IVs, Loc, SubbedVs, CG) ->
               % We don't need to curry here; we know the implementation
               % accepts all arguments directly; i.e. it doesn't return
               % another function that accepts more arguments.
-              ImplRep = {call, Line, ImplVar, ImplArgsRep},
-              {[ImplRep | NestedImplReps], NewSubbedVs}
+              NewImplRep = {call, Line, ImplVarRep, ImplArgsRep},
+              {
+                [NewArgIVs | NestedArgIVs],
+                [NewImplRep | NestedImplReps],
+                NewBindMap,
+                NewSubbedVs
+              }
           end
-        end, {FoldImplReps, maps:remove(V, FoldSubbedVs)}, Is)
+        end, {[], FoldImplReps, FoldBindMap, maps:remove(V, FoldSubbedVs)}, Is),
+
+        {ArgIVs, NewImplReps, NewBindMap, NewSubbedVs} = Result,
+        {ArgIVs, {NewImplReps, NewBindMap, NewSubbedVs}}
     end
-  end, {[], SubbedVs}, IVs).
+  end, {[], BindMap, SubbedVs}, IVs),
+
+  erlang:insert_element(1, FinalMemo, lists:flatten(FinalArgIVs)).
 
 rewrite_ref(Rep, Ref, Loc, CG) ->
   % rewrite() expects a single var rep as a parameter, whereas Rep might be
@@ -898,25 +945,57 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   ArgTs = utils:arg_ts(LamT),
 
-  {AllImplsRep, _} = lists:mapfoldl(fun(ArgT, FoldSubbedVs) ->
-    rep_impls(utils:ivs(ArgT), Loc, FoldSubbedVs, CG)
-  end, SubbedVs, ArgTs),
+  % Must fold*l* b/c impls associated with multiple args are passed through the
+  % left-most arg.
+  {ArgsRepRev, ArgIVsRev, ImplRepsRev, BindMap, _} = lists:foldl(fun(ArgT, Memo) ->
+    {FoldArgsRep, FoldArgIVs, FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
+    {NewArgIVs, NewImplReps, NewBindMap, NewSubbedVs} = rep_impls(
+      utils:ivs(ArgT),
+      Loc,
+      FoldBindMap,
+      FoldSubbedVs,
+      CG
+    ),
 
-  AllImplsListRep = lists:foldr(fun(ArgImplsRep, FoldListRep) ->
-    ArgImplsListRep = lists:foldr(fun(ImplRep, NestedListRep) ->
-      {cons, Line, ImplRep, NestedListRep}
-    end, {nil, Line}, ArgImplsRep),
+    NewArgRep = {var, Line, unique("Arg")},
+    {
+      [NewArgRep | FoldArgsRep],
+      [NewArgIVs | FoldArgIVs],
+      [NewImplReps | FoldImplReps],
+      NewBindMap,
+      NewSubbedVs
+    }
+  end, {[], [], [], #{}, SubbedVs}, ArgTs),
 
-    {cons, Line, ArgImplsListRep, FoldListRep}
-  end, {nil, Line}, AllImplsRep),
+  ArgsRep = lists:reverse(ArgsRepRev),
+  ArgIVs = lists:reverse(ArgIVsRev),
+  ImplReps = lists:reverse(ImplRepsRev),
 
-  case lists:flatlength(AllImplsRep) of
+  {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgIVs, false, CG),
+
+  case maps:size(BindMap) of
+    % If there aren't any bindings, we didn't solve for any impls (both bound
+    % impls and solved impls create bindings), so don't rewrite.
     0 -> {[], VarRep};
+
     _ ->
+      BindListRep = maps:fold(fun(Atom, ValueRep, FoldListRep) ->
+        TupleRep = {tuple, Line, [eabs(Atom, Line), ValueRep]},
+        {cons, Line, TupleRep, FoldListRep}
+      end, {nil, Line}, BindMap),
+
       ResultRep = {var, Line, unique("Lam")},
       excluder_remove('_@wrap_with_impls'),
-      Call = {call, Line, {atom, Line, '_@wrap_with_impls'},
-        [VarRep, AllImplsListRep, eabs(Line, Line)]},
+      excluder_remove('_@wrap_with_impls_r'),
+
+      CallArgsRep = [
+        VarRep,
+        eabs(PatternReps, Line),
+        eabs(ImplReps, Line),
+        BindListRep,
+        eabs(Line, Line)
+      ],
+      Call = {call, Line, {atom, Line, '_@wrap_with_impls'}, CallArgsRep},
       {[{match, Line, ResultRep, Call}], ResultRep}
   end;
 

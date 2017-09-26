@@ -502,6 +502,18 @@ test_interface(Run) ->
       "}\n"
       "main() = (foo(true, (true, [1])), foo(false, (true, ['a', 'b', 'c'])))"
     ))
+  , ?_test({1, 2} = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for [A] { to_int(l) = @erlang:length(l) }\n"
+      "interface Foo { foo : T -> (T, A ~ ToInt) -> Int }\n"
+      "impl Foo for Bool {\n"
+      "  foo(a, (b, c)) = if b && a then 2 * to_int(c) else to_int(c)\n"
+      "}\n"
+      "main() = (\n"
+      "  (foo : T ~ Foo -> (T ~ Foo, [Int]) -> Int)(true, (false, [1])),\n"
+      "  (foo : Bool -> (Bool, A ~ ToInt) -> Int)(false, (false, [@a, @b]))\n"
+      ")"
+    ))
   , ?_test({{ok, <<"combine">>}, false} = Run(
       "filename = \"/tmp/par-combine-1\"\n"
       "interface Combine { combine : T -> T -> T }\n"

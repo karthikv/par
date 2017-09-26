@@ -5,7 +5,6 @@
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Handle more rewrite cases
-%   - sig instantiation
 %   - Validation to prevent struct/enum TE from being a gen TV from HKT?
 %     - And to prevent impl type from being a HKT
 %   - Extending interfaces?
