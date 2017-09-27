@@ -84,10 +84,10 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
         Value = {{global_fn, Atom}, Arity},
         {[{Atom, Arity}], env_set(Con, Value, ModuleCG)};
 
-      {interface, _, {con_token, _, RawCon}, Fields} ->
+      {interface, _, {con_token, _, RawCon}, _, Fields} ->
         #cg{ctx=#ctx{ifaces=Ifaces}=C} = ModuleCG,
         Con = utils:qualify(RawCon, C),
-        {_, FieldTs} = maps:get(Con, Ifaces),
+        {_, FieldTs, _} = maps:get(Con, Ifaces),
 
         lists:mapfoldl(fun({Sig, RawT}, FoldCG) ->
           {sig, _, {var, _, Name}, _} = Sig,
@@ -269,7 +269,7 @@ rep({struct, Loc, StructTE, FieldTEs}, CG) ->
   Clause = {clause, Line, ArgsRep, [], Body},
   {function, Line, list_to_atom(Con), length(FieldTEs), [Clause]};
 
-rep({interface, _, {con_token, _, RawCon}, Fields}, CG) ->
+rep({interface, _, {con_token, _, RawCon}, _, Fields}, CG) ->
   #cg{ctx=#ctx{
     ifaces=Ifaces,
     inst_refs=InstRefs,
@@ -277,7 +277,7 @@ rep({interface, _, {con_token, _, RawCon}, Fields}, CG) ->
   }=C} = CG,
 
   Con = utils:qualify(RawCon, C),
-  {_, FieldTs} = maps:get(Con, Ifaces),
+  {_, FieldTs, _} = maps:get(Con, Ifaces),
 
   lists:map(fun({Sig, RawT}) ->
     {sig, Loc, {var, _, Name}, _} = Sig,

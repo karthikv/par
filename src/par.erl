@@ -21,6 +21,7 @@
 % - [2 days] Exceptions
 % - Negative numbers and unit in patterns
 % - Ensure con is fully applied in patterns
+% - Trim left whitespace for error lines
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
@@ -51,9 +52,8 @@
 %   - Fix other_errors_test that ensures sig cst is unified first
 %   - Suppress dup errors if multiple params/elems don't unify
 %   - Better messages for indirect errors from T<B> due to T<A> being unified
-%     - Better messages for bad impl type that has wrong # of params; might
-%       be fixed by better indirect errors
 %   - Improve error when iface needs HKT and impl type has wrong # of params
+%     - Ditto for interface extension that has wrong # of params
 % - Website + Documentation
 %
 % Defer

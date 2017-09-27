@@ -1604,7 +1604,7 @@ def_test_() ->
 
 
   , ?_assertEqual(
-      {interface, l(0, 0, 2, 1), {con_token, l(10, 5), "Iface"}, [
+      {interface, l(0, 0, 2, 1), {con_token, l(10, 5), "Iface"}, [], [
         {sig, l(1, 2, 12),
           {var, l(1, 2, 3), "foo"},
           {con_token, l(1, 8, 6), "String"}
@@ -1624,7 +1624,7 @@ def_test_() ->
       )
     )
   , ?_assertEqual(
-      {interface, l(0, 0, 3, 1), {con_token, l(10, 8), "Mappable"}, [
+      {interface, l(0, 0, 3, 1), {con_token, l(10, 8), "Mappable"}, [], [
         {sig, l(1, 2, 23),
           {var, l(1, 2, 3), "add"},
           {lam_te, l(1, 8, 17),
@@ -1656,6 +1656,41 @@ def_test_() ->
         "interface Mappable {\n"
         "  add : A -> T<A> -> T<A>\n"
         "  length : T<B> -> Int\n"
+        "}"
+      )
+    )
+  , ?_assertEqual(
+      {interface, l(0, 0, 2, 1),
+        {con_token, l(10, 3), "Foo"}, [
+          {con_token, l(22, 3), "Bar"}
+        ], [
+          {sig, l(1, 2, 12),
+            {var, l(1, 2, 3), "foo"},
+            {con_token, l(1, 8, 6), "String"}
+          }
+        ]
+      },
+      ok_def(
+        "interface Foo extends Bar {\n"
+        "  foo : String\n"
+        "}"
+      )
+    )
+  , ?_assertEqual(
+      {interface, l(0, 0, 2, 1),
+        {con_token, l(10, 3), "Foo"}, [
+          {con_token, l(22, 10), "Module.Bar"},
+          {con_token, l(34, 3), "Baz"}
+        ], [
+          {sig, l(1, 2, 12),
+            {var, l(1, 2, 3), "foo"},
+            {con_token, l(1, 8, 6), "String"}
+          }
+        ]
+      },
+      ok_def(
+        "interface Foo extends Module.Bar, Baz {\n"
+        "  foo : String\n"
         "}"
       )
     )

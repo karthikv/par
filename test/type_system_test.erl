@@ -1156,10 +1156,6 @@ interface_test_() ->
       "bar = (to_int((1, true)), to_int((1, false, 2)))",
       "bar"
     ))
-  , ?_test("(A -> B) -> C<A> ~ Mappable -> C<B> ~ Mappable" = ok_prg(
-      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }",
-      "map"
-    ))
   , ?_test("(String, String, String, String)" = ok_prg(
       "interface ToStr { to_str : T -> String }\n"
       "impl ToStr for String { to_str(s) = s }\n"
@@ -1180,6 +1176,96 @@ interface_test_() ->
       "  to_str(Foo((\"hey\", true)))\n"
       ")",
       "x"
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Atom { foo(a) = @hi }",
+      {"Atom -> Atom", "Atom -> Bool", l(16, 15), ?FROM_GLOBAL_SIG("foo")}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Atom { foo(a) = a == [] }",
+      {"[A]", "Atom", l(1, 34, 2), ?FROM_OP_RHS('==')}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : A -> T -> A }\n"
+      "impl Foo for A -> A { foo(a, t) = { t(a); a } }",
+      {"rigid(A)", "rigid(B)", l(1, 38, 1), ?FROM_APP}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Atom { foo(a) = a == @hi }\n"
+      "bar = foo(\"hi\")",
+      {"String", "A ~ Foo", l(2, 10, 4), ?FROM_APP}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for String { foo(_) = true foo(_) = false }",
+      {?ERR_DUP_FIELD_IMPL("foo"), l(1, 36, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for String { baz(_) = \"hi\" foo(_) = false }",
+      {?ERR_EXTRA_FIELD_IMPL("baz", "Foo"), l(1, 22, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool, bar : T -> String }\n"
+      "impl Foo for String { bar(_) = \"hi\" }",
+      {?ERR_MISSING_FIELD_IMPL("foo", "Foo"), l(1, 0, 37)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for [A] { foo(_) = true }\n"
+      "impl Foo for [Int] { foo(_) = true }",
+      {?ERR_DUP_IMPL("Foo", "List", "[A]"), l(2, 13, 5)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Bool }\n"
+      "impl Foo for Int -> Bool { foo(_) = true }\n"
+      "impl Foo for (Atom -> A) -> A { foo(_) = true }",
+      {?ERR_DUP_IMPL("Foo", "function", "Int -> Bool"), l(2, 13, 16)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : Bool }",
+      {?ERR_IFACE_TYPE("foo"), l(16, 10)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T -> Int, bar : Int -> T }",
+      {?ERR_IFACE_TYPE("bar"), l(32, 14)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T, bar : T -> T }",
+      {?ERR_IFACE_TYPE("foo"), l(16, 7)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = to_int(@erlang:round(5.3))",
+      {?ERR_MUST_SOLVE("M ~ ToInt", "M ~ ToInt"), l(2, 13, 18)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = to_int(3)",
+      {?ERR_MUST_SOLVE("I ~ ToInt ~ Num", "I ~ ToInt ~ Num"), l(2, 13, 1)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = (|x| to_int(x))(@erlang:round(5.3))",
+      {?ERR_MUST_SOLVE("O ~ ToInt", "O ~ ToInt"), l(2, 22, 18)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for Int { to_int(i) = i }\n"
+      "foo = let to_i(x) = to_int(x) in to_i(3)",
+      {?ERR_MUST_SOLVE("N ~ ToInt ~ Num", "N ~ ToInt ~ Num"), l(2, 38, 1)}
+    ))
+
+
+  , ?_test("(A -> B) -> C<A> ~ Mappable -> C<B> ~ Mappable" = ok_prg(
+      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }",
+      "map"
     ))
   , ?_test("[Bool]" = ok_prg(
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
@@ -1226,27 +1312,6 @@ interface_test_() ->
       "foo"
     ))
   , ?_test(bad_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for Atom { foo(a) = @hi }",
-      {"Atom -> Atom", "Atom -> Bool", l(16, 15), ?FROM_GLOBAL_SIG("foo")}
-    ))
-  , ?_test(bad_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for Atom { foo(a) = a == [] }",
-      {"[A]", "Atom", l(1, 34, 2), ?FROM_OP_RHS('==')}
-    ))
-  , ?_test(bad_prg(
-      "interface Foo { foo : A -> T -> A }\n"
-      "impl Foo for A -> A { foo(a, t) = { t(a); a } }",
-      {"rigid(A)", "rigid(B)", l(1, 38, 1), ?FROM_APP}
-    ))
-  , ?_test(bad_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for Atom { foo(a) = a == @hi }\n"
-      "bar = foo(\"hi\")",
-      {"String", "A ~ Foo", l(2, 10, 4), ?FROM_APP}
-    ))
-  , ?_test(bad_prg(
       "interface Foo { foo : T<Int> -> Char }\n"
       "impl Foo for Map { foo(_) = 'a' }",
       {"A<Int>", "Map<B, C>", l(1, 13, 3), ?FROM_IMPL_TYPE}
@@ -1263,45 +1328,6 @@ interface_test_() ->
       {"rigid(A)<rigid(B)>", "C ~ ToInt", l(2, 16, 1), ?FROM_APP}
     ))
   , ?_test(ctx_err_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for String { foo(_) = true foo(_) = false }",
-      {?ERR_DUP_FIELD_IMPL("foo"), l(1, 36, 3)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for String { baz(_) = \"hi\" foo(_) = false }",
-      {?ERR_EXTRA_FIELD_IMPL("baz", "Foo"), l(1, 22, 3)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : T -> Bool, bar : T -> String }\n"
-      "impl Foo for String { bar(_) = \"hi\" }",
-      {?ERR_MISSING_FIELD_IMPL("foo", "Foo"), l(1, 0, 37)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for [A] { foo(_) = true }\n"
-      "impl Foo for [Int] { foo(_) = true }",
-      {?ERR_DUP_IMPL("Foo", "List", "[A]"), l(2, 13, 5)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : T -> Bool }\n"
-      "impl Foo for Int -> Bool { foo(_) = true }\n"
-      "impl Foo for (Atom -> A) -> A { foo(_) = true }",
-      {?ERR_DUP_IMPL("Foo", "function", "Int -> Bool"), l(2, 13, 16)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : Bool }",
-      {?ERR_IFACE_TYPE("foo"), l(16, 10)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : T -> Int, bar : Int -> T }",
-      {?ERR_IFACE_TYPE("bar"), l(32, 14)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface Foo { foo : T, bar : T -> T }",
-      {?ERR_IFACE_TYPE("foo"), l(16, 7)}
-    ))
-  , ?_test(ctx_err_prg(
       "interface Foo { foo : T<A> -> Int }\n"
       "impl Foo for [A] { foo(_) = 3 }",
       {?ERR_IMPL_TYPE("Foo"), l(1, 13, 3)}
@@ -1313,30 +1339,6 @@ interface_test_() ->
     ))
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Int { to_int(i) = i }\n"
-      "foo = to_int(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE("M ~ ToInt", "M ~ ToInt"), l(2, 13, 18)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Int { to_int(i) = i }\n"
-      "foo = to_int(3)",
-      {?ERR_MUST_SOLVE("I ~ ToInt ~ Num", "I ~ ToInt ~ Num"), l(2, 13, 1)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Int { to_int(i) = i }\n"
-      "foo = (|x| to_int(x))(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE("O ~ ToInt", "O ~ ToInt"), l(2, 22, 18)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Int { to_int(i) = i }\n"
-      "foo = let to_i(x) = to_int(x) in to_i(3)",
-      {?ERR_MUST_SOLVE("N ~ ToInt ~ Num", "N ~ ToInt ~ Num"), l(2, 38, 1)}
-    ))
-  , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
       "foo = to_int(@io:printable_range() : T<A>)",
       {?ERR_MUST_SOLVE("R<Q> ~ ToInt", "R<Q> ~ ToInt"), l(1, 13, 28)}
     ))
@@ -1345,6 +1347,63 @@ interface_test_() ->
       "foo = to_int(@io:printable_range())",
       {?ERR_MUST_SOLVE("N ~ ToInt", "N<M> ~ ToInt"), l(1, 13, 21)}
     ))
+
+  , ?_test("A ~ ToInt -> Int" = ok_prg(
+      "interface ToInt extends Num { to_int : T -> Int }\n"
+      "impl ToInt for Float { to_int(f) = @erlang:round(f) }",
+      "to_int"
+    ))
+  , ?_test("Int" = ok_prg(
+      "interface Foo { foo : T -> String }\n"
+      "interface ToInt extends Concatable, Foo { to_int : T -> Int }\n"
+      "impl Foo for [A] { foo(_) = \"list\" }\n"
+      "impl ToInt for [Int] {\n"
+      "  to_int(l) = match l { [h | t] => h + to_int(t), [] => 0 }\n"
+      "}\n"
+      "bar = to_int([17, 48, 3])",
+      "bar"
+    ))
+  , ?_test(bad_prg(
+      "interface ToInt extends Num { to_int : T -> Int }\n"
+      "impl ToInt for Bool { to_int(_) = 2 }",
+      {"A ~ Num", "Bool", l(1, 15, 4), ?FROM_PARENT_IFACE("Num")}
+    ))
+  %% , ?_test(bad_prg(
+  %%     "interface Foo { foo : T -> String }\n"
+  %%     "interface ToInt extends Foo { to_int : T -> Int }\n"
+  %%     "impl Foo for [A ~ Foo] { foo([a]) = foo(a) }\n"
+  %%     "impl ToInt for [A ~ ToInt] { foo([a]) = to_int(a) }",
+  %%     {"A ~ Foo", "Bool", l(3, 15, 4), ?FROM_PARENT_IFACE("Foo")}
+  %%   ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt extends Foo { to_int : T -> Int }",
+      {?ERR_NOT_DEF_IFACE("Foo"), l(24, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt extends Int { to_int : T -> Int }",
+      {?ERR_TYPE_NOT_IFACE("Int"), l(24, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt extends Foo { to_int : T -> Int }\n"
+      "interface Foo extends ToInt { foo : T -> String }\n",
+      {?ERR_CYCLE("Foo", "ToInt"), l(1, 22, 5)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface Foo { foo : T<A> -> Int }\n"
+      "interface ToInt extends Foo { to_int : T -> Int }",
+      {?ERR_TYPE_PARAMS("Foo", 1, 0), l(1, 24, 3)}
+    ))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "interface Foo { to_int : T -> Int }\n"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "interface ToInt extends Foo.Foo { to_int : T -> Int }\n"
+      }
+    ], "bar", {?ERR_DUP_FIELD_PARENT("to_int", "Foo"), "Bar", l(1, 34, 17)}))
   ].
 
 gen_tv_test_() ->

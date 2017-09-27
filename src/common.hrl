@@ -14,7 +14,7 @@
 %     given by Name and the type T, parameterized by Vs
 %   structs - a Name => {T, SigIfaces} map for structs in the env
 %   enums - a Name => [VariantName] map for enums in the env
-%   ifaces - a Name => {Fields, FieldMetas} map for interfaces in the env
+%   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   impl_refs - a Ref => ImplKey map for implementations of interfaces
 %   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
@@ -104,12 +104,12 @@
 -define(FROM_OP_LHS(Op), ?FMT("left-hand side of ~p operator", [Op])).
 -define(FROM_OP_RHS(Op), ?FMT("right-hand side of ~p operator", [Op])).
 -define(FROM_OP_RESULT(Op), ?FMT("result of ~p operation", [Op])).
--define(
-  FROM_IMPL(Con, PrettyT),
-  ?FMT("implementing interface ~s for ~s", [utils:unqualify(Con), PrettyT])
-).
 -define(FROM_INST, "instantiation").
 -define(FROM_IMPL_TYPE, "impl type").
+-define(
+  FROM_PARENT_IFACE(Con),
+  ?FMT("satisfying parent interface ~p", [utils:unqualify(Con)])
+).
 
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
@@ -145,6 +145,13 @@
 -define(
   ERR_DUP_FIELD_IMPL(Name),
   ?FMT("Duplicate field ~s in this implementation", [Name])
+).
+-define(
+  ERR_DUP_FIELD_PARENT(Name, ParentCon),
+  ?FMT(
+    "Duplicate field ~s that already exists in parent interface ~s",
+    [Name, utils:unqualify(ParentCon)]
+  )
 ).
 -define(
   ERR_EXTRA_FIELD_IMPL(Name, Con),
@@ -276,6 +283,18 @@
     "specify a type constructor as a single, capitalized name, like List or "
     "Set.",
     [utils:unqualify(Con)]
+  )
+).
+-define(
+  ERR_CYCLE(Con, ParentCon),
+  ?FMT(
+    "Making ~s extend ~s would cause a cycle. ~s is already an ancestor "
+    "interface of ~s.", [
+      utils:unqualify(Con),
+      utils:unqualify(ParentCon),
+      utils:unqualify(Con),
+      utils:unqualify(ParentCon)
+    ]
   )
 ).
 

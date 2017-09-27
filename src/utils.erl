@@ -9,6 +9,7 @@
   builtin_is/0,
   all_ivs/1,
   arg_ts/1,
+  family_is/2,
   absolute/1,
   pretty_csts/1,
   pretty/1
@@ -102,6 +103,16 @@ ivs_list(unit) -> [].
 
 arg_ts({lam, ArgT, ReturnT}) -> [ArgT | arg_ts(ReturnT)];
 arg_ts(_) -> [].
+
+family_is(I, C) ->
+  case gb_sets:is_member(I, builtin_is()) of
+    true -> gb_sets:singleton(I);
+    false ->
+      {_, _, Parents} = maps:get(I, C#ctx.ifaces),
+      gb_sets:fold(fun(ParentI, Family) ->
+        gb_sets:union(Family, family_is(ParentI, C))
+      end, gb_sets:add(I, Parents), Parents)
+  end.
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

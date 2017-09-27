@@ -299,7 +299,7 @@ infer_comps(Comps) ->
   Result.
 
 populate_env_and_types(Comps, C) ->
-  lists:foldl(fun(Comp, FoldC) ->
+  C1 = lists:foldl(fun(Comp, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     lists:foldl(fun(Node, ModuleC) ->
@@ -339,7 +339,7 @@ populate_env_and_types(Comps, C) ->
               ModuleC3#ctx{structs=(ModuleC3#ctx.structs)#{Con => StructInfo}}
           end;
 
-        {interface, _, {con_token, Loc, Name}, Fields} ->
+        {interface, _, {con_token, Loc, Name}, _, Fields} ->
           Con = utils:qualify(Name, ModuleC),
           NumParams = case gen_t_num_params({record_te, Loc, Fields}) of
             false -> 0;
@@ -347,7 +347,8 @@ populate_env_and_types(Comps, C) ->
           end,
           ModuleC1 = define_type(Con, true, NumParams, Loc, ModuleC),
 
-          NewIfaces = (ModuleC1#ctx.ifaces)#{Con => {Fields, none}},
+          Value = {Fields, none, gb_sets:new()},
+          NewIfaces = (ModuleC1#ctx.ifaces)#{Con => Value},
           NewImpls = (ModuleC1#ctx.impls)#{Con => #{}},
           ModuleC2 = ModuleC1#ctx{ifaces=NewIfaces, impls=NewImpls},
 
@@ -359,7 +360,21 @@ populate_env_and_types(Comps, C) ->
         _ -> ModuleC
       end
     end, FoldC#ctx{module=Module}, Defs)
-  end, C, Comps).
+  end, C, Comps),
+
+  lists:foldl(fun(Comp, FoldC) ->
+    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
+
+    lists:foldl(fun(Node, ModuleC) ->
+      N = element(1, Node),
+      if
+        N == enum; N == struct; N == interface ->
+          {_, ModuleC1} = infer(Node, ModuleC),
+          ModuleC1;
+        true -> ModuleC
+      end
+    end, FoldC#ctx{module=Module}, Defs)
+  end, C1, Comps).
 
 define(Name, Value, Exported, Loc, C) ->
   case env_exists(Name, C) of
@@ -495,11 +510,13 @@ infer_defs(Comps, C) ->
               {none, ModuleC8}
           end;
 
-        {sig, _, _, _} -> {Node, ModuleC1};
+        _ when element(1, Node) == sig -> {Node, ModuleC1};
 
-        _ ->
+        _ when element(1, Node) == impl ->
           {_, ModuleC2} = infer(Node, ModuleC1),
-          {none, ModuleC2}
+          {none, ModuleC2};
+
+        _ -> {none, ModuleC1}
       end
     end, {none, FoldC1}, Defs),
 
@@ -751,7 +768,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
 
   {none, C5};
 
-infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
+infer({interface, Loc, {con_token, _, RawCon}, Extends, Fields}, C) ->
   Con = utils:qualify(RawCon, C),
   {true, NumParams} = maps:get(Con, C#ctx.types),
   {RawRecordT, C1} = infer_sig(
@@ -766,23 +783,60 @@ infer({interface, Loc, {con_token, _, RawCon}, Fields}, C) ->
   % type sigs don't need consolidation, so don't pass aliases
   {record, _, RawFieldMap} = subs(RawRecordT, #sub_opts{subs=Subs}),
 
-  {FieldTs, C2} = lists:mapfoldl(fun(Sig, FoldC) ->
-    {sig, SigLoc, {var, _, Name}, FieldTE} = Sig,
-    FoldC1 = validate_iface_field(FieldTE, Name, SigLoc, FoldC),
+  {Parents, Ancestors, C2} = lists:foldl(fun(ConToken, Memo) ->
+    {FoldParents, FoldAncestors, FoldC} = Memo,
+    {con_token, ParentLoc, ParentRawCon} = ConToken,
+
+    ParentCon = utils:resolve_con(ParentRawCon, FoldC),
+    FoldC1 = validate_type(ParentCon, true, NumParams, ParentLoc, FoldC),
+
+    case no_ctx_errs(FoldC1, FoldC) of
+      false -> {FoldParents, FoldAncestors, FoldC1};
+      true ->
+        ParentFamily = utils:family_is(ParentCon, FoldC1),
+        case gb_sets:is_member(Con, ParentFamily) of
+          false ->
+            NewParents = gb_sets:add(ParentCon, FoldParents),
+            NewAncestors = gb_sets:union(ParentFamily, FoldAncestors),
+            {NewParents, NewAncestors, FoldC1};
+
+          true ->
+            FoldC2 = add_ctx_err(?ERR_CYCLE(Con, ParentCon), ParentLoc, FoldC1),
+            {FoldParents, FoldAncestors, FoldC2}
+        end
+    end
+  end, {gb_sets:new(), gb_sets:new(), C1}, Extends),
+
+  FieldOrigins = gb_sets:fold(fun(AncestorCon, FoldFieldOrigins) ->
+    {AncestorFields, _, _} = maps:get(AncestorCon, C2#ctx.ifaces),
+    lists:foldl(fun({sig, _, {var, _, Name}, _}, NestedFieldOrigins) ->
+      NestedFieldOrigins#{Name => AncestorCon}
+    end, FoldFieldOrigins, AncestorFields)
+  end, #{}, gb_sets:subtract(Ancestors, utils:builtin_is())),
+
+  {FieldTs, C3} = lists:mapfoldl(fun(Sig, FoldC) ->
+    {sig, FieldLoc, {var, _, Name}, FieldTE} = Sig,
+    FoldC1 = case maps:find(Name, FieldOrigins) of
+      error -> FoldC;
+      {ok, ParentCon} ->
+        Err = ?ERR_DUP_FIELD_PARENT(Name, ParentCon),
+        add_ctx_err(Err, FieldLoc, FoldC)
+    end,
+    FoldC2 = validate_iface_field(FieldTE, Name, FieldLoc, FoldC1),
 
     % don't need to make any Vs rigid; inst still works correctly
     #{Name := RawT} = RawFieldMap,
-    T = norm_sig_type(RawT, [], FoldC1#ctx.pid),
+    T = norm_sig_type(RawT, [], FoldC2#ctx.pid),
 
-    {add_dep, TV, ID} = env_get(Name, FoldC1),
-    FoldC2 = new_gnr(TV, ID, FoldC1),
-    FoldC3 = add_cst(TV, T, SigLoc, ?FROM_GLOBAL_SIG(Name), FoldC2),
-    {RawT, finish_gnr(FoldC3, FoldC1#ctx.gnr)}
-  end, C1, Fields),
+    {add_dep, TV, ID} = env_get(Name, FoldC2),
+    FoldC3 = new_gnr(TV, ID, FoldC2),
+    FoldC4 = add_cst(TV, T, FieldLoc, ?FROM_GLOBAL_SIG(Name), FoldC3),
+    {RawT, finish_gnr(FoldC4, FoldC2#ctx.gnr)}
+  end, C2, Fields),
 
-  Ifaces = C2#ctx.ifaces,
-  NewIfaces = Ifaces#{Con => setelement(2, maps:get(Con, Ifaces), FieldTs)},
-  {none, C2#ctx{ifaces=NewIfaces}};
+  Ifaces = C3#ctx.ifaces,
+  NewIfaces = Ifaces#{Con => {Fields, FieldTs, Parents}},
+  {none, C3#ctx{ifaces=NewIfaces}};
 
 infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
   ImplLoc = ?LOC(ImplTE),
@@ -792,7 +846,7 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
     % TODO: are builtin type classes implementable?
     error -> {none, add_ctx_err(?ERR_NOT_DEF_IFACE(IfaceCon), IfaceLoc, C)};
 
-    {ok, {Fields, _}} ->
+    {ok, {Fields, FieldTs, Parents}} ->
       {true, IfaceNumParams} = maps:get(IfaceCon, C#ctx.types),
       {RawT, C1} = case {IfaceNumParams, ImplTE} of
         {0, _} -> infer_sig(false, false, #{}, ImplTE, C);
@@ -829,47 +883,45 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
             {ok, {ExistingT, _, _, _}} ->
               DupErr = ?ERR_DUP_IMPL(IfaceCon, Key, utils:pretty(ExistingT)),
               add_ctx_err(DupErr, ImplLoc, C1);
+
             error ->
               Value = {RawT, ImplT, Inits, C1#ctx.module},
               NewSubImpls = SubImpls#{Key => Value},
-              C1#ctx{impls=Impls#{IfaceCon => NewSubImpls}}
+              NewImpls = Impls#{IfaceCon => NewSubImpls},
+
+              gb_sets:fold(fun(I, FoldC) ->
+                TV = tv_server:fresh(I, FoldC#ctx.pid),
+                FoldC1 = new_gnr(FoldC),
+                From = ?FROM_PARENT_IFACE(I),
+                FoldC2 = add_cst(ImplT, TV, ImplLoc, From, FoldC1),
+                finish_gnr(FoldC2, FoldC#ctx.gnr)
+              end, C1#ctx{impls=NewImpls}, Parents)
           end,
 
-          % TODO: is there a way around inferring these sigs again?
-          {Pairs, C3} = lists:mapfoldl(fun(Sig, FoldC) ->
-            {sig, SigLoc, {var, _, Name}, SigTE} = Sig,
-            {SigT, FoldC1} = infer_sig(
-              false,
-              false,
-              #{"T" => {none, IfaceNumParams}},
-              SigTE,
-              FoldC
-            ),
-            {{Name, {SigLoc, SigT}}, FoldC1}
-          end, C2, Fields),
-
-          % don't duplicate errors, as we've already inferred this signature
-          C4 = C3#ctx{errs=C2#ctx.errs},
+          Pairs = lists:map(fun({Sig, FieldT}) ->
+            {sig, FieldLoc, {var, _, Name}, _} = Sig,
+            {Name, {FieldLoc, FieldT}}
+          end, lists:zip(Fields, FieldTs)),
           FieldLocTs = maps:from_list(Pairs),
 
-          {ActualNames, C5} = infer_impl_inits(
+          {ActualNames, C3} = infer_impl_inits(
             Inits,
             ImplT,
             ImplLoc,
             IfaceCon,
             IfaceNumParams,
             FieldLocTs,
-            C4
+            C2
           ),
 
           ExpNames = gb_sets:from_list(maps:keys(FieldLocTs)),
           MissingNames = gb_sets:difference(ExpNames, ActualNames),
 
-          C6 = gb_sets:fold(fun(Name, FoldC) ->
+          C4 = gb_sets:fold(fun(Name, FoldC) ->
             add_ctx_err(?ERR_MISSING_FIELD_IMPL(Name, IfaceCon), Loc, FoldC)
-          end, C5, MissingNames),
-          ImplRefs = C6#ctx.impl_refs,
-          {none, C6#ctx{impl_refs=ImplRefs#{Ref => Key}}}
+          end, C3, MissingNames),
+          ImplRefs = C4#ctx.impl_refs,
+          {none, C4#ctx{impl_refs=ImplRefs#{Ref => Key}}}
       end
   end;
 
@@ -1289,33 +1341,34 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
       end,
       {{con, Con}, none, CaseC};
 
-    {tv_te, TVLoc, V, Ifaces} ->
-      {BaseIfaces, GenIs} = case Ifaces of
+    {tv_te, TVLoc, V, IfaceTokens} ->
+      {BaseIfaceTokens, GenIs} = case IfaceTokens of
         [] -> {[], none};
         _ ->
-          {BaseIfaces_, GenIsSet} = lists:foldr(fun(ConToken, Memo) ->
-            {FoldBaseIfaces, FoldGenIsSet} = Memo,
+          {BaseIfaceTokens_, GenIsSet} = lists:foldr(fun(ConToken, Memo) ->
+            {FoldBaseIfaceTokens, FoldGenIsSet} = Memo,
             {con_token, _, RawI} = ConToken,
             I = utils:resolve_con(RawI, C),
 
             case maps:find(I, C#ctx.types) of
-              {ok, {true, 0}} -> {FoldBaseIfaces, gb_sets:add(I, FoldGenIsSet)};
-              _ -> {[ConToken | FoldBaseIfaces], FoldGenIsSet}
+              {ok, {true, 0}} ->
+                {FoldBaseIfaceTokens, gb_sets:add(I, FoldGenIsSet)};
+              _ -> {[ConToken | FoldBaseIfaceTokens], FoldGenIsSet}
             end
-          end, {[], gb_sets:new()}, Ifaces),
+          end, {[], gb_sets:new()}, IfaceTokens),
 
           GenIs_ = case gb_sets:is_empty(GenIsSet) of
             true -> none;
             false -> GenIsSet
           end,
-          {BaseIfaces_, GenIs_}
+          {BaseIfaceTokens_, GenIs_}
       end,
 
       CaseC = C#ctx{num_params=NumParams},
       {BaseT_, CaseC1} = infer_sig_helper(
         RestrictVs,
         Unique,
-        {tv_te, TVLoc, V, BaseIfaces},
+        {tv_te, TVLoc, V, BaseIfaceTokens},
         CaseC
       ),
       {BaseT_, GenIs, CaseC1#ctx{num_params=undefined}}
@@ -1339,7 +1392,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
 
     true -> {tv_server:fresh(C2#ctx.pid), C2}
   end;
-infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, Ifaces}, C) ->
+infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
   C1 = case RestrictVs of
     false -> C;
     {T, AllowedVs} ->
@@ -1359,14 +1412,14 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, Ifaces}, C) ->
     NumParams_ -> NumParams_
   end,
 
-  {Is, C2} = case Ifaces of
+  {Is, C2} = case IfaceTokens of
     [] -> {none, C1};
     _ ->
       lists:foldl(fun({con_token, ConLoc, RawI_}, {FoldIs, FoldC}) ->
         I = utils:resolve_con(RawI_, C1),
         NewFoldIs = gb_sets:add(I, FoldIs),
         {NewFoldIs, validate_type(I, true, NumParams, ConLoc, FoldC)}
-      end, {gb_sets:new(), C1}, Ifaces)
+      end, {gb_sets:new(), C1}, IfaceTokens)
   end,
 
   case no_ctx_errs(C1, C2) of
@@ -1539,7 +1592,7 @@ infer_impl_inits(
           error ->
             add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, IfaceCon), VarLoc, FoldC);
 
-          {ok, {SigLoc, RawSigT}} ->
+          {ok, {FieldLoc, RawFieldT}} ->
             {TupleSubs, NumParams} = case IfaceNumParams of
               1 ->
                 {con, ImplCon} = ImplT,
@@ -1556,7 +1609,7 @@ infer_impl_inits(
                         {tv, V, _, _} -> FoldSubs#{V => {tuple, ElemTs}};
                         _ -> FoldSubs
                       end
-                    end, #{}, gen_vs_list(RawSigT));
+                    end, #{}, gen_vs_list(RawFieldT));
 
                   true -> #{}
                 end,
@@ -1565,7 +1618,7 @@ infer_impl_inits(
               _ -> {#{}, IfaceNumParams}
             end,
 
-            TupleSigT = subs(RawSigT, #sub_opts{subs=TupleSubs}),
+            TupleSigT = subs(RawFieldT, #sub_opts{subs=TupleSubs}),
             FVs = gb_sets:delete_any("T", fvs(TupleSigT)),
             RigidVs = gb_sets:to_list(FVs),
 
@@ -1573,7 +1626,7 @@ infer_impl_inits(
             NewV = tv_server:next_name(FoldC#ctx.pid),
             NewTV = {tv, NewV, none, false},
             % type sigs don't need consolidation, so don't pass aliases
-            SigT = subs(NormT, #sub_opts{subs=#{"T" => NewV}}),
+            SigT = subs(NormT, #sub_opts{subs=#{"T" => NewTV}}),
 
             % All IVs within ImplT will be in the environment during code gen.
             % To make sure they're treated as bound variables, whose impls
@@ -1613,7 +1666,7 @@ infer_impl_inits(
             SigCst = make_cst(
               TV,
               SigT,
-              SigLoc,
+              FieldLoc,
               ?FROM_GLOBAL_SIG(Name),
               FoldC3
             ),
