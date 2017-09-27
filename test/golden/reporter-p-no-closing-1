@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
 Couldn't find matching closing brace '}':
-2: expr = { a = 3
-          ^
+3: { a = 3
+   ^
 

@@ -1,6 +1,6 @@
 *** module Mod *** ([infer-prg])
 
 From function call, given 2 arguments, but need at most 1 argument:
-2: expr = (|x| x)(true, @hi)
-          ^^^^^^^^^^^^^^^^^^
+3: (|x| x)(true, @hi)
+   ^^^^^^^^^^^^^^^^^^
 

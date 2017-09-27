@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected either global definition, global signature, keyword 'enum', or keyword 
+'struct':
+4:   @hello
+     ^^^^^^
+

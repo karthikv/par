@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+After this expression, expected either a fat arrow '=>' to define a key/value 
+pair in a map literal, or a pipe '|' to update a record:
+3: { @hello, 3 + 5 }
+     ^^^^^^
+

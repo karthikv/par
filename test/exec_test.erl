@@ -20,8 +20,8 @@ run_interpreter(Prg) ->
   {ok, [#comp{ast=Ast}], _} = type_system_test:type_check(Prg),
   interpreter:run_ast(Ast, []).
 
-expr_code_gen(Expr) -> run_code_gen("main() = " ++ Expr).
-expr_interpreter(Expr) -> run_interpreter("main() = " ++ Expr).
+expr_code_gen(Expr) -> run_code_gen("main() =\n" ++ Expr).
+expr_interpreter(Expr) -> run_interpreter("main() =\n" ++ Expr).
 
 many_code_gen(PathPrgs, TargetPath) ->
   {ok, Comps, C} = type_system_test:type_check_many(
@@ -85,7 +85,9 @@ test_expr(Expr) ->
   , ?_test([4, 1] = Expr("(|x| |-| x -- [3])([4, 3, 1])()"))
   % to test code_gen_utils:'_@curry' in the parital application case
   , ?_test(2 = Expr(
-      "let f = (|a| |b, c, d| a - b + c - d)(4), f = f(3) in f(2, 1)"
+      "let f = (|a| |b, c, d| a - b + c - d)(4)\n"
+      "let f = f(3)\n"
+      "f(2, 1)"
     ))
 
 
@@ -95,31 +97,64 @@ test_expr(Expr) ->
   , ?_test({} = Expr("if true then @foo"))
   , ?_test({} = Expr("if false then @io:nl() : () else discard 3"))
   % ensures that we handle conditions that aren't valid guard clauses
-  , ?_test($a = Expr("let f = |x| x == 3 in if f(3) then 'a' else 'b'"))
+  , ?_test($a = Expr(
+      "let f = |x| x == 3\n"
+      "if f(3) then 'a' else 'b'"
+    ))
 
-  , ?_test(5 = Expr("let x = 5 in x"))
+  , ?_test(5 = Expr(
+      "let x = 5\n"
+      "x"
+    ))
   % ensures that we generate a unique name for each variable; otherwise, we'll
   % get a badmatch 4 <=> 5
-  , ?_test(5 = Expr("let x = (let x = 4, y = 5 in y) in x"))
-  , ?_test(true = Expr("let x = 5, y = true in x == 4 || y"))
-  , ?_test(false =
-             Expr("let and = |a, b, c| a && b && c in and(true, true, false)"))
-  , ?_test([4, 3, 4, 2, 3] =
-             Expr("let a = [4], f(x) = a ++ x ++ [3] in f([]) ++ f([2])"))
-  , ?_test(15 = Expr("let a = 10, b = a + 5 in b"))
-  , ?_test(32 = Expr(
-      "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
-      "  f(5, 1)"
+  , ?_test(5 = Expr(
+      "let x =\n"
+      "  let x = 4\n"
+      "  let y = 5\n"
+      "  y\n"
+      "x"
     ))
-  , ?_test(true = Expr("let a = 1, a = a == 1 in a"))
+  , ?_test(true = Expr(
+      "let x = 5\n"
+      "let y = true\n"
+      "x == 4 || y"
+    ))
+  , ?_test(false = Expr(
+      "let and = |a, b, c| a && b && c\n"
+      "and(true, true, false)"
+    ))
+  , ?_test([4, 3, 4, 2, 3] = Expr(
+      "let a = [4]\n"
+      "let f(x) = a ++ x ++ [3]\n"
+      "f([]) ++ f([2])"
+    ))
+  , ?_test(15 = Expr(
+      "let a = 10\n"
+      "let b = a + 5\n"
+      "b"
+    ))
+  , ?_test(32 = Expr(
+      "let f = |x, c| if x == 0 then c else f(x - 1, c * 2)\n"
+      "f(5, 1)"
+    ))
+  , ?_test(true = Expr(
+      "let a = 1\n"
+      "let a = a == 1\n"
+      "a"
+    ))
 
 
-  , ?_test(<<"hello">> = Expr("{ \"hello\" }"))
-  , ?_test(true = Expr("{ @foo; true }"))
-  , ?_assertEqual(
-      #{<<"hi">> => 5},
-      Expr("let x = 5 in { @erlang:hd([1]); 3.0; {\"hi\" => x} }")
-    )
+  , ?_test(true = Expr(
+      "@foo\n"
+      "true"
+    ))
+  , ?_assertEqual(#{<<"hi">> => 5}, Expr(
+      "let x = 5\n"
+      "@erlang:hd([1])\n"
+      "3.0\n"
+      "{ \"hi\" => x }"
+    ))
 
   , ?_test(false = Expr("1 == 2"))
   , ?_test(true = Expr("(3, 4) == (3, 4)"))
@@ -186,12 +221,24 @@ test_expr(Expr) ->
   , ?_test(3 = Expr("@exec_test:returns_fun()(1)(2)"))
   , ?_test(3 = Expr("@exec_test:returns_fun/0((), 1)(2)"))
   , ?_test(3 = Expr("@exec_test:returns_fun/0((), 1, 2)"))
-  , ?_test(true = Expr("let foo(x) = x == () in foo()"))
-  , ?_test(true = Expr("let foo(x) = x == () in foo(())"))
+  , ?_test(true = Expr(
+      "let foo(x) = x == ()\n"
+      "foo()"
+    ))
+  , ?_test(true = Expr(
+      "let foo(x) = x == ()\n"
+      "foo(())"
+    ))
 
   , ?_test(<<"hello world">> = Expr("\"hello\" |> |x| x ++ \" world\""))
-  , ?_test(77 = Expr("let inc(x) = x + 1 in (5 |> |x| 2 * x |> inc) * 7"))
-  , ?_test(true = (Expr("let f(x, y) = x == y in @hi |> f"))(hi))
+  , ?_test(77 = Expr(
+      "let inc(x) = x + 1\n"
+      "(5 |> |x| 2 * x |> inc) * 7"
+    ))
+  , ?_test(true = (Expr(
+      "let f(x, y) = x == y\n"
+      "@hi |> f"
+    ))(hi))
   ].
 
 % used for the last few tests above
@@ -256,8 +303,10 @@ test_global(Run) ->
   % to ensure globals are only evaluated once
   , ?_test({ok, <<"bar">>} = Run(
       "foo = @file:write_file(\"/tmp/par-foo\", \"bar\")\n"
-      "bar = let result = @file:read_file(\"/tmp/par-foo\") in\n"
-      "  { @file:delete(\"/tmp/par-foo\"); result }"
+      "bar =\n"
+      "  let result = @file:read_file(\"/tmp/par-foo\")\n"
+      "  @file:delete(\"/tmp/par-foo\")\n"
+      "  result\n"
       "main() = bar"
     ))
   % to ensure indirect global dependencies (foo -> f -> b) work
@@ -335,8 +384,14 @@ test_record(Expr, Run) ->
   , ?_test(true = Expr("{ bar = 3 } == { bar = 3 }"))
 
 
-  , ?_test(true = Expr("let f(x) = x.bar || false in f({ bar = true })"))
-  , ?_test(hi = Expr("let f(x) = x.bar in f({ bar = @hi, baz = 7 })"))
+  , ?_test(true = Expr(
+      "let f(x) = x.bar || false\n"
+      "f({ bar = true })"
+    ))
+  , ?_test(hi = Expr(
+      "let f(x) = x.bar\n"
+      "f({ bar = @hi, baz = 7 })"
+    ))
 
   , ?_test({11, <<"oh, hi">>} = Run(
       "f(x) = (x.bar + 4, x.foo ++ \"hi\")\n"
@@ -408,7 +463,9 @@ test_record(Expr, Run) ->
   % generalization cases
   , ?_test({<<"hi">>, true} = Run(
       "struct Foo<A> { bar : A }\n"
-      "main() = let id(a) = a, f = Foo { bar = id } in\n"
+      "main() =\n"
+      "  let id(a) = a\n"
+      "  let f = Foo { bar = id }\n"
       "  (f.bar(\"hi\"), f.bar(true))"
     ))
   , ?_test(7.5 = Run(
@@ -490,7 +547,7 @@ test_interface(Run) ->
       "      2 * to_int(c)\n"
       "    else\n"
       "      to_int(c)\n"
-      "  in bar(t, b)\n"
+      "  bar(t, b)\n"
       "main() = foo(true, true)"
     ))
   , ?_test({2, 3} = Run(
@@ -518,13 +575,15 @@ test_interface(Run) ->
       "filename = \"/tmp/par-combine-1\"\n"
       "interface Combine { combine : T -> T -> T }\n"
       "impl Combine for Bool {\n"
-      "  combine(a) = {\n"
-      "    @file:write_file(filename, \"combine\");\n"
+      "  combine(a) =\n"
+      "    @file:write_file(filename, \"combine\")\n"
       "    |b| a && b\n"
-      "  }\n"
       "}\n"
-      "main() = let f = combine(true), result = @file:read_file(filename) in\n"
-      "  { @file:delete(filename); (result, f(false)) }"
+      "main() =\n"
+      "  let f = combine(true)\n"
+      "  let result = @file:read_file(filename)\n"
+      "  @file:delete(filename)\n"
+      "  (result, f(false))"
     ))
   % We can only call combine() after we receive the second argument, which
   % determines the implementation, so the file isn't created.
@@ -532,13 +591,15 @@ test_interface(Run) ->
       "filename = \"/tmp/par-combine-2\"\n"
       "interface Combine { combine : Int -> T -> T -> T }\n"
       "impl Combine for Bool {\n"
-      "  combine(_) = {\n"
-      "    @file:write_file(filename, \"combine\");\n"
+      "  combine(_) =\n"
+      "    @file:write_file(filename, \"combine\")\n"
       "    |a, b| a && b\n"
-      "  }\n"
       "}\n"
-      "main() = let _ = combine(1), result = @file:read_file(filename) in\n"
-      "  { @file:delete(filename); result }"
+      "main() =\n"
+      "  combine(1)\n"
+      "  let result = @file:read_file(filename)\n"
+      "  @file:delete(filename)\n"
+      "  result"
     ))
   , ?_test({1, 3} = Run(
       "interface ToInt { to_int : T -> Int }\n"
@@ -605,7 +666,10 @@ test_interface(Run) ->
       "interface Bar { bar : T -> T }\n"
       "impl Foo for Atom { foo(a) = a }\n"
       "impl Foo for (A ~ Foo, B) { foo((a, b)) = (foo(a), b) }\n"
-      "baz(a, b) = let x = foo(a), y = foo(b), same = x == y in\n"
+      "baz(a, b) =\n"
+      "  let x = foo(a)\n"
+      "  let y = foo(b)\n"
+      "  let same = x == y\n"
       "  (same, match x { (@hi, _) => 'a', _ => 'b' })\n"
       "main() = baz((@hey, 4), (@hey, 4))"
     ))
@@ -617,7 +681,10 @@ test_interface(Run) ->
       "impl Foo for (A ~ Foo, B) { foo((a, b)) = (foo(a), b) }\n"
       "impl Bar for Atom { bar(a) = a }\n"
       "impl Bar for (A ~ Bar, B) { bar((a, b)) = (bar(a), b) }\n"
-      "baz(a, b) = let x = foo(a), y = bar(b), same = x == y in\n"
+      "baz(a, b) =\n"
+      "  let x = foo(a)\n"
+      "  let y = bar(b)\n"
+      "  let same = x == y\n"
       "  (same, match x { (@hi, _) => 'a', _ => 'b' })\n"
       "main() = baz((@hi, 3), (@hey, 4))"
     ))
@@ -723,9 +790,18 @@ interpreter_pattern_test_() ->
   test_pattern(fun expr_interpreter/1, fun run_interpreter/1).
 test_pattern(Expr, Run) ->
   [ ?_test(true = Expr("match 3 { 3 => true, 4 => false }"))
-  , ?_test(18 = Expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test(18 = Expr(
+      "let x = 3\n"
+      "match x + 5 { a => a + 10 }"
+    ))
   , ?_test(hello = Expr("match 'x' { 'y' => @hi, 'x' => @hello }"))
-  , ?_test(5.0 = Expr("match |x| x { id => let y = id(true) in id(5.0) }"))
+  , ?_test(5.0 = Expr(
+      "match |x| x {\n"
+      "  id =>\n"
+      "    let y = id(true)\n"
+      "    id(5.0)\n"
+      "}"
+    ))
   , ?_test({6, 6.0, 8, 8.0} = Expr(
       "match (3, 4) {\n"
       "  (a, b) => (a + 3 : Int, a + 3.0, b + 4 : Int, b + 4.0)\n"
@@ -744,15 +820,16 @@ test_pattern(Expr, Run) ->
       "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
     ))
   , ?_test(2.0 = Expr(
-      "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
-      "  match x {\n"
-      "    [([h | t], _, _) | _] => h\n"
-      "    [_, ([], _, c)] => c\n"
-      "    [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
-      "  }"
+      "let x = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)]\n"
+      "match x {\n"
+      "  [([h | t], _, _) | _] => h\n"
+      "  [_, ([], _, c)] => c\n"
+      "  [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
+      "}"
     ))
   , ?_test([1, 2] = Expr(
-      "let x = 3, y = [2] in match [1] { &y => y ++ [1], x => x ++ [2] }"
+      "let (x, y) = (3, [2])\n"
+      "match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
   , ?_test($h = Expr("(|(a, _)| a)(('h', true))"))
   , ?_test(2 = Run(
@@ -775,18 +852,33 @@ test_pattern(Expr, Run) ->
     ))
 
 
-  , ?_test([] = Expr("let 3 = 3 in []"))
-  , ?_test({5, 5.0} = Expr(
-      "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 : Int, x + 3.0)"
+  , ?_test([] = Expr(
+      "let 3 = 3\n"
+      "[]"
     ))
-  , ?_test(7 = Expr("let [_, a] = [1, 3], (&a, b, &a) = (3, 7, 3) in b"))
+  , ?_test({5, 5.0} = Expr(
+      "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)]\n"
+      "(x + 3 : Int, x + 3.0)"
+    ))
+  , ?_test(7 = Expr(
+      "let [_, a] = [1, 3]\n"
+      "let (&a, b, &a) = (3, 7, 3)\n"
+      "b"
+    ))
 
 
   , ?_test({} = Expr("if let a = 3.0 then a"))
   % to ensure env is reset appropriately
-  , ?_test(true = Expr("let a = true in { if let a = 3.0 then a; a }"))
-  , ?_test(true = Expr("let a = true in { if let a = 3.0 then a else 5; a }"))
+  , ?_test(true = Expr(
+      "let a = true\n"
+      "if let a = 3.0 then a\n"
+      "a"
+    ))
+  , ?_test(true = Expr(
+      "let a = true\n"
+      "if let a = 3.0 then a else 5\n"
+      "a"
+    ))
   , ?_test(<<"hey">> = Expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test(2.5 = Expr(
       "if let f = |b| if b then f(!b) + 1 else 1.5\n"

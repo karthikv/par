@@ -6,7 +6,7 @@
 
 golden_expr_(Name, Expr) ->
   fun() ->
-    Errors = type_system_test:type_check("expr = " ++ Expr),
+    Errors = type_system_test:type_check("expr =\n" ++ Expr),
     ?assertNot(is_tuple(Errors) andalso element(1, Errors) == ok),
     Str = lists:flatten(reporter:format(Errors)),
     check(Name, Str)
@@ -51,7 +51,7 @@ check(Name, Str) ->
 
 expr_test_() ->
   % lexer errors
-  [ golden_expr_("l-bad-char", "let a = ^3 in a")
+  [ golden_expr_("l-bad-char", "let a = ^3\na")
   , golden_expr_("l-unterminated-string-1", "(\"hello world, true)")
   , golden_expr_("l-unterminated-string-2", "\"hello, \nworld\"")
   , golden_expr_("l-bad-atom", "@+asdf")
@@ -75,11 +75,15 @@ expr_test_() ->
 
   % parser errors
   , golden_expr_("p-list-literal", "[@a @b]")
-  , golden_expr_("p-let-no-in", "let x = 3")
-  , golden_expr_("p-bad-block", "{ 3 + 5, @hello }")
+  , golden_expr_("p-let-no-body", "let x = 3")
+  , golden_expr_("p-let-misaligned", "let x = 3\n  x + 5")
+  , golden_expr_("p-let-misaligned-2", "  let x = \n3 x + 5")
+  , golden_expr_("p-block-misaligned", "3 + 5\n  @hello")
+  , golden_expr_("p-block-misaligned-2", "  3 + \n5 @hello")
+  , golden_expr_("p-bad-map", "{ @hello, 3 + 5 }")
   , golden_expr_("p-bad-tuple", "(1,)")
   , golden_expr_("p-bad-tuple-te", "(1, @hi) : (Int,)")
-  , golden_expr_("p-bad-tuple-pattern", "let (1,) = (1, @hi) in 2")
+  , golden_expr_("p-bad-tuple-pattern", "let (1,) = (1, @hi)\n2")
   , golden_expr_("p-no-closing-1", "{ a = 3")
   , golden_expr_("p-no-closing-2", "[1, [2, [3, 4], 5, 6]")
   , golden_prg_(
@@ -184,12 +188,12 @@ expr_test_() ->
 
   % type system errors
   , golden_expr_("ts-mismatch", "true + 5")
-  , golden_expr_("ts-other", "let a = 3 in (a, true, b)")
-  , golden_expr_("ts-order", "let a = 3 : Bool in a.field")
+  , golden_expr_("ts-other", "let a = 3\n(a, true, b)")
+  , golden_expr_("ts-order", "let a = 3 : Bool\na.field")
   , golden_expr_("ts-extra-args-lam", "(|x| x)(true, @hi)")
   , golden_expr_(
       "ts-extra-args-recursive",
-      "let f(x) = if x == 0 then 0 else f(x - 1) in f(2, 3)"
+      "let f(x) = if x == 0 then 0 else f(x - 1)\nf(2, 3)"
     )
   , golden_prg_(
       "ts-extra-args-fn",

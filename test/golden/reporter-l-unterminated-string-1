@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
 Unterminated string literal:
-2: expr = ("hello world, true)
-           ^^^^^^^^^^^^^^^^^^^
+3: ("hello world, true)
+    ^^^^^^^^^^^^^^^^^^^
 

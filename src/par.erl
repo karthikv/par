@@ -22,6 +22,7 @@
 % - Negative numbers and unit in patterns
 % - Ensure con is fully applied in patterns
 % - Trim left whitespace for error lines
+% - Force discard for block exprs that don't return unit?
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?

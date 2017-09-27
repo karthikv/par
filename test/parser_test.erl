@@ -948,64 +948,61 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {'let', l(0, 20),
+      {'let', l(0, 0, 1, 5),
         [{binding, l(4, 7), {var, l(4, 1), "x"}, {float, l(8, 3), 3.0}}],
-        {binary_op, l(15, 5), '+',
-          {var_ref, l(15, 1), ref, "x"},
-          {int, l(19, 1), 5}
+        {binary_op, l(1, 0, 5), '+',
+          {var_ref, l(1, 0, 1), ref, "x"},
+          {int, l(1, 4, 1), 5}
         }
       },
-      ok_expr("let x = 3.0 in x + 5")
+      ok_expr(
+        "let x = 3.0\n"
+        "x + 5"
+      )
     )
   , ?_assertEqual(
-      {'let', l(0, 39),
-        [{binding, l(4, 7),
-           {var, l(4, 1), "f"},
-           {fn, l(4, 7), ref, [], {int, l(10, 1), 3}}
-         },
-         {binding, l(13, 14),
-           {var, l(13, 3), "inc"},
-           {fn, l(13, 14), ref, [{var, l(17, 1), "x"}],
-           {binary_op, l(22, 5), '+',
-             {var_ref, l(22, 1), ref, "x"},
-             {int, l(26, 1), 1}
-           }
-         }}],
-        {app, l(31, 8),
-          {var_ref, l(31, 3), ref, "inc"},
-          [{app, l(35, 3), {var_ref, l(35, 1), ref, "f"}, [{unit, l(36, 2)}]}]
-        }
+      {'let', l(0, 0, 2, 8), [
+          {binding, l(4, 14), {var, l(4, 3), "inc"},
+            {fn, l(4, 14), ref, [{var, l(8, 1), "x"}],
+              {binary_op, l(13, 5), '+',
+                {var_ref, l(13, 1), ref, "x"},
+                {int, l(17, 1), 1}
+              }
+            }
+          },
+          {binding, l(1, 4, 7), {var, l(1, 4, 1), "f"},
+            {fn, l(1, 4, 7), ref, [], {int, l(1, 10, 1), 3}}
+          }
+        ],
+        {app, l(2, 0, 8), {var_ref, l(2, 0, 3), ref, "inc"}, [
+          {app, l(2, 4, 3), {var_ref, l(2, 4, 1), ref, "f"}, [
+            {unit, l(2, 5, 2)}
+          ]}
+        ]}
       },
-      ok_expr("let f() = 3, inc(x) = x + 1 in inc(f())")
+      ok_expr(
+        "let inc(x) = x + 1\n"
+        "let f() = 3\n"
+        "inc(f())"
+      )
     )
   , ?_assertEqual(
-      {'let', l(0, 0, 1, 10),
-        [{binding, l(4, 7),
-           {var, l(4, 1), "f"},
-           {fn, l(4, 7), ref, [], {var_ref, l(10, 1), ref, "x"}}
-         },
-         {binding, l(1, 0, 5),
-           {var, l(1, 0, 1), "y"},
-           {int, l(1, 4, 1), 3}
-         }],
-        {var_ref, l(1, 9, 1), ref, "y"}
+      {'let', l(0, 0, 3, 1), [
+          {binding, l(0, 4, 2, 5), {var, l(4, 1), "x"},
+            {block, l(1, 2, 2, 5), [
+              {atom, l(1, 2, 6), hello},
+              {char, l(2, 2, 3), $a}
+            ]}
+          }
+        ],
+        {var_ref, l(3, 0, 1), ref, "x"}
       },
-      ok_expr("let f() = x\ny = 3 in y")
-    )
-  % ensure no ambiguity with app
-  , ?_assertEqual(
-      {'let', l(0, 0, 1, 12),
-        [{binding, l(4, 7),
-           {var, l(4, 1), "f"},
-           {fn, l(4, 7), ref, [], {var_ref, l(10, 1), ref, "x"}}
-         },
-         {binding, l(1, 0, 7),
-           {var, l(1, 0, 3), "y"},
-           {int, l(1, 6, 1), 3}
-         }],
-        {var_ref, l(1, 11, 1), ref, "y"}
-      },
-      ok_expr("let f() = x\n(y) = 3 in y")
+      ok_expr(
+        "let x =\n"
+        "  @hello\n"
+        "  'a'\n"
+        "x"
+      )
     )
 
 
@@ -1028,19 +1025,23 @@ expr_test_() ->
       ok_expr("if let [] = true then \"hi\" else \"hey\"")
     )
   , ?_assertEqual(
-      {'let', l(0, 39),
-        [{binding, l(4, 30),
-           {var, l(4, 1), "x"},
-           {if_let, l(8, 26),
-             {int, l(15, 1), 1},
-             {int, l(19, 1), 1},
-             {int, l(26, 1), 1},
-             {int, l(33, 1), 2}
-           }
-         }],
-        {var_ref, l(38, 1), ref, "x"}
+      {'let', l(0, 0, 1, 1),
+        [
+          {binding, l(4, 30), {var, l(4, 1), "x"},
+            {if_let, l(8, 26),
+              {int, l(15, 1), 1},
+              {int, l(19, 1), 1},
+              {int, l(26, 1), 1},
+              {int, l(33, 1), 2}
+            }
+          }
+        ],
+        {var_ref, l(1, 0, 1), ref, "x"}
       },
-      ok_expr("let x = if let 1 = 1 then 1 else 2 in x")
+      ok_expr(
+        "let x = if let 1 = 1 then 1 else 2\n"
+        "x"
+      )
     )
 
 
@@ -1346,19 +1347,15 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {block, l(0, 11), [{str, l(2, 7), <<"hello">>}]},
-      ok_expr("{ \"hello\" }")
-    )
-  , ?_assertEqual(
-      {block, l(0, 30), [
-        {atom, l(2, 4), foo},
-        {map, l(8, 13), [{
-          {str, l(9, 4), <<"hi">>},
-          {var_ref, l(17, 3), ref, "var"}
+      {block, l(0, 0, 2, 5), [
+        {atom, l(0, 4), foo},
+        {map, l(1, 0, 15), [{
+          {str, l(1, 2, 4), <<"hi">>},
+          {var_ref, l(1, 10, 3), ref, "var"}
         }]},
-        {bool, l(23, 5), false}
+        {bool, l(2, 0, 5), false}
       ]},
-      ok_expr("{ @foo; {\"hi\" => var}; false }")
+      ok_expr("@foo\n{ \"hi\" => var }\nfalse")
     )
   ].
 

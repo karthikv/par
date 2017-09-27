@@ -421,28 +421,52 @@ expr_test_() ->
       {"Float", "Bool", l(22, 4), ?FROM_ELSE_BODY}
     ))
 
-  , ?_test("Float" = ok_expr("let x = 3.0 in x + 5"))
-  , ?_test("A ~ Num" = ok_expr("let inc(x) = x + 1 in inc(3)"))
-  , ?_test("Bool" = ok_expr("let x = |a| a in x(3) == 3 && x(true)"))
-  , ?_test("A ~ Num" = ok_expr("let a = 10, b = a + 5 in b"))
+  , ?_test("Float" = ok_expr(
+      "let x = 3.0\n"
+      "x + 5"
+    ))
   , ?_test("A ~ Num" = ok_expr(
-      "let f = |x, c| if x == 0 then c else f(x - 1, c * 2) in\n"
-      "  f(5, 1)"
+      "let inc(x) = x + 1\n"
+      "inc(3)"
     ))
-  , ?_test("Bool" = ok_expr("let a = 1, a = a == 1 in a"))
-  , ?_test(bad_expr(
-      "let x = 3.0, y = true in x - y",
-      {"Bool", "Float", l(29, 1), ?FROM_OP_RHS('-')}
+  , ?_test("Bool" = ok_expr(
+      "let x = |a| a\n"
+      "x(3) == 3 && x(true)"
+    ))
+  , ?_test("A ~ Num" = ok_expr(
+      "let a = 10\n"
+      "let b = a + 5\n"
+      "b"
+    ))
+  , ?_test("A ~ Num" = ok_expr(
+      "let f = |x, c| if x == 0 then c else f(x - 1, c * 2)\n"
+      "f(5, 1)"
+    ))
+  , ?_test("Bool" = ok_expr(
+      "let a = 1\n"
+      "let a = a == 1\n"
+      "a"
     ))
   , ?_test(bad_expr(
-      "(|x| let a = x(3) in x(true))(|y| y)",
-      {"Bool", "A ~ Num", l(23, 4), ?FROM_APP}
+      "let x = 3.0\n"
+      "let y = true\n"
+      "x - y",
+      {"Bool", "Float", l(2, 4, 1), ?FROM_OP_RHS('-')}
+    ))
+  , ?_test(bad_expr(
+      "(|x|\n"
+      "  let a = x(3)\n"
+      "  x(true)\n"
+      ")(|y| y)",
+      {"Bool", "A ~ Num", l(2, 4, 4), ?FROM_APP}
     ))
 
-  , ?_test("String" = ok_expr("{ \"hello\" }"))
-  , ?_test("Bool" = ok_expr("{ @foo; true }"))
+  , ?_test("Bool" = ok_expr("@foo\ntrue"))
   , ?_test("Map<String, A ~ Num>" = ok_expr(
-      "let x = 5 in { @erlang:hd([1]); 3.0; {\"hi\" => x} }"
+      "let x = 5\n"
+      "@erlang:hd([1])\n"
+      "3.0\n"
+      "{ \"hi\" => x }"
     ))
 
   , ?_test("() -> A ~ Num" = ok_expr("|-| 3"))
@@ -464,10 +488,15 @@ expr_test_() ->
     ))
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
-  , ?_test("Set<A ~ Num>" =
-             ok_expr("#[3] ++ let f = @gb_sets:add/2 in f(2)(#[1])"))
+  , ?_test("Set<A ~ Num>" = ok_expr(
+      "let f = @gb_sets:add/2\n"
+      "#[3] ++ f(2)(#[1])"
+    ))
   , ?_test("A" = ok_expr("@io:printable_range()"))
-  , ?_test("Atom" = ok_expr("let f() = @hi in f(())"))
+  , ?_test("Atom" = ok_expr(
+      "let f() = @hi\n"
+      "f(())"
+    ))
   , ?_test("A" = ok_expr("@io:printable_range/0((), 1, 2)"))
   , ?_test(bad_expr(
       "@io:printable_range/0(1, 2)",
@@ -476,9 +505,13 @@ expr_test_() ->
 
   , ?_test("String" = ok_expr("\"hello\" |> |x| x ++ \" world\""))
   , ?_test("A ~ Num" = ok_expr(
-      "let inc(x) = x + 1 in (5 |> |x| 2 * x |> inc) * 7"
+      "let inc(x) = x + 1\n"
+      "(5 |> |x| 2 * x |> inc) * 7"
     ))
-  , ?_test("Atom -> Bool" = ok_expr("let f(x, y) = x == y in @hi |> f"))
+  , ?_test("Atom -> Bool" = ok_expr(
+      "let f(x, y) = x == y\n"
+      "@hi |> f"
+    ))
   , ?_test(bad_expr(
       "3 |> true",
       {"Bool", "A ~ Num -> B", l(5, 4), ?FROM_OP_RHS('|>')}
@@ -488,9 +521,10 @@ expr_test_() ->
       {"String", "[A]", l(0, 4), ?FROM_OP_LHS('|>')}
     ))
   , ?_test(bad_expr(
-      "let inc(x) = x + 1 in 5 |> |x| 2 * x |> inc * 7",
-      [{"A ~ Num -> B", "C ~ Num", l(40, 7), ?FROM_OP_RHS('|>')},
-       {"A ~ Num -> A ~ Num", "B ~ Num", l(40, 3), ?FROM_OP_LHS('*')}]
+      "let inc(x) = x + 1\n"
+      "5 |> |x| 2 * x |> inc * 7",
+      [{"A ~ Num -> B", "C ~ Num", l(1, 18, 7), ?FROM_OP_RHS('|>')},
+       {"A ~ Num -> A ~ Num", "B ~ Num", l(1, 18, 3), ?FROM_OP_LHS('*')}]
     ))
   , ?_test(bad_expr(
       "3 |> |x| [x] |> |x| x ++ [4] |> |x| 2 * x",
@@ -519,14 +553,22 @@ para_poly_test_() ->
       "expr"
     ))
   , ?_test("Bool" = ok_prg(
-      "id(a) = let foo(x) = a in let a = 4 in let bar = foo(3) in bar\n"
+      "id(a) =\n"
+      "  let foo(x) = a\n"
+      "  let a = 4\n"
+      "  let bar = foo(3)\n"
+      "  bar\n"
       "expr = id(3) == 3 && id(true)",
       "expr"
     ))
   , ?_test(bad_prg(
-      "id(a) = let foo(x) = a in let a = 4 in let bar = foo(3) in bar\n"
+      "id(a) =\n"
+      "  let foo(x) = a\n"
+      "  let a = 4\n"
+      "  let bar = foo(3)\n"
+      "  bar\n"
       "expr = id(3) && id(true)",
-      {"A ~ Num", "Bool", l(1, 7, 5), ?FROM_OP_LHS('&&')}
+      {"A ~ Num", "Bool", l(5, 7, 5), ?FROM_OP_LHS('&&')}
     ))
   ].
 
@@ -698,7 +740,12 @@ sig_test_() ->
 
 global_test_() ->
   [ ?_test("A ~ Num" = ok_prg("foo = 3", "foo"))
-  , ?_test("Bool -> Bool" = ok_prg("f(x) = let y = x && false in true", "f"))
+  , ?_test("Bool -> Bool" = ok_prg(
+      "f(x) =\n"
+      "  let y = x && false\n"
+      "  true",
+      "f"
+    ))
   , ?_test("[Bool]" = ok_prg(
       "foo = baz && false\n"
       "bar = [foo] ++ [true]\n"
@@ -800,7 +847,10 @@ record_test_() ->
     ))
   , ?_test("{ bar : A ~ Num, baz : Bool }" =
              ok_expr("{ bar = 3, baz = true }"))
-  , ?_test("{ id : A -> A }" = ok_expr("let id(a) = a in { id = id }"))
+  , ?_test("{ id : A -> A }" = ok_expr(
+      "let id(a) = a\n"
+      "{ id = id }"
+    ))
   , ?_test("{ A | bar : B } -> B" = ok_expr(".bar"))
   , ?_test("Atom" = ok_expr("{ bar = @hi }.bar"))
   , ?_test("{ bar : Float }" = ok_expr("{ { bar = 3 } | bar = 4.0 }"))
@@ -813,10 +863,14 @@ record_test_() ->
       "{ abs(x) = if x > 0 then x else abs(true) }",
       {"Bool -> A ~ Num", "A ~ Num -> A ~ Num", l(2, 39), ?FROM_FIELD_DEF("abs")}
     ))
-  % ensuring f doesn't escape its scope
+  % to ensure env is reset properly
   , ?_test(ctx_err_prg(
-      "foo = { { f(x) = true }; f(3) }",
-      {?ERR_NOT_DEF("f"), l(25, 1)}
+      "foo =\n"
+      "  let f =\n"
+      "    let g = true\n"
+      "    1\n"
+      "  g",
+      {?ERR_NOT_DEF("g"), l(4, 2, 1)}
     ))
   , ?_test(bad_expr(
       "{ foo = @hi }.bar",
@@ -848,7 +902,9 @@ record_test_() ->
   , ?_test("Bool" = ok_expr("{ bar = 3 } == { bar = 5 }"))
   % to avoid infinite loops from subbing anchors
   , ?_test("(Bool, Bool)" = ok_expr(
-      "let x = { bar = 3 }, y = x in (x == y, x == y)"
+      "let x = { bar = 3 }\n"
+      "let y = x\n"
+      "(x == y, x == y)"
     ))
   , ?_test(bad_expr(
       "{ bar = 3 } == { bar = \"hi\" }",
@@ -861,12 +917,19 @@ record_test_() ->
 
 
   % record <=> iface unification
-  , ?_test("Bool" = ok_expr("let f(x) = x.bar || false in f({ bar = true })"))
-  , ?_test("Atom" = ok_expr("let f(x) = x.bar in f({ bar = @hi, baz = 7 })"))
+  , ?_test("Bool" = ok_expr(
+      "let f(x) = x.bar || false\n"
+      "f({ bar = true })"
+    ))
+  , ?_test("Atom" = ok_expr(
+      "let f(x) = x.bar\n"
+      "f({ bar = @hi, baz = 7 })"
+    ))
   , ?_test(bad_expr(
-      "let f(x) = x.bar + x.baz in f({ bar = 3 })",
+      "let f(x) = x.bar + x.baz\n"
+      "f({ bar = 3 })",
       {"{ A | bar : B ~ Num, baz : B ~ Num }", "{ bar : C ~ Num }",
-       l(30, 11), ?FROM_APP}
+       l(1, 2, 11), ?FROM_APP}
     ))
 
 
@@ -898,8 +961,10 @@ record_test_() ->
 
   % record fvs
   , ?_test(bad_prg(
-      "f(x) = let a() = x.a in (true && a(), a() ++ \"hi\")",
-      {"Bool", "String", l(38, 3), ?FROM_OP_LHS('++')}
+      "f(x) =\n"
+      "  let a() = x.a\n"
+      "  (true && a(), a() ++ \"hi\")",
+      {"Bool", "String", l(2, 16, 3), ?FROM_OP_LHS('++')}
     ))
 
 
@@ -1006,7 +1071,9 @@ record_test_() ->
   % generalization cases
   , ?_test("(String, Bool)" = ok_prg(
       "struct Foo<A> { bar : A }\n"
-      "expr = let id(a) = a, f = Foo { bar = id } in\n"
+      "expr =\n"
+      "  let id(a) = a\n"
+      "  let f = Foo { bar = id }\n"
       "  (f.bar(\"hi\"), f.bar(true))",
       "expr"
     ))
@@ -1015,7 +1082,8 @@ record_test_() ->
       "f"
     ))
   , ?_test("(Bool, Bool)" = ok_expr(
-      "let x = { a = 3 } in (x == { a = 5.0 }, x == { a = 5 })"
+      "let x = { a = 3 }\n"
+      "(x == { a = 5.0 }, x == { a = 5 })"
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar : A }\n"
@@ -1040,15 +1108,18 @@ record_test_() ->
       {"A ~ Num -> B", "Bool", l(21, 8), ?FROM_OP_LHS('&&')}
     ))
   , ?_test(bad_prg(
-      "f(x) = let y = x.bar(2) in (y, g(true, x.bar))\n"
+      "f(x) =\n"
+      "  let y = x.bar(2)\n"
+      "  (y, g(true, x.bar))\n"
       "g(a, b) = b(a)",
-      {"A ~ Num -> B", "Bool -> C", l(39, 5), ?FROM_APP}
+      {"A ~ Num -> B", "Bool -> C", l(2, 14, 5), ?FROM_APP}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar : A }\n"
-      "expr = let id(a) = a in\n"
+      "expr =\n"
+      "  let id(a) = a\n"
       "  (|f| (f.bar(\"hi\"), f.bar(true)))(Foo { bar = id })",
-      {"String", "Bool", l(2, 27, 4), ?FROM_APP}
+      {"String", "Bool", l(3, 27, 4), ?FROM_APP}
     ))
   % We purposely sacrifice generalization power here in favor of safety. If
   % x unifies with Foo at any point in time, we expect that x really should be
@@ -1056,8 +1127,10 @@ record_test_() ->
   % operator to change a field's type.
   , ?_test(bad_prg(
       "struct Foo { a : Int }\n"
-      "expr = let x = { a = 3 } in (x == Foo { a = 5 }, { x | a = 3.0 })",
-      {"{ a : Int }", "{ a : Float }", l(1, 49, 15), ?FROM_RECORD_UPDATE}
+      "expr =\n"
+      "  let x = { a = 3 }\n"
+      "  (x == Foo { a = 5 }, { x | a = 3.0 })",
+      {"{ a : Int }", "{ a : Float }", l(3, 23, 15), ?FROM_RECORD_UPDATE}
     ))
 
 
@@ -1069,7 +1142,10 @@ record_test_() ->
     ))
   , ?_test("Foo" = ok_prg(
       "struct Foo { bar : Int }\n"
-      "expr = let x = { bar = 3 } in { x == Foo { bar = 4 }; x }",
+      "expr =\n"
+      "  let x = { bar = 3 }\n"
+      "  x == Foo { bar = 4 }\n"
+      "  x",
       "expr"
     ))
   , ?_test("(String, Foo<Int>)" = ok_prg(
@@ -1098,8 +1174,10 @@ record_test_() ->
     ))
   , ?_test(bad_prg(
       "struct Foo { bar : Int }\n"
-      "expr = let x = { bar = 3, baz = \"hi\" } in x == Foo { bar = 4 }",
-      {"{ bar : A ~ Num, baz : String }", "{ bar : Int }", l(1, 47, 15),
+      "expr =\n"
+      "  let x = { bar = 3, baz = \"hi\" }\n"
+      "  x == Foo { bar = 4 }",
+      {"{ bar : A ~ Num, baz : String }", "{ bar : Int }", l(3, 7, 15),
        ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
@@ -1189,8 +1267,12 @@ interface_test_() ->
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : A -> T -> A }\n"
-      "impl Foo for A -> A { foo(a, t) = { t(a); a } }",
-      {"rigid(A)", "rigid(B)", l(1, 38, 1), ?FROM_APP}
+      "impl Foo for A -> A {\n"
+      "  foo(a, t) =\n"
+      "    t(a)\n"
+      "    a\n"
+      "}",
+      {"rigid(A)", "rigid(B)", l(3, 6, 1), ?FROM_APP}
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
@@ -1258,8 +1340,10 @@ interface_test_() ->
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Int { to_int(i) = i }\n"
-      "foo = let to_i(x) = to_int(x) in to_i(3)",
-      {?ERR_MUST_SOLVE("N ~ ToInt ~ Num", "N ~ ToInt ~ Num"), l(2, 38, 1)}
+      "foo =\n"
+      "  let to_i(x) = to_int(x)\n"
+      "  to_i(3)",
+      {?ERR_MUST_SOLVE("N ~ ToInt ~ Num", "N ~ ToInt ~ Num"), l(4, 7, 1)}
     ))
 
 
@@ -1280,8 +1364,9 @@ interface_test_() ->
       "map_map : ((A, B) -> (C, D)) -> Map<A, B> -> Map<C, D>\n"
       "map_map(f, m) =\n"
       "  let cb = |k, v, new_m|\n"
-      "    let (new_k, new_v) = f((k, v)) in @maps:put(new_k, new_v, new_m)\n"
-      "  in @maps:fold(cb, {}, m)\n"
+      "    let (new_k, new_v) = f((k, v))\n"
+      "    @maps:put(new_k, new_v, new_m)\n"
+      "  @maps:fold(cb, {}, m)\n"
       "impl Mappable for Map { map = map_map }\n"
       "foo = map(|(k, v)| (v, k), { 'a' => @a })",
       "foo"
@@ -1302,7 +1387,9 @@ interface_test_() ->
     ))
   , ?_test("A<B> ~ ToInt -> Int" = ok_prg(
       "interface ToInt { to_int : T -> Int }\n"
-      "foo(x) = { @io:printable_range() : T<A> == x; to_int(x) }",
+      "foo(x) =\n"
+      "  @io:printable_range() : T<A> == x\n"
+      "  to_int(x)",
       "foo"
     ))
   , ?_test("A<B> ~ ToInt -> Int" = ok_prg(
@@ -1428,13 +1515,21 @@ gen_tv_test_() ->
   , ?_test("A<B> ~ Concatable -> A<B> ~ Concatable -> Char" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
-      "bar(y, z) = let _ = foo(y), _ = foo(z), _ = y ++ z in 'a'",
+      "bar(y, z) =\n"
+      "  foo(y)\n"
+      "  foo(z)\n"
+      "  y ++ z\n"
+      "  'a'",
       "bar"
     ))
   , ?_test("[A] -> [A] -> [A]" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
-      "bar(y, z) = let _ = foo(y), _ = foo(z), _ = y ++ z in z ++ []",
+      "bar(y, z) =\n"
+      "  foo(y)\n"
+      "  foo(z)\n"
+      "  y ++ z\n"
+      "  z ++ []",
       "bar"
     ))
   , ?_test("Map<Atom, Float>" = ok_prg(
@@ -1448,7 +1543,10 @@ gen_tv_test_() ->
       "foo(x) = x\n"
       "bar : T<B, C> -> T<B, C>\n"
       "bar(x) = x\n"
-      "baz(y, z) = { foo(y); bar(z); y == z }\n",
+      "baz(y, z) =\n"
+      "  foo(y)\n"
+      "  bar(z)\n"
+      "  y == z",
       "baz"
     ))
   , ?_test("Map<Char, Bool> -> Map<Char, Bool> -> Bool" = ok_prg(
@@ -1456,7 +1554,11 @@ gen_tv_test_() ->
       "foo(x) = x\n"
       "bar : T<B, C> -> T<B, C>\n"
       "bar(x) = x\n"
-      "baz(y, z) = { foo(y); bar(z); y == z; z == { 'c' => true } }\n",
+      "baz(y, z) =\n"
+      "  foo(y)\n"
+      "  bar(z)\n"
+      "  y == z\n"
+      "  z == { 'c' => true }",
       "baz"
     ))
   , ?_test(bad_prg(
@@ -1474,8 +1576,12 @@ gen_tv_test_() ->
   , ?_test(bad_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
-      "bar(y, z) = let _ = foo(y), _ = foo(z), _ = y ++ z in z ++ \"hi\"",
-      {"String", "A<B> ~ Concatable", l(2, 59, 4), ?FROM_OP_RHS('++')}
+      "bar(y, z) =\n"
+      "  foo(y)\n"
+      "  foo(z)\n"
+      "  y ++ z\n"
+      "  z ++ \"hi\"",
+      {"String", "A<B> ~ Concatable", l(6, 7, 4), ?FROM_OP_RHS('++')}
     ))
   , ?_test(bad_prg(
       "foo : T<A> ~ Num -> Float\n"
@@ -1486,8 +1592,11 @@ gen_tv_test_() ->
   , ?_test(bad_prg(
       "foo : T<A> -> T<B>\n"
       "foo(_) = @io:printable_range()\n"
-      "bar(x) = let y = foo(x), _ = y + 3 in x == []",
-      {"B<A> ~ Num", "[A]", l(2, 43, 2), ?FROM_OP_RHS('==')}
+      "bar(x) =\n"
+      "  let y = foo(x)\n"
+      "  y + 3\n"
+      "  x == []",
+      {"B<A> ~ Num", "[A]", l(5, 7, 2), ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "foo : T<A, B> -> T<A, B>\n"
@@ -1500,17 +1609,27 @@ gen_tv_test_() ->
       "foo(x) = x\n"
       "bar : T<B, C> -> T<B, C>\n"
       "bar(x) = x\n"
-      "baz(y, z) = { foo(y); bar(z); y == z }\n",
-      {"A<Int>", "B<C, D>", l(4, 35, 1), ?FROM_OP_RHS('==')}
+      "baz(y, z) =\n"
+      "  foo(y)\n"
+      "  bar(z)\n"
+      "  y == z",
+      {"A<Int>", "B<C, D>", l(7, 7, 1), ?FROM_OP_RHS('==')}
     ))
   ].
 
 pattern_test_() ->
   [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
-  , ?_test("A ~ Num" = ok_expr("let x = 3 in match x + 5 { a => a + 10 }"))
+  , ?_test("A ~ Num" = ok_expr(
+      "let x = 3\n"
+      "match x + 5 { a => a + 10 }"
+    ))
   , ?_test("Atom" = ok_expr("match 'x' { 'y' => @hi, 'x' => @hello }"))
   , ?_test("Float" = ok_expr(
-      "match |x| x { id => let y = id(true) in id(5.0) }"
+      "match |x| x {\n"
+      "  id =>\n"
+      "    let y = id(true)\n"
+      "    id(5.0)\n"
+      "}"
     ))
   , ?_test("(Int, Float, Int, Float)" = ok_expr(
       "match (3, 4) {\n"
@@ -1538,15 +1657,16 @@ pattern_test_() ->
       "}"
     ))
   , ?_test("Float" = ok_expr(
-      "let m = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)] in"
-      "  match m {\n"
-      "    [([h | t], _, _) | _] => h\n"
-      "    [_, ([], _, c)] => c\n"
-      "    [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
-      "  }"
+      "let m = [([], \"hi\", 3.0), ([2, 3], \"hey\", 58.0)]\n"
+      "match m {\n"
+      "  [([h | t], _, _) | _] => h\n"
+      "  [_, ([], _, c)] => c\n"
+      "  [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
+      "}"
     ))
   , ?_test("[A ~ Num]" = ok_expr(
-      "let x = 3, y = [2] in match [1] { &y => y ++ [1], x => x ++ [2] }"
+      "let (x, y) = (3, [2])\n"
+      "match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
   , ?_test("(A, B) -> A" = ok_expr("|(a, _)| a"))
   , ?_test("A ~ Num -> [B ~ Num] -> B ~ Num" = ok_prg(
@@ -1592,8 +1712,9 @@ pattern_test_() ->
       {"Float", "([A], String, Float)", l(2, 21, 1), ?FROM_MATCH_BODY}
     ))
   , ?_test(bad_expr(
-      "let x = 3, y = [2] in match [1] { y => y ++ [1], &x => [x] }",
-      {"[A ~ Num]", "B ~ Num", l(49, 2), ?FROM_MATCH_PATTERN}
+      "let (x, y) = (3, [2])\n"
+      "match [1] { y => y ++ [1], &x => [x] }",
+      {"[A ~ Num]", "B ~ Num", l(1, 27, 2), ?FROM_MATCH_PATTERN}
     ))
   , ?_test(bad_expr(
       "(|a, &a| a)(true, @hi)",
@@ -1610,44 +1731,65 @@ pattern_test_() ->
     ))
 
 
-  , ?_test("[A]" = ok_expr("let 3 = 3 in []"))
+  , ?_test("[A]" = ok_expr(
+      "let 3 = 3\n"
+      "[]"
+    ))
   , ?_test("(Int, Float)" = ok_expr(
-      "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)] in\n"
-      "  (x + 3 : Int, x + 3.0)"
+      "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)]\n"
+      "(x + 3 : Int, x + 3.0)"
     ))
   , ?_test("A ~ Num" = ok_expr(
-      "let [_, a] = [1, 3], (&a, b, &a) = (3, 7, 3) in b"
+      "let [_, a] = [1, 3]\n"
+      "let (&a, b, &a) = (3, 7, 3)\n"
+      "b"
     ))
   , ?_test("(A, B) -> A" = ok_prg(
-      "f(t) = let (a, _) = t in a",
+      "f(t) =\n"
+      "  let (a, _) = t\n"
+      "  a",
       "f"
     ))
   , ?_test(bad_expr(
-      "let true = 3 in []",
+      "let true = 3\n"
+      "[]",
       {"Bool", "A ~ Num", l(4, 4), ?FROM_LET}
     ))
   , ?_test(bad_expr(
-      "let [_, (x, _)] = [\"foo\", \"bar\"] in x",
+      "let [_, (x, _)] = [\"foo\", \"bar\"]\n"
+      "x",
       {"[(A, B)]", "[String]", l(4, 11), ?FROM_LET}
     ))
   , ?_test(bad_expr(
-      "let [_, a] = [true, false], (&a, b) = (3, 7) in b",
-      {"(Bool, A ~ Num)", "(B ~ Num, A ~ Num)", l(28, 7), ?FROM_LET}
+      "let [_, a] = [true, false]\n"
+      "let (&a, b) = (3, 7)\n"
+      "b",
+      {"(Bool, A ~ Num)", "(B ~ Num, A ~ Num)", l(1, 4, 7), ?FROM_LET}
     ))
   , ?_test(bad_prg(
-      "f(t) = let (a, _) = t in a\n"
+      "f(t) =\n"
+      "  let (a, _) = t\n"
+      "  a\n"
       "g(t) = f(t) : B",
-      {"A", "rigid(B)", l(1, 7, 8), ?FROM_EXPR_SIG}
+      {"A", "rigid(B)", l(3, 7, 8), ?FROM_EXPR_SIG}
     ))
 
 
   , ?_test("()" = ok_expr("if let a = 3.0 then a"))
   % to ensure env is reset appropriately
-  , ?_test("Bool" = ok_expr("let a = true in { if let a = 3.0 then a; a }"))
-  , ?_test("Bool" =
-             ok_expr("let a = true in { if let a = 3.0 then a else 5; a }"))
-  , ?_test("String" =
-             ok_expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
+  , ?_test("Bool" = ok_expr(
+      "let a = true\n"
+      "if let a = 3.0 then a\n"
+      "a"
+    ))
+  , ?_test("Bool" = ok_expr(
+      "let a = true\n"
+      "if let a = 3.0 then a else 5\n"
+      "a"
+    ))
+  , ?_test("String" = ok_expr(
+      "if let (2, a) = (1, \"hi\") then a else \"hey\""
+    ))
   , ?_test("Float" = ok_expr(
       "if let f = |b| if b then f(!b) + 1 else 1.5\n"
       "then f(true)\n"

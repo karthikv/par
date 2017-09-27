@@ -3,6 +3,6 @@
 Expected either a fat arrow '=>' to define a key/value pair in a map literal, a 
 semicolon ';' to separate a sequence of expressions in block, or a pipe '|' to 
 update a record:
-2: expr = { 3 + 5, @hello }
-                 ^
+3: { 3 + 5, @hello }
+          ^
 
