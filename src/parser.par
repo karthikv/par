@@ -645,7 +645,8 @@ expr_r(expr_s, state, stack, tokens) = match state {
       [Lexer.Colon(_) | t] =>
         type_expr(t) |> pbind(|(node, rest)|
           let next_prec = get(Bin(Colon), opa_prec)
-          let new_stack = [Node(node), BinaryOp(Colon) | reduce(next_prec, stack)]
+          let op = BinaryOp(Colon)
+          let new_stack = [Node(node), op | reduce(next_prec, stack)]
           expr_r(expr_s, AcceptOp, new_stack, rest)
         )
 
@@ -690,7 +691,8 @@ expr_r(expr_s, state, stack, tokens) = match state {
                   else
                     n
 
-                let app = App(range(node_loc(node), e), node, [Unit(range(s, e))])
+                let l = range(node_loc(node), e)
+                let app = App(l, node, [Unit(range(s, e))])
                 expr_r(expr_s, AcceptOp, [Node(app) | left], t)
             [Lexer.LParen(s) | t] =>
               if s.start_line > head_end_line(stack) then
@@ -728,7 +730,9 @@ expr_r(expr_s, state, stack, tokens) = match state {
               let field = Field(range(node_loc(node), e), node, prop)
               expr_r(expr_s, AcceptOp, [Node(field) | left], t)
             [Lexer.Dot(_) | t] =>
-              head_loc(t) |> one_err("Expected variable identifier after dot '.'")
+              head_loc(t) |> one_err(
+                "Expected variable identifier after dot '.'"
+              )
 
             _ => finish()
           }
