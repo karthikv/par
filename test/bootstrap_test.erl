@@ -1,5 +1,13 @@
 -module(bootstrap_test).
 -include_lib("eunit/include/eunit.hrl").
 
-lexer_test() -> {ok, _, _} = type_system:infer_file("src/lexer.par").
-parser_test() -> {ok, _, _} = type_system:infer_file("src/parser.par").
+check_infer(Path) ->
+  case type_system:infer_file(Path) of
+    {ok, _, _} -> ?assert(true);
+    Errors ->
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end.
+
+lexer_test() -> check_infer("src/lexer.par").
+parser_test() -> check_infer("src/parser.par").

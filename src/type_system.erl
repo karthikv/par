@@ -299,7 +299,7 @@ infer_comps(Comps) ->
   Result.
 
 populate_env_and_types(Comps, C) ->
-  C1 = lists:foldl(fun(Comp, FoldC) ->
+  lists:foldl(fun(Comp, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     lists:foldl(fun(Node, ModuleC) ->
@@ -360,21 +360,7 @@ populate_env_and_types(Comps, C) ->
         _ -> ModuleC
       end
     end, FoldC#ctx{module=Module}, Defs)
-  end, C, Comps),
-
-  lists:foldl(fun(Comp, FoldC) ->
-    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
-
-    lists:foldl(fun(Node, ModuleC) ->
-      N = element(1, Node),
-      if
-        N == enum; N == struct; N == interface ->
-          {_, ModuleC1} = infer(Node, ModuleC),
-          ModuleC1;
-        true -> ModuleC
-      end
-    end, FoldC#ctx{module=Module}, Defs)
-  end, C1, Comps).
+  end, C, Comps).
 
 define(Name, Value, Exported, Loc, C) ->
   case env_exists(Name, C) of
@@ -436,17 +422,43 @@ gen_t_num_params({record_ext_te, Loc, BaseTE, Fields}) ->
 gen_t_num_params({unit, _}) -> false.
 
 infer_defs(Comps, C) ->
-  lists:foldl(fun(Comp, FoldC) ->
-    #comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps} = Comp,
-    DepModules = lists:map(fun({DepModule, _}) -> DepModule end, Deps),
-    AccessibleModules = gb_sets:from_list([Module | DepModules]),
-
-    FoldC1 = populate_direct_imports(
-      Deps,
-      FoldC#ctx{module=Module, modules=AccessibleModules}
+  {Envs, C1} = lists:mapfoldl(fun(#comp{module=Module, deps=Deps}, FoldC) ->
+    NewImportedPairs = lists:map(fun({DepModule, _}) ->
+      {Module, DepModule}
+    end, Deps),
+    NewImported = gb_sets:union(
+      FoldC#ctx.imported,
+      gb_sets:from_list(NewImportedPairs)
     ),
 
-    {LastSig, FoldC2} = lists:foldl(fun(Node, {UncheckedSig, ModuleC}) ->
+    FoldC1 = FoldC#ctx{module=Module, imported=NewImported},
+    FoldC2 = populate_direct_imports(Deps, FoldC1),
+
+    % Remove direct imports from env. We don't want modules trying to import
+    % recursively through other modules, as this would make the order in
+    % which files are processed important.
+    {FoldC2#ctx.env, FoldC2#ctx{env=FoldC#ctx.env}}
+  end, C, Comps),
+
+  CompsEnvs = lists:zip(Comps, Envs),
+  C2 = lists:foldl(fun({Comp, Env}, FoldC) ->
+    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
+
+    lists:foldl(fun(Node, ModuleC) ->
+      N = element(1, Node),
+      if
+        N == enum; N == struct; N == interface ->
+          {_, ModuleC1} = infer(Node, ModuleC),
+          ModuleC1;
+        true -> ModuleC
+      end
+    end, FoldC#ctx{module=Module, env=Env}, Defs)
+  end, C1, CompsEnvs),
+
+  lists:foldl(fun({Comp, Env}, FoldC) ->
+    #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
+
+    {LastSig, FoldC1} = lists:foldl(fun(Node, {UncheckedSig, ModuleC}) ->
       {Sig, ModuleC1} = if
         UncheckedSig == none -> {none, ModuleC};
         true ->
@@ -518,19 +530,14 @@ infer_defs(Comps, C) ->
 
         _ -> {none, ModuleC1}
       end
-    end, {none, FoldC1}, Defs),
-
-    % Remove direct imports from env. We don't want modules trying to import
-    % recursively through other modules, as this would make the order in
-    % which files are processed important.
-    FoldC3 = FoldC2#ctx{env=FoldC#ctx.env},
+    end, {none, FoldC#ctx{module=Module, env=Env}}, Defs),
 
     case LastSig of
-      none -> FoldC3;
+      none -> FoldC1;
       {sig, _, {var, _, SigName}, _} ->
-        add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC3)
+        add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC1)
     end
-  end, C, Comps).
+  end, C2, CompsEnvs).
 
 populate_direct_imports(Deps, C) ->
   lists:foldl(fun({Module, Idents}, ModuleC) ->
@@ -1122,7 +1129,7 @@ infer({field, Loc, Expr, Prop}, C) ->
         {con_token, _, Name_} -> {none, Name_}
       end,
 
-      case gb_sets:is_member(Module, C#ctx.modules) of
+      case gb_sets:is_member({C#ctx.module, Module}, C#ctx.imported) of
         true -> lookup(Module, Name, Loc, Ref, C);
         false ->
           TV = tv_server:fresh(C#ctx.pid),

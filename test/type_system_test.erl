@@ -2265,6 +2265,15 @@ import_test_() ->
         "f(l) = { start_line = l.start_line + 1 }"
       }
     ], "bar", "f"))
+  , ?_test("Bar" = ok_many([
+      {"foo", "module Foo struct Loc { start_line : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Loc)\n"
+        "enum Bar { Baz(Loc) }\n"
+        "x = Baz({ start_line = 3 })"
+      }
+    ], "bar", "x"))
   , ?_test(ctx_err_many([
       {"foo",
         "module Foo\n"

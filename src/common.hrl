@@ -24,8 +24,9 @@
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   num_params - the number of type params for the TV being processed
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
-%   modules - the set of accessible modules from the current module
 %   module - the current module
+%   imported - a set containing {Module1, Module2} pairs, meaning Module2 has
+%              been imported by Module1
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(ctx, {
   gnr,
@@ -65,8 +66,8 @@
   num_params,
   errs = [],
   gen_vs = #{},
-  modules = gb_sets:new(),
   module,
+  imported = gb_sets:new(),
   pid
 }).
 

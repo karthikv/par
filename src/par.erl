@@ -124,7 +124,7 @@ main(Args) ->
       end,
 
       case type_system:infer_file(Path) of
-        {ok, C, Comps} ->
+        {ok, Comps, C} ->
           {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps, C]),
           {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
 
