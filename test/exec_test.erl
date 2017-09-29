@@ -782,6 +782,62 @@ test_interface(Run) ->
   %%     "}\n"
   %%     "main() = to_int(Foo { a = 3, b = 4 })"
   %%   ))
+
+
+  , ?_test(84 = Run(
+      "interface ToInt extends Num { to_int : T -> Int }\n"
+      "impl ToInt for Float { to_int(f) = @erlang:round(f) }"
+      "main() = to_int(84.1)"
+    ))
+  , ?_test({hey, $h, <<"hello">>} = Run(
+      "interface First { first : T -> Atom }\n"
+      "interface Second extends First { second : T -> Char }\n"
+      "interface Third extends Second { third : T -> String }\n"
+      "impl First for (Atom, Char, String) { first((f, _, _)) = f }\n"
+      "impl Second for (Atom, Char, String) { second((_, s, _)) = s }\n"
+      "impl Third for (Atom, Char, String) { third((_, _, t)) = t }\n"
+      "foo(x) = (first(x), second(x), third(x))\n"
+      "main() = foo((@hey, 'h', \"hello\"))"
+    ))
+  , ?_test(68 = Run(
+      "interface Foo { foo : T -> String }\n"
+      "interface ToInt extends Concatable, Foo { to_int : T -> Int }\n"
+      "impl Foo for [A] { foo(_) = \"list\" }\n"
+      "impl ToInt for [Int] {\n"
+      "  to_int(l) = match l { [h | t] => h + to_int(t), [] => 0 }\n"
+      "}\n"
+      "main() = to_int([17, 48, 3])"
+    ))
+  , ?_test(381 = Run(
+      "interface Foo { foo : T -> Int }\n"
+      "interface ToInt extends Foo { to_int : T -> Int }\n"
+      "impl Foo for String { foo = @erlang:byte_size/1 }\n"
+      "impl Foo for [A ~ Foo] { foo([a]) = foo(a) }\n"
+      "impl ToInt for String {\n"
+      "  to_int(s) = foo(s) + @erlang:binary_to_integer(s)\n"
+      "}\n"
+      "impl ToInt for [A ~ ToInt] { to_int([a]) = to_int(a) }\n"
+      "main() = to_int([\"378\"])"
+    ))
+  , ?_assertEqual(
+      {2, 1, [false, true], gb_sets:singleton(#{greeting => <<"hi">>})},
+      Run(
+        "interface Collection extends Mappable { len : T<A> -> Int }\n"
+        "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+        "impl Collection for List { len = @erlang:length/1 }\n"
+        "impl Mappable for List { map = @lists:map/2 }\n"
+        "impl Collection for Set { len = @gb_sets:size/1 }\n"
+        "impl Mappable for Set {\n"
+        "  map(f, s) = @gb_sets:fold(|e, new_s|\n"
+        "    @gb_sets:add(f(e), new_s)\n"
+        "  , #[], s)\n"
+        "}\n"
+        "main() =\n"
+        "  let l = [1, 2]\n"
+        "  let s = #[\"hi\"]\n"
+        "  (len(l), len(s), map(|x| x == 2, l), map(|x| { greeting = x }, s))\n"
+      )
+    )
   ].
 
 code_gen_pattern_test_() ->

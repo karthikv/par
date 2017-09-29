@@ -7,7 +7,6 @@
 %   - Handle more rewrite cases
 %   - Validation to prevent struct/enum TE from being a gen TV from HKT?
 %     - And to prevent impl type from being a HKT
-%   - Extending interfaces?
 %   - Port exec interface tests to type system tests
 %     - Port gen TV test cases to exec tests
 %   - Bootstrap, fix, and ensure everything still works
@@ -26,7 +25,6 @@
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
-%   - Character type for typeclasses
 % - [1 week] REPL
 %   - See if interpreter is even necessary
 %   - Finish implementation of import, interfaces, records
@@ -78,7 +76,6 @@
 % - Rename var to id and var_ref to var?
 % - Put solver record into CG to avoid duplication of fields like nested_ivs?
 % - [1 day] TV vs. Con parsing
-% - Allow ifaces on struct/enum params?
 % - Implementations for builtin typeclasses?
 %   - Should we also exclude concatable, separable, etc. from sets?
 % - [2 days] Better pattern matching

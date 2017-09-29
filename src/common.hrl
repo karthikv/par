@@ -80,6 +80,7 @@
 -define(FROM_GLOBAL_DEF(Name), ?FMT("global definition of ~s", [Name])).
 -define(FROM_GLOBAL_SIG(Name), ?FMT("global type signature of ~s", [Name])).
 -define(FROM_EXPR_SIG, "expression type signature").
+-define(FROM_EXPR_SIG_RESULT, "result of expression type signature").
 -define(FROM_ENUM_CTOR, "enum constructor").
 -define(FROM_STRUCT_CTOR, "struct constructor").
 -define(FROM_LIST_ELEM, "element in list literal").
@@ -105,12 +106,9 @@
 -define(FROM_OP_LHS(Op), ?FMT("left-hand side of ~p operator", [Op])).
 -define(FROM_OP_RHS(Op), ?FMT("right-hand side of ~p operator", [Op])).
 -define(FROM_OP_RESULT(Op), ?FMT("result of ~p operation", [Op])).
--define(FROM_INST, "instantiation").
+-define(FROM_VAR(Name), ?FMT("variable ~p", [Name])).
 -define(FROM_IMPL_TYPE, "impl type").
--define(
-  FROM_PARENT_IFACE(Con),
-  ?FMT("satisfying parent interface ~p", [utils:unqualify(Con)])
-).
+-define(FROM_PARENT_IFACES, "satisfying parent interfaces").
 
 
 -define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).

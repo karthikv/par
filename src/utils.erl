@@ -104,13 +104,13 @@ ivs_list(unit) -> [].
 arg_ts({lam, ArgT, ReturnT}) -> [ArgT | arg_ts(ReturnT)];
 arg_ts(_) -> [].
 
-family_is(I, C) ->
+family_is(I, Ifaces) ->
   case gb_sets:is_member(I, builtin_is()) of
     true -> gb_sets:singleton(I);
     false ->
-      {_, _, Parents} = maps:get(I, C#ctx.ifaces),
+      {_, _, Parents} = maps:get(I, Ifaces),
       gb_sets:fold(fun(ParentI, Family) ->
-        gb_sets:union(Family, family_is(ParentI, C))
+        gb_sets:union(Family, family_is(ParentI, Ifaces))
       end, gb_sets:add(I, Parents), Parents)
   end.
 
@@ -197,6 +197,8 @@ pretty({gen, _, Is, BaseT, ParamTs}) ->
   end,
   ?FMT("~s<~s>~s", [PrettyBaseT, string:join(PrettyParamTs, ", "), PrettyIs]);
 pretty({inst, _, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
+pretty({inst, _, GVs, T}) ->
+  ?FMT("inst(~s, ~s)", [gb_sets:to_list(GVs), pretty(T)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, BaseT, Ext}) ->
   ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
