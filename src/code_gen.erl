@@ -209,23 +209,8 @@ rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
 
     _ ->
       {{global, Atom}, _} = env_get(Name, CG),
-      Gm = gm(CG#cg.ctx#ctx.module),
-
-      excluder_remove('_@gm_find'),
-      excluder_remove('_@gm_set'),
-
-      FindCall = {call, Line, {atom, Line, '_@gm_find'},
-        [{atom, Line, Gm}, {atom, Line, Atom}]},
-      SetCall = {call, Line, {atom, Line, '_@gm_set'},
-        [{atom, Line, Gm}, {atom, Line, Atom}, rep(Expr, CG)]},
-
-      Var = {var, Line, unique("_@Value")},
-      Case = {'case', Line, FindCall, [
-        {clause, Line, [{tuple, Line, [{atom, Line, ok}, Var]}], [], [Var]},
-        {clause, Line, [{atom, Line, error}], [], [SetCall]}
-      ]},
-
-      Clause = {clause, Line, [], [], [Case]},
+      Body = [rep_gm_cache(Atom, rep(Expr, CG), Line, CG)],
+      Clause = {clause, Line, [], [], Body},
       {function, Line, list_to_atom(Name), 0, [Clause]}
   end;
 
@@ -359,9 +344,7 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
         end, {FoldArgsRep, FoldCG}, Is)
       end, {[], CG}, IVs)
   end,
-  io:format("for ~p, args rep ~p~n", [RawCon, ArgsRep]),
 
-  % TODO: wrap in gm_find/gm_set?
   RecordRep = rep({anon_record, Loc, Inits}, CG1#cg{in_impl=true}),
   Body = case maps:find(Ref, InstRefs) of
     error -> [RecordRep];
@@ -379,7 +362,12 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
   end,
 
   ImplAtom = list_to_atom(impl_name(Con, Key)),
-  Clause = {clause, Line, ArgsRep, [], Body},
+  FinalBody = case ArgsRep of
+    [] -> [rep_gm_cache(ImplAtom, {block, Line, Body}, Line, CG1)];
+    _ -> Body
+  end,
+
+  Clause = {clause, Line, ArgsRep, [], FinalBody},
   {function, Line, ImplAtom, length(ArgsRep), [Clause]};
 
 rep({sig, _, _, _}, _) -> [];
@@ -842,6 +830,22 @@ rep_arg_iv_patterns(ArgsRep, ArgIVs, Bind, CG) ->
 
   {PatternReps, CG1}.
 
+rep_gm_cache(Atom, Rep, Line, CG) ->
+  Gm = gm(CG#cg.ctx#ctx.module),
+  excluder_remove('_@gm_find'),
+  excluder_remove('_@gm_set'),
+
+  FindCall = {call, Line, {atom, Line, '_@gm_find'},
+    [{atom, Line, Gm}, {atom, Line, Atom}]},
+  SetCall = {call, Line, {atom, Line, '_@gm_set'},
+    [{atom, Line, Gm}, {atom, Line, Atom}, Rep]},
+
+  Var = {var, Line, unique("_@Value")},
+  {'case', Line, FindCall, [
+    {clause, Line, [{tuple, Line, [{atom, Line, ok}, Var]}], [], [Var]},
+    {clause, Line, [{atom, Line, error}], [], [SetCall]}
+  ]}.
+
 rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   #cg{env=Env, ctx=#ctx{
@@ -864,7 +868,6 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
         FirstImplName = bound_impl_name(child_i(FirstI, NewIs, Ifaces), NewV),
 
         IsBound = maps:is_key({Module, FirstImplName}, Env),
-        io:format("check is bound ~p in ~p~n~p~n", [FirstImplName, Env, IsBound]),
         ArgIVs = if
           IsBound -> [];
           % Not a bound TV, so we must introduce IVs as arguments.
