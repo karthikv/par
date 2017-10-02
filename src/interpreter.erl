@@ -315,13 +315,7 @@ match(V1, {var, _, Name}, ID) ->
 match(V1, {var_value, Loc, Name}, ID) -> V1 == eval({var, Loc, Name}, ID);
 match(_, {'_', _}, _) -> true;
 
-match(V1, {con_token, _, Name}, ID) ->
-  case env_get(Name, ID) of
-    {option, _, V2} -> V1 == V2;
-    {value, V2} -> V1 == V2
-  end;
-
-match(V, {app, _, {con_token, Loc, Name}, Args}, ID) ->
+match(V, {variant, _, {con_token, Loc, Name}, Args}, ID) ->
   {option, Key, _} = env_get(Name, ID),
   if
     length(Args) == 0 -> V == Key;

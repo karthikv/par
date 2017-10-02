@@ -18,7 +18,6 @@
 %   - Ord type class for comparison and sorting
 % - Dot instead of ':' for native functions?
 % - [2 days] Exceptions
-% - Ensure con is fully applied in patterns
 % - Trim left whitespace for error lines
 % - Force discard for block exprs that don't return unit?
 % - [2 weeks] Stdlib
@@ -80,7 +79,7 @@
 % - [2 days] Better pattern matching
 %   - Record types
 %   - '=' sign
-%   - Disallow pattern matching w/ struct Con(...) fn?
+%   - Struct types
 %   - Allow when clause and or?
 %
 % Uncertain

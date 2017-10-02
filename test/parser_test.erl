@@ -1152,7 +1152,7 @@ expr_test_() ->
   , ?_assertEqual(
       {match, l(0, 24), {con_token, l(6, 3), "Bar"}, [
         {'case', l(12, 10),
-          {con_token, l(12, 3), "Bar"},
+          {variant, l(12, 3), {con_token, l(12, 3), "Bar"}, []},
           {con_token, l(19, 3), "Bar"}
         }
       ]},
@@ -1170,7 +1170,7 @@ expr_test_() ->
           {init, l(12, 5), {var, l(12, 1), "a"}, {int, l(16, 1), 3}}
         ]}, [
           {'case', l(22, 10),
-            {con_token, l(22, 3), "Bar"},
+            {variant, l(22, 3), {con_token, l(22, 3), "Bar"}, []},
             {con_token, l(29, 3), "Bar"}
           }
         ]
@@ -1188,7 +1188,7 @@ expr_test_() ->
           }
         ]}, [
           {'case', l(25, 10),
-            {con_token, l(25, 3), "Bar"},
+            {variant, l(25, 3), {con_token, l(25, 3), "Bar"}, []},
             {con_token, l(32, 3), "Bar"}
           }
         ]
@@ -1203,7 +1203,7 @@ expr_test_() ->
           [{init, l(16, 5), {var, l(16, 1), "b"}, {int, l(20, 1), 3}}]
         }, [
           {'case', l(26, 10),
-            {con_token, l(26, 3), "Bar"},
+            {variant, l(26, 3), {con_token, l(26, 3), "Bar"}, []},
             {con_token, l(33, 3), "Bar"}
           }
         ]
@@ -1225,9 +1225,12 @@ expr_test_() ->
           {con_token, l(10, 3), "Bar"}
         }, [
           {'case', l(16, 23),
-            {field, l(16, 10),
-              {con_token, l(16, 6), "Module"},
-              {con_token, l(23, 3), "Bar"}
+            {variant, l(16, 10),
+              {field, l(16, 10),
+                {con_token, l(16, 6), "Module"},
+                {con_token, l(23, 3), "Bar"}
+              },
+              []
             },
             {field, l(30, 9),
               {con_token, l(30, 5), "Other"},
@@ -1245,7 +1248,7 @@ expr_test_() ->
           [{int, l(10, 1), 9}]
         }, [
           {'case', l(15, 16),
-            {app, l(15, 6),
+            {variant, l(15, 6),
               {con_token, l(15, 3), "Bar"},
               [{var, l(19, 1), "x"}]
             },
@@ -1268,7 +1271,7 @@ expr_test_() ->
           [{int, l(14, 1), 9}]
         }, [
           {'case', l(19, 29),
-            {app, l(19, 13),
+            {variant, l(19, 13),
               {field, l(19, 10),
                 {con_token, l(19, 6), "Module"},
                 {con_token, l(26, 3), "Bar"}

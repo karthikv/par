@@ -13,7 +13,8 @@
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
 %   structs - a Name => {T, SigIfaces} map for structs in the env
-%   enums - a Name => [VariantName] map for enums in the env
+%   enums - a EnumName => [OptionName] map for enums in the env
+%   options - a {Module, Name} => Arity map for options
 %   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   impl_refs - a Ref => ImplKey map for implementations of interfaces
@@ -52,6 +53,7 @@
   aliases = #{},
   structs = #{},
   enums = #{},
+  options = #{},
   ifaces = #{},
   impls = #{
     "Num" => #{},
@@ -294,6 +296,20 @@
       utils:unqualify(Con),
       utils:unqualify(ParentCon)
     ]
+  )
+).
+-define(
+  ERR_MATCH_STRUCT,
+  ?FMT(
+    "Pattern matching against structs is currently not supported, but we do "
+    "plan to support this in the future."
+  )
+).
+-define(
+  ERR_OPTION_ARITY(Con, ExpArity, Arity),
+  ?FMT(
+    "In a pattern, ~s must be given all ~p arguments, but it's only given ~p.",
+    [Con, ExpArity, Arity]
   )
 ).
 

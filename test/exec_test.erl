@@ -1138,20 +1138,20 @@ test_import(Many) ->
       }
     ], "bar"))
   , ?_test(2 = Many([
-      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\" (One, Two, Three)\n"
-        "f(x) = match x { One => 1, Two => 2, Three => 3 }\n"
-        "main() = f(Two)"
+        "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }\n"
+        "main() = f(Two(true))"
       }
     ], "bar"))
   , ?_test(3 = Many([
-      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\" (variants Foo)\n"
-        "f(x) = match x { One => 1, Two => 2, Three => 3 }\n"
+        "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }\n"
         "main() = f(Three)"
       }
     ], "bar"))

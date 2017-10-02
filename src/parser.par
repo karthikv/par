@@ -52,6 +52,7 @@ enum Node {
   Ext(Loc, Node, Node) @ext
 
   App(Loc, Node, [Node]) @app
+  Variant(Loc, Node, [Node]) @variant
   Native(Loc, Node, Node, Int) @native
 
   Con(Loc, [Char]) @con_token
@@ -992,20 +993,20 @@ pattern(tokens) =
       let node = Field(range(s, e), Con(s, mod), Con(e, con))
       if let [Lexer.LParen(_) | t] = t then
         parse_args(pattern, s, t) |> pmap(|(l, args, rest)|
-          (App(l, node, args), rest)
+          (Variant(l, node, args), rest)
         )
       else
-        node |> finish(t)
+        Variant(node_loc(node), node, []) |> finish(t)
     [Lexer.Con(_, _), Lexer.Dot(_) | t] =>
       head_loc(t) |> one_err("Expected capitalized identifier after dot '.'")
     [Lexer.Con(s, con) | t] =>
       let node = Con(s, con)
       if let [Lexer.LParen(_) | t] = t then
         parse_args(pattern, s, t) |> pmap(|(l, args, rest)|
-          (App(l, node, args), rest)
+          (Variant(l, node, args), rest)
         )
       else
-        node |> finish(t)
+        Variant(node_loc(node), node, []) |> finish(t)
 
     [Lexer.LBracket(s), Lexer.RBracket(e) | t] =>
       List(range(s, e), []) |> finish(t)

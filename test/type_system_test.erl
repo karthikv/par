@@ -1714,8 +1714,8 @@ pattern_test_() ->
       "}"
     ))
   , ?_test("Foo -> A ~ Num" = ok_prg(
-      "enum Foo { One, Two, Three }\n"
-      "f(x) = match x { One => 1, Two => 2, Three => 3 }",
+      "enum Foo { One, Two(Bool), Three }\n"
+      "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }",
       "f"
     ))
   , ?_test("Int" = ok_prg(
@@ -1805,6 +1805,26 @@ pattern_test_() ->
       "enum Foo { Bar(Int), Baz(Char) }\n"
       "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
       {"Int", "Char", l(1, 23, 1), ?FROM_APP}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "expr = match Baz(5) { Baz => 1 }",
+      {?ERR_OPTION_ARITY("Baz", 1, 0), l(1, 22, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "expr = match Baz(5) { Baz(1, 2) => 1 }",
+      {?ERR_OPTION_ARITY("Baz", 1, 2), l(1, 22, 9)}
+    ))
+  , ?_test(ctx_err_prg(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "expr = match Baz(5) { Bar(2) => 1 }",
+      {?ERR_OPTION_ARITY("Bar", 0, 1), l(1, 22, 6)}
+    ))
+  , ?_test(ctx_err_prg(
+      "struct Foo { a : Int }\n"
+      "expr = match Foo(1) { Foo(1) => 1 }",
+      {?ERR_MATCH_STRUCT, l(1, 22, 3)}
     ))
 
 
@@ -2318,19 +2338,19 @@ import_test_() ->
       }
     ], "bar", "x"))
   , ?_test("Foo -> A ~ Num" = ok_many([
-      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\" (One, Two, Three)\n"
-        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+        "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", "f"))
   , ?_test("Foo -> A ~ Num" = ok_many([
-      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\" (variants Foo)\n"
-        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+        "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", "f"))
   , ?_test("Loc -> Loc" = ok_many([
@@ -2371,12 +2391,12 @@ import_test_() ->
       }
     ], "bar", {?ERR_NOT_DEF("SomeEnum", "Foo"), "Bar", l(16, 8)}))
   , ?_test(ctx_err_many([
-      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\" (variants Foo)\n"
         "f : Foo -> Int\n"
-        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+        "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", {?ERR_NOT_DEF_TYPE("Foo"), "Bar", l(1, 4, 3)}))
   , ?_test(ctx_err_many([
@@ -2388,11 +2408,11 @@ import_test_() ->
       }
     ], "bar", {?ERR_REDEF("x"), "Bar", l(19, 1)}))
   , ?_test(ctx_err_many([
-      {"foo", "module Foo enum Foo { One, Two, Three }"},
+      {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\" (Foo, One, variants Foo)\n"
-        "f(x) = match x { One => 1, Two => 2, Three => 3 }"
+        "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", {?ERR_REDEF("One"), "Bar", l(26, 12)}))
   , ?_test(ctx_err_many([

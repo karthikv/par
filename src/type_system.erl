@@ -324,14 +324,23 @@ populate_env_and_types(Comps, C) ->
           case N of
             enum ->
               Enums = ModuleC1#ctx.enums,
-              {Variants, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
-                {option, _, {con_token, OptionLoc, OptionCon}, _, _} = Option,
+              {OptNames, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
+                {option, _, {con_token, OptionLoc, OptionCon}, ArgTEs, _} = Option,
                 {TV, ID} = tv_server:fresh_gnr_id(NestedC#ctx.pid),
                 Value = {add_dep, TV, ID},
-                {OptionCon, define(OptionCon, Value, true, OptionLoc, NestedC)}
+
+                NestedC1 = define_option(
+                  OptionCon,
+                  Value,
+                  length(ArgTEs),
+                  true,
+                  OptionLoc,
+                  NestedC
+                ),
+                {OptionCon, NestedC1}
               end, ModuleC1, OptionsOrFields),
 
-              ModuleC2#ctx{enums=Enums#{Con => Variants}};
+              ModuleC2#ctx{enums=Enums#{Con => OptNames}};
 
             struct ->
               {TV, ID} = tv_server:fresh_gnr_id(ModuleC1#ctx.pid),
@@ -369,6 +378,15 @@ define(Name, Value, Exported, Loc, C) ->
   case env_exists(Name, C) of
     true -> add_ctx_err(?ERR_REDEF(Name), Loc, C);
     false -> env_add(Name, Value, Exported, C)
+  end.
+
+define_option(Name, Value, Arity, Exported, Loc, C) ->
+  case env_exists(Name, C) of
+    true -> add_ctx_err(?ERR_REDEF(Name), Loc, C);
+    false ->
+      Options = C#ctx.options,
+      NewOptions = Options#{{C#ctx.module, Name} => Arity},
+      env_add(Name, Value, Exported, C#ctx{options=NewOptions})
   end.
 
 define_type(Con, IsIface, NumParams, Loc, C) ->
@@ -559,18 +577,23 @@ populate_direct_imports(Deps, C) ->
           case {TypeExists, no_ctx_errs(NestedC2, NestedC1)} of
             {false, false} -> NestedC2;
             {true, false} -> NestedC1;
-            {_, true} -> define(Name, Value, false, Loc, NestedC2)
+            {_, true} ->
+              case maps:find({Module, Name}, NestedC2#ctx.options) of
+                {ok, Arity} ->
+                  define_option(Name, Value, Arity, false, Loc, NestedC2);
+                error -> define(Name, Value, false, Loc, NestedC2)
+              end
           end;
 
         {variants, Loc, Name} ->
           Con = lists:concat([Module, '.', Name]),
           case maps:find(Con, NestedC#ctx.enums) of
-            {ok, Variants} ->
-              lists:foldl(fun(Variant, FoldC) ->
-                Env = FoldC#ctx.env,
-                {Value, true} = maps:get({Module, Variant}, Env),
-                define(Variant, Value, false, Loc, FoldC)
-              end, NestedC, Variants);
+            {ok, OptNames} ->
+              lists:foldl(fun(OptName, #ctx{env=Env, options=Options}=FoldC) ->
+                {Value, true} = maps:get({Module, OptName}, Env),
+                Arity = maps:get({Module, OptName}, Options),
+                define_option(OptName, Value, Arity, false, Loc, FoldC)
+              end, NestedC, OptNames);
 
             error -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con, Module), Loc, NestedC)
           end
@@ -1198,6 +1221,35 @@ infer({app, Loc, Expr, Args}, C) ->
   C3 = add_cst(T, ExprT, Loc, ?FROM_APP, C2),
   {TV, C3};
 
+infer({variant, Loc, Expr, Args}, C) ->
+  {Module, Con, LookupLoc} = case Expr of
+    {field, LookupLoc_, {con_token, _, Module_}, {con_token, _, Con_}} ->
+      {Module_, Con_, LookupLoc_};
+    {con_token, LookupLoc_, Con_} -> {C#ctx.module, Con_, LookupLoc_}
+  end,
+  {_, C1} = raw_lookup(Module, Con, LookupLoc, C),
+
+  case no_ctx_errs(C1, C) of
+    false -> {tv_server:fresh(C1#ctx.pid), C1};
+    true ->
+      {ExpArity, C2} = case maps:find({Module, Con}, C1#ctx.options) of
+        {ok, ExpArity_} -> {ExpArity_, C1};
+        error -> {none, add_ctx_err(?ERR_MATCH_STRUCT, LookupLoc, C1)}
+      end,
+
+      case no_ctx_errs(C2, C1) of
+        false -> {tv_server:fresh(C2#ctx.pid), C2};
+        true ->
+          case length(Args) of
+            ExpArity when ExpArity == 0 -> infer(Expr, C2);
+            ExpArity when ExpArity > 0 -> infer({app, Loc, Expr, Args}, C2);
+            Arity ->
+              C3 = add_ctx_err(?ERR_OPTION_ARITY(Con, ExpArity, Arity), Loc, C2),
+              {tv_server:fresh(C3#ctx.pid), C3}
+          end
+      end
+  end;
+
 infer({native, Loc, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
   C1 = case erlang:function_exported(Module, list_to_atom(Name), Arity) of
     true -> C;
@@ -1559,14 +1611,13 @@ pattern_names([]) -> gb_sets:new();
 pattern_names([Node | Rest]) ->
   gb_sets:union(pattern_names(Node), pattern_names(Rest));
 pattern_names({N, _, _}) when N == int; N == float; N == bool; N == char;
-    N == str; N == atom; N == var_value; N == con_token ->
+    N == str; N == atom; N == var_value ->
   gb_sets:new();
 pattern_names({var, _, Name}) -> gb_sets:singleton(Name);
 pattern_names({N, _}) when N == unit; N == '_' -> gb_sets:new();
 pattern_names({field, _, ModuleConToken, ConToken}) ->
   gb_sets:union(pattern_names(ModuleConToken), pattern_names(ConToken));
-pattern_names({app, _, ConToken, Args}) ->
-  gb_sets:union(pattern_names(ConToken), pattern_names(Args));
+pattern_names({variant, _, _, Args}) -> pattern_names(Args);
 pattern_names({list, _, Elems}) -> pattern_names(Elems);
 pattern_names({cons, _, Elems, Tail}) ->
   gb_sets:union(pattern_names(Elems), pattern_names(Tail));

@@ -6,7 +6,7 @@
 -define(EXCLUDER_NAME, code_gen_excluder).
 -define(INIT_FN_ATOM, '_@init').
 
--record(cg, {env, in_pattern = false, in_impl = false, ctx}).
+-record(cg, {env, in_impl = false, ctx}).
 
 compile_comps(Comps, C) ->
   CG = #cg{env=#{}, ctx=C},
@@ -150,12 +150,12 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
 
         {variants, _, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
-          Variants = maps:get(Con, Enums),
+          OptNames = maps:get(Con, Enums),
 
-          lists:foldl(fun(Variant, FoldCG) ->
-            {_, Arity} = maps:get({DepModule, Variant}, FoldCG#cg.env),
-            env_set(Variant, {{external, DepModule}, Arity}, FoldCG)
-          end, NestedCG, Variants)
+          lists:foldl(fun(OptName, FoldCG) ->
+            {_, Arity} = maps:get({DepModule, OptName}, FoldCG#cg.env),
+            env_set(OptName, {{external, DepModule}, Arity}, FoldCG)
+          end, NestedCG, OptNames)
       end
     end, ModuleCG, Idents)
   end, set_module(Module, CG), Deps).
@@ -383,9 +383,7 @@ rep({fn, Loc, Ref, Args, Expr}, CG) ->
   AllArgIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
   ArgIVs = lists:sublist(AllArgIVs, length(Args)),
 
-  ArgsRep = lists:map(fun(Pattern) ->
-    rep(Pattern, CG1#cg{in_pattern=true})
-  end, Args),
+  ArgsRep = lists:map(fun(Pattern) -> rep(Pattern, CG1) end, Args),
   {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgIVs, true, CG1),
 
   Line = ?START_LINE(Loc),
@@ -535,29 +533,6 @@ rep({field, Loc, Expr, Prop}, CG) ->
       call(maps, get, [AtomRep, ExprRep], Line)
   end;
 
-rep({app, _, {con_token, Loc, Name}, Args}, #cg{in_pattern=true}=CG) ->
-  {{option, Key, _}, _} = env_get(Name, CG),
-  ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
-
-  Line = ?START_LINE(Loc),
-  % It's possible that this is actually a partial application, but we can't
-  % successfully pattern match a newly generated function anyway, so as long as
-  % our pattern fails (which it will, because a function won't match a tuple),
-  % we're good.
-  {tuple, Line, [{atom, Line, Key} | ArgsRep]};
-
-rep({app, _, {field, Loc, {con_token, _, Module}, {con_token, _, Name}}, Args},
-    #cg{in_pattern=true}=CG) ->
-  {{option, Key, _}, _} = maps:get({Module, Name}, CG#cg.env),
-  ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
-
-  Line = ?START_LINE(Loc),
-  % It's possible that this is actually a partial application, but we can't
-  % successfully pattern match a newly generated function anyway, so as long as
-  % our pattern fails (which it will, because a function won't match a tuple),
-  % we're good.
-  {tuple, Line, [{atom, Line, Key} | ArgsRep]};
-
 rep({app, Loc, Expr, RawArgs}, CG) ->
   ExprRep = rep(Expr, CG),
   Line = ?START_LINE(Loc),
@@ -615,6 +590,28 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
       end
   end;
 
+rep({variant, _, {con_token, Loc, Name}, Args}, CG) ->
+  Key = option_key(Name, CG),
+  ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
+
+  Line = ?START_LINE(Loc),
+  case ArgsRep of
+    [] -> {atom, Line, Key};
+    _ -> {tuple, Line, [{atom, Line, Key} | ArgsRep]}
+  end;
+
+rep({variant, _, Field, Args}, CG) ->
+  {field, Loc, {con_token, _, Module}, {con_token, _, Name}} = Field,
+  Key = option_key(Module, Name, CG),
+  {{option, Key, _}, _} = maps:get({Module, Name}, CG#cg.env),
+  ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
+
+  Line = ?START_LINE(Loc),
+  case ArgsRep of
+    [] -> {atom, Line, Key};
+    _ -> {tuple, Line, [{atom, Line, Key} | ArgsRep]}
+  end;
+
 rep({native, _, {atom, Loc, Mod}, {var, _, Name}, Arity}, _) ->
   Line = ?START_LINE(Loc),
   Atom = list_to_atom(Name),
@@ -668,7 +665,7 @@ rep({match, Loc, Expr, Cases}, CG) ->
       bind(Name, unknown, FoldCG)
     end, CG, type_system:pattern_names(Pattern)),
 
-    PatternRep = rep(Pattern, CG1#cg{in_pattern=true}),
+    PatternRep = rep(Pattern, CG1),
     Body = [rep(Then, CG1)],
     {clause, element(2, PatternRep), [PatternRep], [], Body}
   end, Cases),
@@ -730,7 +727,7 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
 % recursive definitions allowed for simple pattern functions
 rep_pattern({var, _, Name}=Pattern, {fn, _, _, Args, _}=Expr, CG) ->
   CG1 = bind(Name, length(Args), CG),
-  PatternRep = rep(Pattern, CG1#cg{in_pattern=true}),
+  PatternRep = rep(Pattern, CG1),
 
   % We're unsure whether the named fun is going to be used (i.e. whether the
   % named fun is recursive), so we give it a name prefixed with an underscore
@@ -749,7 +746,7 @@ rep_pattern(Pattern, Expr, CG) ->
   CG1 = gb_sets:fold(fun(Name, FoldCG) ->
     bind(Name, unknown, FoldCG)
   end, CG, type_system:pattern_names(Pattern)),
-  {rep(Pattern, CG1#cg{in_pattern=true}), rep(Expr, CG), CG1}.
+  {rep(Pattern, CG1), rep(Expr, CG), CG1}.
 
 rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   ArgVar = {var, 1, unique("_@Arg")},
@@ -1039,6 +1036,14 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
 % TODO: fix this
 rewrite({gen, "List", _}, VarRep, _, _, _) -> {[], VarRep};
 rewrite({tv, _, _, _}, VarRep, _, _, _) -> {[], VarRep}.
+
+option_key(Name, CG) -> option_key(CG#cg.ctx#ctx.module, Name, CG).
+option_key(Module, Name, #cg{env=Env}=CG) ->
+  case maps:get({Module, Name}, Env) of
+    {{external, OtherModule}, _} -> option_key(OtherModule, Name, CG);
+    {{option, Key}, _} -> Key;
+    {{option, Key, _}, _} -> Key
+  end.
 
 eabs(Lit, Line) -> erl_parse:abstract(Lit, Line).
 gm(Module) -> list_to_atom(Module ++ "_gm").
