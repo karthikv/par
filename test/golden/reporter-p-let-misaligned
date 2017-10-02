@@ -2,6 +2,6 @@
 
 Expected an expression after let statement. The expression must be on a new 
 line and indented to the same level as the let statement:
-4:   x + 5
-     ^
+4: x + 5
+   ^
 

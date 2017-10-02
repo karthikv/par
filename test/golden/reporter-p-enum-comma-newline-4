@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
 Expected either comma ',' or newline delimiter:
-3:   Foo(A) Bar
-            ^^^
+3: Foo(A) Bar
+          ^^^
 

@@ -18,7 +18,6 @@
 %   - Ord type class for comparison and sorting
 % - Dot instead of ':' for native functions?
 % - [2 days] Exceptions
-% - Trim left whitespace for error lines
 % - Force discard for block exprs that don't return unit?
 % - [2 weeks] Stdlib
 %   - Map/Set operations?

@@ -218,14 +218,18 @@ extract_code(Loc, StrLines) ->
       Carets = string:copies("^", EndCol - StartCol),
       Prefix = ?FMT("~p: ", [StartLine]),
 
-      % end column is exclusive, so we subtract 1
-      Underline = string:right(Carets, length(Prefix) + EndCol - 1),
       StrLine = array:get(StartLine - 1, StrLines),
+      Trimmed = string:strip(StrLine, left),
+      TrimmedLength = length(StrLine) - length(Trimmed),
+
+      % end column is exclusive, so we subtract 1
+      Offset = length(Prefix) + EndCol - 1 - TrimmedLength,
+      Underline = string:right(Carets, Offset),
 
       io_lib:format(
         "~s~s~n"
         "~s~n",
-        [Prefix, StrLine, Underline]
+        [Prefix, Trimmed, Underline]
       );
 
     true ->

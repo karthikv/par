@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
 Delimiting comma ',' is unnecessary because items are separated by a newline:
-3:              , Bar(String) @bar
-                ^
+3: , Bar(String) @bar
+   ^
 
