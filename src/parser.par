@@ -969,7 +969,13 @@ pattern(tokens) =
   let finish(t, node) = parsed((node, t))
   match tokens {
     [Lexer.LitInt(l, int) | t] => LitInt(l, int) |> finish(t)
+    [Lexer.Sub(s), Lexer.LitInt(e, int) | t] =>
+      LitInt(range(s, e), -int) |> finish(t)
+
     [Lexer.LitFloat(l, float) | t] => LitFloat(l, float) |> finish(t)
+    [Lexer.Sub(s), Lexer.LitFloat(e, float) | t] =>
+      LitFloat(range(s, e), -float) |> finish(t)
+
     [Lexer.LitBool(l, bool) | t] => LitBool(l, bool) |> finish(t)
     [Lexer.LitChar(l, char) | t] => LitChar(l, char) |> finish(t)
     [Lexer.LitStr(l, str) | t] => LitStr(l, str) |> finish(t)
@@ -1005,6 +1011,7 @@ pattern(tokens) =
       List(range(s, e), []) |> finish(t)
     [Lexer.LBracket(s) | t] => parse_list(pattern, s, t)
 
+    [Lexer.LParen(s), Lexer.RParen(e) | t] => Unit(range(s, e)) |> finish(t)
     [Lexer.LParen(s) | t] => parse_tuple(pattern, Tuple, s, t)
 
     _ => head_loc(tokens) |> one_err("Expected pattern")

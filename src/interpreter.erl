@@ -299,6 +299,7 @@ match_cases(V, [{'case', _, Pattern, Expr} | Rest], ID) ->
     false -> match_cases(V, Rest, ID)
   end.
 
+match(V, {unit, _}, _) -> V == {};
 match(V1, {N, _, V2}, _) when N == int; N == float; N == bool; N == char;
     N == str; N == atom ->
   V1 == V2;

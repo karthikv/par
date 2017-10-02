@@ -1693,7 +1693,8 @@ gen_tv_test_() ->
   ].
 
 pattern_test_() ->
-  [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4 => false }"))
+  [ ?_test("Bool" = ok_expr("match 3 { 3 => true, 4.8 => false }"))
+  , ?_test("Bool" = ok_expr("match -4.8 { -3 => true, -4.8 => false }"))
   , ?_test("A ~ Num" = ok_expr(
       "let x = 3\n"
       "match x + 5 { a => a + 10 }"
@@ -1706,6 +1707,7 @@ pattern_test_() ->
       "    id(5.0)\n"
       "}"
     ))
+  , ?_test("()" = ok_expr("match () { () => () }"))
   , ?_test("(Int, Float, Int, Float)" = ok_expr(
       "match (3, 4) {\n"
       "  (a, b) => (a + 3 : Int, a + 3.0, b + 4 : Int, b + 4.0)\n"

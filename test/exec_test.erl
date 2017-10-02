@@ -846,6 +846,7 @@ interpreter_pattern_test_() ->
   test_pattern(fun expr_interpreter/1, fun run_interpreter/1).
 test_pattern(Expr, Run) ->
   [ ?_test(true = Expr("match 3 { 3 => true, 4 => false }"))
+  , ?_test(false = Expr("match -4.8 { -3 => true, -4.8 => false }"))
   , ?_test(18 = Expr(
       "let x = 3\n"
       "match x + 5 { a => a + 10 }"
@@ -858,6 +859,7 @@ test_pattern(Expr, Run) ->
       "    id(5.0)\n"
       "}"
     ))
+  , ?_test({} = Expr("match () { () => () }"))
   , ?_test({6, 6.0, 8, 8.0} = Expr(
       "match (3, 4) {\n"
       "  (a, b) => (a + 3 : Int, a + 3.0, b + 4 : Int, b + 4.0)\n"

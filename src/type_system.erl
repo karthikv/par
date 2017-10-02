@@ -1562,7 +1562,7 @@ pattern_names({N, _, _}) when N == int; N == float; N == bool; N == char;
     N == str; N == atom; N == var_value; N == con_token ->
   gb_sets:new();
 pattern_names({var, _, Name}) -> gb_sets:singleton(Name);
-pattern_names({'_', _}) -> gb_sets:new();
+pattern_names({N, _}) when N == unit; N == '_' -> gb_sets:new();
 pattern_names({field, _, ModuleConToken, ConToken}) ->
   gb_sets:union(pattern_names(ModuleConToken), pattern_names(ConToken));
 pattern_names({app, _, ConToken, Args}) ->

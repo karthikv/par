@@ -18,7 +18,6 @@
 %   - Ord type class for comparison and sorting
 % - Dot instead of ':' for native functions?
 % - [2 days] Exceptions
-% - Negative numbers and unit in patterns
 % - Ensure con is fully applied in patterns
 % - Trim left whitespace for error lines
 % - Force discard for block exprs that don't return unit?

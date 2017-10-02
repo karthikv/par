@@ -1059,6 +1059,19 @@ expr_test_() ->
       ok_expr("match 1 { 1 => x, 5.7 => y }")
     )
   , ?_assertEqual(
+      {match, l(0, 30), {int, l(6, 1), 1}, [
+        {'case', l(10, 7),
+          {int, l(10, 2), -1},
+          {var_ref, l(16, 1), ref, "x"}
+        },
+        {'case', l(19, 9),
+          {float, l(19, 4), -5.7},
+          {var_ref, l(27, 1), ref, "y"}
+        }
+      ]},
+      ok_expr("match 1 { -1 => x, -5.7 => y }")
+    )
+  , ?_assertEqual(
       {match, l(0, 0, 1, 10), {int, l(6, 1), 1}, [
         {'case', l(10, 6),
           {int, l(10, 1), 1},
@@ -1306,6 +1319,15 @@ expr_test_() ->
         }
       ]},
       ok_expr("match [1] { [_ | t] => t }")
+    )
+  , ?_assertEqual(
+      {match, l(0, 21), {unit, l(6, 2)}, [
+        {'case', l(11, 8),
+          {unit, l(11, 2)},
+          {unit, l(17, 2)}
+        }
+      ]},
+      ok_expr("match () { () => () }")
     )
   , ?_assertEqual(
       {match, l(0, 42),
