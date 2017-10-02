@@ -300,10 +300,7 @@
 ).
 -define(
   ERR_MATCH_STRUCT,
-  ?FMT(
-    "Pattern matching against structs is currently not supported, but we do "
-    "plan to support this in the future."
-  )
+  "Pattern matching against structs is not supported."
 ).
 -define(
   ERR_OPTION_ARITY(Con, ExpArity, Arity),
