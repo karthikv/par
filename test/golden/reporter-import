@@ -1,6 +1,7 @@
 *** module Foo *** (/tmp/reporter-test-many/foo.par)
 
 Couldn't import /tmp/reporter-test-many/bar.par: file doesn't exist:
+
 2: import "./bar"
           ^^^^^^^
 

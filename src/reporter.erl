@@ -19,7 +19,7 @@ format({import_error, Loc, ImportPath, Reason, Comp}) ->
   Code = extract_code(Loc, StrLines),
 
   Msg = ?FMT("Couldn't import ~s: ~s", [ImportPath, reason_str(Reason)]),
-  [Prefix, wrap(Msg, ?LINE_WIDTH), $:, $\n, Code, $\n];
+  [Prefix, wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n];
 
 format({lexer_errors, Errs, Path, Prg}) ->
   StrLines = split_lines(Prg),
@@ -33,7 +33,7 @@ format({lexer_errors, Errs, Path, Prg}) ->
 
   StrErrs = lists:map(fun({unexpected, Loc, _, Msg}) ->
     Code = extract_code(Loc, StrLines),
-    [wrap(Msg, ?LINE_WIDTH), $:, $\n, Code, $\n]
+    [wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n]
   end, SortedErrs),
 
   [Prefix, StrErrs];
@@ -71,7 +71,7 @@ format({parser_errors, Errs, Path, Prg}) ->
         [wrap(Suffixed, ?LINE_WIDTH), $\n, $\n];
       {some, Loc} ->
         Code = extract_code(Loc, StrLines),
-        [wrap(Msg, ?LINE_WIDTH), $:, $\n, Code, $\n]
+        [wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n]
     end
   end, SortedErrs),
 

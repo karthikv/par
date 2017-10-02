@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
 Unterminated string literal:
+
 3: ("hello world, true)
     ^^^^^^^^^^^^^^^^^^^
 

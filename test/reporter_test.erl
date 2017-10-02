@@ -86,6 +86,7 @@ expr_test_() ->
   , golden_expr_("p-bad-tuple-pattern", "let (1,) = (1, @hi)\n2")
   , golden_expr_("p-no-closing-1", "{ a = 3")
   , golden_expr_("p-no-closing-2", "[1, [2, [3, 4], 5, 6]")
+  , golden_expr_("p-native", "erlang:length([])")
   , golden_prg_(
       "p-enum-comma-newline-1",
       "enum SumType {\n"

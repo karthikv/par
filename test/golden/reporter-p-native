@@ -1,0 +1,10 @@
+*** file [infer-prg] ***
+
+A colon can either be used to separate an expression and its corresponding type 
+signature, such as in 1 : Int, or to call a native erlang function, such as in 
+@erlang:length([]). It looks like you're trying to do the latter here, but you 
+must specify a literal atom, like @erlang or @lists, before the colon:
+
+3: erlang:length([])
+         ^
+

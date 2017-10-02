@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
 Couldn't find matching closing brace '}':
+
 3: { a = 3
    ^
 

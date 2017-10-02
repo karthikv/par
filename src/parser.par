@@ -643,6 +643,15 @@ expr_r(expr_s, state, stack, tokens) = match state {
       [Lexer.Div(_) | t] => shunt(Div, t)
       [Lexer.Mod(_) | t] => shunt(Mod, t)
 
+      [Lexer.Colon(s), Lexer.Var(_, _) | _] =>
+        one_err(
+          "A colon can either be used to separate an expression and its " ++
+          "corresponding type signature, such as in 1 : Int, or to call a " ++
+          "native erlang function, such as in @erlang:length([]). It looks " ++
+          "like you're trying to do the latter here, but you must specify " ++
+          "a literal atom, like @erlang or @lists, before the colon",
+          Some(s)
+        )
       [Lexer.Colon(_) | t] =>
         type_expr(t) |> pbind(|(node, rest)|
           let next_prec = get(Bin(Colon), opa_prec)

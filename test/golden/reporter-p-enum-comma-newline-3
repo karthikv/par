@@ -2,6 +2,7 @@
 
 Delimiting comma ',' is unnecessary because nothing follows it. Note that if 
 you separate successive items by newlines, no commas are necessary at all:
+
 3: Foo(Atom, A),
                ^
 

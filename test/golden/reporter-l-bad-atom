@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
 Atom must start with a letter, digit, or underscore:
+
 3: @+asdf
    ^^
 

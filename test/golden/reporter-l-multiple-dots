@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
 Can't have multiple dots in numeric literal:
+
 3: 3.07.8
    ^^^^^
 
