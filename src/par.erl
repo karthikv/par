@@ -15,8 +15,6 @@
 % - Builtin typeclasses
 %   - Proper type class for non-functions
 %   - Make pattern matching with var_value use proper type class
-%   - Ord type class for comparison and sorting
-% - Dot instead of ':' for native functions?
 % - [2 days] Exceptions
 % - Force discard for block exprs that don't return unit?
 % - [2 weeks] Stdlib

@@ -47,6 +47,7 @@
 
     % ifaces
     "Num" => {true, 0},
+    "Ord" => {true, 0},
     "Concatable" => {true, 0},
     "Separable" => {true, 0}
   },
@@ -57,6 +58,7 @@
   ifaces = #{},
   impls = #{
     "Num" => #{},
+    "Ord" => #{},
     "Concatable" => #{},
     "Separable" => #{}
   },

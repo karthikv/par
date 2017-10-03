@@ -1363,8 +1363,8 @@ infer({binary_op, Loc, Op, Left, Right}, C) ->
     Op == '||'; Op == '&&' ->
       {{con, "Bool"}, {con, "Bool"}, {con, "Bool"}};
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
-      NumTV = tv_server:fresh("Num", C2#ctx.pid),
-      {NumTV, NumTV, {con, "Bool"}};
+      OrdTV = tv_server:fresh("Ord", C2#ctx.pid),
+      {OrdTV, OrdTV, {con, "Bool"}};
     Op == '+'; Op == '-'; Op == '*'; Op == '/' ->
       NumTV = tv_server:fresh("Num", C2#ctx.pid),
       ReturnT = if Op == '/' -> {con, "Float"}; true -> NumTV end,
@@ -2703,6 +2703,10 @@ unalias_except_struct(T, _) -> T.
 
 instance({con, "Int"}, "Num", _, S) -> S;
 instance({con, "Float"}, "Num", _, S) -> S;
+instance({con, "Int"}, "Ord", _, S) -> S;
+instance({con, "Float"}, "Ord", _, S) -> S;
+instance({con, "String"}, "Ord", _, S) -> S;
+instance({con, "Char"}, "Ord", _, S) -> S;
 instance({con, "String"}, "Concatable", _, S) -> S;
 instance({gen, {con, "List"}, _}, "Concatable", _, S) -> S;
 instance({gen, {con, "Map"}, _}, "Concatable", _, S) -> S;

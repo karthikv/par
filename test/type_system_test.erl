@@ -270,13 +270,22 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("1.2 <= 2.34"))
   , ?_test("Bool" = ok_expr("1 <= 2.34"))
 
+  , ?_test("Bool" = ok_expr("\"hi\" < \"hello\""))
+  , ?_test("Bool" = ok_expr("'n' > 'm'"))
+  , ?_test("Bool" = ok_expr("\"some\" >= \"some\""))
+
+  , ?_test(bad_expr(
+      "@hey > @hello",
+      [{"Atom", "A ~ Ord", l(7, 6), ?FROM_OP_RHS('>')},
+       {"Atom", "A ~ Ord", l(0, 4), ?FROM_OP_LHS('>')}]
+    ))
   , ?_test(bad_expr(
       "true > 1",
       {"Bool", "A ~ Num", l(0, 4), ?FROM_OP_LHS('>')}
     ))
   , ?_test(bad_expr(
-      "true <= 1",
-      {"Bool", "A ~ Num", l(0, 4), ?FROM_OP_LHS('<=')}
+      "\"hi\" <= 'c'",
+      {"String", "Char", l(8, 3), ?FROM_OP_RHS('<=')}
     ))
 
   , ?_test("A ~ Num" = ok_expr("100 + 50"))

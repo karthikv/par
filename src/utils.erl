@@ -67,7 +67,7 @@ ivs(T, InitSeenVs) ->
   end, {[], InitSeenVs}, ivs_list(T)),
   IVs.
 
-builtin_is() -> gb_sets:from_list(["Num", "Concatable", "Separable"]).
+builtin_is() -> gb_sets:from_list(["Num", "Ord", "Concatable", "Separable"]).
 
 all_ivs(T) ->
   {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
@@ -104,15 +104,14 @@ ivs_list(unit) -> [].
 arg_ts({lam, ArgT, ReturnT}) -> [ArgT | arg_ts(ReturnT)];
 arg_ts(_) -> [].
 
+family_is(I, _) when I == "Ord"; I == "Concatable"; I == "Separable" ->
+  gb_sets:singleton(I);
+family_is("Num", _) -> gb_sets:from_list(["Num", "Ord"]);
 family_is(I, Ifaces) ->
-  case gb_sets:is_member(I, builtin_is()) of
-    true -> gb_sets:singleton(I);
-    false ->
-      {_, _, Parents} = maps:get(I, Ifaces),
-      gb_sets:fold(fun(ParentI, Family) ->
-        gb_sets:union(Family, family_is(ParentI, Ifaces))
-      end, gb_sets:add(I, Parents), Parents)
-  end.
+  {_, _, Parents} = maps:get(I, Ifaces),
+  gb_sets:fold(fun(ParentI, Family) ->
+    gb_sets:union(Family, family_is(ParentI, Ifaces))
+  end, gb_sets:add(I, Parents), Parents).
 
 absolute(Path) ->
   FullPath = filename:absname(Path),
