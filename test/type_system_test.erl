@@ -1328,6 +1328,34 @@ interface_test_() ->
       "interface Foo { foo : T, bar : T -> T }",
       {?ERR_IFACE_TYPE("foo"), l(16, 7)}
     ))
+
+
+  , ?_test("Set<A ~ ToInt -> Int>" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "id(a) = a\n"
+      "foo =\n"
+      "  let set = #[to_int]\n"
+      "  id(set)",
+      "foo"
+    ))
+  , ?_test("Bool -> A ~ ToInt -> A ~ ToInt" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo(b, x) =\n"
+      "  |y| (to_int(y), foo(b, y))\n"
+      "  if b then x else foo(true, x)",
+      "foo"
+    ))
+  % We know the impl, since it's given to foo() when x is passed. Doesn't
+  % matter that we pass @io:printable_range(); the impl is the same. This
+  % would *not* be the case if we provided a type signature to foo(), and
+  % we'd get a must solve error (see below for test case).
+  , ?_test("Bool -> A ~ ToInt -> Atom" = ok_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo(b, x) =\n"
+      "  |y| (to_int(y), foo(b, y))\n"
+      "  if b then @hi else foo(true, @io:printable_range())",
+      "foo"
+    ))
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T -> Int }\n"
       "impl ToInt for Int { to_int(i) = i }\n"
@@ -1353,6 +1381,19 @@ interface_test_() ->
       "  let to_i(x) = to_int(x)\n"
       "  to_i(3)",
       {?ERR_MUST_SOLVE("O ~ ToInt ~ Num", "O ~ ToInt ~ Num"), l(4, 7, 1)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo : Bool -> A ~ ToInt -> Atom\n"
+      "foo(b, x) =\n"
+      "  |y| (to_int(y), foo(b, y))\n"
+      "  if b then @hi else foo(true, @io:printable_range())",
+      {?ERR_MUST_SOLVE("T ~ ToInt", "T ~ ToInt"), l(4, 31, 21)}
+    ))
+  , ?_test(ctx_err_prg(
+      "interface ToInt { to_int : T -> Int }\n"
+      "foo = (|[x]| to_int(x))(@io:printable_range())",
+      {?ERR_MUST_SOLVE("L ~ ToInt", "[L ~ ToInt]"), l(1, 24, 21)}
     ))
 
 

@@ -1,16 +1,17 @@
-{application, par,
- [{description, "An escript"},
+{application, par, [
+  {description, "An escript"},
   {vsn, "0.1.0"},
   {registered, []},
-  {applications,
-   [kernel,
+  {applications, [
+    kernel,
     stdlib,
-    getopt
-   ]},
+    getopt,
+    unite
+  ]},
   {env,[]},
   {modules, []},
 
   {maintainers, []},
   {licenses, []},
   {links, []}
- ]}.
+]}.

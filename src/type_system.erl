@@ -37,6 +37,7 @@
 %   nested_ivs - a {I, V} => IVs mapping for impls depending on other impls
 %   passed_vs - a V => {Is, ArgT, Module, Loc} mapping of Vs that have args
 %               passed in for them
+%   must_solve_vs - a set of Vs that must be solved because of their interface
 %   err_vs - a set of Vs that had errors unifying with a concrete type
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
 %   t1/t2 - the two types currently being unified
@@ -57,6 +58,7 @@
   impls,
   nested_ivs = #{},
   passed_vs = [],
+  must_solve_vs = gb_sets:new(),
   err_vs = gb_sets:new(),
   gen_vs,
   t1,
@@ -99,9 +101,6 @@
 %
 % [1] https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
 -record(tarjan, {stack, map, next_index, solver}).
-
-% options while performing substitution on a type
--record(sub_opts, {subs, aliases = #{}, for_err = false}).
 
 -ifdef(TEST).
   -define(
@@ -858,7 +857,7 @@ infer({interface, Loc, {con_token, _, RawCon}, _, Fields}, C) ->
 
   Subs = #{"T" => {set_ifaces, gb_sets:from_list([Con])}},
   % type sigs don't need consolidation, so don't pass aliases
-  {record, _, RawFieldMap} = subs(RawRecordT, #sub_opts{subs=Subs}),
+  {record, _, RawFieldMap} = utils:subs(RawRecordT, #sub_opts{subs=Subs}),
 
   Ifaces = C1#ctx.ifaces,
   Ancestors = gb_sets:subtract(
@@ -1712,7 +1711,7 @@ infer_impl_inits(
               _ -> {#{}, IfaceNumParams}
             end,
 
-            TupleSigT = subs(RawFieldT, #sub_opts{subs=TupleSubs}),
+            TupleSigT = utils:subs(RawFieldT, #sub_opts{subs=TupleSubs}),
             FVs = gb_sets:delete_any("T", fvs(TupleSigT)),
             RigidVs = gb_sets:to_list(FVs),
 
@@ -1720,7 +1719,7 @@ infer_impl_inits(
             NewV = tv_server:next_name(FoldC#ctx.pid),
             NewTV = {tv, NewV, none, false},
             % type sigs don't need consolidation, so don't pass aliases
-            SigT = subs(NormT, #sub_opts{subs=#{"T" => NewTV}}),
+            SigT = utils:subs(NormT, #sub_opts{subs=#{"T" => NewTV}}),
 
             % All IVs within ImplT will be in the environment during code gen.
             % To make sure they're treated as bound variables, whose impls
@@ -1875,7 +1874,7 @@ norm_sig_type(SigT, RigidVs, FVs, Pid) ->
   end, #{}, FVs),
 
   % type sigs don't need consolidation, so don't pass aliases
-  subs(SigT, #sub_opts{subs=Subs}).
+  utils:subs(SigT, #sub_opts{subs=Subs}).
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
@@ -1893,26 +1892,30 @@ solve(Gs, S) ->
   end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
 
   #solver{
-    iv_origins=IVOrigins,
     passed_vs=PassedVs,
+    must_solve_vs=MustSolveVs,
     err_vs=ErrVs
   }=S1 = T#tarjan.solver,
 
-  RefVsSet = maps:fold(fun({I, OrigV}, _, FoldRefVsSet) ->
-    % Rigid doesn't matter for subs. We specify the iface I so IVs still
-    % contains OrigV even if there are no subs.
-    SubbedT = subs_s({tv, OrigV, gb_sets:singleton(I), false}, S1),
-    IVs = utils:ivs(SubbedT),
-    NewVs = gb_sets:from_list(lists:map(fun({_, V}) -> V end, IVs)),
-    gb_sets:union(FoldRefVsSet, NewVs)
-  end, gb_sets:new(), IVOrigins),
+  SubbedMustSolveVs = gb_sets:fold(fun(V, FoldMustSolveVs) ->
+    % Is and Rigid don't matter for subs.
+    case subs_s({tv, V, none, false}, S1) of
+      % Rigidity doesn't matter; if NewV is rigid, it should still be solved
+      % for by means of a bound impl.
+      {tv, NewV, _, _} -> gb_sets:add(NewV, FoldMustSolveVs);
+      {gen, NewV, _, _, _} -> gb_sets:add(NewV, FoldMustSolveVs);
+      _ -> FoldMustSolveVs
+    end
+  end, gb_sets:new(), MustSolveVs),
 
   SubbedErrVs = gb_sets:fold(fun(ErrV, FoldErrVs) ->
     % Is and Rigid don't matter for subs.
     case subs_s({tv, ErrV, none, false}, S1) of
-      % If NewV is rigid, it shouldn't be in ErrVs, as it can't be unified with
-      % a concrete type.
-      {tv, NewV, _, false} -> gb_sets:add(NewV, FoldErrVs);
+      % Rigidity doesn't matter; we tried to unify ErrV/NewV with a concrete
+      % type at some point, so don't report ambiguity error until the user
+      % decides which it actually is.
+      {tv, NewV, _, _} -> gb_sets:add(NewV, FoldErrVs);
+      {gen, NewV, _, _, _} -> gb_sets:add(NewV, FoldErrVs);
       _ -> FoldErrVs
     end
   end, gb_sets:new(), ErrVs),
@@ -1924,13 +1927,13 @@ solve(Gs, S) ->
     BoundVs = bound_vs(Env, FoldS),
 
     gb_sets:fold(fun(V, {NestedReportedVs, NestedS}) ->
-      IsRefV = gb_sets:is_member(V, RefVsSet),
+      MustSolveV = gb_sets:is_member(V, SubbedMustSolveVs),
       IsErrV = gb_sets:is_member(V, SubbedErrVs),
       Bound = gb_sets:is_member(V, BoundVs),
       Reported = gb_sets:is_member(V, NestedReportedVs),
 
       if
-        IsRefV and not IsErrV and not Bound and not Reported ->
+        MustSolveV, not IsErrV, not Bound, not Reported ->
           SubbedArgT = subs_s(ArgT, NestedS),
           GenTV = lists:foldl(fun({_, GenTV}, FoldGenTV) ->
             {gen, HiddenV, _, _, _} = GenTV,
@@ -1980,8 +1983,8 @@ solve(Gs, S) ->
           ),
 
           {FinalT1, FinalT2} = case {IsRecord1, IsRecord2} of
-            {true, false} -> {SubbedT1, unalias(SubbedT2, Aliases)};
-            {false, true} -> {unalias(SubbedT1, Aliases), SubbedT2};
+            {true, false} -> {SubbedT1, utils:unalias(SubbedT2, Aliases)};
+            {false, true} -> {utils:unalias(SubbedT1, Aliases), SubbedT2};
             _ -> {SubbedT1, SubbedT2}
           end,
           {FinalT1, FinalT2, Module, Loc, From};
@@ -2193,7 +2196,7 @@ inst({GVs, T}, Pid) ->
     FoldSubs#{V => tv_server:next_name(Pid)}
   end, #{}, GVs),
   % consolidation already happened when finalizing scheme; no aliases needed
-  subs(T, #sub_opts{subs=Subs}).
+  utils:subs(T, #sub_opts{subs=Subs}).
 
 unify(T1, T2, S) when T1 == T2 -> S;
 
@@ -2209,14 +2212,23 @@ unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     loc=OrigLoc,
     t1=OrigT1,
     t2=OrigT2,
-    passed_vs=PassedVs
+    passed_vs=PassedVs,
+    must_solve_vs=MustSolveVs
   } = S,
 
+  VsWithIs = lists:map(fun({_, V}) -> V end, utils:ivs(ArgT2)),
+  NewMustSolveVs = gb_sets:union(MustSolveVs, gb_sets:from_list(VsWithIs)),
   NewPassedVs = gb_sets:fold(fun(V, FoldPassedVs) ->
     [{V, ArgT2, Module, Loc, Env} | FoldPassedVs]
   end, PassedVs, fvs(ArgT2)),
 
-  S1 = S#solver{loc=Loc, t1=ArgT1, t2=ArgT2, passed_vs=NewPassedVs},
+  S1 = S#solver{
+    loc=Loc,
+    t1=ArgT1,
+    t2=ArgT2,
+    passed_vs=NewPassedVs,
+    must_solve_vs=NewMustSolveVs
+  },
   S2 = sub_unify(ArgT1, ArgT2, S1),
   S3 = S2#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2},
 
@@ -2369,33 +2381,31 @@ unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
           MergedGenTVs = GenTVs1 ++ GenTVs2,
           GenVs#{V1 => MergedGenTVs, V2 => MergedGenTVs}
       end,
-      S1 = S#solver{gen_vs=NewGenVs},
+      CaseS = S#solver{gen_vs=NewGenVs},
 
       if
-        Is1 == none -> add_sub(V1, TV2, S1);
-        Is2 == none -> add_sub(V2, TV1, S1);
+        Is1 == none -> add_sub(V1, TV2, CaseS);
+        Is2 == none -> add_sub(V2, TV1, CaseS);
         true ->
           MergedSub = {set_ifaces, merge_is(Is1, Is2, Ifaces)},
-          S2 = add_sub(V1, MergedSub, add_sub(V2, TV1, S1)),
-          merge_iv_origins(Is2, V2, V1, S2)
+          CaseS1 = add_sub(V1, MergedSub, add_sub(V2, TV1, CaseS)),
+          merge_iv_origins(Is2, V2, V1, CaseS1)
       end;
 
     true -> add_err(S)
   end;
 
-unify({tv, V, Is, Rigid}, T, S) ->
+unify({tv, V, Is, Rigid}, T, #solver{bound_vs=BoundVs}=S) ->
   Occurs = occurs(V, T),
-  Bound = gb_sets:is_member(V, S#solver.bound_vs),
+  Bound = gb_sets:is_member(V, BoundVs),
   WouldEscape = Bound and occurs(true, T),
 
-  if
-    % Don't add V to ErrVs here because it can't actually be unified with
-    % a concrete type.
+  S1 = if
     Rigid -> add_err(S);
+    Occurs or WouldEscape -> add_err(S);
 
-    Occurs or WouldEscape -> add_err_v(V, add_err(S));
     true ->
-      S1 = case {T, Is} of
+      case {T, Is} of
         % V can sub with anything, so just sub V with GenTV below
         {_, none} -> S;
 
@@ -2420,12 +2430,18 @@ unify({tv, V, Is, Rigid}, T, S) ->
           merge_iv_origins(Is, V, V1, CaseS);
 
         _ -> gb_sets:fold(fun(I, FoldS) -> instance(T, I, V, FoldS) end, S, Is)
-      end,
-
-      case no_errs(S1, S) of
-        true -> add_sub(V, T, S1);
-        false -> add_err_v(V, S1)
       end
+  end,
+
+  case no_errs(S1, S) of
+    true -> add_sub(V, T, S1);
+
+    % There was an attempt to unify V with a concrete type; avoid reporting
+    % ambiguity errors. It's possible that T is a gen TV, which isn't a concrete
+    % type, but we find that still adding an ErrV results in fewer, more
+    % relevant messages (if the gen TV is bound, but V isn't, then we'll get
+    % a spurious ambiguity error if we don't add an ErrV).
+    false -> add_err_v(V, S1)
   end;
 unify(T, {tv, V, Is, Rigid}, S) -> sub_unify({tv, V, Is, Rigid}, T, S);
 
@@ -2532,7 +2548,7 @@ unify(
   end;
 
 unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
-  case unalias(T1, S#solver.aliases) of
+  case utils:unalias(T1, S#solver.aliases) of
     T1 -> add_err(S);
     NewT1 ->
       S1 = sub_unify(NewT1, T2, S),
@@ -2546,8 +2562,8 @@ unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
 unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
   sub_unify(T2, T1, S);
 
-unify(T1, T2, S) ->
-  case {unalias(T1, S#solver.aliases), unalias(T2, S#solver.aliases)} of
+unify(T1, T2, #solver{aliases=Aliases}=S) ->
+  case {utils:unalias(T1, Aliases), utils:unalias(T2, Aliases)} of
     {T1, T2} -> add_err(S);
     % at least one type was an alias
     {NewT1, NewT2} -> sub_unify(NewT1, NewT2, S)
@@ -2669,21 +2685,6 @@ add_err_v(V, #solver{err_vs=ErrVs}=S) ->
 
 no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
-unalias({con, Con}, Aliases) ->
-  case maps:find(Con, Aliases) of
-    {ok, {[], T, _}} -> unalias(T, Aliases);
-    error -> {con, Con}
-  end;
-unalias({gen, {con, Con}, ParamTs}, Aliases) ->
-  case maps:find(Con, Aliases) of
-    {ok, {Vs, T, _}} ->
-      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
-      unalias(subs(T, #sub_opts{subs=Subs, aliases=Aliases}), Aliases);
-    % no need to unalias ParamTs because we'll sub_unify them
-    error -> {gen, {con, Con}, ParamTs}
-  end;
-unalias(T, _) -> T.
-
 unalias_except_struct({con, Con}, Aliases) ->
   case maps:find(Con, Aliases) of
     {ok, {[], T, false}} -> unalias_except_struct(T, Aliases);
@@ -2694,7 +2695,7 @@ unalias_except_struct({gen, {con, Con}, ParamTs}, Aliases) ->
     {ok, {Vs, T, false}} ->
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       Opts = #sub_opts{subs=Subs, aliases=Aliases},
-      unalias_except_struct(subs(T, Opts), Aliases);
+      unalias_except_struct(utils:subs(T, Opts), Aliases);
     % no need to unalias ParamTs because we'll recursively unalias them if
     % necessary in infer_sig_helper
     _ -> {gen, {con, Con}, ParamTs}
@@ -2778,78 +2779,7 @@ remove_app_meta(T) -> T.
 subs_s(T, S) -> subs_s(T, S, #sub_opts{}).
 
 subs_s(T, #solver{subs=Subs, aliases=Aliases}, Opts) ->
-  subs(T, Opts#sub_opts{subs=Subs, aliases=Aliases}).
-
-subs({lam, ArgT, ReturnT}, Opts) ->
-  {lam, subs(ArgT, Opts), subs(ReturnT, Opts)};
-subs({lam, Env, Loc, ArgT, ReturnT}, Opts) ->
-  {lam, Env, Loc, subs(ArgT, Opts), subs(ReturnT, Opts)};
-subs({tuple, ElemTs}, Opts) ->
-  {tuple, lists:map(fun(T) -> subs(T, Opts) end, ElemTs)};
-subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs}=Opts) ->
-  case maps:find(V, Subs) of
-    error -> TV;
-    {ok, {rigid, V1}} -> {tv, V1, Is, true};
-
-    {ok, {set_ifaces, NewIs}} ->
-      false = Rigid,
-      {tv, V, NewIs, Rigid};
-
-    {ok, Value} ->
-      Sub = if
-        % Instantiation, so rigid resets to false
-        is_list(Value) -> {tv, Value, Is, false};
-        % Replacing with a new type entirely
-        true -> Value
-      end,
-      subs(Sub, Opts)
-  end;
-subs({con, Con}, _) -> {con, Con};
-subs({gen, ConT, ParamTs}, Opts) ->
-  {gen, subs(ConT, Opts), lists:map(fun(T) -> subs(T, Opts) end, ParamTs)};
-subs({gen, V, Is, BaseT, ParamTs}, #sub_opts{for_err=ForErr}=Opts) ->
-  case subs({tv, V, Is, false}, Opts) of
-    {tv, NewV, NewIs, _} ->
-      % When reporting errors, do *not* sub BaseT; if BaseT is subbed and
-      % V isn't subbed, that indicates a unification error with a regular gen.
-      % We avoid subbing BaseT for better error messages; instead of
-      % mismatched List<A> ~ Num and [A], we get T<A> ~ Num and [A].
-      SubbedBaseT = if
-        ForErr -> BaseT;
-        true -> subs(BaseT, Opts)
-      end,
-      {gen, _, SubbedParamTs} = subs({gen, {con, ""}, ParamTs}, Opts),
-      {gen, NewV, NewIs, SubbedBaseT, SubbedParamTs};
-
-    SubbedT -> subs(SubbedT, Opts)
-  end;
-subs({record, A, FieldMap}, #sub_opts{subs=Subs}=Opts) ->
-  case maps:find(A, Subs) of
-    error -> {record, A, maps:map(fun(_, T) -> subs(T, Opts) end, FieldMap)};
-    {ok, {anchor, NewA}} -> subs({record, NewA, FieldMap}, Opts);
-    {ok, T} -> subs(T, Opts)
-  end;
-subs({record_ext, A, BaseT, Ext}, #sub_opts{subs=Subs, aliases=Aliases}=Opts) ->
-  case maps:find(A, Subs) of
-    error ->
-      NewExt = maps:map(fun(_, T) -> subs(T, Opts) end, Ext),
-      consolidate({record_ext, A, subs(BaseT, Opts), NewExt}, Aliases);
-    {ok, {anchor, NewA}} ->
-      subs({record_ext, NewA, BaseT, Ext}, Opts);
-    {ok, T} -> subs(T, Opts)
-  end;
-subs(unit, _) -> unit.
-
-consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Aliases) ->
-  consolidate({record_ext, A, BaseT, maps:merge(Ext1, Ext2)}, Aliases);
-consolidate({record_ext, A, {record, _, FieldMap}, Ext}, _) ->
-  {record, A, maps:merge(FieldMap, Ext)};
-consolidate({record_ext, A, BaseT, Ext}, Aliases) ->
-  case unalias(BaseT, Aliases) of
-    % invalid base; just return as is
-    BaseT -> {record_ext, A, BaseT, Ext};
-    NewBaseT -> consolidate({record_ext, A, NewBaseT, Ext}, Aliases)
-  end.
+  utils:subs(T, Opts#sub_opts{subs=Subs, aliases=Aliases}).
 
 bound_vs(Env, #solver{schemes=Schemes}=S) ->
   maps:fold(fun(_, {Value, _}, FoldVs) ->

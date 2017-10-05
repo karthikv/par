@@ -3,6 +3,8 @@
   resolve_con/2,
   qualify/2,
   unqualify/1,
+  unalias/2,
+  subs/2,
   impl_key/1,
   ivs/1,
   ivs/2,
@@ -39,6 +41,91 @@ unqualify(Con) ->
   case string:chr(Con, $.) of
     0 -> Con;
     Index -> lists:sublist(Con, Index + 1, length(Con))
+  end.
+
+unalias({con, Con}, Aliases) ->
+  case maps:find(Con, Aliases) of
+    {ok, {[], T, _}} -> unalias(T, Aliases);
+    error -> {con, Con}
+  end;
+unalias({gen, {con, Con}, ParamTs}, Aliases) ->
+  case maps:find(Con, Aliases) of
+    {ok, {Vs, T, _}} ->
+      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
+      unalias(subs(T, #sub_opts{subs=Subs, aliases=Aliases}), Aliases);
+    % no need to unalias ParamTs because we'll sub_unify them
+    error -> {gen, {con, Con}, ParamTs}
+  end;
+unalias(T, _) -> T.
+
+subs({lam, ArgT, ReturnT}, Opts) ->
+  {lam, subs(ArgT, Opts), subs(ReturnT, Opts)};
+subs({lam, Env, Loc, ArgT, ReturnT}, Opts) ->
+  {lam, Env, Loc, subs(ArgT, Opts), subs(ReturnT, Opts)};
+subs({tuple, ElemTs}, Opts) ->
+  {tuple, lists:map(fun(T) -> subs(T, Opts) end, ElemTs)};
+subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs}=Opts) ->
+  case maps:find(V, Subs) of
+    error -> TV;
+    {ok, {rigid, V1}} -> {tv, V1, Is, true};
+
+    {ok, {set_ifaces, NewIs}} ->
+      false = Rigid,
+      {tv, V, NewIs, Rigid};
+
+    {ok, Value} ->
+      Sub = if
+        % Instantiation, so rigid resets to false
+        is_list(Value) -> {tv, Value, Is, false};
+        % Replacing with a new type entirely
+        true -> Value
+      end,
+      subs(Sub, Opts)
+  end;
+subs({con, Con}, _) -> {con, Con};
+subs({gen, ConT, ParamTs}, Opts) ->
+  {gen, subs(ConT, Opts), lists:map(fun(T) -> subs(T, Opts) end, ParamTs)};
+subs({gen, V, Is, BaseT, ParamTs}, #sub_opts{for_err=ForErr}=Opts) ->
+  case subs({tv, V, Is, false}, Opts) of
+    {tv, NewV, NewIs, _} ->
+      % When reporting errors, do *not* sub BaseT; if BaseT is subbed and
+      % V isn't subbed, that indicates a unification error with a regular gen.
+      % We avoid subbing BaseT for better error messages; instead of
+      % mismatched List<A> ~ Num and [A], we get T<A> ~ Num and [A].
+      SubbedBaseT = if
+        ForErr -> BaseT;
+        true -> subs(BaseT, Opts)
+      end,
+      {gen, _, SubbedParamTs} = subs({gen, {con, ""}, ParamTs}, Opts),
+      {gen, NewV, NewIs, SubbedBaseT, SubbedParamTs};
+
+    SubbedT -> subs(SubbedT, Opts)
+  end;
+subs({record, A, FieldMap}, #sub_opts{subs=Subs}=Opts) ->
+  case maps:find(A, Subs) of
+    error -> {record, A, maps:map(fun(_, T) -> subs(T, Opts) end, FieldMap)};
+    {ok, {anchor, NewA}} -> subs({record, NewA, FieldMap}, Opts);
+    {ok, T} -> subs(T, Opts)
+  end;
+subs({record_ext, A, BaseT, Ext}, #sub_opts{subs=Subs, aliases=Aliases}=Opts) ->
+  case maps:find(A, Subs) of
+    error ->
+      NewExt = maps:map(fun(_, T) -> subs(T, Opts) end, Ext),
+      consolidate({record_ext, A, subs(BaseT, Opts), NewExt}, Aliases);
+    {ok, {anchor, NewA}} ->
+      subs({record_ext, NewA, BaseT, Ext}, Opts);
+    {ok, T} -> subs(T, Opts)
+  end;
+subs(unit, _) -> unit.
+
+consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Aliases) ->
+  consolidate({record_ext, A, BaseT, maps:merge(Ext1, Ext2)}, Aliases);
+consolidate({record_ext, A, {record, _, FieldMap}, Ext}, _) ->
+  {record, A, maps:merge(FieldMap, Ext)};
+consolidate({record_ext, A, BaseT, Ext}, Aliases) ->
+  case unalias(BaseT, Aliases) of
+    BaseT -> {record_ext, A, BaseT, Ext};
+    NewBaseT -> consolidate({record_ext, A, NewBaseT, Ext}, Aliases)
   end.
 
 % The keys function, tuple, and record are in lowercase so they don't conflict

@@ -12,9 +12,6 @@
 %   - Bootstrap, fix, and ensure everything still works
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
-% - Builtin typeclasses
-%   - Proper type class for non-functions
-%   - Make pattern matching with var_value use proper type class
 % - [2 days] Exceptions
 % - Force discard for block exprs that don't return unit?
 % - [2 weeks] Stdlib
@@ -78,6 +75,8 @@
 %   - '=' sign
 %   - Struct types
 %   - Allow when clause and or?
+% - Eq/Proper typeclass for non-functions?
+%   - Make pattern matching with var_value use proper type class
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

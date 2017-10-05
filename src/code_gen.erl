@@ -1033,9 +1033,152 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
       {[{match, Line, ResultRep, Call}], ResultRep}
   end;
 
-% TODO: fix this
-rewrite({gen, "List", _}, VarRep, _, _, _) -> {[], VarRep};
-rewrite({tv, _, _, _}, VarRep, _, _, _) -> {[], VarRep}.
+rewrite({tuple, ElemTs}, VarRep, Loc, SubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+  ElemReps = lists:map(fun(Index) ->
+    {var, Line, unique(lists:concat(["Elem", Index]))}
+  end, lists:seq(1, length(ElemTs))),
+  Match = {match, Line, {tuple, Line, ElemReps}, VarRep},
+
+  {NewElemReps, AllStmts} = lists:mapfoldr(fun({ElemT, ElemRep}, FoldStmts) ->
+    case rewrite(ElemT, ElemRep, Loc, SubbedVs, CG) of
+      {[], _} -> {ElemRep, FoldStmts};
+      {Stmts, NewElemRep} -> {NewElemRep, [Stmts | FoldStmts]}
+    end
+  end, [], lists:zip(ElemTs, ElemReps)),
+
+  case lists:append(AllStmts) of
+    [] -> {[], VarRep};
+    Stmts ->
+      ResultRep = {var, Line, unique("Tuple")},
+      TupleRep = {tuple, Line, NewElemReps},
+      {[Match | Stmts] ++ [{match, Line, ResultRep, TupleRep}], ResultRep}
+  end;
+
+rewrite({gen, {con, "List"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+  ElemRep = {var, Line, unique("Elem")},
+
+  case rewrite(ElemT, ElemRep, Loc, SubbedVs, CG) of
+    {[], _} -> {[], VarRep};
+
+    {Stmts, NewElemRep} ->
+      Body = Stmts ++ [NewElemRep],
+      Clause = {clause, Line, [ElemRep], [], Body},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+
+      Call = call(lists, map, [FunRep, VarRep], Line),
+      ResultRep = {var, Line, unique("List")},
+      {[{match, Line, ResultRep, Call}], ResultRep}
+  end;
+
+rewrite({gen, {con, "Set"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+  ElemRep = {var, Line, unique("Elem")},
+
+  case rewrite(ElemT, ElemRep, Loc, SubbedVs, CG) of
+    {[], _} -> {[], VarRep};
+
+    {Stmts, NewElemRep} ->
+      FoldSetRep = {var, Line, unique("FoldSet")},
+      AddCall = call(gb_sets, add, [NewElemRep, FoldSetRep], Line),
+      Body = Stmts ++ [AddCall],
+      Clause = {clause, Line, [ElemRep, FoldSetRep], [], Body},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+
+      NewSetRep = call(gb_sets, new, [], Line),
+      FoldCall = call(gb_sets, fold, [FunRep, NewSetRep, VarRep], Line),
+      ResultRep = {var, Line, unique("List")},
+      {[{match, Line, ResultRep, FoldCall}], ResultRep}
+  end;
+
+rewrite({gen, {con, "Map"}, [KeyT, ValueT]}, VarRep, Loc, SubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+  KeyRep = {var, Line, unique("Key")},
+  ValueRep = {var, Line, unique("Value")},
+
+  {KeyStmts, NewKeyRep} = rewrite(KeyT, KeyRep, Loc, SubbedVs, CG),
+  {ValueStmts, NewValueRep} = rewrite(ValueT, ValueRep, Loc, SubbedVs, CG),
+  ResultRep = {var, Line, unique("Map")},
+
+  case {KeyStmts, ValueStmts} of
+    {[], []} -> {[], VarRep};
+
+    {[], _} ->
+      Body = ValueStmts ++ [NewValueRep],
+      Clause = {clause, Line, [{var, Line, '_'}, ValueRep], [], Body},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+      MapCall = call(maps, map, [FunRep, VarRep], Line),
+      {[{match, Line, ResultRep, MapCall}], ResultRep};
+
+    _ ->
+      FoldMapRep = {var, Line, unique("FoldMap")},
+      AddCall = call(maps, put, [NewKeyRep, NewValueRep, FoldMapRep], Line),
+      Body = lists:append([KeyStmts, ValueStmts, [AddCall]]),
+      Clause = {clause, Line, [KeyRep, ValueRep, FoldMapRep], [], Body},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+
+      NewMapRep = {map, Line, []},
+      FoldCall = call(maps, fold, [FunRep, NewMapRep, VarRep], Line),
+      {[{match, Line, ResultRep, FoldCall}], ResultRep}
+  end;
+
+rewrite({gen, {con, Con}, _}=GenT, VarRep, Loc, SubbedVs, CG) ->
+  case maps:is_key(Con, CG#cg.ctx#ctx.structs) of
+    true ->
+      {record, _, _}=RecordT = utils:unalias(GenT, CG#cg.ctx#ctx.aliases),
+      rewrite(RecordT, VarRep, Loc, SubbedVs, CG)
+  end;
+
+rewrite({record, _, FieldMap}, VarRep, Loc, SubbedVs, CG) ->
+  Line = ?START_LINE(Loc),
+
+  {AllStmts, ExactReps, Updates} = maps:fold(fun(Name, FieldT, Memo) ->
+    {FoldStmts, FoldExactReps, FoldUpdates} = Memo,
+    FieldRep = {var, Line, unique("Field_" ++ Name)},
+
+    case rewrite(FieldT, FieldRep, Loc, SubbedVs, CG) of
+      {[], _} -> {FoldStmts, FoldExactReps, FoldUpdates};
+      {Stmts, NewFieldRep} ->
+        AtomRep = eabs(list_to_atom(Name), Line),
+        ExactRep = {map_field_exact, Line, AtomRep, FieldRep},
+
+        NewStmts = [Stmts | FoldStmts],
+        NewExactReps = [ExactRep | FoldExactReps],
+        NewUpdates = [{Name, NewFieldRep} | FoldUpdates],
+        {NewStmts, NewExactReps, NewUpdates}
+    end
+  end, {[], [], []}, FieldMap),
+
+  Match = {match, Line, {map, Line, ExactReps}, VarRep},
+  case lists:append(AllStmts) of
+    [] -> {[], VarRep};
+    Stmts ->
+      UpdateReps = lists:map(fun({Name, NewFieldRep}) ->
+        AtomRep = eabs(list_to_atom(Name), Line),
+        {map_field_exact, Line, AtomRep, NewFieldRep}
+      end, Updates),
+
+      ResultRep = {var, Line, unique("Record")},
+      ResultMatch = {match, Line, ResultRep, {map, Line, VarRep, UpdateReps}},
+      {[Match | Stmts] ++ [ResultMatch], ResultRep}
+  end;
+
+% BaseT (the third element) must be a TV at this point, since this program
+% passed type checking.
+rewrite({record_ext, A, {tv, _, _, _}, Ext}, VarRep, Loc, SubbedVs, CG) ->
+  rewrite({record, A, Ext}, VarRep, Loc, SubbedVs, CG);
+
+% The only way to create a value of type T<A> that is instantiated and needs to
+% be rewritten is to call some native erlang function and cast the result.
+% The user shouldn't be doing this; it's dangerous and won't work, as no value
+% can represent any T<A>. We simply do nothing in this case, and let any
+% runtime exceptions take their course.
+rewrite({gen, _, _, _, _}, VarRep, _, _, _) -> {[], VarRep};
+
+rewrite({con, _}, VarRep, _, _, _) -> {[], VarRep};
+rewrite({tv, _, _, _}, VarRep, _, _, _) -> {[], VarRep};
+rewrite(unit, VarRep, _, _, _) -> {[], VarRep}.
 
 option_key(Name, CG) -> option_key(CG#cg.ctx#ctx.module, Name, CG).
 option_key(Module, Name, #cg{env=Env}=CG) ->

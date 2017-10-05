@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected capitalized interface name:
+
+2: impl [A] for Foo { foo(_) = 1 }
+        ^
+

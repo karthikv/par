@@ -433,6 +433,10 @@ implementation(tokens) =
         _ => head_loc(t) |> one_err("Expected keyword 'for'")
       }
 
+    [Lexer.Impl(_) | t] => head_loc(t) |> one_err(
+      "Expected capitalized interface name"
+    )
+
     _ => head_loc(tokens) |> one_err("Expected keyword 'impl'")
   }
 

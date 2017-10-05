@@ -480,47 +480,101 @@ test_record(Expr, Run) ->
 code_gen_interface_test_() -> test_interface(fun run_code_gen/1).
 %% interpreter_interface_test_() -> test_interface(fun run_interpreter/1).
 test_interface(Run) ->
-  [ ?_test(1 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
-      "main() = to_int(true)"
+  ToIntIface = "interface ToInt { to_int : T -> Int }\n",
+  BoolImpl = "impl ToInt for Bool {\n"
+    "  to_int(b) = if b then 1 else 0\n"
+    "}\n",
+  IfaceImpl = ToIntIface ++ BoolImpl ++ "\n",
+
+  [ ?_test(1 = Run(IfaceImpl ++ "main() = to_int(true)"))
+  , ?_test(0 = Run(IfaceImpl ++ "main() = (to_int : Bool -> Int)(false)"))
+  , ?_test(1 = Run(IfaceImpl ++ "main() = (to_int : T ~ ToInt -> Int)(true)"))
+  , ?_test(0 = Run(
+      IfaceImpl ++
+      "foo([_, f]) = f(false)\n"
+      "main() =\n"
+      "  let list = [to_int, to_int]\n"
+      "  foo(list)"
     ))
   , ?_test(1 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
-      "main() = (to_int : Bool -> Int)(true)"
-    ))
-  , ?_test(1 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
-      "main() = (to_int : T ~ ToInt -> Int)(true)"
+      IfaceImpl ++
+      "foo((f, _)) = f(true)\n"
+      "main() =\n"
+      "  let tuple = (to_int, 1)\n"
+      "  foo(tuple)"
     ))
   , ?_test(0 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
+      IfaceImpl ++
+      "foo(set) = (@gb_sets:largest/1 : Set<A> -> A)(set, false)\n"
+      "main() =\n"
+      "  let set = #[to_int]\n"
+      "  foo(set)"
+    ))
+  , ?_test(1 = Run(
+      IfaceImpl ++
+      "key : Map<K, V> -> K\n"
+      "key(map) = @erlang:hd(@maps:keys(map))\n"
+      "foo(map) = key(map, true)\n"
+      "main() =\n"
+      "  let map = { to_int => 1 }\n"
+      "  foo(map)"
+    ))
+  , ?_test(0 = Run(
+      IfaceImpl ++
+      "value : Map<K, V> -> V\n"
+      "value(map) = @erlang:hd(@maps:values(map))\n"
+      "foo(map) = value(map, false)\n"
+      "main() =\n"
+      "  let map = { 1 => to_int }\n"
+      "  foo(map)"
+    ))
+  , ?_test(1 = Run(
+      IfaceImpl ++
+      "foo(record) = record.b(true)\n"
+      "main() =\n"
+      "  let record = { a = true, b = to_int }\n"
+      "  foo(record)"
+    ))
+  , ?_test(0 = Run(
+      IfaceImpl ++
+      "foo(record) = record.b(false)\n"
+      "bar(record) =\n"
+      "  let new_record = { record | b := to_int }\n"
+      "  foo(new_record)\n"
+      "main() = bar({ a = true, b = 35.0 })"
+    ))
+  , ?_test(1 = Run(
+      IfaceImpl ++
+      "struct Foo<A> { a : (), b : A }\n"
+      "bar(foo) = foo.b(true)\n"
+      "main() =\n"
+      "  let foo = Foo { a = (), b = to_int }\n"
+      "  bar(foo)"
+    ))
+  , ?_test(0 = Run(
+      IfaceImpl ++
+      "impl ToInt for [Int] { to_int([i]) = i }\n"
+      "hd : T<A> -> A\n"
+      "hd(_) = @erlang:hd([to_int : Bool -> Int])\n"
+      "bar(l) = hd(l, false)\n"
+      "main() =\n"
+      "  let foo = @io:printable_range() : T<A ~ ToInt -> Int>\n"
+      "  bar(foo)"
+    ))
+  , ?_test(0 = Run(
+      IfaceImpl ++
       "proxy(b) = to_int(b)\n"
       "main() = proxy(false)"
     ))
   % to ensure no impl arg is added to lambda |c| ... because of bound impl b
   , ?_test(1 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
+      IfaceImpl ++
       "foo(b) = |c| if b == c then to_int(c) else -1\n"
       "main() = foo(true, true)"
     ))
   % to test fns with multiple arguments having the same iv pair
   , ?_test(7 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Float {\n"
       "  to_int(n) = @erlang:round(n)\n"
       "}\n"
@@ -529,19 +583,13 @@ test_interface(Run) ->
     ))
   % to test recursive fns that we can't inst
   , ?_test(2 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
+      IfaceImpl ++
       "foo(twice, b) = if twice then 2 * foo(false, b) else to_int(b)\n"
       "main() = foo(true, true)"
     ))
   % this time, a fn that's both recursive and with bound variables
   , ?_test(4 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for Bool {\n"
-      "  to_int(b) = if b then 1 else 0\n"
-      "}\n"
+      IfaceImpl ++
       "foo(t, b) =\n"
       "  let bar(twice, c) =\n"
       "    if twice then\n"
@@ -554,7 +602,7 @@ test_interface(Run) ->
       "main() = foo(true, true)"
     ))
   , ?_test({2, 3} = Run(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for [A] { to_int(l) = @erlang:length(l) }\n"
       "interface Foo { foo : T -> (T, A ~ ToInt) -> Int }\n"
       "impl Foo for Bool {\n"
@@ -563,7 +611,7 @@ test_interface(Run) ->
       "main() = (foo(true, (true, [1])), foo(false, (true, ['a', 'b', 'c'])))"
     ))
   , ?_test({1, 2} = Run(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for [A] { to_int(l) = @erlang:length(l) }\n"
       "interface Foo { foo : T -> (T, A ~ ToInt) -> Int }\n"
       "impl Foo for Bool {\n"
@@ -605,13 +653,13 @@ test_interface(Run) ->
       "  result"
     ))
   , ?_test({1, 3} = Run(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
       "impl ToInt for (Int, Bool, Int) { to_int((a, _, c)) = a + c }\n"
       "main() = (to_int((1, true)), to_int((1, false, 2)))"
     ))
   , ?_test(10 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Atom {\n"
       "  to_int(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
       "}\n"
@@ -624,7 +672,7 @@ test_interface(Run) ->
       "main() = to_int([@hello, @hey, @hi])"
     ))
   , ?_test(10 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Atom {\n"
       "  to_int(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
       "}\n"
@@ -636,26 +684,29 @@ test_interface(Run) ->
       "}\n"
       "main() = (to_int : [A ~ ToInt] -> Int)([@hello, @hey, @hi])"
     ))
-  , ?_test({<<"hi">>, <<"(no, yes)">>, <<"Foo(no)">>, <<"Foo((hey, yes))">>} = Run(
-      "interface ToStr { to_str : T -> String }\n"
-      "impl ToStr for String { to_str(s) = s }\n"
-      "impl ToStr for Bool {\n"
-      "  to_str(b) = if b then \"yes\" else \"no\"\n"
-      "}\n"
-      "impl ToStr for (A ~ ToStr, B ~ ToStr) {\n"
-      "  to_str((a, b)) = \"(\" ++ to_str(a) ++ \", \" ++ to_str(b) ++ \")\"\n"
-      "}\n"
-      "enum Foo<A> { Foo(A) }\n"
-      "impl ToStr for Foo<A ~ ToStr> {\n"
-      "  to_str(Foo(a)) = \"Foo(\" ++ to_str(a) ++ \")\"\n"
-      "}\n"
-      "main() = (\n"
-      "  to_str(\"hi\"),\n"
-      "  to_str((false, true)),\n"
-      "  to_str(Foo(false)),\n"
-      "  to_str(Foo((\"hey\", true)))\n"
-      ")"
-    ))
+  , ?_assertEqual(
+      {<<"hi">>, <<"(no, yes)">>, <<"Foo(no)">>, <<"Foo((hey, yes))">>},
+      Run(
+        "interface ToStr { to_str : T -> String }\n"
+        "impl ToStr for String { to_str(s) = s }\n"
+        "impl ToStr for Bool {\n"
+        "  to_str(b) = if b then \"yes\" else \"no\"\n"
+        "}\n"
+        "impl ToStr for (A ~ ToStr, B ~ ToStr) {\n"
+        "  to_str((a, b)) = \"(\" ++ to_str(a) ++ \", \" ++ to_str(b) ++ \")\"\n"
+        "}\n"
+        "enum Foo<A> { Foo(A) }\n"
+        "impl ToStr for Foo<A ~ ToStr> {\n"
+        "  to_str(Foo(a)) = \"Foo(\" ++ to_str(a) ++ \")\"\n"
+        "}\n"
+        "main() = (\n"
+        "  to_str(\"hi\"),\n"
+        "  to_str((false, true)),\n"
+        "  to_str(Foo(false)),\n"
+        "  to_str(Foo((\"hey\", true)))\n"
+        ")"
+      )
+    )
   , ?_test([false, false, true] = Run(
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
       "list_map : (A -> B) -> [A] -> [B]\n"

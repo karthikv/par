@@ -75,6 +75,8 @@
   pid
 }).
 
+% options while performing substitution on a type
+-record(sub_opts, {subs, aliases = #{}, for_err = false}).
 
 -define(FMT(Str), lists:flatten(io_lib:format(Str, []))).
 -define(FMT(Str, Args), lists:flatten(io_lib:format(Str, Args))).

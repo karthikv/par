@@ -142,6 +142,7 @@ expr_test_() ->
       "interface Foo { a : T -> Int }\n"
       "impl Foo for A { a(_) = 3 }"
     )
+  , golden_prg_("p-impl-name", "impl [A] for Foo { foo(_) = 1 }")
   , golden_many_("p-multiple-modules-errors", [
       {"foo",
         "module Foo\n"
