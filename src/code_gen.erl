@@ -150,12 +150,12 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
 
         {variants, _, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
-          OptNames = maps:get(Con, Enums),
+          {OptionNames, _, _} = maps:get(Con, Enums),
 
-          lists:foldl(fun(OptName, FoldCG) ->
-            {_, Arity} = maps:get({DepModule, OptName}, FoldCG#cg.env),
-            env_set(OptName, {{external, DepModule}, Arity}, FoldCG)
-          end, NestedCG, OptNames)
+          lists:foldl(fun(OptionName, FoldCG) ->
+            {_, Arity} = maps:get({DepModule, OptionName}, FoldCG#cg.env),
+            env_set(OptionName, {{external, DepModule}, Arity}, FoldCG)
+          end, NestedCG, OptionNames)
       end
     end, ModuleCG, Idents)
   end, set_module(Module, CG), Deps).
@@ -1123,11 +1123,49 @@ rewrite({gen, {con, "Map"}, [KeyT, ValueT]}, VarRep, Loc, SubbedVs, CG) ->
       {[{match, Line, ResultRep, FoldCall}], ResultRep}
   end;
 
-rewrite({gen, {con, Con}, _}=GenT, VarRep, Loc, SubbedVs, CG) ->
-  case maps:is_key(Con, CG#cg.ctx#ctx.structs) of
-    true ->
+rewrite({gen, {con, Con}, ParamTs}=GenT, VarRep, Loc, SubbedVs, CG) ->
+  #ctx{aliases=Aliases, structs=Structs, enums=Enums} = CG#cg.ctx,
+  IsStruct = maps:is_key(Con, Structs),
+  IsEnum = maps:is_key(Con, Enums),
+
+  if
+    IsStruct ->
       {record, _, _}=RecordT = utils:unalias(GenT, CG#cg.ctx#ctx.aliases),
-      rewrite(RecordT, VarRep, Loc, SubbedVs, CG)
+      rewrite(RecordT, VarRep, Loc, SubbedVs, CG);
+
+    IsEnum ->
+      {_, Vs, GenOptions} = maps:get(Con, Enums),
+      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
+      Line = ?START_LINE(Loc),
+
+      IsTupleCall = call(erlang, is_tuple, [VarRep], Line),
+      ElementCall = call(erlang, element, [eabs(1, Line), VarRep], Line),
+      If = {'if', Line, [
+        {clause, Line, [], [[IsTupleCall]], [ElementCall]},
+        {clause, Line, [], [[eabs(true, Line)]], [VarRep]}
+      ]},
+      KeyRep = {var, Line, unique("Key")},
+      Match = {match, Line, KeyRep, If},
+
+      LastClause = {clause, Line, [{var, Line, '_'}], [], [VarRep]},
+      Clauses = lists:foldl(fun({Key, TupleT}, FoldClauses) ->
+        SubbedT = utils:subs(TupleT, #sub_opts{subs=Subs, aliases=Aliases}),
+        case rewrite(SubbedT, VarRep, Loc, SubbedVs, CG) of
+          {[], _} -> FoldClauses;
+          {Stmts, NewTupleRep} ->
+            Body = Stmts ++ [NewTupleRep],
+            [{clause, Line, [eabs(Key, Line)], [], Body} | FoldClauses]
+        end
+      end, [LastClause], GenOptions),
+
+      case Clauses of
+        [LastClause] -> {[], VarRep};
+        _ ->
+          Case = {'case', Line, KeyRep, Clauses},
+          ResultRep = {var, Line, unique("Enum" ++ Con)},
+          ResultMatch = {match, Line, ResultRep, Case},
+          {[Match, ResultMatch], ResultRep}
+      end
   end;
 
 rewrite({record, _, FieldMap}, VarRep, Loc, SubbedVs, CG) ->

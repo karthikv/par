@@ -4,7 +4,6 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Handle more rewrite cases
 %   - Port exec interface tests to type system tests
 %     - Port gen TV test cases to exec tests
 %   - Bootstrap, fix, and ensure everything still works
@@ -69,9 +68,9 @@
 % - Implementations for builtin typeclasses?
 %   - Should we also exclude concatable, separable, etc. from sets?
 % - [2 days] Better pattern matching
-%   - Record types
+%   - Record/Struct types
+%   - Map types
 %   - '=' sign
-%   - Struct types
 %   - Allow when clause and or?
 % - Eq/Proper typeclass for non-functions?
 %   - Make pattern matching with var_value use proper type class

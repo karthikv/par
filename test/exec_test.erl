@@ -551,6 +551,35 @@ test_interface(Run) ->
       "  let foo = Foo { a = (), b = to_int }\n"
       "  bar(foo)"
     ))
+  , ?_test({0, -1} = Run(
+      IfaceImpl ++
+      "enum Foo<A> { Bar, Baz(Int), Call(Bool, A) }\n"
+      "bar(foo) = match foo { Call(b, f) => f(b), _ => -1 }\n"
+      "main() =\n"
+      "  let foo = Call(false, to_int)\n"
+      "  let baz = Baz(3)\n"
+      "  foo == baz\n"
+      "  (bar(foo), bar(baz))"
+    ))
+  , ?_test(2 = Run(
+      IfaceImpl ++
+      "struct Foo<A> { a : A, other_a : A }\n"
+      "enum Bar<A, B> { Cat(A), Dog(B) }\n"
+      "largest : Set<A> -> A\n"
+      "largest = @gb_sets:largest/1\n"
+      "key : Map<K, V> -> K\n"
+      "key(map) = @erlang:hd(@maps:keys(map))\n"
+      "bar(foo) =\n"
+      "  let Cat(s) = foo.a\n"
+      "  let Dog([m]) = foo.other_a\n"
+      "  largest(s, true) + key(m)(true)\n"
+      "main() =\n"
+      "  let foo = Foo {\n"
+      "    a = Cat(#[to_int])\n"
+      "    other_a = Dog([{to_int => 1}])\n"
+      "  }\n"
+      "  bar(foo)"
+    ))
   , ?_test(0 = Run(
       IfaceImpl ++
       "impl ToInt for [Int] { to_int([i]) = i }\n"

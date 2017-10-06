@@ -12,8 +12,8 @@
 %   types - a Name => NumParams map for types in the env
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
-%   structs - a Name => {T, SigIfaces} map for structs in the env
-%   enums - a EnumName => [OptionName] map for enums in the env
+%   structs - a Name => {T, SigVs} map for structs in the env
+%   enums - a EnumName => {[OptionName], ParamTs, GenOptions} map for enums
 %   options - a {Module, Name} => Arity map for options
 %   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces

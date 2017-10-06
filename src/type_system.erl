@@ -323,7 +323,7 @@ populate_env_and_types(Comps, C) ->
           case N of
             enum ->
               Enums = ModuleC1#ctx.enums,
-              {OptNames, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
+              {OptionNames, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
                 {option, _, {con_token, OptionLoc, OptionCon}, ArgTEs, _} = Option,
                 {TV, ID} = tv_server:fresh_gnr_id(NestedC#ctx.pid),
                 Value = {add_dep, TV, ID},
@@ -339,7 +339,7 @@ populate_env_and_types(Comps, C) ->
                 {OptionCon, NestedC1}
               end, ModuleC1, OptionsOrFields),
 
-              ModuleC2#ctx{enums=Enums#{Con => OptNames}};
+              ModuleC2#ctx{enums=Enums#{Con => {OptionNames, none, none}}};
 
             struct ->
               {TV, ID} = tv_server:fresh_gnr_id(ModuleC1#ctx.pid),
@@ -587,12 +587,12 @@ populate_direct_imports(Deps, C) ->
         {variants, Loc, Name} ->
           Con = lists:concat([Module, '.', Name]),
           case maps:find(Con, NestedC#ctx.enums) of
-            {ok, OptNames} ->
-              lists:foldl(fun(OptName, #ctx{env=Env, options=Options}=FoldC) ->
-                {Value, true} = maps:get({Module, OptName}, Env),
-                Arity = maps:get({Module, OptName}, Options),
-                define_option(OptName, Value, Arity, false, Loc, FoldC)
-              end, NestedC, OptNames);
+            {ok, {OptionNames, _, _}} ->
+              lists:foldl(fun(OptionName, #ctx{env=Env, options=Options}=FoldC) ->
+                {Value, true} = maps:get({Module, OptionName}, Env),
+                Arity = maps:get({Module, OptionName}, Options),
+                define_option(OptionName, Value, Arity, false, Loc, FoldC)
+              end, NestedC, OptionNames);
 
             error -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con, Module), Loc, NestedC)
           end
@@ -744,7 +744,7 @@ infer({enum, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
   FVs = fvs(T),
 
-  {_, C2} = lists:foldl(fun(Option, {Keys, FoldC}) ->
+  {GenOptions, _, C2} = lists:foldl(fun(Option, {FoldGenOptions, Keys, FoldC}) ->
     {option, _, {con_token, Loc, Con}, ArgTEs, KeyNode} = Option,
     {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, NestedC}) ->
       {ArgT, NestedC1} = infer_sig(
@@ -769,28 +769,39 @@ infer({enum, _, EnumTE, Options}, C) ->
     FoldC3 = add_cst(TV, NormOptionT, Loc, ?FROM_ENUM_CTOR, FoldC2),
     FoldC4 = finish_gnr(FoldC3, FoldC1#ctx.gnr),
 
-    case KeyNode of
+    Key = case KeyNode of
+      none -> list_to_atom(Con);
+      {some, {atom, _, Key_}} -> Key_
+    end,
+
+    NewGenOptions = case gb_sets:is_empty(fvs(OptionT)) of
+      true -> FoldGenOptions;
+      false ->
+        TupleT = {tuple, [{con, "Atom"} | lists:reverse(ArgTsRev)]},
+        [{Key, TupleT} | FoldGenOptions]
+    end,
+
+    {NewKeys, FoldC5} = case KeyNode of
       none ->
-        Key = list_to_atom(Con),
         case maps:find(Key, Keys) of
           {ok, {default, _, _}} ->
             % we've already added an ERR_REDEF; no need to add another
             {Keys, FoldC4};
           {ok, {custom, _, CustomLoc}} ->
             % TODO: show actual code instead of just line for ERR_DUP_KEY
-            FoldC5 = add_ctx_err(
+            CaseC = add_ctx_err(
               ?ERR_DUP_KEY(Key, Con, Loc),
               CustomLoc,
               FoldC4
             ),
-            {Keys, FoldC5};
+            {Keys, CaseC};
           error -> {Keys#{Key => {default, Con, Loc}}, FoldC4}
         end;
 
-      {some, {atom, KeyLoc, Key}} ->
+      {some, {atom, KeyLoc, _}} ->
         case maps:find(Key, Keys) of
           {ok, {_, OtherCon, OtherLoc}} ->
-            FoldC5 = add_ctx_err(
+            CaseC = add_ctx_err(
               ?ERR_DUP_KEY(Key, OtherCon, OtherLoc),
               KeyLoc,
               FoldC4
@@ -799,13 +810,24 @@ infer({enum, _, EnumTE, Options}, C) ->
             % In case the map contains a default, we go ahead and replace the
             % value with a custom. This way, if another default comes up, we'll
             % correctly report an error.
-            {Keys#{Key := {custom, Con, KeyLoc}}, FoldC5};
+            {Keys#{Key := {custom, Con, KeyLoc}}, CaseC};
           error -> {Keys#{Key => {custom, Con, KeyLoc}}, FoldC4}
         end
-    end
-  end, {#{}, C1}, Options),
+    end,
 
-  {none, C2};
+    {NewGenOptions, NewKeys, FoldC5}
+  end, {[], #{}, C1}, Options),
+
+  {Con, Vs} = case T of
+    {con, Con_} -> {Con_, []};
+    {gen, {con, Con_}, ParamTs} ->
+      {Con_, lists:map(fun({tv, V, none, _}) -> V end, ParamTs)}
+  end,
+
+  Enums = C2#ctx.enums,
+  {OptionNames, none, none} = maps:get(Con, Enums),
+  NewEnums = Enums#{Con => {OptionNames, Vs, GenOptions}},
+  {none, C2#ctx{enums=NewEnums}};
 
 infer({struct, Loc, StructTE, Fields}, C) ->
   Name = case StructTE of
@@ -814,11 +836,11 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   end,
   Con = utils:qualify(Name, C),
 
-  {T, SigIfaces} = maps:get(Con, C#ctx.structs),
+  {T, SigVs} = maps:get(Con, C#ctx.structs),
   {{record, _, RawFieldMap}, C1} = infer_sig(
     {T, fvs(T)},
     false,
-    SigIfaces,
+    SigVs,
     {record_te, Loc, Fields},
     C
   ),
