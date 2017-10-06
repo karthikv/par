@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected concrete type, not a variable generic type:
+
+3: impl Foo for T<A> { a(_) = 3 }
+                ^^^^
+

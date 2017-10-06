@@ -371,6 +371,12 @@ new_type_braces(s, tokens) = match tokens {
   [Lexer.Con(_, _) | t] =>
     head_loc(t) |> one_err("Expected open brace '{' or less than '<'")
 
+  [Lexer.TV(l, _) | _] =>
+    Some(l) |> one_err(
+      "Expected capitalized type name, which should be at least two letters " ++
+      "long. A single, capitalized letter is a type variable"
+    )
+
   _ => head_loc(tokens) |> one_err("Expected capitalized type name")
 }
 
@@ -414,6 +420,10 @@ implementation(tokens) =
           type_expr(t) |> pbind(|(te, rest)|
             if let TV(l, _, _) = te then
               Some(l) |> one_err("Expected concrete type, not type variable")
+            else if let Gen(l, TV(_, _, _), _) = te then
+              Some(l) |> one_err(
+                "Expected concrete type, not a variable generic type"
+              )
             else match rest {
               [Lexer.LBrace(brace_l) | t] =>
                 enclosed_brace(brace_l, t) |> pbind(|(l, inner, rest)|

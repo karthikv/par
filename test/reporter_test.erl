@@ -137,10 +137,17 @@ expr_test_() ->
       "  foo : A bar : Atom\n"
       "}"
     )
+  , golden_prg_("p-enum-tv", "enum T { Foo }")
+  , golden_prg_("p-struct-tv", "struct T { foo : Int }")
   , golden_prg_(
       "p-impl-tv",
       "interface Foo { a : T -> Int }\n"
       "impl Foo for A { a(_) = 3 }"
+    )
+  , golden_prg_(
+      "p-impl-gen-tv",
+      "interface Foo { a : T -> Int }\n"
+      "impl Foo for T<A> { a(_) = 3 }"
     )
   , golden_prg_("p-impl-name", "impl [A] for Foo { foo(_) = 1 }")
   , golden_many_("p-multiple-modules-errors", [

@@ -5,8 +5,6 @@
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
 %   - Handle more rewrite cases
-%   - Validation to prevent struct/enum TE from being a gen TV from HKT?
-%     - And to prevent impl type from being a HKT
 %   - Port exec interface tests to type system tests
 %     - Port gen TV test cases to exec tests
 %   - Bootstrap, fix, and ensure everything still works
