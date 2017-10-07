@@ -1228,20 +1228,133 @@ record_test_() ->
   ].
 
 interface_test_() ->
-  [ ?_test("A ~ ToStr -> String" = ok_prg(
-      "interface ToStr { to_str : T -> String }",
-      "to_str"
+  ToIntIface = "interface ToInt { to_int : T -> Int }\n",
+
+  [ ?_test("A ~ ToInt -> Int" = ok_prg(ToIntIface, "to_int"))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for Int {\n"
+      "  to_int(i) = i\n"
+      "}\n"
+      "foo = to_int(3 : Int)",
+      "foo"
     ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for Float {\n"
+      "  to_int(f) = @erlang:round(f)\n"
+      "}\n"
+      "foo = to_int(1.6)",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for String {\n"
+      "  to_int = @erlang:byte_size/1\n"
+      "}\n"
+      "foo = to_int(\"hey\")",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for Ref {\n"
+      "  to_int(_) = 8\n"
+      "}\n"
+      "foo = to_int(@erlang:make_ref() : Ref)",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for [Int] {\n"
+      "  to_int = @lists:foldl/3(|memo, num| memo + num, 0)\n"
+      "}\n"
+      "foo = to_int([1, 2, 3])",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for Map<Int, V> {\n"
+      "  to_int(m) = @erlang:hd(@maps:keys(m))\n"
+      "}\n"
+      "foo = to_int({ 936 => @value })",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for () -> Int {\n"
+      "  to_int(f) = f()\n"
+      "}\n"
+      "foo = to_int(|-| -17)",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for () {\n"
+      "  to_int(_) = 0\n"
+      "}\n"
+      "foo = to_int(())",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
+      "foo = to_int((1, true))",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for { a: Int, b: Int } {\n"
+      "  to_int(r) = r.a + r.b\n"
+      "}\n"
+      "foo = to_int({ a = 7, b = 21 })",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for { A | target: Int } {\n"
+      "  to_int(r) = r.target\n"
+      "}\n"
+      "foo = to_int({ foo = \"hi\", bar = true, target = -3 })",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "impl ToInt for Set<A> {\n"
+      "  to_int(s) = @gb_sets:size(@erlang:element(2, s))\n"
+      "}\n"
+      "foo = to_int(#['a', 'b'])",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "enum Foo<A> { Bar(A) }\n"
+      "impl ToInt for Foo<Int> {\n"
+      "  to_int(Bar(i)) = i\n"
+      "}\n"
+      "foo = to_int(Bar(30))",
+      "foo"
+    ))
+  , ?_test("Int" = ok_prg(
+      ToIntIface ++
+      "struct Foo { a : Int, b : Int }\n"
+      "impl ToInt for Foo {\n"
+      "  to_int(r) = r.a * r.b\n"
+      "}\n"
+      "foo = to_int(Foo { a = 3, b = 4 })",
+      "foo"
+    ))
+
+
   , ?_test("[A ~ Foo] -> A ~ Foo" = ok_prg(
       "interface Foo { foo : [T] -> T }",
       "foo"
     ))
   , ?_test("(Int, Int)" = ok_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
       "impl ToInt for (Int, Bool, Int) { to_int((a, _, c)) = a + c }\n"
-      "bar = (to_int((1, true)), to_int((1, false, 2)))",
-      "bar"
+      "foo = (to_int((1, true)), to_int((1, false, 2)))",
+      "foo"
     ))
   , ?_test("(String, String, String, String)" = ok_prg(
       "interface ToStr { to_str : T -> String }\n"
@@ -1331,7 +1444,7 @@ interface_test_() ->
 
 
   , ?_test("Set<A ~ ToInt -> Int>" = ok_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "id(a) = a\n"
       "foo =\n"
       "  let set = #[to_int]\n"
@@ -1339,7 +1452,7 @@ interface_test_() ->
       "foo"
     ))
   , ?_test("Bool -> A ~ ToInt -> A ~ ToInt" = ok_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo(b, x) =\n"
       "  |y| (to_int(y), foo(b, y))\n"
       "  if b then x else foo(true, x)",
@@ -1350,32 +1463,32 @@ interface_test_() ->
   % would *not* be the case if we provided a type signature to foo(), and
   % we'd get a must solve error (see below for test case).
   , ?_test("Bool -> A ~ ToInt -> Atom" = ok_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo(b, x) =\n"
       "  |y| (to_int(y), foo(b, y))\n"
       "  if b then @hi else foo(true, @io:printable_range())",
       "foo"
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(@erlang:round(5.3))",
       {?ERR_MUST_SOLVE("N ~ ToInt", "N ~ ToInt"), l(2, 13, 18)}
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(3)",
       {?ERR_MUST_SOLVE("J ~ ToInt ~ Num", "J ~ ToInt ~ Num"), l(2, 13, 1)}
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = (|x| to_int(x))(@erlang:round(5.3))",
       {?ERR_MUST_SOLVE("P ~ ToInt", "P ~ ToInt"), l(2, 22, 18)}
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo =\n"
       "  let to_i(x) = to_int(x)\n"
@@ -1383,7 +1496,7 @@ interface_test_() ->
       {?ERR_MUST_SOLVE("O ~ ToInt ~ Num", "O ~ ToInt ~ Num"), l(4, 7, 1)}
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo : Bool -> A ~ ToInt -> Atom\n"
       "foo(b, x) =\n"
       "  |y| (to_int(y), foo(b, y))\n"
@@ -1391,7 +1504,7 @@ interface_test_() ->
       {?ERR_MUST_SOLVE("T ~ ToInt", "T ~ ToInt"), l(4, 31, 21)}
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo = (|[x]| to_int(x))(@io:printable_range())",
       {?ERR_MUST_SOLVE("L ~ ToInt", "[L ~ ToInt]"), l(1, 24, 21)}
     ))
@@ -1436,14 +1549,14 @@ interface_test_() ->
       "bar"
     ))
   , ?_test("A<B> ~ ToInt -> Int" = ok_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo(x) =\n"
       "  @io:printable_range() : T<A> == x\n"
       "  to_int(x)",
       "foo"
     ))
   , ?_test("A<B> ~ ToInt -> Int" = ok_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo : T<A> ~ ToInt -> Int\n"
       "foo(x) = to_int(x)",
       "foo"
@@ -1459,7 +1572,7 @@ interface_test_() ->
       {"A<(Int, Bool, Char)>", "Map<B, C>", l(1, 13, 3), ?FROM_IMPL_TYPE}
     ))
   , ?_test(bad_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo : T<A> -> Int\n"
       "foo(x) = to_int(x)",
       {"rigid(A)<rigid(B)>", "C ~ ToInt", l(2, 16, 1), ?FROM_APP}
@@ -1475,7 +1588,7 @@ interface_test_() ->
       {?ERR_TYPE_PARAMS("Int", 0, 1), l(1, 13, 3)}
     ))
   , ?_test(ctx_err_prg(
-      "interface ToInt { to_int : T -> Int }\n"
+      ToIntIface ++
       "foo = to_int(@io:printable_range() : T<A>)",
       {?ERR_MUST_SOLVE("R<Q> ~ ToInt", "R<Q> ~ ToInt"), l(1, 13, 28)}
     ))

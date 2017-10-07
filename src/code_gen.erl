@@ -855,12 +855,19 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
   {FinalArgIVs, FinalMemo} = lists:mapfoldl(fun({Is, V}, Memo) ->
     {FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
 
+    {T, NewV, NewIs} = case maps:find(V, FoldSubbedVs) of
+      error -> {none, none, none};
+      {ok, {tv, NewV_, NewIs_, _}} -> {none, NewV_, NewIs_};
+      {ok, {gen, NewV_, NewIs_, _, _}} -> {none, NewV_, NewIs_};
+      {ok, T_} -> {T_, none, none}
+    end,
+
     % V will not be in SubbedVs if it is bound in the env or if it has been seen
     % before. In both these cases, we don't want to add impls.
-    case maps:find(V, FoldSubbedVs) of
-      error -> {[], Memo};
+    case {T, NewV, NewIs} of
+      {none, none, none} -> {[], Memo};
 
-      {ok, {tv, NewV, NewIs, _}} ->
+      {none, NewV, NewIs} ->
         {FirstI, _} = gb_sets:next(gb_sets:iterator(Is)),
         FirstImplName = bound_impl_name(child_i(FirstI, NewIs, Ifaces), NewV),
 
@@ -891,7 +898,7 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
         NewSubbedVs = maps:remove(V, FoldSubbedVs),
         {ArgIVs, {NewImplReps, NewBindMap, NewSubbedVs}};
 
-      {ok, T} ->
+      {T, _, _} ->
         Key = utils:impl_key(T),
 
         Result = gb_sets:fold(fun(I, FoldMemo) ->

@@ -4,8 +4,6 @@
 
 % TODO:
 % - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Port exec interface tests to type system tests
-%     - Port gen TV test cases to exec tests
 %   - Bootstrap, fix, and ensure everything still works
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
@@ -35,8 +33,9 @@
 %   - "Expected closing '}'" messages might have wrong start location b/c
 %     we use the keyword location!
 %   - Better message for no impl of interface
-%   - Better message for no impl of anon record type when there's a concrete
-%     record type impl that matches
+%   - Better message for no impl of anon record type when there's a struct
+%     type that matches
+%   - Better message for T<A> <=> anon record or anon record ext
 %   - Fix other_errors_test that ensures sig cst is unified first
 %   - Suppress dup errors if multiple params/elems don't unify
 %   - Better messages for indirect errors from T<B> due to T<A> being unified

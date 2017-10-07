@@ -487,6 +487,107 @@ test_interface(Run) ->
   IfaceImpl = ToIntIface ++ BoolImpl ++ "\n",
 
   [ ?_test(1 = Run(IfaceImpl ++ "main() = to_int(true)"))
+  , ?_test(3 = Run(
+      ToIntIface ++
+      "impl ToInt for Int {\n"
+      "  to_int(i) = i\n"
+      "}\n"
+      "main() = to_int(3 : Int)"
+    ))
+  , ?_test(2 = Run(
+      ToIntIface ++
+      "impl ToInt for Float {\n"
+      "  to_int(f) = @erlang:round(f)\n"
+      "}\n"
+      "main() = to_int(1.6)"
+    ))
+  , ?_test(3 = Run(
+      ToIntIface ++
+      "impl ToInt for String {\n"
+      "  to_int = @erlang:byte_size/1\n"
+      "}\n"
+      "main() = to_int(\"hey\")"
+    ))
+  , ?_test(8 = Run(
+      ToIntIface ++
+      "impl ToInt for Ref {\n"
+      "  to_int(_) = 8\n"
+      "}\n"
+      "main() = to_int(@erlang:make_ref() : Ref)"
+    ))
+  , ?_test(6 = Run(
+      ToIntIface ++
+      "impl ToInt for [Int] {\n"
+      "  to_int = @lists:foldl/3(|memo, num| memo + num, 0)\n"
+      "}\n"
+      "main() = to_int([1, 2, 3])"
+    ))
+  , ?_test(936 = Run(
+      ToIntIface ++
+      "impl ToInt for Map<Int, V> {\n"
+      "  to_int(m) = @erlang:hd(@maps:keys(m))\n"
+      "}\n"
+      "main() = to_int({ 936 => @value })"
+    ))
+  , ?_test(-17 = Run(
+      ToIntIface ++
+      "impl ToInt for () -> Int {\n"
+      "  to_int(f) = f()\n"
+      "}\n"
+      "main() = to_int(|-| -17)"
+    ))
+  , ?_test(0 = Run(
+      ToIntIface ++
+      "impl ToInt for () {\n"
+      "  to_int(_) = 0\n"
+      "}\n"
+      "main() = to_int(())"
+    ))
+  , ?_test(1 = Run(
+      ToIntIface ++
+      "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
+      "main() = to_int((1, true))"
+    ))
+  , ?_test(28 = Run(
+      ToIntIface ++
+      "impl ToInt for { a: Int, b: Int } {\n"
+      "  to_int(r) = r.a + r.b\n"
+      "}\n"
+      "main() = to_int({ a = 7, b = 21 })"
+    ))
+  , ?_test(-3 = Run(
+      ToIntIface ++
+      "impl ToInt for { A | target: Int } {\n"
+      "  to_int(r) = r.target\n"
+      "}\n"
+      "main() = to_int({ foo = \"hi\", bar = true, target = -3 })"
+    ))
+  , ?_test(2 = Run(
+      ToIntIface ++
+      "impl ToInt for Set<A> {\n"
+      "  to_int(s) = @gb_sets:size(s)\n"
+      "}\n"
+      "main() = to_int(#['a', 'b'])"
+    ))
+  , ?_test(30 = Run(
+      ToIntIface ++
+      "enum Foo<A> { Bar(A) }\n"
+      "impl ToInt for Foo<Int> {\n"
+      "  to_int(Bar(i)) = i\n"
+      "}\n"
+      "main() = to_int(Bar(30))"
+    ))
+  , ?_test(12 = Run(
+      ToIntIface ++
+      "struct Foo { a : Int, b : Int }\n"
+      "impl ToInt for Foo {\n"
+      "  to_int(r) = r.a * r.b\n"
+      "}\n"
+      "main() = to_int(Foo { a = 3, b = 4 })"
+    ))
+
+
+  % rewriting cases
   , ?_test(0 = Run(IfaceImpl ++ "main() = (to_int : Bool -> Int)(false)"))
   , ?_test(1 = Run(IfaceImpl ++ "main() = (to_int : T ~ ToInt -> Int)(true)"))
   , ?_test(0 = Run(
@@ -590,6 +691,8 @@ test_interface(Run) ->
       "  let foo = @io:printable_range() : T<A ~ ToInt -> Int>\n"
       "  bar(foo)"
     ))
+
+
   , ?_test(0 = Run(
       IfaceImpl ++
       "proxy(b) = to_int(b)\n"
@@ -743,6 +846,40 @@ test_interface(Run) ->
       "impl Mappable for List { map = list_map }\n"
       "main() = map(|x| x == 3, [1, 2, 3])"
     ))
+  , ?_assertEqual(#{a => $a}, Run(
+      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+      "map_map : ((A, B) -> (C, D)) -> Map<A, B> -> Map<C, D>\n"
+      "map_map(f, m) =\n"
+      "  let cb = |k, v, new_m|\n"
+      "    let (new_k, new_v) = f((k, v))\n"
+      "    @maps:put(new_k, new_v, new_m)\n"
+      "  @maps:fold(cb, {}, m)\n"
+      "impl Mappable for Map { map = map_map }\n"
+      "main() = map(|(k, v)| (v, k), { 'a' => @a })"
+    ))
+  , ?_test($a = Run(
+      "interface Foo { foo : T<(Int, Bool)> -> Char }\n"
+      "impl Foo for Map { foo(_) = 'a' }\n"
+      "main() = foo({ 3 => true })"
+    ))
+  , ?_test(true = Run(
+      "interface Foo { foo : T -> T }\n"
+      "impl Foo for Int { foo(i) = 2 * i }\n"
+      "impl Foo for [A ~ Foo] {\n"
+      "  foo(l) = match l { [] => l, [h | t] => [foo(h) | foo(t)] }\n"
+      "}\n"
+      "main() = foo(@lists:seq(1, 2) : T<Int>) == [2, 4]"
+    ))
+  , ?_test(48 = Run(
+      "interface ToInt { to_int : T -> Int }\n"
+      "impl ToInt for [Int] { to_int([h | _]) = h }\n"
+      "foo(x) =\n"
+      "  @io:printable_range() : T<A> == x\n"
+      "  to_int(x)\n"
+      "main() = foo([48, 7, 8])"
+    ))
+
+
   % to ensure code gen works even with iv unification
   , ?_test({true, $b} = Run(
       "interface Foo { foo : T -> T }\n"
@@ -771,100 +908,6 @@ test_interface(Run) ->
       "  (same, match x { (@hi, _) => 'a', _ => 'b' })\n"
       "main() = baz((@hi, 3), (@hey, 4))"
     ))
-
-  %% , ?_test(3 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for Int {\n"
-  %%     "  to_int(i) = i\n"
-  %%     "}\n"
-  %%     "main() = to_int(3)"
-  %%   ))
-  %% , ?_test(2 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for Float {\n"
-  %%     "  to_int(f) = @erlang:round(f)\n"
-  %%     "}\n"
-  %%     "main() = to_int(1.6)"
-  %%   ))
-  %% , ?_test(3 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for String {\n"
-  %%     "  to_int = @erlang:byte_size/1\n"
-  %%     "}\n"
-  %%     "main() = to_int(\"hey\")"
-  %%   ))
-  %% , ?_test(8 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for Ref {\n"
-  %%     "  to_int(_) = 8\n"
-  %%     "}\n"
-  %%     "main() = to_int(@erlang:make_ref())"
-  %%   ))
-  %% , ?_test(6 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for [Int] {\n"
-  %%     "  to_int = @lists:foldl/3(|memo, num| memo + num, 0)\n"
-  %%     "}\n"
-  %%     "main() = to_int([1, 2, 3])"
-  %%   ))
-  %% , ?_test(936 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for Map<Int, V> {\n"
-  %%     "  to_int(m) = @erlang:hd(@maps:keys(m))\n"
-  %%     "}\n"
-  %%     "main() = to_int({ 936 => @value })"
-  %%   ))
-  %% , ?_test(-17 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for () -> Int {\n"
-  %%     "  to_int(f) = f()\n"
-  %%     "}\n"
-  %%     "main() = to_int(|-| -17)"
-  %%   ))
-  %% , ?_test(0 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for () {\n"
-  %%     "  to_int(_) = 0\n"
-  %%     "}\n"
-  %%     "main() = to_int(())"
-  %%   ))
-  %% , ?_test(28 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for { a: Int, b: Int } {\n"
-  %%     "  to_int(r) = r.a + r.b\n"
-  %%     "}\n"
-  %%     "main() = to_int({ a = 7, b = 21 })"
-  %%   ))
-  %% , ?_test(-3 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for { A | target: Int } {\n"
-  %%     "  to_int(r) = r.target\n"
-  %%     "}\n"
-  %%     "main() = to_int({ foo = \"hi\", bar = true, target = -3 })"
-  %%   ))
-  %% , ?_test(2 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "impl ToInt for Set<A> {\n"
-  %%     "  to_int(s) = @gb_sets:size(@erlang:element(2, s))\n"
-  %%     "}\n"
-  %%     "main() = to_int(#['a', 'b'])"
-  %%   ))
-  %% , ?_test(30 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "enum Foo<A> { Bar(A) }\n"
-  %%     "impl ToInt for Foo<Int> {\n"
-  %%     "  to_int(Bar(i)) = i\n"
-  %%     "}\n"
-  %%     "main() = to_int(Bar(30))"
-  %%   ))
-  %% , ?_test(12 = Run(
-  %%     "interface ToInt { to_int : T -> Int }\n"
-  %%     "struct Foo { a : Int, b : Int }\n"
-  %%     "impl ToInt for Foo {\n"
-  %%     "  to_int(r) = r.a * r.b\n"
-  %%     "}\n"
-  %%     "main() = to_int(Foo { a = 3, b = 4 })"
-  %%   ))
 
 
   , ?_test(84 = Run(
@@ -921,6 +964,74 @@ test_interface(Run) ->
         "  (len(l), len(s), map(|x| x == 2, l), map(|x| { greeting = x }, s))\n"
       )
     )
+  ].
+
+code_gen_gen_tv_test_() -> test_gen_tv(fun run_code_gen/1).
+interpreter_gen_tv_test_() -> test_gen_tv(fun run_interpreter/1).
+test_gen_tv(Run) ->
+  [ ?_assertEqual({[1, 2, 3], gb_sets:from_list([hey, hi])}, Run(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
+    ))
+  , ?_test([1] = Run(
+      "foo : T<Int> -> T<Int>\n"
+      "foo(x) = x\n"
+      "main() = foo([1])"
+    ))
+  , ?_assertEqual({[1, 2, 3], gb_sets:from_list([hey, hi])}, Run(
+      "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
+      "foo(x) = x\n"
+      "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
+    ))
+  , ?_test($a = Run(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar(y, z) =\n"
+      "  foo(y)\n"
+      "  foo(z)\n"
+      "  y ++ z\n"
+      "  'a'\n"
+      "main() = bar({ 3.5 => @hi }, { 4.7 => @hello })"
+    ))
+  , ?_test([false, false] = Run(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar(y, z) =\n"
+      "  foo(y)\n"
+      "  foo(z)\n"
+      "  y ++ z\n"
+      "  z ++ []\n"
+      "main() = bar([true], [false, false])"
+    ))
+  , ?_assertEqual(#{hello => 5.1}, Run(
+      "foo : A -> T<A> -> T<A>\n"
+      "foo(_, x) = x\n"
+      "main() = foo((@hi, 3.7), { @hello => 5.1 })"
+    ))
+  , ?_test(true = Run(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar : T<B, C> -> T<B, C>\n"
+      "bar(x) = x\n"
+      "baz(y, z) =\n"
+      "  foo(y)\n"
+      "  bar(z)\n"
+      "  y == z\n"
+      "main() = baz({ @a => 3 }, { @a => 3 })"
+    ))
+  , ?_test(false = Run(
+      "foo : T<A> -> T<A>\n"
+      "foo(x) = x\n"
+      "bar : T<B, C> -> T<B, C>\n"
+      "bar(x) = x\n"
+      "baz(y, z) =\n"
+      "  foo(y)\n"
+      "  bar(z)\n"
+      "  y == z\n"
+      "  z == { 'c' => true }\n"
+      "main() = baz({ 'c' => true }, { 'c' => false })"
+    ))
   ].
 
 code_gen_pattern_test_() ->
