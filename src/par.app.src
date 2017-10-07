@@ -5,8 +5,7 @@
   {applications, [
     kernel,
     stdlib,
-    getopt,
-    unite
+    getopt
   ]},
   {env,[]},
   {modules, []},

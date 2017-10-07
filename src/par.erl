@@ -3,8 +3,6 @@
 -include("common.hrl").
 
 % TODO:
-% - [2-3 weeks] Typeclasses + generics w/o concrete types (HKTs)
-%   - Bootstrap, fix, and ensure everything still works
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - [2 days] Exceptions
