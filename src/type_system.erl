@@ -350,6 +350,11 @@ populate_env_and_types(Comps, C) ->
               ModuleC3#ctx{structs=(ModuleC3#ctx.structs)#{Con => StructInfo}}
           end;
 
+        {exception, _, {con_token, Loc, Name}, ArgTEs} ->
+          {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
+          Value = {add_dep, TV, ID},
+          define_option(Name, Value, length(ArgTEs), true, Loc, ModuleC);
+
         {interface, _, {con_token, Loc, Name}, _, Fields} ->
           Con = utils:qualify(Name, ModuleC),
           NumParams = case gen_t_num_params({record_te, Loc, Fields}) of
@@ -742,32 +747,12 @@ infer({expr_sig, Loc, Ref, Expr, Sig}, C) ->
 
 infer({enum, _, EnumTE, Options}, C) ->
   {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
+  SigVs = C1#ctx.sig_vs,
   FVs = fvs(T),
 
   {GenOptions, _, C2} = lists:foldl(fun(Option, {FoldGenOptions, Keys, FoldC}) ->
-    {option, _, {con_token, Loc, Con}, ArgTEs, KeyNode} = Option,
-    {ArgTsRev, FoldC1} = lists:foldl(fun(ArgTE, {Ts, NestedC}) ->
-      {ArgT, NestedC1} = infer_sig(
-        {T, FVs},
-        false,
-        NestedC#ctx.sig_vs,
-        ArgTE,
-        NestedC
-      ),
-      {[ArgT | Ts], NestedC1}
-    end, {[], FoldC}, ArgTEs),
-
-    OptionT = lists:foldl(fun(ArgT, LastT) ->
-      {lam, ArgT, LastT}
-    end, T, ArgTsRev),
-
-    % don't need to make any Vs rigid; inst still works correctly
-    NormOptionT = norm_sig_type(OptionT, [], FoldC1#ctx.pid),
-    {add_dep, TV, ID} = env_get(Con, FoldC1),
-
-    FoldC2 = new_gnr(TV, ID, FoldC1),
-    FoldC3 = add_cst(TV, NormOptionT, Loc, ?FROM_ENUM_CTOR, FoldC2),
-    FoldC4 = finish_gnr(FoldC3, FoldC1#ctx.gnr),
+    {option, _, {con_token, Loc, Con}, _, KeyNode} = Option,
+    {OptionT, ArgTs, FoldC1} = infer_option(Option, T, FVs, SigVs, FoldC),
 
     Key = case KeyNode of
       none -> list_to_atom(Con);
@@ -777,25 +762,25 @@ infer({enum, _, EnumTE, Options}, C) ->
     NewGenOptions = case gb_sets:is_empty(fvs(OptionT)) of
       true -> FoldGenOptions;
       false ->
-        TupleT = {tuple, [{con, "Atom"} | lists:reverse(ArgTsRev)]},
+        TupleT = {tuple, [{con, "Atom"} | ArgTs]},
         [{Key, TupleT} | FoldGenOptions]
     end,
 
-    {NewKeys, FoldC5} = case KeyNode of
+    {NewKeys, FoldC2} = case KeyNode of
       none ->
         case maps:find(Key, Keys) of
           {ok, {default, _, _}} ->
             % we've already added an ERR_REDEF; no need to add another
-            {Keys, FoldC4};
+            {Keys, FoldC1};
           {ok, {custom, _, CustomLoc}} ->
             % TODO: show actual code instead of just line for ERR_DUP_KEY
             CaseC = add_ctx_err(
               ?ERR_DUP_KEY(Key, Con, Loc),
               CustomLoc,
-              FoldC4
+              FoldC1
             ),
             {Keys, CaseC};
-          error -> {Keys#{Key => {default, Con, Loc}}, FoldC4}
+          error -> {Keys#{Key => {default, Con, Loc}}, FoldC1}
         end;
 
       {some, {atom, KeyLoc, _}} ->
@@ -804,18 +789,18 @@ infer({enum, _, EnumTE, Options}, C) ->
             CaseC = add_ctx_err(
               ?ERR_DUP_KEY(Key, OtherCon, OtherLoc),
               KeyLoc,
-              FoldC4
+              FoldC1
             ),
 
             % In case the map contains a default, we go ahead and replace the
             % value with a custom. This way, if another default comes up, we'll
             % correctly report an error.
             {Keys#{Key := {custom, Con, KeyLoc}}, CaseC};
-          error -> {Keys#{Key => {custom, Con, KeyLoc}}, FoldC4}
+          error -> {Keys#{Key => {custom, Con, KeyLoc}}, FoldC1}
         end
     end,
 
-    {NewGenOptions, NewKeys, FoldC5}
+    {NewGenOptions, NewKeys, FoldC2}
   end, {[], #{}, C1}, Options),
 
   {Con, Vs} = case T of
@@ -828,6 +813,11 @@ infer({enum, _, EnumTE, Options}, C) ->
   {OptionNames, none, none} = maps:get(Con, Enums),
   NewEnums = Enums#{Con => {OptionNames, Vs, GenOptions}},
   {none, C2#ctx{enums=NewEnums}};
+
+infer({exception, Loc, ConToken, ArgTEs}, C) ->
+  Option = {option, Loc, ConToken, ArgTEs, none},
+  {_, _, C1} = infer_option(Option, {con, "Exception"}, gb_sets:new(), #{}, C),
+  {none, C1};
 
 infer({struct, Loc, StructTE, Fields}, C) ->
   Name = case StructTE of
@@ -1351,6 +1341,34 @@ infer({match, _, Expr, Cases}, C) ->
 
   {TV, C1};
 
+infer({'try', _, Expr, Cases}, C) ->
+  {ExprT, C1} = infer(Expr, C),
+
+  C2 = lists:foldl(fun({'case', _, Pattern, Then}, FoldC) ->
+    FoldC1 = new_gnr(FoldC),
+    ID = FoldC1#ctx.gnr#gnr.id,
+    {PatternT, FoldC2} = infer(Pattern, with_pattern_env(Pattern, FoldC1)),
+    FoldC3 = add_cst(
+      {con, "Exception"},
+      PatternT,
+      ?LOC(Pattern),
+      ?FROM_MATCH_PATTERN,
+      FoldC2
+    ),
+
+    FoldC4 = finish_gnr(FoldC3, add_gnr_dep(ID, FoldC#ctx.gnr)),
+    {ThenT, FoldC5} = infer(Then, FoldC4),
+    % revert env to before pattern was parsed
+    FoldC6 = FoldC5#ctx{env=FoldC#ctx.env},
+    add_cst(ExprT, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
+  end, C1, Cases),
+
+  {ExprT, C2};
+
+infer({ensure, _, Expr, After}, C) ->
+  {_, C1} = infer(Expr, C),
+  infer(After, C1);
+
 infer({block, _, Exprs}, C) ->
   {T, C1} = lists:foldl(fun(Expr, {_, FoldC}) ->
     infer(Expr, FoldC)
@@ -1419,6 +1437,7 @@ infer({unary_op, Loc, Op, Expr}, C) ->
     Op == '-' ->
       NumT = tv_server:fresh("Num", C1#ctx.pid),
       {NumT, NumT};
+    Op == 'raise' -> {{con, "Exception"}, tv_server:fresh(C1#ctx.pid)};
     Op == 'discard' -> {ExprT, unit}
   end,
 
@@ -1516,7 +1535,12 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
           case T of
             % T is already an invalid type; no need to add another error
             {tv, _, _, _} -> C;
-            _ -> add_ctx_err(?ERR_TV_SCOPE(V, element(2, T)), Loc, C)
+            _ ->
+              Err = case T of
+                {con, "Exception"} -> ?ERR_TV_SCOPE(V);
+                _ -> ?ERR_TV_SCOPE(V, element(2, T))
+              end,
+              add_ctx_err(Err, Loc, C)
           end
       end
   end,
@@ -1599,6 +1623,24 @@ infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, BaseTE, Fields}, C) ->
   ),
   {{record_ext, A, BaseT, FieldMap}, C2};
 infer_sig_helper(_, _, {unit, _}, C) -> {unit, C}.
+
+infer_option(Option, T, FVs, SigVs, C) ->
+  {option, Loc, {con_token, _, Con}, ArgTEs, _} = Option,
+  {ArgTs, C1} = lists:mapfoldl(fun(ArgTE, FoldC) ->
+    infer_sig({T, FVs}, false, FoldC#ctx.sig_vs, ArgTE, FoldC)
+  end, C#ctx{sig_vs=SigVs}, ArgTEs),
+
+  RawOptionT = lists:foldr(fun(ArgT, LastT) ->
+    {lam, ArgT, LastT}
+  end, T, ArgTs),
+
+  % don't need to make any Vs rigid; inst still works correctly
+  OptionT = norm_sig_type(RawOptionT, [], C1#ctx.pid),
+  {add_dep, TV, ID} = env_get(Con, C1),
+
+  C2 = new_gnr(TV, ID, C1),
+  C3 = add_cst(TV, OptionT, Loc, ?FROM_ENUM_CTOR, C2),
+  {OptionT, ArgTs, finish_gnr(C3, C1#ctx.gnr)}.
 
 infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),

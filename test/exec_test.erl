@@ -362,6 +362,76 @@ test_enum(Run) ->
     ))
   ].
 
+code_gen_exception_test_() ->
+  test_exception(fun expr_code_gen/1, fun run_code_gen/1, fun many_code_gen/2).
+%% interpreter_exception_test_() ->
+%%   test_exception(fun expr_interpreter/1, fun run_interpreter/1).
+test_exception(Expr, Run, Many) ->
+  [ ?_test('Mod.Bar' = Run(
+      "exception Bar\n"
+      "main() = Bar"
+    ))
+  , ?_test({'Mod.Baz', 5} = Run(
+      "exception Baz(Int)\n"
+      "main() = Baz(5)"
+    ))
+  , ?_test({'Mod.Bar', true, [<<"hi">>, <<"hey">>]} = (Run(
+      "exception Bar(Bool, [String])\n"
+      "main() = Bar(true)"
+    ))([<<"hi">>, <<"hey">>]))
+
+
+  , ?_assertThrow('Mod.Bar', Run(
+      "exception Bar\n"
+      "main() = raise Bar"
+    ))
+  , ?_assertThrow({'Mod.Bar', 3}, Run(
+      "exception Bar(Int)\n"
+      "bar = Bar(3)\n"
+      "main() = raise bar"
+    ))
+  , ?_test(1 = Expr("try 1 { _ => 2 }"))
+  , ?_test(hey = Run(
+      "exception Bar\n"
+      "main() = try raise Bar { Bar => @hey }\n"
+    ))
+  , ?_assertThrow('Mod.Bar', Run(
+      "exception Bar\n"
+      "exception Baz\n"
+      "main() = try raise Bar { Baz => 'a' }\n"
+    ))
+  , ?_test(4.2 = Run(
+      "exception Bar([Float], Float)\n"
+      "bar(b) = if b then raise Bar([1.7], 2.5) else 5.8\n"
+      "baz(x, b) = x + bar(b)\n"
+      "main() = try baz(7, true) { Bar([a], b) => a + b }"
+    ))
+  , ?_test(<<"hello">> = Expr("ensure @world after \"hello\""))
+  , ?_test(begin
+      Filename = "/tmp/par-exception-1",
+      ?assertThrow('Mod.Bar', Run(
+        "exception Bar\n"
+        "filename = \"" ++ Filename ++ "\"\n"
+        "main() =\n"
+        "  @file:write_file(filename, \"contents\")\n"
+        "  ensure @file:delete(filename) after raise Bar"
+      )),
+      {error, enoent} = file:read_file(Filename)
+    end)
+  , ?_test(bar = Many([
+      {"foo",
+        "module Foo\n"
+        "exception Baz"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "exception Baz\n"
+        "main() = try raise Baz { Foo.Baz => @foo, Baz => @bar }\n"
+      }
+    ], "bar"))
+  ].
+
 code_gen_record_test_() ->
   test_record(fun expr_code_gen/1, fun run_code_gen/1).
 interpreter_record_test_() ->

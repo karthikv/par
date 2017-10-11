@@ -41,6 +41,7 @@
     "Char" => {false, 0},
     "String" => {false, 0},
     "Ref" => {false, 0},
+    "Exception" => {false, 0},
     "List" => {false, 1},
     "Set" => {false, 1},
     "Map" => {false, 2},
@@ -171,6 +172,10 @@
     "Missing field ~s in implementation of interface ~s",
     [Name, utils:unqualify(Con)]
   )
+).
+-define(
+  ERR_TV_SCOPE(V),
+  "Type variable ~s isn't in scope; you must specify a concrete type."
 ).
 -define(
   ERR_TV_SCOPE(V, Con),

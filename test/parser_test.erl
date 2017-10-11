@@ -535,6 +535,10 @@ expr_test_() ->
       ok_expr("$'h'")
     )
   , ?_assertEqual(
+      {unary_op, l(0, 9), 'raise', {con_token, l(6, 3), "Bar"}},
+      ok_expr("raise Bar")
+    )
+  , ?_assertEqual(
       {unary_op, l(0, 11), 'discard', {float, l(8, 3), 3.7}},
       ok_expr("discard 3.7")
     )
@@ -1158,6 +1162,15 @@ expr_test_() ->
       ]},
       ok_expr("match Bar { Bar => Bar }")
     )
+  , ?_assertEqual(
+      {'try', l(0, 22), {con_token, l(4, 3), "Bar"}, [
+        {'case', l(10, 10),
+          {variant, l(10, 3), {con_token, l(10, 3), "Bar"}, []},
+          {con_token, l(17, 3), "Bar"}
+        }
+      ]},
+      ok_expr("try Bar { Bar => Bar }")
+    )
 
 
   % Ensure ambiguity is resolved. The first three tests below ensure that the
@@ -1215,6 +1228,12 @@ expr_test_() ->
         {'case', l(12, 8), {'_', l(12, 1)}, {con_token, l(17, 3), "Bar"}}
       ]},
       ok_expr("match Bar { _ => Bar }")
+    )
+  , ?_assertEqual(
+      {'try', l(0, 20), {con_token, l(4, 3), "Bar"}, [
+        {'case', l(10, 8), {'_', l(10, 1)}, {con_token, l(15, 3), "Bar"}}
+      ]},
+      ok_expr("try Bar { _ => Bar }")
     )
 
 
@@ -1381,6 +1400,15 @@ expr_test_() ->
         {bool, l(2, 0, 5), false}
       ]},
       ok_expr("@foo\n{ \"hi\" => var }\nfalse")
+    )
+
+
+  , ?_assertEqual(
+      {ensure, l(0, 22),
+        {app, l(7, 5), {var_ref, l(7, 3), ref, "foo"}, [{unit, l(10, 2)}]},
+        {var_ref, l(19, 3), ref, "bar"}
+      },
+      ok_expr("ensure foo() after bar")
     )
   ].
 
@@ -1759,6 +1787,28 @@ def_test_() ->
         "  other = @hi\n"
         "}"
       )
+    )
+
+
+  , ?_assertEqual(
+      {exception, l(0, 16), {con_token, l(10, 6), "BadKey"}, []},
+      ok_def("exception BadKey")
+    )
+  , ?_assertEqual(
+      {exception, l(0, 24), {con_token, l(10, 6), "BadKey"}, [
+        {con_token, l(17, 6), "String"}
+      ]},
+      ok_def("exception BadKey(String)")
+    )
+  , ?_assertEqual(
+      {exception, l(0, 29), {con_token, l(10, 6), "BadKey"}, [
+        {con_token, l(17, 6), "String"},
+        {gen_te, l(25, 3),
+          {con_token, l(25, 3), "List"},
+          [{tv_te, l(26, 1), "A", []}]
+        }
+      ]},
+      ok_def("exception BadKey(String, [A])")
     )
   ].
 

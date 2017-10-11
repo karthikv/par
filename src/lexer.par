@@ -58,6 +58,7 @@ enum Token {
   Import(Loc) @import
   Export(Loc) @export
   Enum(Loc) @enum
+  Exception(Loc) @exception
   Struct(Loc) @struct
   Interface(Loc) @interface
   Impl(Loc) @impl
@@ -67,6 +68,10 @@ enum Token {
   Else(Loc) @else
   Let(Loc) @let
   Match(Loc) @match
+  Try(Loc) @try
+  Raise(Loc) @raise
+  Ensure(Loc) @ensure
+  After(Loc) @after
   Discard(Loc) @discard
 
   LitBool(Loc, Bool) @bool
@@ -325,6 +330,7 @@ chs_to_token_fn = {
   to_list("import") => Import,
   to_list("export") => Export,
   to_list("enum") => Enum,
+  to_list("exception") => Exception,
   to_list("struct") => Struct,
   to_list("interface") => Interface,
   to_list("impl") => Impl,
@@ -334,9 +340,14 @@ chs_to_token_fn = {
   to_list("else") => Else,
   to_list("let") => Let,
   to_list("match") => Match,
+  to_list("try") => Try,
+  to_list("raise") => Raise,
+  to_list("ensure") => Ensure,
+  to_list("after") => After,
+  to_list("discard") => Discard,
+
   to_list("true") => flip(LitBool, true),
   to_list("false") => flip(LitBool, false),
-  to_list("discard") => Discard,
 }
 
 get : A -> Map<A, B> -> B -> B

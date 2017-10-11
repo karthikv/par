@@ -51,10 +51,10 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
 
       {enum, _, _, OptionTEs} ->
         {Exports, ModuleCG1} = lists:mapfoldl(fun(OptionTE, FoldCG) ->
-          {option, _, {con_token, _, Con}, ArgsTE, KeyNode} = OptionTE,
+          {option, _, {con_token, _, Con}, ArgTEs, KeyNode} = OptionTE,
 
           Atom = list_to_atom(Con),
-          Arity = length(ArgsTE),
+          Arity = length(ArgTEs),
           Key = case KeyNode of
             none -> Atom;
             {some, {atom, _, Key_}} -> Key_
@@ -71,6 +71,22 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
         end, ModuleCG, OptionTEs),
 
         {lists:append(Exports), ModuleCG1};
+
+      {exception, _, {con_token, _, Con}, ArgTEs} ->
+        Atom = list_to_atom(Con),
+        Arity = length(ArgTEs),
+        % Exceptions of the same name in different modules should have different
+        % keys, so we qualify Con with the module name.
+        Key = list_to_atom(lists:concat([Module, '.', Con])),
+
+        case Arity of
+          0 ->
+            Value = {{option, Key}, badarity},
+            {[], env_set(Con, Value, ModuleCG)};
+          _ ->
+            Value = {{option, Key, Atom}, Arity},
+            {[{Atom, Arity}], env_set(Con, Value, ModuleCG)}
+        end;
 
       {struct, _, {con_token, _, Con}, FieldTEs} ->
         Atom = list_to_atom(Con),
@@ -215,13 +231,13 @@ rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
   end;
 
 rep({enum, _, _, OptionTEs}, _) ->
-  FnOptionTEs = lists:filter(fun({option, _, _, ArgsTE, _}) ->
-    length(ArgsTE) > 0
+  FnOptionTEs = lists:filter(fun({option, _, _, ArgTEs, _}) ->
+    length(ArgTEs) > 0
   end, OptionTEs),
 
-  lists:map(fun({option, _, {con_token, ConLoc, Con}, ArgsTE, KeyNode}) ->
+  lists:map(fun({option, _, {con_token, ConLoc, Con}, ArgTEs, KeyNode}) ->
     Line = ?START_LINE(ConLoc),
-    ArgsRep = lists:map(fun(_) -> {var, Line, unique("_@Arg")} end, ArgsTE),
+    ArgsRep = lists:map(fun(_) -> {var, Line, unique("_@Arg")} end, ArgTEs),
 
     ConAtom = list_to_atom(Con),
     {KeyLine, Key} = case KeyNode of
@@ -231,8 +247,25 @@ rep({enum, _, _, OptionTEs}, _) ->
 
     Body = [{tuple, Line, [{atom, KeyLine, Key} | ArgsRep]}],
     Clause = {clause, Line, ArgsRep, [], Body},
-    {function, Line, ConAtom, length(ArgsTE), [Clause]}
+    {function, Line, ConAtom, length(ArgTEs), [Clause]}
   end, FnOptionTEs);
+
+rep({exception, _, {con_token, Loc, Con}, ArgTEs}, CG) ->
+  case length(ArgTEs) of
+    0 -> [];
+    Arity ->
+      Line = ?START_LINE(Loc),
+      ArgsRep = lists:map(fun(_) -> {var, Line, unique("_@Arg")} end, ArgTEs),
+
+      Atom = list_to_atom(Con),
+      % Exceptions of the same name in different modules should have different
+      % keys, so we qualify Con with the module name.
+      Key = list_to_atom(lists:concat([CG#cg.ctx#ctx.module, '.', Con])),
+
+      Body = [{tuple, Line, [{atom, Line, Key} | ArgsRep]}],
+      Clause = {clause, Line, ArgsRep, [], Body},
+      {function, Line, Atom, Arity, [Clause]}
+  end;
 
 rep({struct, Loc, StructTE, FieldTEs}, CG) ->
   {Line, Con} = case StructTE of
@@ -603,7 +636,6 @@ rep({variant, _, {con_token, Loc, Name}, Args}, CG) ->
 rep({variant, _, Field, Args}, CG) ->
   {field, Loc, {con_token, _, Module}, {con_token, _, Name}} = Field,
   Key = option_key(Module, Name, CG),
-  {{option, Key, _}, _} = maps:get({Module, Name}, CG#cg.env),
   ArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, Args),
 
   Line = ?START_LINE(Loc),
@@ -672,6 +704,32 @@ rep({match, Loc, Expr, Cases}, CG) ->
 
   {'case', ?START_LINE(Loc), ExprRep, CaseClauses};
 
+rep({'try', Loc, Expr, Cases}, CG) ->
+  ExprRep = rep(Expr, CG),
+  CatchClauses = lists:map(fun({'case', _, Pattern, Then}) ->
+    % TODO: use arity(Expr) in case of simple pattern?
+    CG1 = gb_sets:fold(fun(Name, FoldCG) ->
+      bind(Name, unknown, FoldCG)
+    end, CG, type_system:pattern_names(Pattern)),
+
+    Line = ?START_LINE(element(2, Pattern)),
+    PatternRep = {tuple, Line, [
+      eabs(throw, Line),
+      rep(Pattern, CG1),
+      {var, Line, '_'}
+    ]},
+
+    Body = [rep(Then, CG1)],
+    {clause, Line, [PatternRep], [], Body}
+  end, Cases),
+
+  {'try', ?START_LINE(Loc), [ExprRep], [], CatchClauses, []};
+
+rep({'ensure', Loc, Expr, After}, CG) ->
+  ExprRep = rep(Expr, CG),
+  AfterRep = rep(After, CG),
+  {'try', ?START_LINE(Loc), [AfterRep], [], [], [ExprRep]};
+
 rep({block, Loc, Exprs}, CG) ->
   {block, ?START_LINE(Loc), lists:map(fun(E) -> rep(E, CG) end, Exprs)};
 
@@ -721,6 +779,7 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
     % $ used by the type system to treat Char as Int, but they're the same
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
+    'raise' -> call(erlang, throw, [ExprRep], Line);
     'discard' -> {block, Line, [ExprRep, eabs({}, Line)]}
   end.
 

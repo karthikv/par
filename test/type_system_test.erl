@@ -847,6 +847,107 @@ enum_test_() ->
     ))
   ].
 
+exception_test_() ->
+  [ ?_test("Exception" = ok_prg(
+      "exception Bar\n"
+      "expr = Bar",
+      "expr"
+    ))
+  , ?_test("Exception" = ok_prg(
+      "exception Baz(Int)\n"
+      "expr = Baz(5)",
+      "expr"
+    ))
+  , ?_test("[String] -> Exception" = ok_prg(
+      "exception Bar(Bool, [String])\n"
+      "expr = Bar(true)",
+      "expr"
+    ))
+  , ?_test(ctx_err_prg("exception Bar(A)", {?ERR_TV_SCOPE("A"), l(14, 1)}))
+  , ?_test(ctx_err_prg(
+      "exception Bar(T<Int>)",
+      {?ERR_TV_SCOPE("T"), l(14, 6)}
+    ))
+  , ?_test(bad_prg(
+      "exception Bar((Float, Atom))\n"
+      "expr = Bar(([1], @atom))",
+      {"([A ~ Num], Atom)", "(Float, Atom)", l(1, 11, 12), ?FROM_APP}
+    ))
+
+
+  , ?_test("A" = ok_prg(
+      "exception Bar\n"
+      "expr = raise Bar",
+      "expr"
+    ))
+  , ?_test("A" = ok_prg(
+      "exception Bar(Int)\n"
+      "bar = Bar(3)\n"
+      "expr = raise bar",
+      "expr"
+    ))
+  , ?_test("A ~ Num" = ok_expr("try 1 { _ => 2 }"))
+  , ?_test("Atom" = ok_prg(
+      "exception Bar\n"
+      "expr = try raise Bar { Bar => @hey }\n",
+      "expr"
+    ))
+  , ?_test("Char" = ok_prg(
+      "exception Bar\n"
+      "exception Baz\n"
+      "expr = try raise Bar { Baz => 'a' }\n",
+      "expr"
+    ))
+  , ?_test("Float" = ok_prg(
+      "exception Bar([Float], Float)\n"
+      "bar(b) = if b then raise Bar([1.7], 2.5) else 5.8\n"
+      "baz(x, b) = x + bar(b)\n"
+      "foo = try baz(7, true) { Bar([a], b) => a + b }",
+      "foo"
+    ))
+  , ?_test("String" = ok_expr("ensure @world after \"hello\""))
+  , ?_test("Char" = ok_prg(
+      "exception Bar\n"
+      "expr =\n"
+      "  ensure\n"
+      "    @io:format(\"hello\")\n"
+      "    @w\n"
+      "  after\n"
+      "    raise Bar\n"
+      "    'w'",
+      "expr"
+    ))
+  , ?_test("Atom" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "exception Baz"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\"\n"
+        "exception Baz\n"
+        "expr = try raise Baz { Foo.Baz => @foo, Baz => @bar }\n"
+      }
+    ], "bar", "expr"))
+  , ?_test(bad_expr(
+      "raise @foo",
+      {"Atom", "Exception", l(6, 4), ?FROM_UNARY_OP('raise')}
+    ))
+  , ?_test(bad_expr(
+      "try () { () => () }",
+      {"()", "Exception", l(9, 2), ?FROM_MATCH_PATTERN}
+    ))
+  , ?_test(bad_expr(
+      "try 'a' { _ => () }",
+      {"()", "Char", l(15, 2), ?FROM_MATCH_BODY}
+    ))
+  , ?_test(bad_prg(
+      "exception Bar\n"
+      "expr = try 'a' { Bar => 'b', _ => @c }",
+      {"Atom", "Char", l(1, 34, 2), ?FROM_MATCH_BODY}
+    ))
+  ].
+
 record_test_() ->
   % simple create/access/update record
   [ ?_test("{ bar : A ~ Num }" = ok_expr("{ bar = 3 }"))
@@ -1981,8 +2082,23 @@ pattern_test_() ->
     ))
   , ?_test(ctx_err_prg(
       "enum Foo { Bar, Baz(Int) }\n"
-      "expr = match Baz(5) { Bar(2) => 1 }",
-      {?ERR_OPTION_ARITY("Bar", 0, 1), l(1, 22, 6)}
+      "expr = match Bar { Bar(2) => 1 }",
+      {?ERR_OPTION_ARITY("Bar", 0, 1), l(1, 19, 6)}
+    ))
+  , ?_test(ctx_err_prg(
+      "exception Baz(Int)\n"
+      "expr = match Baz(5) { Baz => 1 }",
+      {?ERR_OPTION_ARITY("Baz", 1, 0), l(1, 22, 3)}
+    ))
+  , ?_test(ctx_err_prg(
+      "exception Baz(Int)\n"
+      "expr = match Baz(5) { Baz(1, 2) => 1 }",
+      {?ERR_OPTION_ARITY("Baz", 1, 2), l(1, 22, 9)}
+    ))
+  , ?_test(ctx_err_prg(
+      "exception Bar\n"
+      "expr = match Bar { Bar(2) => 1 }",
+      {?ERR_OPTION_ARITY("Bar", 0, 1), l(1, 19, 6)}
     ))
   , ?_test(ctx_err_prg(
       "struct Foo { a : Int }\n"
