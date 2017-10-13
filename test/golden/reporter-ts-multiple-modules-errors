@@ -4,13 +4,13 @@ Mismatched types [Char] and String from right-hand side of '++' operator:
 4: e = [Foo.a] ++ "hi"
                   ^^^^
 
-Mismatched types Char and W ~ Num from match pattern:
+Mismatched types Char and X ~ Num from match pattern:
 6: 1 => 3
    ^
 
 *** module Foo *** (/tmp/reporter-test-many/foo.par)
 
-Mismatched types Bool and Z ~ Num from function call:
+Mismatched types Bool and BA ~ Num from function call:
 4: b = Bar.d(true)
              ^^^^
 

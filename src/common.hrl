@@ -270,20 +270,29 @@
 -define(
   ERR_IFACE_TYPE(Name),
   ?FMT(
-    "The type of interface field ~s must be a function, where one of the "
-    "arguments is precisely T (though T may also appear elsewhere in the "
-    "signature).",
+    "The type of interface field ~s must be a function that has T in its "
+    "type signature",
     [Name]
   )
 ).
 -define(
-  ERR_MUST_SOLVE(PrettyTV, PrettyArgT),
+  ERR_MUST_SOLVE_ARG(PrettyTV, PrettyArgT),
   ?FMT(
     "Ambiguous argument of type ~s. I need to know the concrete type of the "
     "type variable ~s so I can ensure its interfaces are satisifed. Please "
     "provide a type signature for this argument that specifies the concrete "
     "type.",
     [PrettyArgT, PrettyTV]
+  )
+).
+-define(
+  ERR_MUST_SOLVE_RETURN(PrettyTV, PrettyReturnT),
+  ?FMT(
+    "Ambiguous return type ~s. The function that needs to be called here "
+    "depends on what the return type is. Specifically, I need to know the "
+    "concrete type of the type variable ~s. Please provide a type signature "
+    "for the return value that specifies the concrete type.",
+    [PrettyReturnT, PrettyTV]
   )
 ).
 -define(

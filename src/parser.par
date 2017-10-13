@@ -630,10 +630,10 @@ expr_r(expr_s, state, stack, tokens) = match state {
 
       [Lexer.Ensure(s) | t] =>
         expr(t) |> pbind(|v| match v {
-          (node, [Lexer.After(_) | t]) =>
-            expr(t) |> pbind(|(after, rest)|
-              let l = node_loc(after) |> range(s)
-              Ensure(l, node, after) |> recurse(rest)
+          (ensured, [Lexer.After(_) | t]) =>
+            expr(t) |> pbind(|(node, rest)|
+              let l = node_loc(node) |> range(s)
+              Ensure(l, ensured, node) |> recurse(rest)
             )
 
           (_, t) => head_loc(t) |> one_err("Expected keyword 'after'")

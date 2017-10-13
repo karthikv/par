@@ -7,7 +7,6 @@
 %   - Make default case that returns unknown
 %   - Check all current cases
 % - Syntax for match and try
-% - Typeclass function where T is on rhs
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Force discard for block exprs that don't return unit?

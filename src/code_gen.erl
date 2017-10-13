@@ -108,13 +108,13 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
         lists:mapfoldl(fun({Sig, RawT}, FoldCG) ->
           {sig, _, {var, _, Name}, _} = Sig,
           Atom = list_to_atom(Name),
-          ArgTs = utils:arg_ts(RawT),
+          ArgsIVs = utils:args_ivs(RawT),
 
           % To disambiguate which impl we're using, we need all args up until
           % the first one that contains the target type T, inclusive.
-          UntilTargetT = lists:takewhile(fun(ArgT) ->
-            lists:all(fun({_, V}) -> V /= "T" end, utils:ivs(ArgT))
-          end, ArgTs),
+          UntilTargetT = lists:takewhile(fun(IVs) ->
+            lists:all(fun({_, V}) -> V /= "T" end, IVs)
+          end, ArgsIVs),
           Arity = length(UntilTargetT) + 1,
 
           Value = {{global_fn, Atom}, Arity},
@@ -299,20 +299,18 @@ rep({interface, _, {con_token, _, RawCon}, _, Fields}, CG) ->
 
   lists:map(fun({Sig, RawT}) ->
     {sig, Loc, {var, _, Name}, _} = Sig,
-    AllArgTs = utils:arg_ts(RawT),
-    AllArgIVs = lists:map(fun utils:ivs/1, AllArgTs),
+    AllArgsIVs = utils:args_ivs(RawT),
 
-    {ArgIVsRev, _} = lists:foldl(fun(IVs, {FoldArgIVs, Done}) ->
+    {ArgsIVsRev, _} = lists:foldl(fun(IVs, {FoldArgsIVs, Done}) ->
       case Done of
-        true -> {FoldArgIVs, Done};
+        true -> {FoldArgsIVs, Done};
         false ->
           NewDone = lists:any(fun({_, V}) -> V == "T" end, IVs),
-          {[IVs | FoldArgIVs], NewDone}
+          {[IVs | FoldArgsIVs], NewDone}
       end
-    end, {[], false}, AllArgIVs),
-    ArgIVs = lists:reverse(ArgIVsRev),
-    ArgTs = lists:sublist(AllArgTs, length(ArgIVs)),
-    Arity = length(ArgTs),
+    end, {[], false}, AllArgsIVs),
+    ArgsIVs = lists:reverse(ArgsIVsRev),
+    Arity = length(ArgsIVs),
 
     Args = lists:map(fun(Num) ->
       {var, Loc, lists:concat(["Arg", Num])}
@@ -336,11 +334,11 @@ rep({interface, _, {con_token, _, RawCon}, _, Fields}, CG) ->
           _ -> FoldSubbedVs#{V => {tv, V, Is, false}}
         end
       end, Memo, IVs)
-    end, #{}, ArgIVs),
+    end, #{}, ArgsIVs),
 
     C1 = C#ctx{
       inst_refs=InstRefs#{InstRef => {RawT, SubbedVs}},
-      fn_refs=FnRefs#{FnRef => ArgIVs}
+      fn_refs=FnRefs#{FnRef => ArgsIVs}
     },
     CG1 = CG#cg{ctx=C1},
 
@@ -411,13 +409,13 @@ rep({fn, Loc, Ref, Args, Expr}, CG) ->
     bind(Name, unknown, FoldCG)
   end, CG, Names),
 
-  % length(AllArgIVs) can be greater than length(Args) if this fn returns
+  % length(AllArgsIVs) can be greater than length(Args) if this fn returns
   % another fn. We only need to process this fn's args here, so clamp.
-  AllArgIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
-  ArgIVs = lists:sublist(AllArgIVs, length(Args)),
+  AllArgsIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
+  ArgsIVs = lists:sublist(AllArgsIVs, length(Args)),
 
   ArgsRep = lists:map(fun(Pattern) -> rep(Pattern, CG1) end, Args),
-  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgIVs, true, CG1),
+  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, true, CG1),
 
   Line = ?START_LINE(Loc),
   Clause = {clause, Line, PatternReps, [], [rep(Expr, CG2)]},
@@ -845,7 +843,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   Clause = {clause, 1, [ArgVar], [], [Case]},
   {function, 1, '_@init', 1, [Clause]}.
 
-rep_arg_iv_patterns(ArgsRep, ArgIVs, Bind, CG) ->
+rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
   {PatternReps, {_, CG1}} = lists:mapfoldl(fun({PatternRep, IVs}, OuterMemo) ->
     {SeenVs, OuterCG} = OuterMemo,
     PatternLine = element(2, PatternRep),
@@ -882,7 +880,7 @@ rep_arg_iv_patterns(ArgsRep, ArgIVs, Bind, CG) ->
     end,
 
     {FinalPatternRep, {NewSeenVs, NewOuterCG}}
-  end, {gb_sets:new(), CG}, lists:zip(ArgsRep, ArgIVs)),
+  end, {gb_sets:new(), CG}, lists:zip(ArgsRep, ArgsIVs)),
 
   {PatternReps, CG1}.
 
@@ -1043,14 +1041,13 @@ rewrite_ref(Rep, Ref, Loc, CG) ->
 
 rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
-  ArgTs = utils:arg_ts(LamT),
 
   % Must fold*l* b/c impls associated with multiple args are passed through the
   % left-most arg.
-  {ArgsRepRev, ArgIVsRev, ImplRepsRev, BindMap, _} = lists:foldl(fun(ArgT, Memo) ->
-    {FoldArgsRep, FoldArgIVs, FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
+  {ArgsRepRev, ArgsIVsRev, ImplRepsRev, BindMap, _} = lists:foldl(fun(IVs, Memo) ->
+    {FoldArgsRep, FoldArgsIVs, FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
     {NewArgIVs, NewImplReps, NewBindMap, NewSubbedVs} = rep_impls(
-      utils:ivs(ArgT),
+      IVs,
       Loc,
       FoldBindMap,
       FoldSubbedVs,
@@ -1060,18 +1057,18 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
     NewArgRep = {var, Line, unique("Arg")},
     {
       [NewArgRep | FoldArgsRep],
-      [NewArgIVs | FoldArgIVs],
+      [NewArgIVs | FoldArgsIVs],
       [NewImplReps | FoldImplReps],
       NewBindMap,
       NewSubbedVs
     }
-  end, {[], [], [], #{}, SubbedVs}, ArgTs),
+  end, {[], [], [], #{}, SubbedVs}, utils:args_ivs(LamT)),
 
   ArgsRep = lists:reverse(ArgsRepRev),
-  ArgIVs = lists:reverse(ArgIVsRev),
+  ArgsIVs = lists:reverse(ArgsIVsRev),
   ImplReps = lists:reverse(ImplRepsRev),
 
-  {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgIVs, false, CG),
+  {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, false, CG),
 
   case maps:size(BindMap) of
     % If there aren't any bindings, we didn't solve for any impls (both bound

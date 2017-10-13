@@ -10,7 +10,8 @@
   ivs/2,
   builtin_is/0,
   all_ivs/1,
-  arg_ts/1,
+  args_ivs/1,
+  args_ivs/2,
   family_is/2,
   absolute/1,
   pretty_csts/1,
@@ -188,8 +189,14 @@ ivs_list({record_ext, _, BaseT, Ext}) ->
   ivs_list(BaseT) ++ ivs_list({record, none, Ext});
 ivs_list(unit) -> [].
 
-arg_ts({lam, ArgT, ReturnT}) -> [ArgT | arg_ts(ReturnT)];
-arg_ts(_) -> [].
+args_ivs(T) -> args_ivs(T, gb_sets:new()).
+
+args_ivs({lam, ArgT, ReturnT}, InitSeenVs) ->
+  case ReturnT of
+    {lam, _, _} -> [ivs(ArgT, InitSeenVs) | args_ivs(ReturnT, InitSeenVs)];
+    % last argument; must include IVs of return type
+    _ -> [ivs({lam, ArgT, ReturnT}, InitSeenVs)]
+  end.
 
 family_is(I, _) when I == "Ord"; I == "Concatable"; I == "Separable" ->
   gb_sets:singleton(I);

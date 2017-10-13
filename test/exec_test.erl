@@ -909,6 +909,12 @@ test_interface(Run) ->
         ")"
       )
     )
+  , ?_test({93, true} = Run(
+      "interface FromStr { from_str : String -> T }\n"
+      "impl FromStr for Int { from_str = @erlang:binary_to_integer/1 }\n"
+      "impl FromStr for Bool { from_str(s) = s == \"true\" }\n"
+      "main() = (from_str(\"93\") : Int, from_str(\"true\") : Bool)\n"
+    ))
   , ?_test([false, false, true] = Run(
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
       "list_map : (A -> B) -> [A] -> [B]\n"
@@ -926,6 +932,11 @@ test_interface(Run) ->
       "  @maps:fold(cb, {}, m)\n"
       "impl Mappable for Map { map = map_map }\n"
       "main() = map(|(k, v)| (v, k), { 'a' => @a })"
+    ))
+  , ?_assertEqual(#{<<"key">> => value}, Run(
+      "interface FromList { from_list : [A] -> T<A> }\n"
+      "impl FromList for Map { from_list([(k, v)]) = { k => v } }\n"
+      "main() = from_list([(\"key\", @value)]) : Map<String, Atom>"
     ))
   , ?_test($a = Run(
       "interface Foo { foo : T<(Int, Bool)> -> Char }\n"
@@ -1078,6 +1089,11 @@ test_gen_tv(Run) ->
       "foo : A -> T<A> -> T<A>\n"
       "foo(_, x) = x\n"
       "main() = foo((@hi, 3.7), { @hello => 5.1 })"
+    ))
+  , ?_test([{hey, $a}] = Run(
+      "foo : T<A, B> -> T<A, B>\n"
+      "foo(x) = x\n"
+      "main() = foo([(@hey, 'a')])"
     ))
   , ?_test(true = Run(
       "foo : T<A> -> T<A>\n"
