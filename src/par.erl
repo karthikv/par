@@ -3,13 +3,9 @@
 -include("common.hrl").
 
 % TODO:
-% - Revisit arity computation
-%   - Make default case that returns unknown
-%   - Check all current cases
-% - Syntax for match and try
+% - Syntax for match and try, literal map, type variables
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
-% - Force discard for block exprs that don't return unit?
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
@@ -74,6 +70,7 @@
 %   - Allow when clause and or?
 % - Eq/Proper typeclass for non-functions?
 %   - Make pattern matching with var_value use proper type class
+% - Force discard for block exprs that don't return unit?
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

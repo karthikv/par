@@ -1309,7 +1309,6 @@ arity({var_ref, _, _, Name}, CG) ->
   {_, Arity} = env_get(Name, CG),
   Arity;
 arity({field_fn, _, _}, _) -> 1;
-% TODO: we can figure this out in some cases from typing info or analysis
 arity({field, _, _, _}, _) -> unknown;
 % TODO: field for module access!!
 arity({app, _, Expr, Args}, CG) ->
@@ -1323,23 +1322,15 @@ arity({app, _, Expr, Args}, CG) ->
       end
   end;
 arity({native, _, _, _, Arity}, _) -> Arity;
-arity({N, _, _, Then, Else}, CG) when N == 'if'; N == if_let ->
-  case Else of
-    {unit, _} -> error;
-    _ -> case arity(Then, CG) of
-      unknown -> arity(Else, CG);
-      Arity -> Arity
-    end
-  end;
+arity({N, _, _, _, _}, _) when N == 'if'; N == if_let -> unknown;
 arity({'let', _, _, Then}, CG) -> arity(Then, CG);
-arity({match, _, _, Cases}, CG) ->
-  lists:foldl(fun({_, Expr}, Arity) ->
-    case Arity of
-      unknown -> arity(Expr, CG);
-      _ -> Arity
-    end
-  end, unknown, Cases);
-arity({block, _, Exprs}, CG) -> arity(lists:last(Exprs), CG).
+arity({match, _, _, _}, _) -> unknown;
+arity({'try', _, _, _}, _) -> unknown;
+arity({ensure, _, _, After}, CG) -> arity(After, CG);
+arity({block, _, Exprs}, CG) -> arity(lists:last(Exprs), CG);
+arity({binary_op, Loc, '|>', Left, Right}, CG) ->
+  arity({app, Loc, Right, [Left]}, CG);
+arity(_, _) -> unknown.
 
 call(Mod, Fn, ArgsRep, Line) ->
   {call, Line, {remote, Line, {atom, Line, Mod}, {atom, Line, Fn}}, ArgsRep}.
