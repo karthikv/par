@@ -816,7 +816,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
 
   StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, gm(Module)}]},
   InitCalls = lists:map(fun({DepModule, _}) ->
-    call(list_to_atom(DepModule), '_@init', [InitSetVar], 1)
+    call(list_to_atom(DepModule), ?INIT_FN_ATOM, [InitSetVar], 1)
   end, Deps),
 
   GlobalVarNames = lists:filtermap(fun
@@ -841,7 +841,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
 
   % must return ok for module load to succeed
   Clause = {clause, 1, [ArgVar], [], [Case]},
-  {function, 1, '_@init', 1, [Clause]}.
+  {function, 1, ?INIT_FN_ATOM, 1, [Clause]}.
 
 rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
   {PatternReps, {_, CG1}} = lists:mapfoldl(fun({PatternRep, IVs}, OuterMemo) ->

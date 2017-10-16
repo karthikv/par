@@ -3,7 +3,6 @@
 -include("common.hrl").
 
 % TODO:
-% - Syntax for match and try, literal map, type variables
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - [2 weeks] Stdlib
@@ -71,6 +70,10 @@
 % - Eq/Proper typeclass for non-functions?
 %   - Make pattern matching with var_value use proper type class
 % - Force discard for block exprs that don't return unit?
+% - Syntax changes?
+%   - Use | to separate cases for match/try?
+%   - Use -> instead of => for match/try?
+%   - Lowercase for type variables?
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?
