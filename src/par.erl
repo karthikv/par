@@ -3,11 +3,16 @@
 -include("common.hrl").
 
 % TODO:
-% - Bug with referencing global variable in pattern
-%   - Also use ^ instead of & for matching existing variable
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
+% - Bug with referencing global variable in pattern
+%   - Also use ^ instead of & for matching existing variable
+% - Bug with global manager init ordering
+% - Bad error message in enclosed_paren/brace when enclosed expression doesn't
+%   finish. Error is "expected ... before end-of-file" even though it's not
+%   the end of file
+% - Enforce newline between defs
 % - [1 week] REPL
 %   - See if interpreter is even necessary
 %   - Finish implementation of import, interfaces, records

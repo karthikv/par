@@ -61,7 +61,9 @@ test_expr(Expr) ->
   , ?_test($\n = Expr("'\\n'"))
   , ?_test(<<"hi">> = Expr("\"hi\""))
   , ?_test(<<"hi\n">> = Expr("\"hi\\n\""))
-  , ?_test(hi = Expr("@hi"))
+  , ?_test(h = Expr("@h"))
+  , ?_test(hello = Expr("@hello"))
+  , ?_test('empty?' = Expr("@empty?"))
   , ?_test('hello world' = Expr("@\"hello world\""))
   , ?_test([3.0, 5] = Expr("[3.0, 5]"))
   , ?_test({<<"what">>, false, 7} = Expr("(\"what\", false, 7)"))
@@ -278,6 +280,12 @@ test_global(Run) ->
   [ ?_test(3 = Run(
       "foo = 3\n"
       "main() = foo"
+    ))
+  , ?_test(true = Run(
+      "empty? = true\n"
+      "main() =\n"
+      "  let maybe? = true\n"
+      "  maybe? || empty?"
     ))
   , ?_test([false, true] = Run(
       "foo = baz && false\n"

@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected '(' or '=' to follow variable identifier in global definition:
+
+3: a?b + 3
+       ^
+

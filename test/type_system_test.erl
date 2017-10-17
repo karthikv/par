@@ -189,7 +189,6 @@ expr_test_() ->
   , ?_test("String" = ok_expr("\"some\\\nstring\""))
   , ?_test("Atom" = ok_expr("@hello"))
   , ?_test("Atom" = ok_expr("@\"hello world\""))
-  , ?_test("Atom" = ok_expr("@\"\""))
 
   , ?_test("[A]" = ok_expr("[]"))
   , ?_test("[A ~ Num]" = ok_expr("[3, 5, 6]"))

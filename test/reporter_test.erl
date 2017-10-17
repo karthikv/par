@@ -55,6 +55,7 @@ expr_test_() ->
   , golden_expr_("l-unterminated-string-1", "(\"hello world, true)")
   , golden_expr_("l-unterminated-string-2", "\"hello, \nworld\"")
   , golden_expr_("l-bad-atom", "@+asdf")
+  , golden_expr_("l-bad-var", "a?b + 3")
   , golden_expr_("l-multiple-dots", "3.07.8")
   , golden_many_("l-multiple-modules-errors", [
       {"foo",

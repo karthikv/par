@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
-Atom must start with a letter, digit, or underscore:
+Unquoted atoms must only contain letters, digits, and underscores. If you'd 
+like to use other characters, use a quoted atom, like @"a quoted atom":
 
 3: @+asdf
    ^^

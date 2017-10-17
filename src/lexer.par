@@ -98,6 +98,7 @@ enum Result<T, E> {
   Err(E) @errors
 }
 
+tokenize : [Char] -> Result<[Token], [Token]>
 export tokenize(chs) =
   let tokens = tokenize_r(chs, 1, 1, [])
   let (tokens, errs) = foldl(|token, (accum, errs)| match token {
@@ -112,6 +113,7 @@ export tokenize(chs) =
   else
     Err(reverse(errs))
 
+tokenize_r : [Char] -> Int -> Int -> [Token] -> [Token]
 tokenize_r(chs, line, col, tokens) =
   if let [] = chs then
     reverse(tokens)
@@ -189,13 +191,15 @@ tokenize_r(chs, line, col, tokens) =
 
       ['@', h | t] =>
         if is_word(h) then
-          let (chs, len, t) = until_not(is_word, t)
+          let (chs, len, t) = until_not(is_word, t) |> allow_qmark
           (LitAtom(inc(loc, 2 + len), to_atom([h | chs])), t)
         else
           let token = Unexpected(
             inc(loc, 2),
             ['@', h],
-            "Atom must start with a letter, digit, or underscore"
+            "Unquoted atoms must only contain letters, digits, and " ++
+            "underscores. If you'd like to use other characters, use a " ++
+            "quoted atom, like @\"a quoted atom\""
           )
           (token, t)
 
@@ -205,7 +209,7 @@ tokenize_r(chs, line, col, tokens) =
             [] => (Underscore(inc(loc, 1)), t)
             [next | t] =>
               if is_lower(next) then
-                let (chs, len, t) = until_not(is_word, t)
+                let (chs, len, t) = until_not(is_word, t) |> allow_qmark
                 (Var(inc(loc, 2 + len), [h, next | chs]), t)
               else
                 (Underscore(inc(loc, 1)), [next | t])
@@ -221,7 +225,7 @@ tokenize_r(chs, line, col, tokens) =
                 (TV(inc(loc, 1), [h]), [next | t])
           }
         else if is_lower(h) then
-          let (chs, len, t) = until_not(is_word, t)
+          let (chs, len, t) = until_not(is_word, t) |> allow_qmark
           let token = get(
             [h | chs],
             chs_to_token_fn,
@@ -250,7 +254,10 @@ tokenize_r(chs, line, col, tokens) =
     let next_loc = @erlang:element(2, token) : Loc
     tokenize_r(left, next_loc.end_line, next_loc.end_col, [token | tokens])
 
+tokenize_num : Loc -> [Char] -> (Token, [Char])
 tokenize_num(loc, chs) = tokenize_num_r(loc, chs, false, [])
+
+tokenize_num_r : Loc -> [Char] -> Bool -> [Char] -> (Token, [Char])
 tokenize_num_r(loc, chs, seen_dot, accum) = match chs {
   [] => tokenize_num_finish(loc, seen_dot, accum, [])
   [h | t] =>
@@ -269,15 +276,20 @@ tokenize_num_r(loc, chs, seen_dot, accum) = match chs {
     else
       tokenize_num_finish(loc, seen_dot, accum, [h | t])
 }
+
+tokenize_num_finish : Loc -> Bool -> [Char] -> [Char] -> (Token, [Char])
 tokenize_num_finish(loc, seen_dot, accum, left) =
   if seen_dot then
     (LitFloat(loc, to_float(reverse(accum))), left)
   else
     (LitInt(loc, to_int(reverse(accum))), left)
 
+tokenize_str : Loc -> [Char] -> (Token, [Char])
 tokenize_str(loc, chs) =
   let ['"' | t] = chs
   tokenize_str_r(inc(loc, 1), t, [])
+
+tokenize_str_r : Loc -> [Char] -> [Char] -> (Token, [Char])
 tokenize_str_r(loc, chs, accum) = match chs {
   ['\\', h | t] =>
     let next_loc = match h {
@@ -310,7 +322,10 @@ tokenize_str_r(loc, chs, accum) = match chs {
     (token, [])
 }
 
+tokenize_whitespace : Loc -> [Char] -> (Token, [Char])
 tokenize_whitespace(loc, chs) = tokenize_whitespace_r(loc, chs, [])
+
+tokenize_whitespace_r : Loc -> [Char] -> [Char] -> (Token, [Char])
 tokenize_whitespace_r(loc, chs, accum) = match chs {
   ['\n' | t] => tokenize_whitespace_r(
     { loc | end_line = loc.end_line + 1, end_col = 1 },
@@ -325,6 +340,7 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
   [] => (Whitespace(loc, reverse(accum)), [])
 }
 
+chs_to_token_fn : Map<[Char], Loc -> Token>
 chs_to_token_fn = {
   to_list("module") => Module,
   to_list("import") => Import,
@@ -356,14 +372,20 @@ get = @maps:get/3
 is_key : A -> Map<A, B> -> Bool
 is_key = @maps:is_key/2
 
+until_nl : [Char] -> ([Char], Int, [Char])
 until_nl(chs) = until_nl_r(chs, [], 0)
+
+until_nl_r : [Char] -> [Char] -> Int -> ([Char], Int, [Char])
 until_nl_r(chs, accum, len) = match chs {
   ['\n' | t] => (reverse(accum), len + 1, ['\n' | t])
   [h | t] => until_nl_r(t, [h | accum], len + 1)
   [] => (reverse(accum), len, [])
 }
 
+until_not : (Char -> Bool) -> [Char] -> ([Char], Int, [Char])
 until_not(cb, chs) = until_not_r(cb, chs, [], 0)
+
+until_not_r : (Char -> Bool) -> [Char] -> [Char] -> Int -> ([Char], Int, [Char])
 until_not_r(cb, chs, accum, len) = match chs {
   [] => (reverse(accum), len, [])
   [h | t] =>
@@ -373,15 +395,35 @@ until_not_r(cb, chs, accum, len) = match chs {
       (reverse(accum), len, [h | t])
 }
 
+allow_qmark : ([Char], Int, [Char]) -> ([Char], Int, [Char])
+allow_qmark((chs, len, t)) =
+  if let ['?' | t] = t then
+    (chs ++ ['?'], len + 1, t)
+  else
+    (chs, len, t)
+
+is_lower : Char -> Bool
 is_lower(ch) = $ch >= $'a' && $ch <= $'z'
+
+is_upper : Char -> Bool
 is_upper(ch) = $ch >= $'A' && $ch <= $'Z'
+
+is_digit : Char -> Bool
 is_digit(ch) = $ch >= $'0' && $ch <= $'9'
+
+is_whitespace : Char -> Bool
 is_whitespace(ch) = ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+
+is_word : Char -> Bool
 is_word(ch) = is_lower(ch) || is_upper(ch) || is_digit(ch) || ch == '_'
 
+inc : Loc -> Int -> Loc
 inc(loc, amount) = { loc | end_col = loc.end_col + amount }
+
+next_line : Loc -> Loc
 next_line(loc) = { loc | end_line = loc.end_line + 1, end_col = 1 }
 
+unesc : Char -> Char
 unesc(ch) = match ch {
   'b' => '\b'
   'f' => '\f'
