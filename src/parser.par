@@ -220,7 +220,7 @@ init : [Token] -> Parsed<(Node, [Token])>
 init = init_or_ext(false)
 
 init_or_ext : Bool -> [Token] -> Parsed<(Node, [Token])>
-init_or_ext(allow_ext, tokens) = match tokens {
+init_or_ext(allow_ext?, tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_), Lexer.Assign(_) | t] =>
     expr(t) |> pmap(|(node, rest)|
       let l = range(s, node_loc(node))
@@ -228,7 +228,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
     )
 
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_), Lexer.Ext(ext_l) | t] =>
-    if allow_ext then
+    if allow_ext? then
       expr(t) |> pmap(|(node, rest)|
         let l = range(s, node_loc(node))
         (Ext(l, Var(s, name), Fn(l, make_ref(), [], node)), rest)
@@ -237,7 +237,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
       Some(ext_l) |> one_err("Expected equals '='")
 
   [Lexer.Var(_, _), Lexer.LParen(_), Lexer.RParen(_) | t] =>
-    if allow_ext then
+    if allow_ext? then
       head_loc(t) |> one_err("Expected equals '=' or extend ':='")
     else
       head_loc(t) |> one_err("Expected equals '='")
@@ -245,7 +245,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_) | t] =>
     parse_args(pattern, s, t) |> pbind(|v| match v {
       (_, args, [Lexer.Ext(ext_l) | t]) =>
-        if allow_ext then
+        if allow_ext? then
           expr(t) |> pmap(|(node, rest)|
             let l = range(s, node_loc(node))
             (Ext(l, Var(s, name), Fn(l, make_ref(), args, node)), rest)
@@ -269,7 +269,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
     )
 
   [Lexer.Var(s, name), Lexer.Ext(ext_l) | t] =>
-    if allow_ext then
+    if allow_ext? then
       expr(t) |> pmap(|(node, rest)|
         let l = range(s, node_loc(node))
         (Ext(l, Var(s, name), node), rest)
@@ -278,7 +278,7 @@ init_or_ext(allow_ext, tokens) = match tokens {
       Some(ext_l) |> one_err("Expected equals '='")
 
   [Lexer.Var(_, _) | t] =>
-    if allow_ext then
+    if allow_ext? then
       head_loc(t) |> one_err(
         "Expected '(', '=', or ':=' to follow variable identifier in " ++
         "global definition"
@@ -1223,8 +1223,8 @@ many(f, tokens) =
 many_delim_cb : (T -> [Token] -> Parsed<(Bool, [Token])>) ->
   ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<([T], [Token])>
 many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|(item, rest)|
-  cb(item, rest) |> pbind(|(continue, rest)|
-    if !continue then
+  cb(item, rest) |> pbind(|(continue?, rest)|
+    if !continue? then
       parsed(([item], rest))
     else if rest == [] then
       one_err("many_delim didn't finish", None)
@@ -1267,9 +1267,9 @@ delim_or_nl_cb(delim, delim_str, node, tokens) =
     let [h | t] = tokens
     let l = token_loc(h)
     let end_line = node_loc(node).end_line
-    let is_delim = h == delim(l)
+    let delim? = h == delim(l)
 
-    if is_delim && t == [] then
+    if delim? && t == [] then
       parsed_err(
         (t != [], t),
         "Delimiting " ++ delim_str ++ " is unnecessary because nothing " ++
@@ -1277,14 +1277,14 @@ delim_or_nl_cb(delim, delim_str, node, tokens) =
           "newlines, no commas are necessary at all",
         Some(l)
       )
-    else if is_delim && end_line < token_loc(head(t)).start_line then
+    else if delim? && end_line < token_loc(head(t)).start_line then
       parsed_err(
         (t != [], t),
         "Delimiting " ++ delim_str ++ " is unnecessary because items are " ++
           "separated by a newline",
         Some(l)
       )
-    else if is_delim then
+    else if delim? then
       parsed((t != [], t))
     else if end_line < l.start_line then
       parsed((tokens != [], tokens))
@@ -1347,19 +1347,19 @@ split_bar(tokens) = split_bar_r(tokens, [], false, [], 1)
 
 split_bar_r : [Token] -> [Token] -> Bool -> [Token] -> Int ->
   Parsed<([Token], [Token])>
-split_bar_r(tokens, left, seen_bar, right, depth) =
-  let recurse(token, seen_bar, depth) =
-    if seen_bar then
-      split_bar_r(tail(tokens), left, seen_bar, [token | right], depth)
+split_bar_r(tokens, left, seen_bar?, right, depth) =
+  let recurse(token, seen_bar?, depth) =
+    if seen_bar? then
+      split_bar_r(tail(tokens), left, seen_bar?, [token | right], depth)
     else
-      split_bar_r(tail(tokens), [token | left], seen_bar, right, depth)
+      split_bar_r(tail(tokens), [token | left], seen_bar?, right, depth)
 
   match tokens {
-    [Lexer.LBracket(l) | _] => recurse(Lexer.LBracket(l), seen_bar, depth + 1)
-    [Lexer.RBracket(l) | _] => recurse(Lexer.RBracket(l), seen_bar, depth - 1)
+    [Lexer.LBracket(l) | _] => recurse(Lexer.LBracket(l), seen_bar?, depth + 1)
+    [Lexer.RBracket(l) | _] => recurse(Lexer.RBracket(l), seen_bar?, depth - 1)
     [Lexer.Bar(l) | t] =>
       if depth == 1 then
-        if seen_bar then
+        if seen_bar? then
           one_err(
             "Expected an expression; already saw a pipe '|' within this " ++
               "list literal",
@@ -1369,9 +1369,9 @@ split_bar_r(tokens, left, seen_bar, right, depth) =
           // shouldn't add a token to left or right, so don't use recurse
           split_bar_r(t, left, true, right, depth)
       else
-        recurse(Lexer.Bar(l), seen_bar, depth)
+        recurse(Lexer.Bar(l), seen_bar?, depth)
 
-    [h | _] => recurse(h, seen_bar, depth)
+    [h | _] => recurse(h, seen_bar?, depth)
     [] => parsed((reverse(left), reverse(right)))
   }
 

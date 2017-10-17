@@ -190,8 +190,8 @@ tokenize_r(chs, line, col, tokens) =
         }
 
       ['@', h | t] =>
-        if is_word(h) then
-          let (chs, len, t) = until_not(is_word, t) |> allow_qmark
+        if word?(h) then
+          let (chs, len, t) = until_not(word?, t) |> allow_qmark
           (LitAtom(inc(loc, 2 + len), to_atom([h | chs])), t)
         else
           let token = Unexpected(
@@ -208,24 +208,24 @@ tokenize_r(chs, line, col, tokens) =
           match t {
             [] => (Underscore(inc(loc, 1)), t)
             [next | t] =>
-              if is_lower(next) then
-                let (chs, len, t) = until_not(is_word, t) |> allow_qmark
+              if lower?(next) then
+                let (chs, len, t) = until_not(word?, t) |> allow_qmark
                 (Var(inc(loc, 2 + len), [h, next | chs]), t)
               else
                 (Underscore(inc(loc, 1)), [next | t])
           }
-        else if is_upper(h) then
+        else if upper?(h) then
           match t {
             [] => (TV(inc(loc, 1), [h]), t)
             [next | t] =>
-              if is_word(next) then
-                let (chs, len, t) = until_not(is_word, t)
+              if word?(next) then
+                let (chs, len, t) = until_not(word?, t)
                 (Con(inc(loc, 2 + len), [h, next | chs]), t)
               else
                 (TV(inc(loc, 1), [h]), [next | t])
           }
-        else if is_lower(h) then
-          let (chs, len, t) = until_not(is_word, t) |> allow_qmark
+        else if lower?(h) then
+          let (chs, len, t) = until_not(word?, t) |> allow_qmark
           let token = get(
             [h | chs],
             chs_to_token_fn,
@@ -237,15 +237,15 @@ tokenize_r(chs, line, col, tokens) =
           match t {
             [] => (Dot(inc(loc, 1)), t)
             [next | t] =>
-              if is_digit(next) then
+              if digit?(next) then
                 // must prefix accum with 0 for to_float to work
                 tokenize_num_r(loc, [h, next | t], false, ['0'])
               else
                 (Dot(inc(loc, 1)), [next | t])
           }
-        else if is_digit(h) then
+        else if digit?(h) then
           tokenize_num(loc, [h | t])
-        else if is_whitespace(h) then
+        else if whitespace?(h) then
           tokenize_whitespace(loc, [h | t])
         else
           (Unexpected(inc(loc, 1), [h], "Unexpected character"), t)
@@ -258,13 +258,13 @@ tokenize_num : Loc -> [Char] -> (Token, [Char])
 tokenize_num(loc, chs) = tokenize_num_r(loc, chs, false, [])
 
 tokenize_num_r : Loc -> [Char] -> Bool -> [Char] -> (Token, [Char])
-tokenize_num_r(loc, chs, seen_dot, accum) = match chs {
-  [] => tokenize_num_finish(loc, seen_dot, accum, [])
+tokenize_num_r(loc, chs, seen_dot?, accum) = match chs {
+  [] => tokenize_num_finish(loc, seen_dot?, accum, [])
   [h | t] =>
-    if is_digit(h) then
-      tokenize_num_r(inc(loc, 1), t, seen_dot, [h | accum])
+    if digit?(h) then
+      tokenize_num_r(inc(loc, 1), t, seen_dot?, [h | accum])
     else if h == '.' then
-      if seen_dot then
+      if seen_dot? then
         let token = Unexpected(
           inc(loc, 1),
           reverse(accum),
@@ -274,12 +274,12 @@ tokenize_num_r(loc, chs, seen_dot, accum) = match chs {
       else
         tokenize_num_r(inc(loc, 1), t, true, [h | accum])
     else
-      tokenize_num_finish(loc, seen_dot, accum, [h | t])
+      tokenize_num_finish(loc, seen_dot?, accum, [h | t])
 }
 
 tokenize_num_finish : Loc -> Bool -> [Char] -> [Char] -> (Token, [Char])
-tokenize_num_finish(loc, seen_dot, accum, left) =
-  if seen_dot then
+tokenize_num_finish(loc, seen_dot?, accum, left) =
+  if seen_dot? then
     (LitFloat(loc, to_float(reverse(accum))), left)
   else
     (LitInt(loc, to_int(reverse(accum))), left)
@@ -333,7 +333,7 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
     ['\n' | accum]
   )
   [h | t] =>
-    if is_whitespace(h) then
+    if whitespace?(h) then
       tokenize_whitespace_r(inc(loc, 1), t, [h | accum])
     else
       (Whitespace(loc, reverse(accum)), [h | t])
@@ -369,9 +369,6 @@ chs_to_token_fn = {
 get : A -> Map<A, B> -> B -> B
 get = @maps:get/3
 
-is_key : A -> Map<A, B> -> Bool
-is_key = @maps:is_key/2
-
 until_nl : [Char] -> ([Char], Int, [Char])
 until_nl(chs) = until_nl_r(chs, [], 0)
 
@@ -402,20 +399,20 @@ allow_qmark((chs, len, t)) =
   else
     (chs, len, t)
 
-is_lower : Char -> Bool
-is_lower(ch) = $ch >= $'a' && $ch <= $'z'
+lower? : Char -> Bool
+lower?(ch) = $ch >= $'a' && $ch <= $'z'
 
-is_upper : Char -> Bool
-is_upper(ch) = $ch >= $'A' && $ch <= $'Z'
+upper? : Char -> Bool
+upper?(ch) = $ch >= $'A' && $ch <= $'Z'
 
-is_digit : Char -> Bool
-is_digit(ch) = $ch >= $'0' && $ch <= $'9'
+digit? : Char -> Bool
+digit?(ch) = $ch >= $'0' && $ch <= $'9'
 
-is_whitespace : Char -> Bool
-is_whitespace(ch) = ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
+whitespace? : Char -> Bool
+whitespace?(ch) = ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r'
 
-is_word : Char -> Bool
-is_word(ch) = is_lower(ch) || is_upper(ch) || is_digit(ch) || ch == '_'
+word? : Char -> Bool
+word?(ch) = lower?(ch) || upper?(ch) || digit?(ch) || ch == '_'
 
 inc : Loc -> Int -> Loc
 inc(loc, amount) = { loc | end_col = loc.end_col + amount }
