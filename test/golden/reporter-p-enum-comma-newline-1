@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
-Delimiting comma ',' is unnecessary because items are separated by a newline:
+Delimiting comma ',' is unnecessary because the next item is aligned and 
+separated by a newline:
 
 3: Foo,
       ^

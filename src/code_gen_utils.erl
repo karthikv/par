@@ -7,7 +7,10 @@
   '_@curry'/3,
   '_@wrap_with_impls'/5,
   '_@concat'/2,
-  '_@separate'/2
+  '_@separate'/2,
+  '_@assertEqual'/5,
+  '_@assertNotEqual'/5,
+  '_@raiseMatchError'/5
 ]).
 -compile(no_auto_import).
 
@@ -193,3 +196,40 @@
       true = gb_sets:is_set(Left),
       gb_sets:subtract(Left, Right)
   end.
+
+'_@assertEqual'(Actual, Expected, ExprStr, Mod, Line) ->
+  case Actual of
+    Expected -> {};
+    _ ->
+      Info = [
+        {module, Mod},
+        {line, Line},
+        {expression, ExprStr},
+        {expected, Expected},
+        {value, Actual}
+      ],
+      erlang:error({assertEqual, Info})
+  end.
+
+'_@assertNotEqual'(Actual, Unexpected, ExprStr, Mod, Line) ->
+  case Actual of
+    Unexpected ->
+      Info = [
+        {module, Mod},
+        {line, Line},
+        {expression, ExprStr},
+        {value, Unexpected}
+      ],
+      erlang:error({assertNotEqual, Info});
+    _ -> {}
+  end.
+
+'_@raiseMatchError'(Value, PatternStr, ExprStr, Mod, Line) ->
+  Info = [
+    {module, Mod},
+    {line, Line},
+    {expression, ExprStr},
+    {pattern, PatternStr},
+    {value, Value}
+  ],
+  erlang:error({assertMatch, Info}).

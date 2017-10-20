@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+let statements are not allowed as list items:
+
+4: let x = 4
+   ^^^^^^^^^
+

@@ -142,11 +142,17 @@ parse_file(RawPath, Parsed) ->
           Prg = binary_to_list(Binary),
 
           case parse_prg(Prg, Path) of
-            {ok, Ast} ->
+            {ok, Ast, PrgLines} ->
               {module, _, {con_token, _, Module}, Imports, _} = Ast,
               Parsed1 = Parsed#{Path => {module, Module}},
 
-              Comp = #comp{module=Module, ast=Ast, path=Path, prg=Prg},
+              Comp = #comp{
+                module=Module,
+                ast=Ast,
+                path=Path,
+                prg=Prg,
+                prg_lines=PrgLines
+              },
               Dir = filename:dirname(Path),
 
               {Deps, Comps, AllErrors, Parsed2} = lists:foldr(fun(Import, Memo) ->
@@ -186,7 +192,7 @@ parse_file(RawPath, Parsed) ->
 
 infer_prg(Prg) ->
   case parse_prg(Prg, "[infer-prg]") of
-    {ok, Ast} ->
+    {ok, Ast, PrgLines} ->
       % infer_prg should only be used only when there are no imports
       {module, _, {con_token, _, Module}, [], _} = Ast,
       %% ?LOG("Ast", Ast),
@@ -196,7 +202,8 @@ infer_prg(Prg) ->
         ast=Ast,
         deps=[],
         path="[infer-prg]",
-        prg=Prg
+        prg=Prg,
+        prg_lines=PrgLines
       },
       infer_comps([Comp]);
 
@@ -204,12 +211,13 @@ infer_prg(Prg) ->
   end.
 
 parse_prg(Prg, Path) ->
+  PrgLines = array:from_list(re:split(Prg, "\r?\n", [{return, list}])),
   case 'Lexer':tokenize(Prg) of
-    {errors, Errs} -> {lexer_errors, Errs, Path, Prg};
+    {errors, Errs} -> {lexer_errors, Errs, Path, PrgLines};
     {ok, Tokens} ->
       case 'Parser':parse(Tokens) of
-        #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, Prg};
-        #{value := {some, Ast}} -> {ok, Ast}
+        #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, PrgLines};
+        #{value := {some, Ast}} -> {ok, Ast, PrgLines}
       end
   end.
 
@@ -1412,6 +1420,9 @@ infer({binary_op, Loc, Op, Left, Right}, C) ->
     Op == '=='; Op == '!=' ->
       OperandTV = tv_server:fresh(C2#ctx.pid),
       {OperandTV, OperandTV, {con, "Bool"}};
+    Op == '?=='; Op == '?!=' ->
+      OperandTV = tv_server:fresh(C2#ctx.pid),
+      {OperandTV, OperandTV, unit};
     Op == '||'; Op == '&&' ->
       {{con, "Bool"}, {con, "Bool"}, {con, "Bool"}};
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
@@ -1451,7 +1462,8 @@ infer({unary_op, Loc, Op, Expr}, C) ->
       NumT = tv_server:fresh("Num", C1#ctx.pid),
       {NumT, NumT};
     Op == 'raise' -> {{con, "Exception"}, tv_server:fresh(C1#ctx.pid)};
-    Op == 'discard' -> {ExprT, unit}
+    Op == 'discard' -> {ExprT, unit};
+    Op == 'test' -> {ExprT, {con, "Test"}}
   end,
 
   C2 = add_cst(ExpExprT, ExprT, ?LOC(Expr), ?FROM_UNARY_OP(Op), C1),

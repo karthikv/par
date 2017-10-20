@@ -2,6 +2,6 @@
 
 Expected '(' or '=' to follow variable identifier in global definition:
 
-4: 3 x + 5
-       ^
+4: x + 5
+     ^
 

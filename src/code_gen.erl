@@ -6,7 +6,7 @@
 -define(EXCLUDER_NAME, code_gen_excluder).
 -define(INIT_FN_ATOM, '_@init').
 
--record(cg, {env, in_impl = false, ctx}).
+-record(cg, {env, in_impl = false, in_test = false, ctx, prg_lines}).
 
 compile_comps(Comps, C) ->
   CG = #cg{env=#{}, ctx=C},
@@ -18,11 +18,12 @@ compile_comps(Comps, C) ->
   CG2 = lists:foldl(fun populate_direct_imports/2, CG1, Comps),
 
   lists:map(fun({Comp, Exports}) ->
-    compile_ast(Comp, Exports, CG2)
+    compile_ast(Comp, Exports, CG2#cg{prg_lines=Comp#comp.prg_lines})
   end, lists:zip(Comps, AllExports)).
 
-populate_env(#comp{module=Module, ast=Ast}, CG) ->
+populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{env=Env}}=CG) ->
   {module, _, _, _, Defs} = Ast,
+  TestNames = utils:test_names(Module, Env),
 
   % populate env and aggregate exports
   lists:mapfoldl(fun(Node, ModuleCG) ->
@@ -44,9 +45,10 @@ populate_env(#comp{module=Module, ast=Ast}, CG) ->
         Value = {{global, Atom}, unknown},
 
         ModuleCG1 = env_set(Name, Value, ModuleCG),
-        case Exported of
-          true -> {[{Atom, 0}], ModuleCG1};
-          false -> {[], ModuleCG1}
+        IsTest = gb_sets:is_member(Name, TestNames),
+        if
+          Exported orelse IsTest -> {[{Atom, 0}], ModuleCG1};
+          true -> {[], ModuleCG1}
         end;
 
       {enum, _, _, OptionTEs} ->
@@ -186,7 +188,10 @@ compile_ast(Comp, Exports, CG) ->
     '_@wrap_with_impls',
     '_@wrap_with_impls_r',
     '_@concat',
-    '_@separate'
+    '_@separate',
+    '_@assertEqual',
+    '_@assertNotEqual',
+    '_@raiseMatchError'
   ])),
 
   {module, _, _, _, Defs} = Ast,
@@ -237,7 +242,7 @@ rep({enum, _, _, OptionTEs}, _) ->
 
   lists:map(fun({option, _, {con_token, ConLoc, Con}, ArgTEs, KeyNode}) ->
     Line = ?START_LINE(ConLoc),
-    ArgsRep = lists:map(fun(_) -> {var, Line, unique("_@Arg")} end, ArgTEs),
+    ArgsRep = lists:map(fun(_) -> {var, Line, unique("Arg")} end, ArgTEs),
 
     ConAtom = list_to_atom(Con),
     {KeyLine, Key} = case KeyNode of
@@ -255,12 +260,12 @@ rep({exception, _, {con_token, Loc, Con}, ArgTEs}, CG) ->
     0 -> [];
     Arity ->
       Line = ?START_LINE(Loc),
-      ArgsRep = lists:map(fun(_) -> {var, Line, unique("_@Arg")} end, ArgTEs),
+      ArgsRep = lists:map(fun(_) -> {var, Line, unique("Arg")} end, ArgTEs),
 
       Atom = list_to_atom(Con),
       % Exceptions of the same name in different modules should have different
       % keys, so we qualify Con with the module name.
-      Key = list_to_atom(lists:concat([CG#cg.ctx#ctx.module, '.', Con])),
+      Key = list_to_atom(lists:concat([module(CG), '.', Con])),
 
       Body = [{tuple, Line, [{atom, Line, Key} | ArgsRep]}],
       Clause = {clause, Line, ArgsRep, [], Body},
@@ -536,7 +541,7 @@ rep({record_ext, Loc, _, Expr, AllInits}, CG) ->
 
 rep({field_fn, _, {var, Loc, Name}}, _) ->
   Line = ?START_LINE(Loc),
-  RecordRep = {var, Line, unique("_@Record")},
+  RecordRep = {var, Line, unique("Record")},
   AtomRep = eabs(list_to_atom(Name), Line),
 
   Body = [call(maps, get, [AtomRep, RecordRep], Line)],
@@ -586,7 +591,7 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
 
     NumArgs < Arity ->
       NewArgsRep = lists:map(fun(_) ->
-        {var, Line, unique("_@Arg")}
+        {var, Line, unique("Arg")}
       end, lists:seq(NumArgs + 1, Arity)),
 
       ArgsListRep = rep({list, Loc, Args}, CG),
@@ -658,7 +663,7 @@ rep({'if', Loc, Cond, Then, Else}, CG) ->
   % must factor out cond into its own variable, since it might not be a valid
   % guard clause; TODO: optimize by not doing this if valid guard
   CondLine = ?START_LINE(?LOC(Cond)),
-  CondVar = {var, CondLine, unique("_@Cond")},
+  CondVar = {var, CondLine, unique("Cond")},
   Match = {match, CondLine, CondVar, rep(Cond, CG)},
 
   ElseClause = {clause, Line, [], [[{atom, Line, true}]], [rep(Else, CG)]},
@@ -666,12 +671,55 @@ rep({'if', Loc, Cond, Then, Else}, CG) ->
   {block, Line, [Match, {'if', Line, Clauses}]};
 
 rep({'let', Loc, Bindings, Then}, CG) ->
-  {InitsRep, CG1} = lists:mapfoldl(fun({binding, _, Pattern, Expr}, FoldCG) ->
+  {InitReps, CG1} = lists:mapfoldl(fun({binding, _, Pattern, Expr}, FoldCG) ->
     {PatternRep, ExprRep, FoldCG1} = rep_pattern(Pattern, Expr, FoldCG),
-    {{match, element(2, PatternRep), PatternRep, ExprRep}, FoldCG1}
+    Line = element(2, PatternRep),
+    {{match, Line, PatternRep, ExprRep}, FoldCG1}
   end, CG, Bindings),
 
-  {block, ?START_LINE(Loc), InitsRep ++ [rep(Then, CG1)]};
+  ThenRep = rep(Then, CG1),
+  BodyRep = if
+    CG#cg.in_test ->
+      PrgLines = CG#cg.prg_lines,
+      Mod = list_to_atom(module(CG)),
+
+      lists:foldr(fun({Binding, InitRep}, FoldBodyRep) ->
+        {binding, _, Pattern, Expr} = Binding,
+        case Pattern of
+          % These patterns will always succeed. Note that this is var, not
+          % var_value, so it's introducing a new variable.
+          {var, _, _} -> [InitRep | FoldBodyRep];
+          {'_', _} -> [InitRep | FoldBodyRep];
+
+          _ ->
+            {match, Line, PatternRep, ExprRep} = InitRep,
+            ValueRep = {var, Line, unique("Value")},
+            PatternStr = reporter:extract_snippet(?LOC(Pattern), PrgLines),
+            PatternStrRep = eabs(PatternStr, Line),
+
+            ExprStr = reporter:extract_snippet(?LOC(Expr), PrgLines),
+            ExprStrRep = eabs(ExprStr, Line),
+            ModRep = eabs(Mod, Line),
+            LineRep = eabs(Line, Line),
+
+            ArgsRep = [ValueRep, PatternStrRep, ExprStrRep, ModRep, LineRep],
+            Atom = '_@raiseMatchError',
+            excluder_remove(Atom),
+
+            Case = {'case', Line, ExprRep, [
+              {clause, Line, [PatternRep], [], FoldBodyRep},
+              {clause, Line, [ValueRep], [], [
+                {call, Line, eabs(Atom, Line), ArgsRep}
+              ]}
+            ]},
+            [Case]
+        end
+      end, [ThenRep], lists:zip(Bindings, InitReps));
+
+    true -> InitReps ++ [ThenRep]
+  end,
+
+  {block, ?START_LINE(Loc), BodyRep};
 
 rep({if_let, Loc, Pattern, Expr, Then, Else}, CG) ->
   Line = ?START_LINE(Loc),
@@ -736,19 +784,33 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
   LeftRep = rep(Left, CG),
   RightRep = rep(Right, CG),
 
-  case Op of
-    '++' ->
+  if
+    Op == '?=='; Op == '?!=' ->
+      ExprStr = reporter:extract_snippet(Loc, CG#cg.prg_lines),
+      ExprStrRep = eabs(ExprStr, Line),
+      ModRep = eabs(list_to_atom(module(CG)), Line),
+      LineRep = eabs(Line, Line),
+
+      ArgsRep = [LeftRep, RightRep, ExprStrRep, ModRep, LineRep],
+      Atom = case Op of
+        '?==' -> '_@assertEqual';
+        '?!=' -> '_@assertNotEqual'
+      end,
+
+      excluder_remove(Atom),
+      {call, Line, eabs(Atom, Line), ArgsRep};
+    Op == '++' ->
       excluder_remove('_@concat'),
       {call, Line, {atom, Line, '_@concat'}, [LeftRep, RightRep]};
-    '--' ->
+    Op == '--' ->
       excluder_remove('_@separate'),
       {call, Line, {atom, Line, '_@separate'}, [LeftRep, RightRep]};
-    '|>' ->
+    Op == '|>' ->
       case Right of
         {app, Expr, Args} -> rep({app, Loc, Expr, [Left | Args]}, CG);
         _ -> rep({app, Loc, Right, [Left]}, CG)
       end;
-    _ ->
+    true ->
       Atom = case Op of
         '==' -> '==';
         '!=' -> '/=';
@@ -769,7 +831,11 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
 
 rep({unary_op, Loc, Op, Expr}, CG) ->
   Line = ?START_LINE(Loc),
-  ExprRep = rep(Expr, CG),
+  CG1 = case Op of
+    'test' -> CG#cg{in_test=true};
+    _ -> CG
+  end,
+  ExprRep = rep(Expr, CG1),
 
   case Op of
     '!' -> {op, Line, 'not', ExprRep};
@@ -778,7 +844,11 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
     'raise' -> call(erlang, throw, [ExprRep], Line);
-    'discard' -> {block, Line, [ExprRep, eabs({}, Line)]}
+    'discard' -> {block, Line, [ExprRep, eabs({}, Line)]};
+    'test' ->
+      Clause = {clause, Line, [], [], [ExprRep]},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+      {tuple, Line, [eabs(Line, Line), FunRep]}
   end.
 
 % recursive definitions allowed for simple pattern functions
@@ -806,11 +876,12 @@ rep_pattern(Pattern, Expr, CG) ->
   {rep(Pattern, CG1), rep(Expr, CG), CG1}.
 
 rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
-  ArgVar = {var, 1, unique("_@Arg")},
+  ArgVar = {var, 1, unique("Arg")},
   ModuleRep = eabs(Module, 1),
   IsMemberCall = call(gb_sets, is_member, [ModuleRep, ArgVar], 1),
 
-  InitSetVar = {var, 1, unique("_@InitSet")},
+  % might be unused if there are no deps
+  InitSetVar = {var, 1, unique("_InitSet")},
   MatchAddCall = {match, 1, InitSetVar,
     call(gb_sets, add, [ModuleRep, ArgVar], 1)},
 
@@ -885,7 +956,7 @@ rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
   {PatternReps, CG1}.
 
 rep_gm_cache(Atom, Rep, Line, CG) ->
-  Gm = gm(CG#cg.ctx#ctx.module),
+  Gm = gm(module(CG)),
   excluder_remove('_@gm_find'),
   excluder_remove('_@gm_set'),
 
@@ -894,7 +965,7 @@ rep_gm_cache(Atom, Rep, Line, CG) ->
   SetCall = {call, Line, {atom, Line, '_@gm_set'},
     [{atom, Line, Gm}, {atom, Line, Atom}, Rep]},
 
-  Var = {var, Line, unique("_@Value")},
+  Var = {var, Line, unique("Value")},
   {'case', Line, FindCall, [
     {clause, Line, [{tuple, Line, [{atom, Line, ok}, Var]}], [], [Var]},
     {clause, Line, [{atom, Line, error}], [], [SetCall]}
@@ -1281,7 +1352,7 @@ rewrite({con, _}, VarRep, _, _, _) -> {[], VarRep};
 rewrite({tv, _, _, _}, VarRep, _, _, _) -> {[], VarRep};
 rewrite(unit, VarRep, _, _, _) -> {[], VarRep}.
 
-option_key(Name, CG) -> option_key(CG#cg.ctx#ctx.module, Name, CG).
+option_key(Name, CG) -> option_key(module(CG), Name, CG).
 option_key(Module, Name, #cg{env=Env}=CG) ->
   case maps:get({Module, Name}, Env) of
     {{external, OtherModule}, _} -> option_key(OtherModule, Name, CG);
@@ -1298,6 +1369,7 @@ env_set(Name, Value, #cg{env=Env, ctx=#ctx{module=Module}}=CG) ->
 env_get(Name, #cg{env=Env, ctx=#ctx{module=Module}}) ->
   maps:get({Module, Name}, Env).
 
+module(CG) -> CG#cg.ctx#ctx.module.
 set_module(Module, CG) -> CG#cg{ctx=CG#cg.ctx#ctx{module=Module}}.
 
 arity({fn, _, _, Args, _}, _) -> length(Args);

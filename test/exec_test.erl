@@ -1233,6 +1233,54 @@ test_pattern(Expr, Run) ->
     ))
   ].
 
+code_gen_assert_test_() ->
+  test_assert(fun expr_code_gen/1, fun many_code_gen/2).
+%% interpreter_assert_test_() ->
+%%   test_assert(fun expr_interpreter/1).
+test_assert(Expr, Many) ->
+  [ ?_test({} = Expr("@hey ?== @hey"))
+  , ?_assertError(
+      {assertEqual, [
+        {module, 'Mod'},
+        {line, 3},
+        {expression, "'a' ?== 'b'"},
+        {expected, 98},
+        {value, 97}
+      ]},
+      Expr("'a' ?== 'b'")
+    )
+  , ?_test({} = Expr("true ?!= false"))
+  , ?_assertError(
+      {assertNotEqual, [
+        {module, 'Mod'},
+        {line, 4},
+        {expression, "x ?!= \"\""},
+        {value, <<>>}
+      ]},
+      Expr(
+        "let x = \"\"\n"
+        "x ?!= \"\""
+      )
+    )
+  , ?_test(begin
+      {3, Fun} = Expr("test true"),
+      true = Fun()
+    end)
+  , ?_assertError(
+      {assertMatch, [
+        {module, 'Mod'},
+        {line, 4},
+        {expression, "x"},
+        {pattern, "@hello"},
+        {value, hey}
+      ]},
+      begin
+        {4, Fun} = Expr("let x = @hey\ntest let @hello = x"),
+        Fun()
+      end
+    )
+  ].
+
 code_gen_import_test_() -> test_import(fun many_code_gen/2).
 % TODO: defer interpreter import until we work on REPL
 test_import(Many) ->

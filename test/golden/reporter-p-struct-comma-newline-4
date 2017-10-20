@@ -1,6 +1,7 @@
 *** file [infer-prg] ***
 
-Expected either comma ',' or newline delimiter:
+You must separate successive items either with a comma ',' or by aligning them 
+on separate lines:
 
 3: foo : A bar : Atom
            ^^^

@@ -13,6 +13,11 @@
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
 % - Enforce newline between defs
+% - _atom for a module
+% - Use expr_single in parsing list instead of expr_multi to avoid bugs
+% - Syntax: List, Set, Map, Record
+%   - New: [a, b], #[a, b], #{a => b, c => d}, {a = b, c = d}
+%   - Put: [a, b | c], #[a, b | c], #{a => b, c => d | m}, {a = b, c = d | r}
 % - [1 week] REPL
 %   - See if interpreter is even necessary
 %   - Finish implementation of import, interfaces, records
@@ -90,9 +95,14 @@ main(Args) ->
   {ok, Dir} = file:get_cwd(),
   OptSpecs = [
     {out_dir, $o, "output directory", {string, Dir},
-     "Directory to output compiled .beam file(s)."},
+      "Directory to output compiled .beam file(s)."
+    },
+    {test, $t, "run tests", boolean,
+      "Run tests in source file"
+    },
     {source_file, undefined, undefined, string,
-     "Path to source file"}
+      "Path to source file"
+    }
   ],
 
   case getopt:parse(OptSpecs, Args) of
@@ -107,8 +117,8 @@ main(Args) ->
       halt(1);
 
     {ok, {Opts, []}} ->
-      Path = case lists:keyfind(source_file, 1, Opts) of
-        false ->
+      Path = case proplists:get_value(source_file, Opts) of
+        undefined ->
           ?ERR("Error: need one <source_file> argument~n"),
           getopt:usage(OptSpecs, "par"),
           halt(1);
@@ -119,15 +129,28 @@ main(Args) ->
       case type_system:infer_file(Path) of
         {ok, Comps, C} ->
           {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps, C]),
-          {out_dir, OutDir} = lists:keyfind(out_dir, 1, Opts),
+          {out_dir, OutDir} = proplists:get_value(out_dir, Opts),
 
-          lists:foreach(fun({Mod, Binary}) ->
+          Filenames = lists:map(fun({Mod, Binary}) ->
             Filename = lists:concat([Mod, ".beam"]),
             file:write_file(filename:join(OutDir, Filename), Binary),
-            io:format(standard_error, "~s~n", [Filename])
+            Filename
           end, Compiled),
 
-          io:format(standard_error, "~pms~n", [Time div 1000]);
+          case proplists:get_value(test, Opts, false) of
+            true ->
+              code:add_patha(OutDir),
+              {Mod, _} = hd(Compiled),
+              Mod:'_@init'(gb_sets:new()),
+              eunit:test(Mod, [no_tty, {report, {unite_compact, []}}]);
+
+            false ->
+              io:format(
+                standard_error,
+                "~s~n~pms~n",
+                [string:join(Filenames, "\n"), Time div 1000]
+              )
+          end;
 
         Errors ->
           ?ERR("~s", [reporter:format(Errors)]),

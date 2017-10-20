@@ -13,6 +13,7 @@
   args_ivs/1,
   args_ivs/2,
   family_is/2,
+  test_names/2,
   absolute/1,
   pretty_csts/1,
   pretty/1
@@ -206,6 +207,13 @@ family_is(I, Ifaces) ->
   gb_sets:fold(fun(ParentI, Family) ->
     gb_sets:union(Family, family_is(ParentI, Ifaces))
   end, gb_sets:add(I, Parents), Parents).
+
+test_names(Module, Env) ->
+  maps:fold(fun
+    ({M, Name}, {con, "test"}, Set) when M == Module ->
+      gb_sets:add(Name, Set);
+    (_, _, Set) -> Set
+  end, gb_sets:new(), Env).
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

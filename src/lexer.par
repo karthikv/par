@@ -15,6 +15,9 @@ enum Token {
   NotEq(Loc) @"!="
   Not(Loc) @"!"
 
+  ShouldEq(Loc) @"?=="
+  ShouldNotEq(Loc) @"?!="
+
   GtEq(Loc) @">="
   Gt(Loc) @">"
   LtEq(Loc) @"<="
@@ -73,6 +76,7 @@ enum Token {
   Ensure(Loc) @ensure
   After(Loc) @after
   Discard(Loc) @discard
+  Test(Loc) @test
 
   LitBool(Loc, Bool) @bool
   LitChar(Loc, Char) @char
@@ -132,6 +136,9 @@ tokenize_r(chs, line, col, tokens) =
 
       ['!', '=' | t] => (NotEq(inc(loc, 2)), t)
       ['!' | t] => (Not(inc(loc, 1)), t)
+
+      ['?', '=', '=' | t] => (ShouldEq(inc(loc, 3)), t)
+      ['?', '!', '=' | t] => (ShouldNotEq(inc(loc, 3)), t)
 
       ['>', '=' | t] => (GtEq(inc(loc, 2)), t)
       ['>' | t] => (Gt(inc(loc, 1)), t)
@@ -361,6 +368,7 @@ chs_to_token_fn = {
   to_list("ensure") => Ensure,
   to_list("after") => After,
   to_list("discard") => Discard,
+  to_list("test") => Test,
 
   to_list("true") => flip(LitBool, true),
   to_list("false") => flip(LitBool, false),

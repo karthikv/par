@@ -97,6 +97,20 @@ expr_test_() ->
       ok_expr("[3, 5.0, 6]")
     )
   , ?_assertEqual(
+      {list, l(0, 0, 4, 1), [
+        {var_ref, l(1, 2, 3), ref, "bar"},
+        {atom, l(2, 2, 6), hello},
+        {int, l(3, 2, 1), 3}
+      ]},
+      ok_expr(
+        "[\n"
+        "  bar\n"
+        "  @hello\n"
+        "  3\n"
+        "]"
+      )
+    )
+  , ?_assertEqual(
       {list, l(0, 23), [
         {list, l(1, 10), [
           {atom, l(2, 2), a},
@@ -222,11 +236,14 @@ expr_test_() ->
       ok_expr("{ f(x) = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 0, 1, 12), [
+      {anon_record, l(0, 0, 1, 14), [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
-        {init, l(1, 0, 10), {var, l(1, 0, 3), "bar"}, {bool, l(1, 6, 4), true}}
+        {init, l(1, 2, 10), {var, l(1, 2, 3), "bar"}, {bool, l(1, 8, 4), true}}
       ]},
-      ok_expr("{ a = 3\nbar = true }")
+      ok_expr(
+        "{ a = 3\n"
+        "  bar = true }"
+      )
     )
   , ?_assertEqual(
       {record, l(0, 13), {con_token, l(0, 3), "Foo"}, [
@@ -242,11 +259,16 @@ expr_test_() ->
       ok_expr("Foo { a = 3, bar = true }")
     )
   , ?_assertEqual(
-      {record, l(0, 0, 1, 12), {con_token, l(0, 3), "Foo"}, [
-        {init, l(6, 5), {var, l(6, 1), "a"}, {int, l(10, 1), 3}},
-        {init, l(1, 0, 10), {var, l(1, 0, 3), "bar"}, {bool, l(1, 6, 4), true}}
+      {record, l(0, 0, 3, 1), {con_token, l(0, 3), "Foo"}, [
+        {init, l(1, 2, 5), {var, l(1, 2, 1), "a"}, {int, l(1, 6, 1), 3}},
+        {init, l(2, 2, 10), {var, l(2, 2, 3), "bar"}, {bool, l(2, 8, 4), true}}
       ]},
-      ok_expr("Foo { a = 3\nbar = true }")
+      ok_expr(
+        "Foo {\n"
+        "  a = 3\n"
+        "  bar = true\n"
+        "}"
+      )
     )
   , ?_assertEqual(
       {record, l(0, 32), {con_token, l(0, 10), "Module.Foo"}, [
@@ -300,11 +322,14 @@ expr_test_() ->
       ok_expr("{ a | f() = @a, c(x, y) := x + y }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 0, 1, 11), {var_ref, l(2, 1), ref, "a"}, [
+      {anon_record_ext, l(0, 0, 1, 17), {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
-        {ext, l(1, 0, 9), {var, l(1, 0, 1), "c"}, {bool, l(1, 5, 4), true}}
+        {ext, l(1, 6, 9), {var, l(1, 6, 1), "c"}, {bool, l(1, 11, 4), true}}
       ]},
-      ok_expr("{ a | bar = @a\nc := true }")
+      ok_expr(
+        "{ a | bar = @a\n"
+        "      c := true }"
+      )
     )
   , ?_assertEqual(
       {record_ext, l(0, 31),
@@ -324,7 +349,10 @@ expr_test_() ->
           {ext, l(1, 0, 9), {var, l(1, 0, 1), "c"}, {bool, l(1, 5, 4), true}}
         ]
       },
-      ok_expr("Foo { a | bar = @a\nc := true }")
+      ok_expr(
+        "Foo { a | bar = @a,\n"
+        "c := true }"
+      )
     )
 
 
@@ -370,6 +398,17 @@ expr_test_() ->
         {bool, l(8, 5), false}
       },
       ok_expr("true != false")
+    )
+  , ?_assertEqual(
+      {binary_op, l(0, 7), '?==', {int, l(0, 1), 1}, {int, l(6, 1), 2}},
+      ok_expr("1 ?== 2")
+    )
+  , ?_assertEqual(
+      {binary_op, l(0, 14), '?!=',
+        {bool, l(0, 4), true},
+        {bool, l(9, 5), false}
+      },
+      ok_expr("true ?!= false")
     )
 
 
@@ -547,6 +586,15 @@ expr_test_() ->
   , ?_assertEqual(
       {unary_op, l(0, 11), 'discard', {float, l(8, 3), 3.7}},
       ok_expr("discard 3.7")
+    )
+  , ?_assertEqual(
+      {unary_op, l(0, 14), 'test',
+        {binary_op, l(5, 9), '?==',
+          {var_ref, l(5, 3), ref, "foo"},
+          {int, l(13, 1), 3}
+        }
+      },
+      ok_expr("test foo ?== 3")
     )
 
 
@@ -872,20 +920,22 @@ expr_test_() ->
       ok_expr("() : { foo : Atom, bar : A }")
     )
   , ?_assertEqual(
-      {expr_sig, l(0, 0, 1, 9), ref,
+      {expr_sig, l(0, 0, 1, 16), ref,
         {unit, l(0, 2)},
-        {record_te, l(0, 5, 1, 9), [
+        {record_te, l(0, 5, 1, 16), [
           {sig, l(7, 10),
             {var, l(7, 3), "foo"},
             {con_token, l(13, 4), "Atom"}
           },
-          {sig, l(1, 0, 7),
-            {var, l(1, 0, 3), "bar"},
-            {tv_te, l(1, 6, 1), "A", []}
+          {sig, l(1, 7, 7),
+            {var, l(1, 7, 3), "bar"},
+            {tv_te, l(1, 13, 1), "A", []}
           }
         ]}
       },
-      ok_expr("() : { foo : Atom\nbar : A }")
+      ok_expr(
+        "() : { foo : Atom\n"
+        "       bar : A }")
     )
   , ?_assertEqual(
       {expr_sig, l(0, 32), ref,
@@ -919,7 +969,10 @@ expr_test_() ->
           ]
         }
       },
-      ok_expr("() : { B | foo : Atom\nbar : A }")
+      ok_expr(
+        "() : { B | foo : Atom,\n"
+        "bar : A }"
+      )
     )
 
 
@@ -1082,17 +1135,22 @@ expr_test_() ->
       ok_expr("match 1 { -1 => x, -5.7 => y }")
     )
   , ?_assertEqual(
-      {match, l(0, 0, 1, 10), {int, l(6, 1), 1}, [
-        {'case', l(10, 6),
-          {int, l(10, 1), 1},
-          {var_ref, l(15, 1), ref, "x"}
+      {match, l(0, 0, 3, 1), {int, l(6, 1), 1}, [
+        {'case', l(1, 2, 6),
+          {int, l(1, 2, 1), 1},
+          {var_ref, l(1, 7, 1), ref, "x"}
         },
-        {'case', l(1, 0, 8),
-          {float, l(1, 0, 3), 5.7},
-          {var_ref, l(1, 7, 1), ref, "y"}
+        {'case', l(2, 2, 8),
+          {float, l(2, 2, 3), 5.7},
+          {var_ref, l(2, 9, 1), ref, "y"}
         }
       ]},
-      ok_expr("match 1 { 1 => x\n5.7 => y }")
+      ok_expr(
+        "match 1 {\n"
+        "  1 => x\n"
+        "  5.7 => y\n"
+        "}"
+      )
     )
   % ensure no ambiguity with app
   , ?_assertEqual(
@@ -1106,7 +1164,7 @@ expr_test_() ->
           {var_ref, l(1, 9, 1), ref, "y"}
         }
       ]},
-      ok_expr("match 1 { 1 => x\n(5.7) => y }")
+      ok_expr("match 1 { 1 => x,\n(5.7) => y }")
     )
   , ?_assertEqual(
       {match, l(0, 29), {bool, l(6, 4), true}, [
@@ -1492,26 +1550,27 @@ def_test_() ->
 
 
   , ?_assertEqual(
-      {enum, l(0, 0, 2, 1), {con_token, l(5, 7), "SumType"}, [
+      {enum, l(0, 0, 3, 1), {con_token, l(5, 7), "SumType"}, [
         {option, l(1, 2, 3), {con_token, l(1, 2, 3), "Foo"}, [], none},
         {option, l(1, 7, 16),
           {con_token, l(1, 7, 3), "Bar"},
           [{con_token, l(1, 11, 6), "String"}],
           {some, {atom, l(1, 19, 4), bar}}
         },
-        {option, l(1, 25, 17),
-          {con_token, l(1, 25, 3), "Baz"},
-          [{con_token, l(1, 29, 3), "Int"},
-           {gen_te, l(1, 34, 7),
-             {con_token, l(1, 34, 7), "List"},
-             [{con_token, l(1, 35, 5), "Float"}]
+        {option, l(2, 2, 17),
+          {con_token, l(2, 2, 3), "Baz"},
+          [{con_token, l(2, 6, 3), "Int"},
+           {gen_te, l(2, 11, 7),
+             {con_token, l(2, 11, 7), "List"},
+             [{con_token, l(2, 12, 5), "Float"}]
            }],
           none
         }
       ]},
       ok_def(
         "enum SumType {\n"
-        "  Foo, Bar(String) @bar, Baz(Int, [Float])\n"
+        "  Foo, Bar(String) @bar,\n"
+        "  Baz(Int, [Float])\n"
         "}"
       )
     )

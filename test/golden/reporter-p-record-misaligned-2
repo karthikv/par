@@ -3,6 +3,6 @@
 You must separate successive items either with a comma ',' or by aligning them 
 on separate lines:
 
-3: Foo(A) Bar
-          ^^^
+4: 3 bar = true }
+     ^^^
 

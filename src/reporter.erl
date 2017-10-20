@@ -1,5 +1,5 @@
 -module(reporter).
--export([format/1]).
+-export([format/1, extract_snippet/2]).
 
 -include("common.hrl").
 -define(LINE_WIDTH, 80).
@@ -12,19 +12,15 @@ format({read_error, Path, Reason}) ->
   [wrap(Msg, ?LINE_WIDTH), $\n];
 
 format({import_error, Loc, ImportPath, Reason, Comp}) ->
-  #comp{module=Module, path=Path, prg=Prg} = Comp,
+  #comp{module=Module, path=Path, prg_lines=PrgLines} = Comp,
   Prefix = ?FMT("*** module ~s *** (~s)~n~n", [Module, Path]),
-
-  StrLines = split_lines(Prg),
-  Code = extract_code(Loc, StrLines),
+  Code = extract_code(Loc, PrgLines),
 
   Msg = ?FMT("Couldn't import ~s: ~s", [ImportPath, reason_str(Reason)]),
   [Prefix, wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n];
 
-format({lexer_errors, Errs, Path, Prg}) ->
-  StrLines = split_lines(Prg),
+format({lexer_errors, Errs, Path, PrgLines}) ->
   Prefix = ?FMT("*** file ~s ***~n~n", [Path]),
-
   SortedErrs = lists:sort(fun(Err1, Err2) ->
     {unexpected, Loc1, _, _} = Err1,
     {unexpected, Loc2, _, _} = Err2,
@@ -32,18 +28,16 @@ format({lexer_errors, Errs, Path, Prg}) ->
   end, Errs),
 
   StrErrs = lists:map(fun({unexpected, Loc, _, Msg}) ->
-    Code = extract_code(Loc, StrLines),
+    Code = extract_code(Loc, PrgLines),
     [wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n]
   end, SortedErrs),
 
   [Prefix, StrErrs];
 
-format({parser_errors, Errs, Path, Prg}) ->
-  StrLines = split_lines(Prg),
+format({parser_errors, Errs, Path, PrgLines}) ->
   Prefix = ?FMT("*** file ~s ***~n~n", [Path]),
-
-  LastLine = array:size(StrLines),
-  LastCol = length(array:get(LastLine - 1, StrLines)),
+  LastLine = array:size(PrgLines),
+  LastCol = length(array:get(LastLine - 1, PrgLines)),
 
   EndLoc = #{
     start_line => LastLine,
@@ -70,7 +64,7 @@ format({parser_errors, Errs, Path, Prg}) ->
         Suffixed = binary_to_list(Msg) ++ " before end-of-file.",
         [wrap(Suffixed, ?LINE_WIDTH), $\n, $\n];
       {some, Loc} ->
-        Code = extract_code(Loc, StrLines),
+        Code = extract_code(Loc, PrgLines),
         [wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n]
     end
   end, SortedErrs),
@@ -78,11 +72,11 @@ format({parser_errors, Errs, Path, Prg}) ->
   [Prefix, StrErrs];
 
 format({errors, Errs, Comps}) ->
-  Pairs = lists:map(fun(#comp{module=Module, path=Path, prg=Prg}) ->
-    {Module, {Path, split_lines(Prg)}}
+  CompMapPairs = lists:map(fun(#comp{module=Module}=Comp) ->
+    {Module, Comp}
   end, Comps),
 
-  ModuleMap = maps:from_list(Pairs),
+  CompMap = maps:from_list(CompMapPairs),
   SortedErrs = lists:sort(fun type_system_err_lte/2, Errs),
 
   {StrErrs, _} = lists:mapfoldl(fun(Err, LastModule) ->
@@ -90,14 +84,14 @@ format({errors, Errs, Comps}) ->
       {_, _, Module_, Loc_, _} -> {Module_, Loc_};
       {_, Module_, Loc_} -> {Module_, Loc_}
     end,
-    {Path, StrLines} = maps:get(Module, ModuleMap),
+    #comp{path=Path, prg_lines=PrgLines} = maps:get(Module, CompMap),
 
     Prefix = if
       Module /= LastModule ->
         ?FMT("*** module ~s *** (~s)~n~n", [Module, Path]);
       true -> ""
     end,
-    Code = extract_code(Loc, StrLines),
+    Code = extract_code(Loc, PrgLines),
 
     Str = case Err of
       {{lam, _, _, _, _}=T1, {lam, _, _}=T2, _, _, From} ->
@@ -126,8 +120,6 @@ reason_str(eisdir) -> "file is a directory";
 reason_str(enotdir) -> "one of the directories in the path doesn't exist";
 reason_str(enomem) -> "not enough memory";
 reason_str(Err) -> ?FMT("unknown error: ~p", Err).
-
-split_lines(Prg) -> array:from_list(re:split(Prg, "\r?\n", [{return, list}])).
 
 wrap(Str, Width) ->
   Words = re:split(Str, " ", [{return, list}]),
@@ -205,7 +197,7 @@ loc_lte(Loc1, Loc2) ->
     true -> EndCol1 =< EndCol2
   end.
 
-extract_code(Loc, StrLines) ->
+extract_code(Loc, PrgLines) ->
   #{
     start_line := StartLine,
     start_col := StartCol,
@@ -218,9 +210,9 @@ extract_code(Loc, StrLines) ->
       Carets = string:copies("^", EndCol - StartCol),
       Prefix = ?FMT("~p: ", [StartLine]),
 
-      StrLine = array:get(StartLine - 1, StrLines),
-      Trimmed = string:strip(StrLine, left),
-      TrimmedLength = length(StrLine) - length(Trimmed),
+      PrgLine = array:get(StartLine - 1, PrgLines),
+      Trimmed = string:strip(PrgLine, left),
+      TrimmedLength = length(PrgLine) - length(Trimmed),
 
       % end column is exclusive, so we subtract 1
       Offset = length(Prefix) + EndCol - 1 - TrimmedLength,
@@ -234,8 +226,34 @@ extract_code(Loc, StrLines) ->
 
     true ->
       lists:map(fun(Line) ->
-        StrLine = array:get(Line - 1, StrLines),
-        io_lib:format("~p: ~s~n", [Line, StrLine])
+        PrgLine = array:get(Line - 1, PrgLines),
+        io_lib:format("~p: ~s~n", [Line, PrgLine])
       end, lists:seq(StartLine, EndLine))
   end.
 
+extract_snippet(Loc, PrgLines) ->
+  #{
+    start_line := StartLine,
+    start_col := StartCol,
+    end_line := EndLine,
+    end_col := EndCol
+  } = Loc,
+
+  StartPrgLine = array:get(StartLine - 1, PrgLines),
+
+  if
+    StartLine == EndLine ->
+      lists:sublist(StartPrgLine, StartCol, EndCol - StartCol);
+
+    true ->
+      Start = lists:sublist(StartPrgLine, StartCol, length(StartPrgLine)),
+      Middle = lists:flatmap(fun(Line) ->
+        [array:get(Line - 1, PrgLines), $\n]
+      end, lists:seq(StartLine + 1, EndLine - 1)),
+
+      EndPrgLine = array:get(EndLine - 1, PrgLines),
+      % end column is exclusive, so we subtract 1
+      End = lists:sublist(EndPrgLine, EndCol - 1),
+
+      lists:flatten([Start, $\n, Middle, End])
+  end.

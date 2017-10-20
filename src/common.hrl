@@ -2,7 +2,7 @@
 -define(COMMON_HRL_, 1).
 
 % a component to compile, representing a module and its metadata
--record(comp, {module, ast, deps, path, prg}).
+-record(comp, {module, ast, deps, path, prg, prg_lines}).
 
 % C - A context record for type inference with the following fields:
 %   gnr - the current gnr record that constraints are being added to; see G
@@ -42,6 +42,7 @@
     "String" => {false, 0},
     "Ref" => {false, 0},
     "Exception" => {false, 0},
+    "Test" => {false, 0},
     "List" => {false, 1},
     "Set" => {false, 1},
     "Map" => {false, 2},

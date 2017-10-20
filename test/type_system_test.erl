@@ -429,6 +429,7 @@ expr_test_() ->
       {"Float", "Bool", l(22, 4), ?FROM_ELSE_BODY}
     ))
 
+  , ?_test("()" = ok_expr("let x = @hey"))
   , ?_test("Float" = ok_expr(
       "let x = 3.0\n"
       "x + 5"
@@ -2260,6 +2261,17 @@ pattern_test_() ->
       "if let (_, a) = [\"hello\", \"hi\"] then a else \"hey\"",
       {"(A, B)", "[String]", l(7, 6), ?FROM_IF_LET_PATTERN}
     ))
+  ].
+
+assert_test_() ->
+  [ ?_test("()" = ok_expr("@hey ?== @hey"))
+  , ?_test("()" = ok_expr("'a' ?== 'b'"))
+  , ?_test("()" = ok_expr("true ?!= false"))
+  , ?_test("()" = ok_expr("\"\" ?!= \"\""))
+  , ?_test("Test" = ok_expr("test true"))
+  , ?_test("Test" = ok_expr("test let 3 = 4"))
+  % to ensure type Test is valid
+  , ?_test("Test" = ok_expr("(test true) : Test"))
   ].
 
 other_errors_test_() ->
