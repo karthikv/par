@@ -47,6 +47,7 @@
 %   - Better messages for indirect errors from T<B> due to T<A> being unified
 %   - Improve error when iface needs HKT and impl type has wrong # of params
 %     - Ditto for interface extension that has wrong # of params
+%   - Add explicit error when assert let w/ a pattern that'll always match
 % - Website + Documentation
 %
 % Defer
@@ -123,13 +124,13 @@ main(Args) ->
           getopt:usage(OptSpecs, "par"),
           halt(1);
 
-        {source_file, Path_} -> utils:absolute(Path_)
+        Path_ -> utils:absolute(Path_)
       end,
 
       case type_system:infer_file(Path) of
         {ok, Comps, C} ->
           {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps, C]),
-          {out_dir, OutDir} = proplists:get_value(out_dir, Opts),
+          OutDir = proplists:get_value(out_dir, Opts),
 
           Filenames = lists:map(fun({Mod, Binary}) ->
             Filename = lists:concat([Mod, ".beam"]),
@@ -139,10 +140,17 @@ main(Args) ->
 
           case proplists:get_value(test, Opts, false) of
             true ->
-              code:add_patha(OutDir),
+              #comp{module=Module} = hd(Comps),
               {Mod, _} = hd(Compiled),
+
+              TestSet = gb_sets:fold(fun(TestName, FoldTestSet) ->
+                [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
+              end, [], utils:test_names(Module, C#ctx.env)),
+
+              code:add_patha(OutDir),
               Mod:'_@init'(gb_sets:new()),
-              eunit:test(Mod, [no_tty, {report, {unite_compact, []}}]);
+              eunit:test(TestSet, [no_tty, {report, {unite_compact, []}}]),
+              eunit:stop();
 
             false ->
               io:format(

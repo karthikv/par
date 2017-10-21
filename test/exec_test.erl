@@ -1234,49 +1234,81 @@ test_pattern(Expr, Run) ->
   ].
 
 code_gen_assert_test_() ->
-  test_assert(fun expr_code_gen/1, fun many_code_gen/2).
+  test_assert(fun expr_code_gen/1).
 %% interpreter_assert_test_() ->
 %%   test_assert(fun expr_interpreter/1).
-test_assert(Expr, Many) ->
-  [ ?_test({} = Expr("@hey ?== @hey"))
+test_assert(Expr) ->
+  [ ?_test(ok = Expr("assert true"))
+  , ?_assertError(
+      {assert, [
+        {expected, true},
+        {value, false},
+        {expression, "false"},
+        {module, 'Mod'},
+        {line, 3}
+      ]},
+      Expr("assert false")
+    )
+  , ?_test(ok = Expr("assert @hey == @hey"))
   , ?_assertError(
       {assertEqual, [
-        {module, 'Mod'},
-        {line, 3},
-        {expression, "'a' ?== 'b'"},
         {expected, 98},
-        {value, 97}
+        {value, 97},
+        {expression, "'a' == 'b'"},
+        {module, 'Mod'},
+        {line, 3}
       ]},
-      Expr("'a' ?== 'b'")
+      Expr("assert 'a' == 'b'")
     )
-  , ?_test({} = Expr("true ?!= false"))
+  , ?_test(ok = Expr("assert true != false"))
   , ?_assertError(
       {assertNotEqual, [
+        {value, <<>>},
+        {expression, "x != \"\""},
         {module, 'Mod'},
-        {line, 4},
-        {expression, "x ?!= \"\""},
-        {value, <<>>}
+        {line, 4}
       ]},
       Expr(
         "let x = \"\"\n"
-        "x ?!= \"\""
+        "assert x != \"\""
+      )
+    )
+  , ?_test(ok = Expr("assert let 3 = 3"))
+  , ?_assertError(
+      {assertMatch, [
+        {pattern, "3"},
+        {value, 4},
+        {expression, "4"},
+        {module, 'Mod'},
+        {line, 3}
+      ]},
+      Expr("assert let 3 = 4")
+    )
+  , ?_assertError(
+      {badmatch, hi},
+      Expr(
+        "assert let 3 = 3\n"
+        "let @hey = @hi"
       )
     )
   , ?_test(begin
-      {3, Fun} = Expr("test true"),
-      true = Fun()
+      {3, Fun} = Expr("test assert true"),
+      ok = Fun()
     end)
   , ?_assertError(
       {assertMatch, [
-        {module, 'Mod'},
-        {line, 4},
-        {expression, "x"},
         {pattern, "@hello"},
-        {value, hey}
+        {value, hey},
+        {expression, "x"},
+        {module, 'Mod'},
+        {line, 4}
       ]},
       begin
-        {4, Fun} = Expr("let x = @hey\ntest let @hello = x"),
-        Fun()
+        {4, Fun} = Expr(
+          "let x = @hey\n"
+          "test assert let @hello = x"
+        ),
+        ok = Fun()
       end
     )
   ].

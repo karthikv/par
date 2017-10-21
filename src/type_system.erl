@@ -1420,9 +1420,6 @@ infer({binary_op, Loc, Op, Left, Right}, C) ->
     Op == '=='; Op == '!=' ->
       OperandTV = tv_server:fresh(C2#ctx.pid),
       {OperandTV, OperandTV, {con, "Bool"}};
-    Op == '?=='; Op == '?!=' ->
-      OperandTV = tv_server:fresh(C2#ctx.pid),
-      {OperandTV, OperandTV, unit};
     Op == '||'; Op == '&&' ->
       {{con, "Bool"}, {con, "Bool"}, {con, "Bool"}};
     Op == '>'; Op == '<'; Op == '>='; Op == '<=' ->
@@ -1463,7 +1460,17 @@ infer({unary_op, Loc, Op, Expr}, C) ->
       {NumT, NumT};
     Op == 'raise' -> {{con, "Exception"}, tv_server:fresh(C1#ctx.pid)};
     Op == 'discard' -> {ExprT, unit};
-    Op == 'test' -> {ExprT, {con, "Test"}}
+    Op == 'test' -> {{con, "Assertion"}, {con, "Test"}};
+    Op == 'assert' ->
+      case Expr of
+        % assert let with one binding and no body turns into an assertion
+        {'let', LetLoc, Bindings, {unit, LetLoc}} when length(Bindings) == 1 ->
+          {ExprT, {con, "Assertion"}};
+        % otherwise, assert let leaves the body type unchanged
+        {'let', _, _, _} -> {ExprT, ExprT};
+        % assert without let turns a boolean expression into an assertion
+        _ -> {{con, "Bool"}, {con, "Assertion"}}
+      end
   end,
 
   C2 = add_cst(ExpExprT, ExprT, ?LOC(Expr), ?FROM_UNARY_OP(Op), C1),

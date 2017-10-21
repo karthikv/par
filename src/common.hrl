@@ -43,6 +43,7 @@
     "Ref" => {false, 0},
     "Exception" => {false, 0},
     "Test" => {false, 0},
+    "Assertion" => {false, 0},
     "List" => {false, 1},
     "Set" => {false, 1},
     "Map" => {false, 2},

@@ -2264,14 +2264,28 @@ pattern_test_() ->
   ].
 
 assert_test_() ->
-  [ ?_test("()" = ok_expr("@hey ?== @hey"))
-  , ?_test("()" = ok_expr("'a' ?== 'b'"))
-  , ?_test("()" = ok_expr("true ?!= false"))
-  , ?_test("()" = ok_expr("\"\" ?!= \"\""))
-  , ?_test("Test" = ok_expr("test true"))
-  , ?_test("Test" = ok_expr("test let 3 = 4"))
-  % to ensure type Test is valid
-  , ?_test("Test" = ok_expr("(test true) : Test"))
+  [ ?_test("Assertion" = ok_expr("assert true"))
+  , ?_test("Assertion" = ok_expr("assert @hey == @hey"))
+  , ?_test("Assertion" = ok_expr("assert true != false"))
+  , ?_test("Atom" = ok_expr(
+      "assert let x = @hey\n"
+      "x"
+    ))
+  , ?_test("()" = ok_expr(
+      "assert let x = @hey\n"
+      "let y = 3"
+    ))
+  , ?_test("Assertion" = ok_expr("assert let 3 = 4"))
+  , ?_test("Test" = ok_expr("test assert true"))
+  , ?_test(bad_expr(
+      "test true",
+      {"Bool", "Assertion", l(5, 4), ?FROM_UNARY_OP('test')}
+    ))
+
+
+  % to ensure Assertion and Test types are valid
+  , ?_test("Assertion" = ok_expr("(assert true) : Assertion"))
+  , ?_test("Test" = ok_expr("(test assert true) : Test"))
   ].
 
 other_errors_test_() ->

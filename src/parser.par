@@ -90,8 +90,6 @@ enum BinaryOpAtom {
   And @"&&"
   Eq @"=="
   NotEq @"!="
-  ShouldEq @"?=="
-  ShouldNotEq @"?!="
   Gt @">"
   GtEq @">="
   Lt @"<"
@@ -115,6 +113,7 @@ enum UnaryOpAtom {
   Raise @"raise"
   Discard @"discard"
   Test @"test"
+  Assert @"assert"
 }
 
 enum OpAtom {
@@ -586,7 +585,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
         )
 
       [Lexer.Bar(s), Lexer.Sub(_), Lexer.Bar(_) | t] =>
-        // lam and test have the lowest prec, so it's fine to recurse
+        // lam, test, and assert have lowest prec, so it's fine to recurse
         expr(t) |> pbind(|(body, rest)|
           Fn(range(s, node_loc(body)), make_ref(), [], body) |> recurse(rest)
         )
@@ -598,7 +597,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
         }, pattern, t)
 
         parsed_args |> pbind(|(args, rest)|
-          // lam and test have the lowest prec, so it's fine to recurse
+          // lam, test, and assert have lowest prec, so it's fine to recurse
           expr(rest) |> pbind(|(body, rest)|
             Fn(range(s, node_loc(body)), make_ref(), args, body)
             |> recurse(rest)
@@ -615,14 +614,31 @@ expr_r(expr_s, state, stack, tokens) = match state {
         expr_r(expr_s, Start, [UnaryOp(l, Raise) | stack], t)
       [Lexer.Discard(l) | t] =>
         expr_r(expr_s, Start, [UnaryOp(l, Discard) | stack], t)
-      [Lexer.Test(l) | t] =>
-        expr_r(expr_s, Start, [UnaryOp(l, Test) | stack], t)
 
-      [Lexer.If(l) | t] =>
-        if_expr([Lexer.If(l) | t]) |> pbind(|(node, rest)| recurse(rest, node))
+      // lam, test, and assert have lowest prec, so it's fine to recurse
+      [Lexer.Test(s) | t] =>
+        expr(t) |> pmap(|(node, rest)|
+          let l = range(s, node_loc(node))
+          (UnaryExpr(l, Test, node), rest)
+        )
+      [Lexer.Assert(assert_s), Lexer.Let(let_s) | t] =>
+        let_expr(assert_s, [Lexer.Let(let_s) | t])
+        |> pmap(|(node, rest)|
+          let l = range(assert_s, node_loc(node))
+          (UnaryExpr(l, Assert, node), rest)
+        )
+      [Lexer.Assert(s) | t] =>
+        expr(t) |> pmap(|(node, rest)|
+          let l = range(s, node_loc(node))
+          (UnaryExpr(l, Assert, node), rest)
+        )
 
-      [Lexer.Let(l) | t] =>
-        let_expr([Lexer.Let(l) | t])
+      [Lexer.If(s) | t] =>
+        if_expr([Lexer.If(s) | t])
+        |> pbind(|(node, rest)| recurse(rest, node))
+
+      [Lexer.Let(s) | t] =>
+        let_expr(s, [Lexer.Let(s) | t])
         |> pbind(|(node, rest)| recurse(rest, node))
 
       [Lexer.Match(s) | t] =>
@@ -669,8 +685,6 @@ expr_r(expr_s, state, stack, tokens) = match state {
       [Lexer.And(_) | t] => shunt(And, t)
       [Lexer.Eq(_) | t] => shunt(Eq, t)
       [Lexer.NotEq(_) | t] => shunt(NotEq, t)
-      [Lexer.ShouldEq(_) | t] => shunt(ShouldEq, t)
-      [Lexer.ShouldNotEq(_) | t] => shunt(ShouldNotEq, t)
       [Lexer.Gt(_) | t] => shunt(Gt, t)
       [Lexer.GtEq(_) | t] => shunt(GtEq, t)
       [Lexer.Lt(_) | t] => shunt(Lt, t)
@@ -963,15 +977,15 @@ then_else(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected keyword 'then'")
 }
 
-let_expr : [Token] -> Parsed<(Node, [Token])>
-let_expr(tokens) = match tokens {
+let_expr : Loc -> [Token] -> Parsed<(Node, [Token])>
+let_expr(ref_l, tokens) = match tokens {
   [Lexer.Let(s) | t] =>
     binding(t) |> pbind(|(node, rest)|
       let l = range(s, node_loc(node))
       match rest {
         [h | _] =>
           let h_l = token_loc(h)
-          let aligned? = h_l.start_col == s.start_col &&
+          let aligned? = h_l.start_col == ref_l.start_col &&
             h_l.start_line > node_loc(node).end_line
 
           if aligned? then
@@ -1133,16 +1147,14 @@ opa_prec =
 
 opa_prec_list : [[OpAtom]]
 opa_prec_list = [
-  [Un(Test)],
-  [Bin(Pipe)],
-  [Bin(Or)],
-  [Bin(And)],
-  [Bin(Eq), Bin(NotEq), Bin(ShouldEq), Bin(ShouldNotEq), Bin(Gt), Bin(GtEq),
-   Bin(Lt), Bin(LtEq)],
-  [Bin(Add), Bin(Sub), Bin(Concat), Bin(Separate)],
-  [Bin(Mul), Bin(Div), Bin(Mod)],
-  [Bin(Colon)],
-  [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Raise), Un(Discard)],
+  [Bin(Pipe)]
+  [Bin(Or)]
+  [Bin(And)]
+  [Bin(Eq), Bin(NotEq), Bin(Gt), Bin(GtEq), Bin(Lt), Bin(LtEq)]
+  [Bin(Add), Bin(Sub), Bin(Concat), Bin(Separate)]
+  [Bin(Mul), Bin(Div), Bin(Mod)]
+  [Bin(Colon)]
+  [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Raise), Un(Discard)]
 ]
 
 try_qualify_con : Loc -> [Char] -> [Token] -> (Node, [Token])

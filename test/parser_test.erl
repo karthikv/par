@@ -399,17 +399,6 @@ expr_test_() ->
       },
       ok_expr("true != false")
     )
-  , ?_assertEqual(
-      {binary_op, l(0, 7), '?==', {int, l(0, 1), 1}, {int, l(6, 1), 2}},
-      ok_expr("1 ?== 2")
-    )
-  , ?_assertEqual(
-      {binary_op, l(0, 14), '?!=',
-        {bool, l(0, 4), true},
-        {bool, l(9, 5), false}
-      },
-      ok_expr("true ?!= false")
-    )
 
 
   , ?_assertEqual(
@@ -580,21 +569,35 @@ expr_test_() ->
       ok_expr("$'h'")
     )
   , ?_assertEqual(
-      {unary_op, l(0, 9), 'raise', {con_token, l(6, 3), "Bar"}},
+      {unary_op, l(0, 9), raise, {con_token, l(6, 3), "Bar"}},
       ok_expr("raise Bar")
     )
   , ?_assertEqual(
-      {unary_op, l(0, 11), 'discard', {float, l(8, 3), 3.7}},
+      {unary_op, l(0, 11), discard, {float, l(8, 3), 3.7}},
       ok_expr("discard 3.7")
     )
   , ?_assertEqual(
-      {unary_op, l(0, 14), 'test',
-        {binary_op, l(5, 9), '?==',
-          {var_ref, l(5, 3), ref, "foo"},
-          {int, l(13, 1), 3}
+      {unary_op, l(0, 9), test, {bool, l(5, 4), true}},
+      ok_expr("test true")
+    )
+  , ?_assertEqual(
+      {unary_op, l(0, 15), assert,
+        {binary_op, l(7, 8), '==',
+          {var_ref, l(7, 3), ref, "foo"},
+          {int, l(14, 1), 3}
         }
       },
-      ok_expr("test foo ?== 3")
+      ok_expr("assert foo == 3")
+    )
+  % expressions after assert let must be aligned to assert
+  , ?_assertEqual(
+      {unary_op, l(0, 0, 1, 1), assert,
+        {'let', l(0, 7, 1, 1),
+          [{binding, l(11, 5), {var, l(11, 1), "x"}, {int, l(15, 1), 4}}],
+          {var_ref, l(1, 0, 1), ref, "x"}
+        }
+      },
+      ok_expr("assert let x = 4\nx")
     )
 
 
@@ -1088,8 +1091,7 @@ expr_test_() ->
       ok_expr("if let [] = true then \"hi\" else \"hey\"")
     )
   , ?_assertEqual(
-      {'let', l(0, 0, 1, 1),
-        [
+      {'let', l(0, 0, 1, 1), [
           {binding, l(4, 30), {var, l(4, 1), "x"},
             {if_let, l(8, 26),
               {int, l(15, 1), 1},

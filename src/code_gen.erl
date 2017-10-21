@@ -6,7 +6,7 @@
 -define(EXCLUDER_NAME, code_gen_excluder).
 -define(INIT_FN_ATOM, '_@init').
 
--record(cg, {env, in_impl = false, in_test = false, ctx, prg_lines}).
+-record(cg, {env, in_impl = false, ctx, prg_lines}).
 
 compile_comps(Comps, C) ->
   CG = #cg{env=#{}, ctx=C},
@@ -188,10 +188,7 @@ compile_ast(Comp, Exports, CG) ->
     '_@wrap_with_impls',
     '_@wrap_with_impls_r',
     '_@concat',
-    '_@separate',
-    '_@assertEqual',
-    '_@assertNotEqual',
-    '_@raiseMatchError'
+    '_@separate'
   ])),
 
   {module, _, _, _, Defs} = Ast,
@@ -677,49 +674,7 @@ rep({'let', Loc, Bindings, Then}, CG) ->
     {{match, Line, PatternRep, ExprRep}, FoldCG1}
   end, CG, Bindings),
 
-  ThenRep = rep(Then, CG1),
-  BodyRep = if
-    CG#cg.in_test ->
-      PrgLines = CG#cg.prg_lines,
-      Mod = list_to_atom(module(CG)),
-
-      lists:foldr(fun({Binding, InitRep}, FoldBodyRep) ->
-        {binding, _, Pattern, Expr} = Binding,
-        case Pattern of
-          % These patterns will always succeed. Note that this is var, not
-          % var_value, so it's introducing a new variable.
-          {var, _, _} -> [InitRep | FoldBodyRep];
-          {'_', _} -> [InitRep | FoldBodyRep];
-
-          _ ->
-            {match, Line, PatternRep, ExprRep} = InitRep,
-            ValueRep = {var, Line, unique("Value")},
-            PatternStr = reporter:extract_snippet(?LOC(Pattern), PrgLines),
-            PatternStrRep = eabs(PatternStr, Line),
-
-            ExprStr = reporter:extract_snippet(?LOC(Expr), PrgLines),
-            ExprStrRep = eabs(ExprStr, Line),
-            ModRep = eabs(Mod, Line),
-            LineRep = eabs(Line, Line),
-
-            ArgsRep = [ValueRep, PatternStrRep, ExprStrRep, ModRep, LineRep],
-            Atom = '_@raiseMatchError',
-            excluder_remove(Atom),
-
-            Case = {'case', Line, ExprRep, [
-              {clause, Line, [PatternRep], [], FoldBodyRep},
-              {clause, Line, [ValueRep], [], [
-                {call, Line, eabs(Atom, Line), ArgsRep}
-              ]}
-            ]},
-            [Case]
-        end
-      end, [ThenRep], lists:zip(Bindings, InitReps));
-
-    true -> InitReps ++ [ThenRep]
-  end,
-
-  {block, ?START_LINE(Loc), BodyRep};
+  {block, ?START_LINE(Loc), InitReps ++ [rep(Then, CG1)]};
 
 rep({if_let, Loc, Pattern, Expr, Then, Else}, CG) ->
   Line = ?START_LINE(Loc),
@@ -785,20 +740,6 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
   RightRep = rep(Right, CG),
 
   if
-    Op == '?=='; Op == '?!=' ->
-      ExprStr = reporter:extract_snippet(Loc, CG#cg.prg_lines),
-      ExprStrRep = eabs(ExprStr, Line),
-      ModRep = eabs(list_to_atom(module(CG)), Line),
-      LineRep = eabs(Line, Line),
-
-      ArgsRep = [LeftRep, RightRep, ExprStrRep, ModRep, LineRep],
-      Atom = case Op of
-        '?==' -> '_@assertEqual';
-        '?!=' -> '_@assertNotEqual'
-      end,
-
-      excluder_remove(Atom),
-      {call, Line, eabs(Atom, Line), ArgsRep};
     Op == '++' ->
       excluder_remove('_@concat'),
       {call, Line, {atom, Line, '_@concat'}, [LeftRep, RightRep]};
@@ -829,13 +770,115 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
       {op, Line, Atom, LeftRep, RightRep}
   end;
 
+rep({unary_op, Loc, 'assert', Expr}, #cg{prg_lines=PrgLines}=CG) ->
+  Line = ?START_LINE(Loc),
+  ExprRep = rep(Expr, CG),
+  ExprLoc = ?LOC(Expr),
+
+  ModLineList = [
+    eabs({module, list_to_atom(module(CG))}, Line),
+    eabs({line, Line}, Line)
+  ],
+  OkRep = eabs(ok, Line),
+
+  case Expr of
+    {binary_op, _, BinOp, _, _} when BinOp == '=='; BinOp == '!=' ->
+      {op, OpLine, OpAtom, LeftExprRep, RightExprRep} = ExprRep,
+      ExprStr = reporter:extract_snippet(ExprLoc, PrgLines),
+
+      LeftVarRep = {var, Line, unique("LeftValue")},
+      RightVarRep = {var, element(2, RightExprRep), unique("RightValue")},
+      Matches = [
+        {match, Line, LeftVarRep, LeftExprRep},
+        {match, Line, RightVarRep, RightExprRep}
+      ],
+
+      BaseInfoList = [
+        {tuple, Line, [eabs(value, Line), LeftVarRep]},
+        eabs({expression, ExprStr}, Line) |
+        ModLineList
+      ],
+      InfoList = case BinOp of
+        '==' ->
+          ExpRep = {tuple, Line, [eabs(expected, Line), RightVarRep]},
+          [ExpRep | BaseInfoList];
+        '!=' -> BaseInfoList
+      end,
+      InfoRep = lists:foldr(fun(ElemRep, FoldRep) ->
+        {cons, Line, ElemRep, FoldRep}
+      end, {nil, Line}, InfoList),
+
+      ErrorAtom = case BinOp of
+        '==' -> assertEqual;
+        '!=' -> assertNotEqual
+      end,
+      ErrorRep = {tuple, Line, [eabs(ErrorAtom, Line), InfoRep]},
+      Call = call(erlang, error, [ErrorRep], Line),
+
+      CondRep = {op, OpLine, OpAtom, LeftVarRep, RightVarRep},
+      If = {'if', Line, [
+        {'clause', Line, [], [[CondRep]], [OkRep]},
+        {'clause', Line, [], [[eabs(true, Line)]], [Call]}
+      ]},
+      {block, Line, Matches ++ [If]};
+
+    {'let', LetLoc, [{binding, _, Pattern, Right} | _], ThenExpr} ->
+      {block, _, [{match, _, PatternRep, RightRep} | BlockReps]} = ExprRep,
+
+      ValueRep = {var, Line, unique("Value")},
+      PatternStr = reporter:extract_snippet(?LOC(Pattern), PrgLines),
+      RightStr = reporter:extract_snippet(?LOC(Right), PrgLines),
+
+      InfoList = [
+        eabs({pattern, PatternStr}, Line),
+        {tuple, Line, [eabs(value, Line), ValueRep]},
+        eabs({expression, RightStr}, Line) |
+        ModLineList
+      ],
+      InfoRep = lists:foldr(fun(ElemRep, FoldRep) ->
+        {cons, Line, ElemRep, FoldRep}
+      end, {nil, Line}, InfoList),
+
+      ErrorRep = {tuple, Line, [eabs(assertMatch, Line), InfoRep]},
+      Call = call(erlang, error, [ErrorRep], Line),
+
+      BodyRep = case ThenExpr of
+        % assert let with no body; return ok
+        {unit, LetLoc} -> [OkRep];
+        % otherwise, continue with other bindings and then expr
+        _ -> BlockReps
+      end,
+      {'case', Line, RightRep, [
+        {clause, Line, [PatternRep], [], BodyRep},
+        {clause, Line, [ValueRep], [], [Call]}
+      ]};
+
+    _ ->
+      ValueRep = {var, Line, unique("Value")},
+      ExprStr = reporter:extract_snippet(ExprLoc, PrgLines),
+
+      InfoList = [
+        eabs({expected, true}, Line),
+        {tuple, Line, [eabs(value, Line), ValueRep]},
+        eabs({expression, ExprStr}, Line) |
+        ModLineList
+      ],
+      InfoRep = lists:foldr(fun(ElemRep, FoldRep) ->
+        {cons, Line, ElemRep, FoldRep}
+      end, {nil, Line}, InfoList),
+
+      ErrorRep = {tuple, Line, [eabs(assert, Line), InfoRep]},
+      Call = call(erlang, error, [ErrorRep], Line),
+
+      {'case', Line, ExprRep, [
+        {clause, Line, [eabs(true, Line)], [], [OkRep]},
+        {clause, Line, [ValueRep], [], [Call]}
+      ]}
+  end;
+
 rep({unary_op, Loc, Op, Expr}, CG) ->
   Line = ?START_LINE(Loc),
-  CG1 = case Op of
-    'test' -> CG#cg{in_test=true};
-    _ -> CG
-  end,
-  ExprRep = rep(Expr, CG1),
+  ExprRep = rep(Expr, CG),
 
   case Op of
     '!' -> {op, Line, 'not', ExprRep};
@@ -845,6 +888,7 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
     '-' -> {op, Line, '-', ExprRep};
     'raise' -> call(erlang, throw, [ExprRep], Line);
     'discard' -> {block, Line, [ExprRep, eabs({}, Line)]};
+
     'test' ->
       Clause = {clause, Line, [], [], [ExprRep]},
       FunRep = {'fun', Line, {clauses, [Clause]}},

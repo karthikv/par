@@ -210,7 +210,7 @@ family_is(I, Ifaces) ->
 
 test_names(Module, Env) ->
   maps:fold(fun
-    ({M, Name}, {con, "test"}, Set) when M == Module ->
+    ({M, Name}, {{con, "Test"}, _}, Set) when M == Module ->
       gb_sets:add(Name, Set);
     (_, _, Set) -> Set
   end, gb_sets:new(), Env).
