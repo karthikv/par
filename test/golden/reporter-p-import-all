@@ -1,0 +1,8 @@
+*** file [infer-prg] ***
+
+Expected either global definition, global signature, keyword 'enum', or keyword 
+'struct':
+
+2: import all List (reverse)
+                   ^
+

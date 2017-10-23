@@ -1,0 +1,9 @@
+*** file [infer-prg] ***
+
+Expected an idenitifer to import or the keyword 'variants'. If you want to 
+import all names unqualified, the import list must only contain *. For 
+instance, import "foo" (*):
+
+2: import List (foo, *)
+                     ^
+

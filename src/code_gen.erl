@@ -151,6 +151,11 @@ bound_impl_name(I, V) -> lists:concat(["_@bound_impl@", I, [$@ | V]]).
 populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
   Enums = CG#cg.ctx#ctx.enums,
   lists:foldl(fun({DepModule, Idents}, ModuleCG) ->
+    Expanded = case Idents of
+      [{all, AllLoc}] -> utils:all_idents(DepModule, AllLoc, CG#cg.ctx#ctx.env);
+      _ -> Idents
+    end,
+
     lists:foldl(fun(Ident, NestedCG) ->
       case Ident of
         {var, _, Name} ->
@@ -175,7 +180,7 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
             env_set(OptionName, {{external, DepModule}, Arity}, FoldCG)
           end, NestedCG, OptionNames)
       end
-    end, ModuleCG, Idents)
+    end, ModuleCG, Expanded)
   end, set_module(Module, CG), Deps).
 
 compile_ast(Comp, Exports, CG) ->

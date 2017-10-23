@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected an idenitifer to import or the keyword 'variants':
+
+2: import List (315)
+                ^^^
+

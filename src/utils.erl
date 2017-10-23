@@ -14,6 +14,7 @@
   args_ivs/2,
   family_is/2,
   test_names/2,
+  all_idents/3,
   absolute/1,
   pretty_csts/1,
   pretty/1
@@ -214,6 +215,17 @@ test_names(Module, Env) ->
       gb_sets:add(Name, Set);
     (_, _, Set) -> Set
   end, gb_sets:new(), Env).
+
+all_idents(Module, Loc, Env) ->
+  maps:fold(fun
+    ({M, [H | _]=Name}, {_, true}, FoldIdents) when M == Module ->
+      if
+        H >= $a andalso H =< $z -> [{var, Loc, Name} | FoldIdents];
+        true -> [{con_token, Loc, Name} | FoldIdents]
+      end;
+
+    (_, _, FoldIdents) -> FoldIdents
+  end, [], Env).
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

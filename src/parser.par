@@ -10,6 +10,7 @@ enum Option<T> {
 enum Node {
   Module(Loc, Node, [Node], [Node]) @module
   Import(Loc, Node, [Node]) @import
+  All(Loc) @all
   Variants(Loc, [Char]) @variants
 
   Enum(Loc, Node, [Node]) @enum
@@ -156,23 +157,36 @@ export parse(tokens) = match tokens {
 //--- Productions
 imports : [Token] -> Parsed<([Node], [Token])>
 imports(tokens) = match tokens {
-  [Lexer.Import(s), Lexer.LitStr(e, str) | t] =>
-    let parsed_import =
-      if let [Lexer.LParen(_) | t] = t then
+  [Lexer.Import(s) | t] =>
+    let from_parsed =
+      if let [Lexer.LitStr(l, str) | t] = t then
+        parsed((LitStr(l, str), t))
+      else if let [Lexer.Con(l, con) | t] = t then
+        parsed((Con(l, con), t))
+      else
+        head_loc(t) |> one_err(
+          "Expected either a string path to a local file or a capitalized " ++
+          "standard library module name to import"
+        )
+
+    let parsed_import = from_parsed |> pbind(|(from, rest)|
+      if let [Lexer.LParen(_) | t] = rest then
         enclosed_paren(s, t) |> pbind(|(l, inner, rest)|
-          many_delim_comma_or_nl(import_ident, inner)
-          |> pmap_or(|v| v, [])
-          |> pmap(|idents| (Import(l, LitStr(e, str), idents), rest))
+          if let [Lexer.Mul(all_l)] = inner then
+            parsed((Import(l, from, [All(all_l)]), rest))
+          else
+            many_delim_comma_or_nl(import_ident, inner)
+            |> pmap_or(|v| v, [])
+            |> pmap(|idents| (Import(l, from, idents), rest))
         )
       else
-        parsed((Import(range(s, e), LitStr(e, str), []), t))
+        let l = range(s, node_loc(from))
+        parsed((Import(l, from, []), rest))
+    )
 
     parsed_import |> pbind(|(node, rest)|
       imports(rest) |> pmap(|(nodes, rest)| ([node | nodes], rest))
     )
-
-  [Lexer.Import(_) | t] =>
-    head_loc(t) |> one_err("Expected string path to import")
 
   _ => parsed(([], tokens))
 }
@@ -185,6 +199,19 @@ import_ident(tokens) =
       parsed((Variants(range(s, e), name), t))
     [Lexer.Var(l, name) | t] => parsed((Var(l, name), t))
     [Lexer.Con(l, name) | t] => parsed((Con(l, name), t))
+
+    _ =>
+      let addendum =
+        if let [Lexer.Mul(_) | _] = tokens then
+          ". If you want to import all names unqualified, the import list " ++
+          "must only contain *. For instance, import \"foo\" (*)"
+        else
+          ""
+
+      head_loc(tokens) |> one_err(
+        "Expected an idenitifer to import or the keyword 'variants'" ++
+        addendum
+      )
   }
 
 def : [Token] -> Parsed<(Node, [Token])>

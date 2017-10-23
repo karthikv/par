@@ -1533,6 +1533,32 @@ test_import(Many) ->
         "main() = f({ start_line = 17 })"
       }
     ], "bar"))
+  , ?_assertEqual({'Baz', #{start_line => 3}}, Many([
+      {"foo", "module Foo struct Loc { start_line : Int }"},
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Loc)\n"
+        "enum Bar { Baz(Loc) }\n"
+        "main() = Baz({ start_line = 3 })"
+      }
+    ], "bar"))
+  , ?_assertEqual(
+      {{'Hello', h}, 'Hi', #{first => $f, second => <<"s">>}, false},
+      Many([
+        {"foo",
+          "module Foo\n"
+          "enum Foo { Hello(Atom), Hi }\n"
+          "struct Baz { first : Char, second : String }\n"
+          "export x = false\n"
+          "y = 3.7\n"
+        },
+        {"bar",
+          "module Bar\n"
+          "import \"./foo\" (*)\n"
+          "main() = (Hello(@h), Hi, Baz { first = 'f', second = \"s\" }, x)"
+        }
+      ], "bar")
+    )
 
 
   , ?_assertEqual($a + $b, Many([

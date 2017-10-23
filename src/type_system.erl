@@ -123,6 +123,11 @@ infer_file(Path) ->
     {errors, Errors, _} -> Errors
   end.
 
+std_modules() ->
+  #{
+    "Base" => "base.par"
+  }.
+
 parse_file(RawPath, Parsed) ->
   Path = case filename:extension(RawPath) of
     "" -> utils:absolute(RawPath ++ ".par");
@@ -156,17 +161,35 @@ parse_file(RawPath, Parsed) ->
               Dir = filename:dirname(Path),
 
               {Deps, Comps, AllErrors, Parsed2} = lists:foldr(fun(Import, Memo) ->
-                {import, _, {str, Loc, DepPath}, Idents} = Import,
+                {import, _, From, Idents} = Import,
                 {FoldDeps, FoldComps, FoldAllErrors, FoldParsed} = Memo,
 
-                FullPath = filename:join(Dir, binary_to_list(DepPath)),
-                case parse_file(FullPath, FoldParsed) of
+                DepPath = case From of
+                  {str, _, DepPath_} ->
+                    filename:join(Dir, binary_to_list(DepPath_));
+                  {con_token, _, StdModule} ->
+                    PrivDir = code:priv_dir(par),
+                    case maps:find(StdModule, std_modules()) of
+                      {ok, DepPath_} -> filename:join(PrivDir, DepPath_);
+
+                      % priv/null doesn't exist and will cause a read error
+                      % below, which will translate to an import error.
+                      error -> filename:join(PrivDir, null)
+                    end
+                end,
+
+                case parse_file(DepPath, FoldParsed) of
                   {ok, DepModule, DepComps, FoldParsed1} ->
                     {[{DepModule, Idents} | FoldDeps], [DepComps | FoldComps],
                      FoldAllErrors, FoldParsed1};
 
                   {errors, [{read_error, ImportPath, Reason}], FoldParsed1} ->
-                    ImportError = {import_error, Loc, ImportPath, Reason, Comp},
+                    ImportError = case From of
+                      {str, DepLoc, _} ->
+                        {import_error, DepLoc, ImportPath, Reason, Comp};
+                      {con_token, DepLoc, DepModule} ->
+                        {import_error, DepLoc, DepModule, Comp}
+                    end,
                     {FoldDeps, FoldComps, [[ImportError] | FoldAllErrors],
                      FoldParsed1};
 
@@ -561,38 +584,53 @@ infer_defs(Comps, C) ->
   end, C2, CompsEnvs).
 
 populate_direct_imports(Deps, C) ->
-  lists:foldl(fun({Module, Idents}, ModuleC) ->
+  lists:foldl(fun({DepModule, Idents}, ModuleC) ->
+    Expanded = case Idents of
+      [{all, AllLoc}] -> utils:all_idents(DepModule, AllLoc, C#ctx.env);
+      _ -> Idents
+    end,
+
     lists:foldl(fun(Ident, NestedC) ->
       case Ident of
         {var, Loc, Name} ->
-          {Value, NestedC1} = raw_lookup(Module, Name, Loc, NestedC),
+          {Value, NestedC1} = raw_lookup(DepModule, Name, Loc, NestedC),
           define(Name, Value, false, Loc, NestedC1);
 
         {con_token, Loc, Name} ->
-          Con = lists:concat([Module, '.', Name]),
+          Con = lists:concat([DepModule, '.', Name]),
           {TypeExists, NestedC1} = case maps:find(Con, NestedC#ctx.types) of
-            {ok, {_, NumParams}} ->
+            {ok, {IsIface, NumParams}} ->
+              % We don't actually want to define a new type. Instead, we'd like
+              % to check whether it's valid to do so. To accomplish this, we
+              % call define_type, but ignore its output if it succeeds.
               NewCon = utils:qualify(Name, NestedC),
-              CaseC = case NumParams of
-                0 -> add_alias(NewCon, [], {con, Con}, false, NestedC);
-                _ ->
+              CaseC = define_type(NewCon, IsIface, NumParams, Loc, NestedC),
+
+              CaseC1 = case {no_ctx_errs(CaseC, NestedC), NumParams} of
+                % Use the error message from CaseC due to define_type.
+                {false, _} -> CaseC;
+
+                % Revert back to NestedC in the code below, as we can
+                % successfully define this alias without conflicts.
+                {true, 0} -> add_alias(NewCon, [], {con, Con}, false, NestedC);
+                {true, _} ->
                   Vs = lists:map(fun(_) ->
                     tv_server:fresh(NestedC#ctx.pid)
                   end, lists:seq(1, NumParams)),
 
                   add_alias(NewCon, Vs, {gen, {con, Con}, Vs}, false, NestedC)
               end,
-              {true, CaseC};
+              {true, CaseC1};
 
             error -> {false, NestedC}
           end,
 
-          {Value, NestedC2} = raw_lookup(Module, Name, Loc, NestedC1),
+          {Value, NestedC2} = raw_lookup(DepModule, Name, Loc, NestedC1),
           case {TypeExists, no_ctx_errs(NestedC2, NestedC1)} of
             {false, false} -> NestedC2;
             {true, false} -> NestedC1;
             {_, true} ->
-              case maps:find({Module, Name}, NestedC2#ctx.options) of
+              case maps:find({DepModule, Name}, NestedC2#ctx.options) of
                 {ok, Arity} ->
                   define_option(Name, Value, Arity, false, Loc, NestedC2);
                 error -> define(Name, Value, false, Loc, NestedC2)
@@ -600,19 +638,20 @@ populate_direct_imports(Deps, C) ->
           end;
 
         {variants, Loc, Name} ->
-          Con = lists:concat([Module, '.', Name]),
+          Con = lists:concat([DepModule, '.', Name]),
           case maps:find(Con, NestedC#ctx.enums) of
             {ok, {OptionNames, _, _}} ->
               lists:foldl(fun(OptionName, #ctx{env=Env, options=Options}=FoldC) ->
-                {Value, true} = maps:get({Module, OptionName}, Env),
-                Arity = maps:get({Module, OptionName}, Options),
+                {Value, true} = maps:get({DepModule, OptionName}, Env),
+                Arity = maps:get({DepModule, OptionName}, Options),
                 define_option(OptionName, Value, Arity, false, Loc, FoldC)
               end, NestedC, OptionNames);
 
-            error -> add_ctx_err(?ERR_NOT_DEF_TYPE(Con, Module), Loc, NestedC)
+            error ->
+              add_ctx_err(?ERR_NOT_DEF_TYPE(Con, DepModule), Loc, NestedC)
           end
       end
-    end, ModuleC, Idents)
+    end, ModuleC, Expanded)
   end, C, Deps).
 
 infer_ifaces(CompsEnvs, C) ->

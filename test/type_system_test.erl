@@ -2757,6 +2757,20 @@ import_test_() ->
         "x = Baz({ start_line = 3 })"
       }
     ], "bar", "x"))
+  , ?_test("(Foo, Foo, Baz, Bool)" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "enum Foo { Hello(Atom), Hi }\n"
+        "struct Baz { first : Char, second : String }\n"
+        "export x = false\n"
+        "y = 3.7\n"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (*)\n"
+        "y = (Hello(@h), Hi, Baz { first = 'f', second = \"s\" }, x)"
+      }
+    ], "bar", "y"))
   , ?_test(ctx_err_many([
       {"foo",
         "module Foo\n"
@@ -2801,6 +2815,19 @@ import_test_() ->
         "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", {?ERR_REDEF("One"), "Bar", l(26, 12)}))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "enum Foo { Hello(Atom), Hi }\n"
+        "struct Baz { first : Char, second : String }\n"
+        "x = false"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (*)\n"
+        "enum Baz { None }\n"
+      }
+    ], "bar", {?ERR_REDEF_TYPE("Baz"), "Bar", l(16, 1)}))
   , ?_test(ctx_err_many([
       {"foo",
         "module Foo\n"

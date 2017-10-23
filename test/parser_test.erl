@@ -1896,6 +1896,51 @@ import_test_() ->
       )
     )
   , ?_assertEqual(
+      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"},
+        [{import, l(0, 11), {con_token, l(7, 4), "List"}, []}],
+        [{global, l(1, 0, 6),
+           {var, l(1, 0, 1), "a"},
+           {unit, l(1, 4, 2)},
+           false
+         }]
+      },
+      ok_prg(
+        "module Mod\n"
+        "import List\n"
+        "a = ()"
+      )
+    )
+  , ?_assertEqual(
+      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"},
+        [{import, l(0, 16), {str, l(7, 5), <<"bar">>}, [{all, l(14, 1)}]}],
+        [{global, l(1, 0, 6),
+           {var, l(1, 0, 1), "a"},
+           {unit, l(1, 4, 2)},
+           false
+         }]
+      },
+      ok_prg(
+        "module Mod\n"
+        "import \"bar\" (*)\n"
+        "a = ()"
+      )
+    )
+  , ?_assertEqual(
+      {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"},
+        [{import, l(0, 15), {con_token, l(7, 4), "List"}, [{all, l(13, 1)}]}],
+        [{global, l(1, 0, 6),
+           {var, l(1, 0, 1), "a"},
+           {unit, l(1, 4, 2)},
+           false
+         }]
+      },
+      ok_prg(
+        "module Mod\n"
+        "import List (*)\n"
+        "a = ()"
+      )
+    )
+  , ?_assertEqual(
       {module, l(-1, 0, 10), {con_token, l(-1, 7, 3), "Mod"}, [
           {import, l(0, 37), {str, l(7, 5), <<"foo">>}, [
             {var, l(14, 3), "foo"},

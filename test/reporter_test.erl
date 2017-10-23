@@ -150,6 +150,16 @@ expr_test_() ->
       "impl Foo for T<A> { a(_) = 3 }"
     )
   , ?golden_prg_("p-impl-name", "impl [A] for Foo { foo(_) = 1 }")
+  , ?golden_prg_(
+      "p-bad-import",
+      "import List (315)\n"
+      "a = 1"
+    )
+  , ?golden_prg_(
+      "p-bad-import-all",
+      "import List (foo, *)\n"
+      "a = 1"
+    )
   , ?golden_many_("p-multiple-modules-errors", [
       {"foo",
         "module Foo\n"
