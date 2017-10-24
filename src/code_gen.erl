@@ -21,9 +21,9 @@ compile_comps(Comps, C) ->
     compile_ast(Comp, Exports, CG2#cg{prg_lines=Comp#comp.prg_lines})
   end, lists:zip(Comps, AllExports)).
 
-populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{env=Env}}=CG) ->
+populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
   {module, _, _, _, Defs} = Ast,
-  TestNames = utils:test_names(Module, Env),
+  TestNames = utils:test_names(Module, GEnv),
 
   % populate env and aggregate exports
   lists:mapfoldl(fun(Node, ModuleCG) ->
@@ -153,7 +153,7 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
   lists:foldl(fun({DepModule, Idents}, ModuleCG) ->
     Expanded = case Idents of
       [{all, AllLoc}] ->
-        utils:all_idents(DepModule, AllLoc, CG#cg.ctx#ctx.env);
+        utils:all_idents(DepModule, AllLoc, CG#cg.ctx#ctx.g_env);
       _ -> Idents
     end,
 

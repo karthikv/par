@@ -1,5 +1,5 @@
 -module(type_system).
--export([infer_file/1, infer_prg/1, pattern_names/1, unify/3]).
+-export([infer_file/1, infer_prg/1, pattern_names/1, parse_file/2]).
 -on_load(load/0).
 -include("common.hrl").
 
@@ -21,7 +21,6 @@
 % fvs - a function that computes the set of free TV names in an expression.
 % Scheme - a tuple {GVs, T, BoundVs} that represents a T generalized across GVs,
 %   a set of TV names. BoundVs are the bound Vs in T.
-% Env - a Name => T mapping of bindings in the environment.
 
 % S - a solver record used to unify types and solve constraints
 %   subs - the substitutions made to unify types
@@ -69,14 +68,14 @@
   module,
   loc,
   from,
-  env,
+  l_env,
   pid
 }).
 
 % G - a gnr record that represents a set of constraints to solve before
 %     generalizing a type variable:
 %   v - the TV name to generalize
-%   env - see Env above
+%   env - a Name => T mapping of bindings in the environment
 %   csts - an array of constraints to solve before generalizing
 %   deps - a set of TV names corresponding to gnr records that need to solved
 %     before this record or, in the case of (mutual) recursion,
@@ -86,7 +85,7 @@
 -record(gnr, {
   id,
   vs,
-  env,
+  l_env,
   csts,
   deps,
   index,
@@ -276,22 +275,17 @@ infer_comps(Comps) ->
         nested_ivs=NestedIVs
       } = FinalS,
 
-      SubbedEnv = maps:map(fun(_, {Value, Exported}) ->
-        {tv, V, _, _} = case Value of
-          % TODO: would no_dep ever happen?
-          {no_dep, TV} -> TV;
-          {add_dep, TV, _} -> TV
-        end,
+      FinalGEnv = maps:map(fun(_, #binding{tv={tv, V, _, _}}=B) ->
         {GVs, T, _} = maps:get(V, Schemes),
-        {inst(GVs, T, Pid), Exported}
-      end, C2#ctx.env),
+        B#binding{inst=inst(GVs, T, Pid)}
+      end, C2#ctx.g_env),
 
       SubbedInstRefsPairs = lists:filtermap(fun
         % In the case of a (mutually) recursive function, we defer computing the
         % SubbedVs until now, as we couldn't inst it earlier.
-        ({Ref, {deferred, TV, Env}}) ->
+        ({Ref, {deferred, TV, LEnv}}) ->
           T = subs_s(TV, FinalS),
-          BoundVs = bound_vs(Env, FinalS),
+          BoundVs = bound_vs(LEnv, FinalS),
           IVs = utils:ivs(T, BoundVs),
 
           case IVs of
@@ -314,13 +308,13 @@ infer_comps(Comps) ->
       end, maps:to_list(InstRefs)),
       SubbedInstRefs = maps:from_list(SubbedInstRefsPairs),
 
-      SubbedFnRefs = maps:map(fun(_, {T, Env}) ->
-        BoundVs = bound_vs(Env, FinalS),
+      SubbedFnRefs = maps:map(fun(_, {T, LEnv}) ->
+        BoundVs = bound_vs(LEnv, FinalS),
         utils:args_ivs(subs_s(T, FinalS), BoundVs)
       end, C2#ctx.fn_refs),
 
       FinalC = C2#ctx{
-        env=SubbedEnv,
+        g_env=FinalGEnv,
         inst_refs=SubbedInstRefs,
         fn_refs=SubbedFnRefs,
         nested_ivs=NestedIVs
@@ -342,7 +336,8 @@ populate_env_and_types(Comps, C) ->
       case Node of
         {global, _, {var, Loc, Name}, _, Exported} ->
           {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
-          define(Name, {add_dep, TV, ID}, Exported, Loc, ModuleC);
+          B = #binding{tv=TV, id=ID, exported=Exported, loc=Loc},
+          define(Name, B, ModuleC);
 
         {N, _, TE, OptionsOrFields} when N == enum; N == struct ->
           {Loc, Name, NumParams} = case TE of
@@ -360,16 +355,15 @@ populate_env_and_types(Comps, C) ->
               {OptionNames, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
                 {option, _, {con_token, OptionLoc, OptionCon}, ArgTEs, _} = Option,
                 {TV, ID} = tv_server:fresh_gnr_id(NestedC#ctx.pid),
-                Value = {add_dep, TV, ID},
 
-                NestedC1 = define_option(
-                  OptionCon,
-                  Value,
-                  length(ArgTEs),
-                  true,
-                  OptionLoc,
-                  NestedC
-                ),
+                B = #binding{
+                  tv=TV,
+                  id=ID,
+                  exported=true,
+                  arity=length(ArgTEs),
+                  loc=OptionLoc
+                },
+                NestedC1 = define(OptionCon, B, NestedC),
                 {OptionCon, NestedC1}
               end, ModuleC1, OptionsOrFields),
 
@@ -377,7 +371,8 @@ populate_env_and_types(Comps, C) ->
 
             struct ->
               {TV, ID} = tv_server:fresh_gnr_id(ModuleC1#ctx.pid),
-              ModuleC2 = define(Name, {add_dep, TV, ID}, true, Loc, ModuleC1),
+              B = #binding{tv=TV, id=ID, exported=true, loc=Loc},
+              ModuleC2 = define(Name, B, ModuleC1),
 
               {T, ModuleC3} = infer_sig(false, true, #{}, TE, ModuleC2),
               StructInfo = {T, ModuleC3#ctx.sig_vs},
@@ -386,8 +381,14 @@ populate_env_and_types(Comps, C) ->
 
         {exception, _, {con_token, Loc, Name}, ArgTEs} ->
           {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
-          Value = {add_dep, TV, ID},
-          define_option(Name, Value, length(ArgTEs), true, Loc, ModuleC);
+          B = #binding{
+            tv=TV,
+            id=ID,
+            exported=true,
+            arity=length(ArgTEs),
+            loc=Loc
+          },
+          define(Name, B, ModuleC);
 
         {interface, _, {con_token, Loc, Name}, _, Fields} ->
           Con = utils:qualify(Name, ModuleC),
@@ -404,7 +405,8 @@ populate_env_and_types(Comps, C) ->
 
           lists:foldl(fun({sig, _, {var, VarLoc, VarName}, _}, NestedC) ->
             {TV, ID} = tv_server:fresh_gnr_id(ModuleC#ctx.pid),
-            define(VarName, {add_dep, TV, ID}, true, VarLoc, NestedC)
+            B = #binding{tv=TV, id=ID, exported=true, loc=VarLoc},
+            define(VarName, B, NestedC)
           end, ModuleC2, Fields);
 
         _ -> ModuleC
@@ -412,19 +414,10 @@ populate_env_and_types(Comps, C) ->
     end, FoldC#ctx{module=Module}, Defs)
   end, C, Comps).
 
-define(Name, Value, Exported, Loc, C) ->
-  case env_exists(Name, C) of
-    true -> add_ctx_err(?ERR_REDEF(Name), Loc, C);
-    false -> env_add(Name, Value, Exported, C)
-  end.
-
-define_option(Name, Value, Arity, Exported, Loc, C) ->
-  case env_exists(Name, C) of
-    true -> add_ctx_err(?ERR_REDEF(Name), Loc, C);
-    false ->
-      Options = C#ctx.options,
-      NewOptions = Options#{{C#ctx.module, Name} => Arity},
-      env_add(Name, Value, Exported, C#ctx{options=NewOptions})
+define(Name, B, #ctx{module=Module, g_env=GEnv}=C) ->
+  case maps:is_key({Module, Name}, GEnv) of
+    true -> add_ctx_err(?ERR_REDEF(Name), B#binding.loc, C);
+    false -> C#ctx{g_env=GEnv#{{Module, Name} => B}}
   end.
 
 define_type(Con, IsIface, NumParams, Loc, C) ->
@@ -481,7 +474,7 @@ gen_t_num_params({record_ext_te, Loc, BaseTE, Fields}) ->
 gen_t_num_params({unit, _}) -> false.
 
 infer_defs(Comps, C) ->
-  {Envs, C1} = lists:mapfoldl(fun(#comp{module=Module, deps=Deps}, FoldC) ->
+  {GEnvs, C1} = lists:mapfoldl(fun(#comp{module=Module, deps=Deps}, FoldC) ->
     NewImportedPairs = lists:map(fun({DepModule, _}) ->
       {Module, DepModule}
     end, Deps),
@@ -496,13 +489,13 @@ infer_defs(Comps, C) ->
     % Remove direct imports from env. We don't want modules trying to import
     % recursively through other modules, as this would make the order in
     % which files are processed important.
-    {FoldC2#ctx.env, FoldC2#ctx{env=FoldC#ctx.env}}
+    {FoldC2#ctx.g_env, FoldC2#ctx{g_env=FoldC#ctx.g_env}}
   end, C, Comps),
 
-  CompsEnvs = lists:zip(Comps, Envs),
-  C2 = infer_ifaces(CompsEnvs, C1),
+  CompsGEnvs = lists:zip(Comps, GEnvs),
+  C2 = infer_ifaces(CompsGEnvs, C1),
 
-  lists:foldl(fun({Comp, Env}, FoldC) ->
+  lists:foldl(fun({Comp, GEnv}, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     {LastSig, FoldC1} = lists:foldl(fun(Node, {UncheckedSig, ModuleC}) ->
@@ -520,10 +513,12 @@ infer_defs(Comps, C) ->
 
       case Node of
         {global, _, {var, _, Name}, Expr, _} ->
-          {add_dep, TV, ID} = env_get(Name, ModuleC1),
+          #binding{tv=TV, id=ID} = g_env_get(Name, ModuleC1),
           ModuleC2 = case Expr of
             {fn, _, _, _, _} -> ModuleC1;
-            _ -> env_remove(Name, ModuleC1)
+            _ ->
+              NewGEnv = maps:remove({Module, Name}, ModuleC1#ctx.g_env),
+              ModuleC1#ctx{g_env=NewGEnv}
           end,
 
           {ExprCstLoc, ExprCstFrom, ExprT, ModuleC3} = case Sig of
@@ -544,7 +539,7 @@ infer_defs(Comps, C) ->
             ModuleC3
           ),
           ModuleC5 = finish_gnr(ModuleC4, ModuleC2#ctx.gnr),
-          ModuleC6 = ModuleC5#ctx{env=ModuleC#ctx.env},
+          ModuleC6 = ModuleC5#ctx{g_env=ModuleC#ctx.g_env},
 
           case Sig of
             none -> {none, ModuleC6};
@@ -575,27 +570,27 @@ infer_defs(Comps, C) ->
           {_, ModuleC2} = infer(Node, ModuleC1),
           {none, ModuleC2}
       end
-    end, {none, FoldC#ctx{module=Module, env=Env}}, Defs),
+    end, {none, FoldC#ctx{module=Module, g_env=GEnv}}, Defs),
 
     case LastSig of
       none -> FoldC1;
       {sig, _, {var, _, SigName}, _} ->
         add_ctx_err(?ERR_SIG_NO_DEF(SigName), ?LOC(LastSig), FoldC1)
     end
-  end, C2, CompsEnvs).
+  end, C2, CompsGEnvs).
 
 populate_direct_imports(Deps, C) ->
   lists:foldl(fun({DepModule, Idents}, ModuleC) ->
     Expanded = case Idents of
-      [{all, AllLoc}] -> utils:all_idents(DepModule, AllLoc, C#ctx.env);
+      [{all, AllLoc}] -> utils:all_idents(DepModule, AllLoc, C#ctx.g_env);
       _ -> Idents
     end,
 
     lists:foldl(fun(Ident, NestedC) ->
       case Ident of
         {var, Loc, Name} ->
-          {Value, NestedC1} = raw_lookup(DepModule, Name, Loc, NestedC),
-          define(Name, Value, false, Loc, NestedC1);
+          {B, NestedC1} = lookup(DepModule, Name, Loc, NestedC),
+          define(Name, B#binding{exported=false, loc=Loc}, NestedC1);
 
         {con_token, Loc, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
@@ -626,26 +621,21 @@ populate_direct_imports(Deps, C) ->
             error -> {false, NestedC}
           end,
 
-          {Value, NestedC2} = raw_lookup(DepModule, Name, Loc, NestedC1),
+          {B, NestedC2} = lookup(DepModule, Name, Loc, NestedC1),
           case {TypeExists, no_ctx_errs(NestedC2, NestedC1)} of
             {false, false} -> NestedC2;
             {true, false} -> NestedC1;
             {_, true} ->
-              case maps:find({DepModule, Name}, NestedC2#ctx.options) of
-                {ok, Arity} ->
-                  define_option(Name, Value, Arity, false, Loc, NestedC2);
-                error -> define(Name, Value, false, Loc, NestedC2)
-              end
+              define(Name, B#binding{exported=false, loc=Loc}, NestedC2)
           end;
 
         {variants, Loc, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
           case maps:find(Con, NestedC#ctx.enums) of
             {ok, {OptionNames, _, _}} ->
-              lists:foldl(fun(OptionName, #ctx{env=Env, options=Options}=FoldC) ->
-                {Value, true} = maps:get({DepModule, OptionName}, Env),
-                Arity = maps:get({DepModule, OptionName}, Options),
-                define_option(OptionName, Value, Arity, false, Loc, FoldC)
+              lists:foldl(fun(OptionName, #ctx{g_env=GEnv}=FoldC) ->
+                B = maps:get({DepModule, OptionName}, GEnv),
+                define(OptionName, B#binding{exported=false, loc=Loc}, FoldC)
               end, NestedC, OptionNames);
 
             error ->
@@ -655,11 +645,11 @@ populate_direct_imports(Deps, C) ->
     end, ModuleC, Expanded)
   end, C, Deps).
 
-infer_ifaces(CompsEnvs, C) ->
+infer_ifaces(CompsGEnvs, C) ->
   % Before inference, we need to first populate the inheritance tree. This
   % ensures sig inference will correctly consolidate interfaces within the
   % same family.
-  C1 = lists:foldl(fun({Comp, Env}, FoldC) ->
+  C1 = lists:foldl(fun({Comp, GEnv}, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     lists:foldl(fun(Node, ModuleC) ->
@@ -673,7 +663,13 @@ infer_ifaces(CompsEnvs, C) ->
             {con_token, ParentLoc, ParentRawCon} = ConToken,
 
             ParentCon = utils:resolve_con(ParentRawCon, NestedC),
-            NestedC1 = validate_type(ParentCon, true, NumParams, ParentLoc, NestedC),
+            NestedC1 = validate_type(
+              ParentCon,
+              true,
+              NumParams,
+              ParentLoc,
+              NestedC
+            ),
 
             case no_ctx_errs(NestedC1, NestedC) of
               false -> {FoldParents, NestedC1};
@@ -698,10 +694,10 @@ infer_ifaces(CompsEnvs, C) ->
 
         _ -> ModuleC
       end
-    end, FoldC#ctx{module=Module, env=Env}, Defs)
-  end, C, CompsEnvs),
+    end, FoldC#ctx{module=Module, g_env=GEnv}, Defs)
+  end, C, CompsGEnvs),
 
-  lists:foldl(fun({Comp, Env}, FoldC) ->
+  lists:foldl(fun({Comp, GEnv}, FoldC) ->
     #comp{module=Module, ast={module, _, _, _, Defs}} = Comp,
 
     lists:foldl(fun(Node, ModuleC) ->
@@ -711,8 +707,8 @@ infer_ifaces(CompsEnvs, C) ->
           ModuleC1;
         true -> ModuleC
       end
-    end, FoldC#ctx{module=Module, env=Env}, Defs)
-  end, C1, CompsEnvs).
+    end, FoldC#ctx{module=Module, g_env=GEnv}, Defs)
+  end, C1, CompsGEnvs).
 
 infer_csts_first(Csts, UntilGs, GnrArgs, C) ->
   % Unifying the expr and sig constraints first generally gives better
@@ -746,7 +742,7 @@ infer({fn, _, Ref, Args, Expr}, C) ->
   Names = ordsets:union(lists:map(fun pattern_names/1, Args)),
   C1 = ordsets:fold(fun(Name, FoldC) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
-    env_add(Name, {no_dep, TV}, false, FoldC)
+    l_env_add(Name, #binding{tv=TV}, FoldC)
   end, C, Names),
 
   {ArgTsRev, C2} = lists:foldl(fun(Pattern, {Ts, FoldC}) ->
@@ -759,7 +755,7 @@ infer({fn, _, Ref, Args, Expr}, C) ->
   % the return type to the env. The key doesn't matter, so we just use the
   % unique ref for this function.
   ReturnTV = tv_server:fresh(C2#ctx.pid),
-  C3 = env_add(Ref, {no_dep, ReturnTV}, false, C2),
+  C3 = l_env_add(Ref, #binding{tv=ReturnTV}, C2),
   {ReturnT, C4} = infer(Expr, C3),
   C5 = add_cst(ReturnTV, ReturnT, ?LOC(Expr), "return type", C4),
 
@@ -771,11 +767,11 @@ infer({fn, _, Ref, Args, Expr}, C) ->
   end,
 
   FnRefs = C5#ctx.fn_refs,
-  % keep reference of original env to find bound variables
-  C6 = C5#ctx{fn_refs=FnRefs#{Ref => {T, C#ctx.env}}},
+  % keep reference of original local env to find bound variables
+  C6 = C5#ctx{fn_refs=FnRefs#{Ref => {T, C#ctx.l_env}}},
 
   % restore original env
-  {T, C6#ctx{env=C#ctx.env}};
+  {T, C6#ctx{l_env=C#ctx.l_env}};
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
@@ -907,7 +903,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   end,
   C2 = add_alias(Con, Vs, {record, none, RawFieldMap}, true, C1),
 
-  {add_dep, TV, ID} = env_get(Name, C2),
+  #binding{tv=TV, id=ID} = g_env_get(Name, C2),
   C3 = new_gnr(TV, ID, C2),
   C4 = add_cst(TV, NormFnT, Loc, ?FROM_STRUCT_CTOR, C3),
   C5 = finish_gnr(C4, C2#ctx.gnr),
@@ -958,7 +954,7 @@ infer({interface, Loc, {con_token, _, RawCon}, _, Fields}, C) ->
     #{Name := RawT} = RawFieldMap,
     T = norm_sig_type(RawT, [], FoldC2#ctx.pid),
 
-    {add_dep, TV, ID} = env_get(Name, FoldC2),
+    #binding{tv=TV, id=ID} = g_env_get(Name, FoldC2),
     FoldC3 = new_gnr(TV, ID, FoldC2),
     FoldC4 = add_cst(TV, T, FieldLoc, ?FROM_GLOBAL_SIG(Name), FoldC3),
     {RawT, finish_gnr(FoldC4, FoldC2#ctx.gnr)}
@@ -1103,9 +1099,9 @@ infer({map, _, Pairs}, C) ->
   {{gen, {con, "Map"}, [KeyTV, ValueTV]}, C1};
 
 infer({N, Loc, Name}, C) when N == var; N == con_token; N == var_value ->
-  lookup(C#ctx.module, Name, Loc, none, C);
+  lookup_inst(Name, Loc, none, C);
 
-infer({var_ref, Loc, Ref, Name}, C) -> lookup(C#ctx.module, Name, Loc, Ref, C);
+infer({var_ref, Loc, Ref, Name}, C) -> lookup_inst(Name, Loc, Ref, C);
 
 % only occurs when pattern matching to designate anything
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
@@ -1117,12 +1113,12 @@ infer({anon_record, _, Inits}, C) ->
     {T, FoldC1} = case Expr of
       {fn, FnLoc, _, _, _} ->
         TV = tv_server:fresh(FoldC#ctx.pid),
-        CaseC = env_add(Name, {no_dep, TV}, false, FoldC),
+        CaseC = l_env_add(Name, #binding{tv=TV}, FoldC),
         {ExprT, CaseC1} = infer(Expr, CaseC),
 
         % TODO: should this cst be unified first for better error messages?
         CaseC2 = add_cst(TV, ExprT, FnLoc, ?FROM_FIELD_DEF(Name), CaseC1),
-        {TV, CaseC2#ctx{env=FoldC#ctx.env}};
+        {TV, CaseC2#ctx{l_env=FoldC#ctx.l_env}};
 
       _ -> infer(Expr, FoldC)
     end,
@@ -1257,7 +1253,7 @@ infer({field, Loc, Expr, Prop}, C) ->
       end,
 
       case ordsets:is_element({C#ctx.module, Module}, C#ctx.imported) of
-        true -> lookup(Module, Name, Loc, Ref, C);
+        true -> lookup_inst(Module, Name, Loc, Ref, C);
         false ->
           TV = tv_server:fresh(C#ctx.pid),
           {TV, add_ctx_err(?ERR_NOT_DEF_MODULE(Module), ConLoc, C)}
@@ -1286,7 +1282,7 @@ infer({app, Loc, Expr, Args}, C) ->
     length(ArgLocTsRev) == 0 -> {lam, unit, TV};
     true ->
       lists:foldl(fun({ArgLoc, ArgT}, LastT) ->
-        {lam, C2#ctx.env, ArgLoc, ArgT, LastT}
+        {lam, C2#ctx.l_env, ArgLoc, ArgT, LastT}
       end, TV, ArgLocTsRev)
   end,
 
@@ -1294,31 +1290,24 @@ infer({app, Loc, Expr, Args}, C) ->
   {TV, C3};
 
 infer({variant, Loc, Expr, Args}, C) ->
-  {Module, Con, LookupLoc} = case Expr of
-    {field, LookupLoc_, {con_token, _, Module_}, {con_token, _, Con_}} ->
-      {Module_, Con_, LookupLoc_};
-    {con_token, LookupLoc_, Con_} -> {C#ctx.module, Con_, LookupLoc_}
+  {ConLoc, Con, {B, C1}} = case Expr of
+    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
+      {ConLoc_, Con_, lookup(Module, Con_, ConLoc_, C)};
+    {con_token, ConLoc_, Con_} -> {ConLoc_, Con_, lookup(Con_, ConLoc_, C)}
   end,
-  {_, C1} = raw_lookup(Module, Con, LookupLoc, C),
 
   case no_ctx_errs(C1, C) of
     false -> {tv_server:fresh(C1#ctx.pid), C1};
     true ->
-      {ExpArity, C2} = case maps:find({Module, Con}, C1#ctx.options) of
-        {ok, ExpArity_} -> {ExpArity_, C1};
-        error -> {none, add_ctx_err(?ERR_MATCH_STRUCT, LookupLoc, C1)}
-      end,
-
-      case no_ctx_errs(C2, C1) of
-        false -> {tv_server:fresh(C2#ctx.pid), C2};
-        true ->
-          case length(Args) of
-            ExpArity when ExpArity == 0 -> infer(Expr, C2);
-            ExpArity when ExpArity > 0 -> infer({app, Loc, Expr, Args}, C2);
-            Arity ->
-              C3 = add_ctx_err(?ERR_OPTION_ARITY(Con, ExpArity, Arity), Loc, C2),
-              {tv_server:fresh(C3#ctx.pid), C3}
-          end
+      case {B#binding.arity, length(Args)} of
+        {undefined, _} ->
+          TV = tv_server:fresh(C1#ctx.pid),
+          {TV, add_ctx_err(?ERR_MATCH_STRUCT, ConLoc, C1)};
+        {Arity, Arity} when Arity == 0 -> infer(Expr, C1);
+        {Arity, Arity} -> infer({app, Loc, Expr, Args}, C1);
+        {ExpArity, Arity} ->
+          TV = tv_server:fresh(C1#ctx.pid),
+          {TV, add_ctx_err(?ERR_OPTION_ARITY(Con, ExpArity, Arity), Loc, C1)}
       end
   end;
 
@@ -1359,13 +1348,13 @@ infer({'let', _, Bindings, Then}, C) ->
   end, C, Bindings),
 
   {T, C2} = infer(Then, C1),
-  {T, C2#ctx{env=C#ctx.env}};
+  {T, C2#ctx{l_env=C#ctx.l_env}};
 
 infer({if_let, _, Pattern, Expr, Then, Else}, C) ->
   C1 = infer_pattern(Pattern, Expr, ?FROM_IF_LET_PATTERN, C),
   {ThenT, C2} = infer(Then, C1),
   % revert env to before pattern was parsed
-  C3 = C2#ctx{env=C#ctx.env},
+  C3 = C2#ctx{l_env=C#ctx.l_env},
 
   case Else of
     {unit, _} -> {unit, C3};
@@ -1396,7 +1385,7 @@ infer({match, _, Expr, Cases}, C) ->
     FoldC4 = finish_gnr(FoldC3, add_gnr_dep(ID, FoldC#ctx.gnr)),
     {ThenT, FoldC5} = infer(Then, FoldC4),
     % revert env to before pattern was parsed
-    FoldC6 = FoldC5#ctx{env=FoldC#ctx.env},
+    FoldC6 = FoldC5#ctx{l_env=FoldC#ctx.l_env},
     add_cst(TV, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
   end, C, Cases),
 
@@ -1420,7 +1409,7 @@ infer({'try', _, Expr, Cases}, C) ->
     FoldC4 = finish_gnr(FoldC3, add_gnr_dep(ID, FoldC#ctx.gnr)),
     {ThenT, FoldC5} = infer(Then, FoldC4),
     % revert env to before pattern was parsed
-    FoldC6 = FoldC5#ctx{env=FoldC#ctx.env},
+    FoldC6 = FoldC5#ctx{l_env=FoldC#ctx.l_env},
     add_cst(ExprT, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
   end, C1, Cases),
 
@@ -1708,7 +1697,7 @@ infer_option(Option, T, FVs, SigVs, C) ->
 
   % don't need to make any Vs rigid; inst still works correctly
   OptionT = norm_sig_type(RawOptionT, [], C1#ctx.pid),
-  {add_dep, TV, ID} = env_get(Con, C1),
+  #binding{tv=TV, id=ID} = g_env_get(Con, C1),
 
   C2 = new_gnr(TV, ID, C1),
   C3 = add_cst(TV, OptionT, Loc, ?FROM_ENUM_CTOR, C2),
@@ -1716,7 +1705,7 @@ infer_option(Option, T, FVs, SigVs, C) ->
 
 infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
-  C1 = env_add(Name, {add_dep, TV, ID}, false, C),
+  C1 = l_env_add(Name, #binding{tv=TV, id=ID}, C),
   {PatternT, C2} = infer(Pattern, new_gnr(TV, ID, C1)),
   {ExprT, C3} = infer(Expr, C2),
   C4 = add_cst(PatternT, ExprT, Loc, From, C3),
@@ -1737,7 +1726,7 @@ with_pattern_env(Pattern, C) ->
   {Vs, C1} = ordsets:fold(fun(Name, {FoldVs, FoldC}) ->
     TV = tv_server:fresh(C#ctx.pid),
     {tv, V, _, _} = TV,
-    {[V | FoldVs], env_add(Name, {add_dep, TV, ID}, false, FoldC)}
+    {[V | FoldVs], l_env_add(Name, #binding{tv=TV, id=ID}, FoldC)}
   end, {[], C}, Names),
 
   C1#ctx{gnr=C1#ctx.gnr#gnr{vs=Vs}}.
@@ -1758,45 +1747,58 @@ pattern_names({cons, _, Elems, Tail}) ->
   ordsets:union(pattern_names(Elems), pattern_names(Tail));
 pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 
-lookup(Module, Name, Loc, Ref, C) ->
-  {Value, C1} = raw_lookup(Module, Name, Loc, C),
-  case Value of
-    {add_dep, TV, ID} ->
-      C2 = C1#ctx{gnr=add_gnr_dep(ID, C1#ctx.gnr)},
+lookup(Name, Loc, C) ->
+  case maps:find(Name, C#ctx.l_env) of
+    {ok, B} -> {B, C};
+    error ->
+      case maps:find({C#ctx.module, Name}, C#ctx.g_env) of
+        {ok, B} -> {B, C};
+        error ->
+          TV = tv_server:fresh(C#ctx.pid),
+          {#binding{tv=TV}, add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)}
+      end
+  end.
+
+lookup(Module, Name, Loc, C) ->
+  External = C#ctx.module /= Module,
+
+  case maps:find({Module, Name}, C#ctx.g_env) of
+    {ok, #binding{exported=false}=B} when External ->
+      {B, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
+    {ok, B} -> {B, C};
+
+    error ->
+      TV = tv_server:fresh(C#ctx.pid),
+      C1 = add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C),
+      {#binding{tv=TV}, C1}
+  end.
+
+lookup_inst(Name, Loc, Ref, C) ->
+  {B, C1} = lookup(Name, Loc, C),
+  binding_inst(B, Name, Loc, Ref, C1).
+
+lookup_inst(Module, Name, Loc, Ref, C) ->
+  {B, C1} = lookup(Module, Name, Loc, C),
+  binding_inst(B, Name, Loc, Ref, C1).
+
+binding_inst(B, Name, Loc, Ref, C) ->
+  case B of
+    #binding{tv=TV, id=undefined} -> {TV, C};
+    #binding{tv=TV, id=ID} ->
+      C1 = C#ctx{gnr=add_gnr_dep(ID, C#ctx.gnr)},
 
       % We don't want to return {inst, ...} directly; if it's added to two
       % separate constraints, that will cause two separate instantiations.
       % Additionally, we want all returned types to be fully resolved in case
       % they're associated with a reference. To accomplish this, introduce an
       % intermediate TV that will get assigned the inst.
-      InstTV = tv_server:fresh(C2#ctx.pid),
-      C3 = add_cst(InstTV, {inst, Ref, TV}, Loc, ?FROM_VAR(Name), C2),
+      InstTV = tv_server:fresh(C1#ctx.pid),
+      C2 = add_cst(InstTV, {inst, Ref, TV}, Loc, ?FROM_VAR(Name), C1),
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
       % instantiate properly.
-      {InstTV, C3};
-
-    {no_dep, TV} -> {TV, C1}
-  end.
-
-raw_lookup(Module, Name, Loc, C) ->
-  Key = {Module, Name},
-  External = C#ctx.module /= Module,
-
-  case maps:find(Key, C#ctx.env) of
-    {ok, {Value, false}} when External ->
-      {Value, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
-
-    {ok, {Value, _}} -> {Value, C};
-
-    error ->
-      TV = tv_server:fresh(C#ctx.pid),
-      C1 = if
-        External -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C);
-        true -> add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)
-      end,
-      {{no_dep, TV}, C1}
+      {InstTV, C2}
   end.
 
 infer_impl_inits(
@@ -1861,7 +1863,7 @@ infer_impl_inits(
             % To make sure they're treated as bound variables, whose impls
             % shouldn't be passed to the Expr here, we add ImplT in the env
             % under some fake variable name.
-            FoldC1 = new_gnr(env_add("_@Impl", {no_dep, ImplT}, false, FoldC)),
+            FoldC1 = new_gnr(l_env_add("_@Impl", #binding{tv=ImplT}, FoldC)),
 
             FoldC2 = case IfaceNumParams of
               0 -> add_cst(NewTV, ImplT, ImplLoc, ?FROM_IMPL_TYPE, FoldC1);
@@ -1903,43 +1905,25 @@ infer_impl_inits(
             % Infer ExprCst first, as inference is in reverse order.
             FoldC4 = append_csts([SigCst, ExprCst], FoldC3),
             FoldC5 = finish_gnr(FoldC4, FoldC#ctx.gnr),
-            FoldC5#ctx{env=FoldC#ctx.env}
+            FoldC5#ctx{l_env=FoldC#ctx.l_env}
         end,
 
         {NewNames, NewC}
     end
   end, {ordsets:new(), C}, Inits).
 
-env_exists(Name, C) ->
-  Key = {C#ctx.module, Name},
-  maps:is_key(Key, C#ctx.env).
+g_env_get(Name, #ctx{module=Module, g_env=GEnv}) ->
+  maps:get({Module, Name}, GEnv).
 
-env_get(Name, C) ->
-  Key = {C#ctx.module, Name},
-  {Value, _} = maps:get(Key, C#ctx.env),
-  Value.
-
-env_add(Name, Value, Exported, C) ->
-  % just a sanity assertion that Value is in the right format
-  case Value of
-    % add_dep must be a TV so we can add V to the list of deps when accessed
-    {add_dep, {tv, _, _, _}, _} -> true;
-    {no_dep, _} -> true
-  end,
-  Key = {C#ctx.module, Name},
-  C#ctx{env=(C#ctx.env)#{Key => {Value, Exported}}}.
-
-env_remove(Name, C) ->
-  Key = {C#ctx.module, Name},
-  C#ctx{env=maps:remove(Key, C#ctx.env)}.
+l_env_add(Name, B, #ctx{l_env=LEnv}=C) -> C#ctx{l_env=LEnv#{Name => B}}.
 
 new_gnr(C) ->
   ID = tv_server:next_gnr_id(C#ctx.pid),
-  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=ordsets:new()},
+  G = #gnr{id=ID, vs=[], l_env=C#ctx.l_env, csts=[], deps=ordsets:new()},
   C#ctx{gnr=G}.
 
 new_gnr({tv, V, _, _}, ID, C) ->
-  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=ordsets:new()},
+  G = #gnr{id=ID, vs=[V], l_env=C#ctx.l_env, csts=[], deps=ordsets:new()},
   C#ctx{gnr=G}.
 
 finish_gnr(C, OldG) -> C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=OldG}.
@@ -2050,14 +2034,14 @@ solve(Gs, S) ->
   end, ordsets:new(), ErrVs),
 
   {ReportedVs, S2} = lists:foldl(fun(PassedV, {FoldReportedVs, FoldS}) ->
-    {OrigV, ArgT, Module, Loc, Env} = PassedV,
+    {OrigV, ArgT, Module, Loc, LEnv} = PassedV,
     % Is and Rigid don't matter for subs.
     SubbedT = subs_s({tv, OrigV, none, false}, FoldS),
-    BoundVs = bound_vs(Env, FoldS),
+    BoundVs = bound_vs(LEnv, FoldS),
 
     ordsets:fold(fun(V, {NestedReportedVs, NestedS}) ->
       validate_solved(
-        {V, ArgT, Module, Loc, Env},
+        {V, ArgT, Module, Loc, LEnv},
         true,
         SubbedMustSolveVs,
         SubbedErrVs,
@@ -2069,8 +2053,8 @@ solve(Gs, S) ->
   end, {ordsets:new(), S1}, PassedVs),
 
   {_, FinalS} = lists:foldl(fun(ReturnV, {FoldReportedVs, FoldS}) ->
-    {_, _, _, _, Env} = ReturnV,
-    BoundVs = bound_vs(Env, FoldS),
+    {_, _, _, _, LEnv} = ReturnV,
+    BoundVs = bound_vs(LEnv, FoldS),
     validate_solved(
       ReturnV,
       false,
@@ -2223,7 +2207,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
 
       S4 = lists:foldl(fun(SolID, FoldS) ->
         #{SolID := SolG} = Map3,
-        BoundVs = bound_vs(SolG#gnr.env, FoldS),
+        BoundVs = bound_vs(SolG#gnr.l_env, FoldS),
 
         lists:foldl(fun(SolV, NestedS) ->
           SolTV = {tv, SolV, none, false},
@@ -2242,8 +2226,8 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
     true -> T2
   end.
 
-unify_csts(#gnr{csts=Csts, env=Env}, S) ->
-  BoundVs = bound_vs(Env, S),
+unify_csts(#gnr{csts=Csts, l_env=LEnv}, S) ->
+  BoundVs = bound_vs(LEnv, S),
 
   % Constraints are always prepended to the list in a depth-first manner. Hence,
   % the shallowest expression's constraints come first. We'd like to solve the
@@ -2264,16 +2248,16 @@ unify_csts(#gnr{csts=Csts, env=Env}, S) ->
     },
 
     unify(SubbedT1, SubbedT2, FoldS3)
-  end, S#solver{bound_vs=BoundVs, env=Env}, Csts).
+  end, S#solver{bound_vs=BoundVs, l_env=LEnv}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
   {ResArgT, S1} = resolve(ArgT, S),
   {ResReturnT, S2} = resolve(ReturnT, S1),
   {{lam, ResArgT, ResReturnT}, S2};
-resolve({lam, Env, Loc, ArgT, ReturnT}, S) ->
+resolve({lam, LEnv, Loc, ArgT, ReturnT}, S) ->
   {ResArgT, S1} = resolve(ArgT, S),
   {ResReturnT, S2} = resolve(ReturnT, S1),
-  {{lam, Env, Loc, ResArgT, ResReturnT}, S2};
+  {{lam, LEnv, Loc, ResArgT, ResReturnT}, S2};
 resolve({tuple, ElemTs}, S) ->
   {ResElemTs, S1} = lists:mapfoldl(fun(T, FoldS) ->
     resolve(T, FoldS)
@@ -2304,7 +2288,7 @@ resolve({inst, Ref, {tv, InstV, _, _}=TV}, #solver{inst_refs=InstRefs}=S) ->
       % fn bar(x), where X ~ I, and we call bar(x) from within it, we *don't*
       % want x to be in the env. If x is in the env, it'll be consider bound,
       % and no impl will be passed.
-      NewInstRefs = InstRefs#{Ref => {deferred, TV, S#solver.env}},
+      NewInstRefs = InstRefs#{Ref => {deferred, TV, S#solver.l_env}},
       resolve(TV, S#solver{inst_refs=NewInstRefs});
 
     {ok, {GVs, T, _}} -> resolve({inst, Ref, GVs, T}, S)
@@ -2372,7 +2356,7 @@ unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     true -> sub_unify(ReturnT1, ReturnT2, S1);
     false -> S1
   end;
-unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
+unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   #solver{
     module=Module,
     loc=OrigLoc,
@@ -2384,7 +2368,7 @@ unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   } = S,
 
   NewPassedVs = ordsets:fold(fun(V, FoldPassedVs) ->
-    [{V, ArgT2, Module, Loc, Env} | FoldPassedVs]
+    [{V, ArgT2, Module, Loc, LEnv} | FoldPassedVs]
   end, PassedVs, fvs(ArgT2)),
 
   VsWithIs = lists:map(fun({_, V}) -> V end, utils:ivs(ArgT2)),
@@ -2401,7 +2385,7 @@ unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   ]),
   NewReturnVs = lists:foldl(fun(V, FoldReturnVs) ->
     % Use OrigLoc, which spans the entire app, to represent the return type.
-    [{V, ReturnT2, Module, OrigLoc, Env} | FoldReturnVs]
+    [{V, ReturnT2, Module, OrigLoc, LEnv} | FoldReturnVs]
   end, ReturnVs, ReturnVsWithIs),
 
   S1 = S#solver{
@@ -2979,22 +2963,21 @@ subs_s(T, S) -> subs_s(T, S, #sub_opts{}).
 subs_s(T, #solver{subs=Subs, aliases=Aliases}, Opts) ->
   utils:subs(T, Opts#sub_opts{subs=Subs, aliases=Aliases}).
 
-bound_vs(Env, #solver{schemes=Schemes}=S) ->
-  maps:fold(fun(_, {Value, _}, FoldVs) ->
-    case Value of
-      {no_dep, T} -> ordsets:union(FoldVs, fvs(subs_s(T, S)));
+bound_vs(LEnv, #solver{schemes=Schemes}=S) ->
+  maps:fold(fun
+    (_, #binding{tv=TV, id=undefined}, FoldVs) ->
+      ordsets:union(FoldVs, fvs(subs_s(TV, S)));
 
+    (_, #binding{tv={tv, V, _, _}}, FoldVs) ->
       % 1) If a given other binding has been fully generalized already,
       %    we'll add the bound type variables from its scheme.
       % 2) If a given other binding is currently being generalized,
       %    its TV can be generalized over, and so we shouldn't add it here.
-      {add_dep, {tv, V, _, _}, _} ->
-        case maps:find(V, Schemes) of
-          {ok, {_, _, BoundVs}} -> ordsets:union(FoldVs, BoundVs);
-          error -> FoldVs
-        end
-    end
-  end, ordsets:new(), Env).
+      case maps:find(V, Schemes) of
+        {ok, {_, _, BoundVs}} -> ordsets:union(FoldVs, BoundVs);
+        error -> FoldVs
+      end
+  end, ordsets:new(), LEnv).
 
 fvs(T) -> ordsets:from_list(fvs_list(T, [])).
 

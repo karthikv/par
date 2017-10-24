@@ -63,8 +63,8 @@ unalias(T, _) -> T.
 
 subs({lam, ArgT, ReturnT}, Opts) ->
   {lam, subs(ArgT, Opts), subs(ReturnT, Opts)};
-subs({lam, Env, Loc, ArgT, ReturnT}, Opts) ->
-  {lam, Env, Loc, subs(ArgT, Opts), subs(ReturnT, Opts)};
+subs({lam, LEnv, Loc, ArgT, ReturnT}, Opts) ->
+  {lam, LEnv, Loc, subs(ArgT, Opts), subs(ReturnT, Opts)};
 subs({tuple, ElemTs}, Opts) ->
   {tuple, lists:map(fun(T) -> subs(T, Opts) end, ElemTs)};
 subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs}=Opts) ->
@@ -209,23 +209,23 @@ family_is(I, Ifaces) ->
     ordsets:union(Family, family_is(ParentI, Ifaces))
   end, ordsets:add_element(I, Parents), Parents).
 
-test_names(Module, Env) ->
+test_names(Module, GEnv) ->
   maps:fold(fun
-    ({M, Name}, {{con, "Test"}, _}, Set) when M == Module ->
+    ({M, Name}, #binding{inst={con, "Test"}}, Set) when M == Module ->
       ordsets:add_element(Name, Set);
     (_, _, Set) -> Set
-  end, ordsets:new(), Env).
+  end, ordsets:new(), GEnv).
 
-all_idents(Module, Loc, Env) ->
+all_idents(Module, Loc, GEnv) ->
   maps:fold(fun
-    ({M, [H | _]=Name}, {_, true}, FoldIdents) when M == Module ->
+    ({M, [H | _]=Name}, #binding{exported=true}, FoldIdents) when M == Module ->
       if
         H >= $a andalso H =< $z -> [{var, Loc, Name} | FoldIdents];
         true -> [{con_token, Loc, Name} | FoldIdents]
       end;
 
     (_, _, FoldIdents) -> FoldIdents
-  end, [], Env).
+  end, [], GEnv).
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

@@ -12,9 +12,9 @@ type_check(Prg) -> type_system:infer_prg(?PRG_PREFIX ++ Prg).
 type_check(Prefix, Prg) -> type_system:infer_prg(Prefix ++ Prg).
 
 norm_prg(Prefix, Prg, Name) ->
-  {ok, _, #ctx{env=Env}} = type_check(Prefix, Prg),
+  {ok, _, #ctx{g_env=GEnv}} = type_check(Prefix, Prg),
   Key = {"Mod", Name},
-  #{Key := {T, _}} = Env,
+  #binding{inst=T} = maps:get(Key, GEnv),
 
   {ok, Pid} = tv_server:start_link(),
   {NormT, _} = norm(T, {#{}, Pid}),
@@ -62,9 +62,9 @@ type_check_many(Dir, PathPrgs, TargetPath) ->
 
 ok_many(PathPrgs, TargetPath, Name) ->
   {ok, Comps, C} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
-  #ctx{env=Env} = C,
+  #ctx{g_env=GEnv} = C,
   #comp{module=Module} = hd(Comps),
-  {T, _} = maps:get({Module, Name}, Env),
+  #binding{inst=T} = maps:get({Module, Name}, GEnv),
 
   {ok, Pid} = tv_server:start_link(),
   {NormT, _} = norm(T, {#{}, Pid}),

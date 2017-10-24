@@ -8,13 +8,12 @@
 %   gnr - the current gnr record that constraints are being added to; see G
 %     below
 %   gnrs - an array of finalized gnr records that need to be solved
-%   env - see Env above
+%   env - a Name => T mapping of bindings in the environment
 %   types - a Name => NumParams map for types in the env
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
 %   structs - a Name => {T, SigVs} map for structs in the env
 %   enums - a EnumName => {[OptionName], ParamTs, GenOptions} map for enums
-%   options - a {Module, Name} => Arity map for options
 %   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   impl_refs - a Ref => ImplKey map for implementations of interfaces
@@ -32,7 +31,8 @@
 -record(ctx, {
   gnr,
   gnrs = [],
-  env = #{},
+  g_env = #{},
+  l_env = #{},
   types = #{
     "Int" => {false, 0},
     "Float" => {false, 0},
@@ -57,7 +57,6 @@
   aliases = #{},
   structs = #{},
   enums = #{},
-  options = #{},
   ifaces = #{},
   impls = #{
     "Num" => #{},
@@ -77,6 +76,9 @@
   imported = ordsets:new(),
   pid
 }).
+
+% a binding in the global or local env
+-record(binding, {tv, id, exported = false, arity, inst, loc}).
 
 % options while performing substitution on a type
 -record(sub_opts, {subs, aliases = #{}, for_err = false}).

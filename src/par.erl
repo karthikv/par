@@ -12,6 +12,7 @@
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
+% - Ensure module can't import itself
 % - Enforce newline between defs
 % - _atom for a module
 % - Use expr_single in parsing list instead of expr_multi to avoid bugs
@@ -145,7 +146,7 @@ main(Args) ->
 
               TestSet = ordsets:fold(fun(TestName, FoldTestSet) ->
                 [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
-              end, [], utils:test_names(Module, C#ctx.env)),
+              end, [], utils:test_names(Module, C#ctx.g_env)),
 
               code:add_patha(OutDir),
               Mod:'_@init'(ordsets:new()),
