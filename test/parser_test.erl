@@ -6,7 +6,7 @@
 -define(DEF_PREFIX, "module Mod\n").
 -define(EXPR_PREFIX, "module Mod expr =\n").
 
-load() -> 'Parser':'_@init'(gb_sets:new()).
+load() -> 'Parser':'_@init'(ordsets:new()).
 
 ok_prg(Prg) ->
   {ok, Tokens} = 'Lexer':tokenize(Prg),

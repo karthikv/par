@@ -74,7 +74,7 @@
   errs = [],
   gen_vs = #{},
   module,
-  imported = gb_sets:new(),
+  imported = ordsets:new(),
   pid
 }).
 

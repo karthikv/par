@@ -45,7 +45,7 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{env=Env}}=CG) ->
         Value = {{global, Atom}, unknown},
 
         ModuleCG1 = env_set(Name, Value, ModuleCG),
-        IsTest = gb_sets:is_member(Name, TestNames),
+        IsTest = ordsets:is_element(Name, TestNames),
         if
           Exported orelse IsTest -> {[{Atom, 0}], ModuleCG1};
           true -> {[], ModuleCG1}
@@ -152,7 +152,8 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
   Enums = CG#cg.ctx#ctx.enums,
   lists:foldl(fun({DepModule, Idents}, ModuleCG) ->
     Expanded = case Idents of
-      [{all, AllLoc}] -> utils:all_idents(DepModule, AllLoc, CG#cg.ctx#ctx.env);
+      [{all, AllLoc}] ->
+        utils:all_idents(DepModule, AllLoc, CG#cg.ctx#ctx.env);
       _ -> Idents
     end,
 
@@ -186,7 +187,7 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
 compile_ast(Comp, Exports, CG) ->
   #comp{module=Module, ast=Ast, path=Path} = Comp,
   counter_spawn(),
-  excluder_spawn(gb_sets:from_list([
+  excluder_spawn(ordsets:from_list([
     '_@gm_find',
     '_@gm_set',
     '_@curry',
@@ -203,7 +204,7 @@ compile_ast(Comp, Exports, CG) ->
   % remove everything except necessary functions
   Excluded = excluder_all(),
   Utils = lists:filter(fun
-    ({function, _, Atom, _, _}) -> not gb_sets:is_member(Atom, Excluded);
+    ({function, _, Atom, _, _}) -> not ordsets:is_element(Atom, Excluded);
     (_) -> false
   end, code_gen_utils_parsed:forms()),
 
@@ -374,7 +375,7 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
     [] -> {[], CG};
     IVs ->
       lists:foldl(fun({Is, V}, {FoldArgsRep, FoldCG}) ->
-        gb_sets:fold(fun(I, {NestedArgsRep, NestedCG}) ->
+        ordsets:fold(fun(I, {NestedArgsRep, NestedCG}) ->
           ImplName = bound_impl_name(I, V),
           NewCG = bind(ImplName, badarity, NestedCG),
           {ImplAtom, _} = env_get(ImplName, NewCG),
@@ -411,8 +412,8 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
 rep({sig, _, _, _}, _) -> [];
 
 rep({fn, Loc, Ref, Args, Expr}, CG) ->
-  Names = gb_sets:union(lists:map(fun type_system:pattern_names/1, Args)),
-  CG1 = gb_sets:fold(fun(Name, FoldCG) ->
+  Names = ordsets:union(lists:map(fun type_system:pattern_names/1, Args)),
+  CG1 = ordsets:fold(fun(Name, FoldCG) ->
     bind(Name, unknown, FoldCG)
   end, CG, Names),
 
@@ -699,7 +700,7 @@ rep({match, Loc, Expr, Cases}, CG) ->
   ExprRep = rep(Expr, CG),
   CaseClauses = lists:map(fun({'case', _, Pattern, Then}) ->
     % TODO: use arity(Expr) in case of simple pattern?
-    CG1 = gb_sets:fold(fun(Name, FoldCG) ->
+    CG1 = ordsets:fold(fun(Name, FoldCG) ->
       bind(Name, unknown, FoldCG)
     end, CG, type_system:pattern_names(Pattern)),
 
@@ -714,7 +715,7 @@ rep({'try', Loc, Expr, Cases}, CG) ->
   ExprRep = rep(Expr, CG),
   CatchClauses = lists:map(fun({'case', _, Pattern, Then}) ->
     % TODO: use arity(Expr) in case of simple pattern?
-    CG1 = gb_sets:fold(fun(Name, FoldCG) ->
+    CG1 = ordsets:fold(fun(Name, FoldCG) ->
       bind(Name, unknown, FoldCG)
     end, CG, type_system:pattern_names(Pattern)),
 
@@ -919,7 +920,7 @@ rep_pattern({var, _, Name}=Pattern, {fn, _, _, Args, _}=Expr, CG) ->
 
 rep_pattern(Pattern, Expr, CG) ->
   % TODO arity(Expr) for simple patterns
-  CG1 = gb_sets:fold(fun(Name, FoldCG) ->
+  CG1 = ordsets:fold(fun(Name, FoldCG) ->
     bind(Name, unknown, FoldCG)
   end, CG, type_system:pattern_names(Pattern)),
   {rep(Pattern, CG1), rep(Expr, CG), CG1}.
@@ -927,12 +928,12 @@ rep_pattern(Pattern, Expr, CG) ->
 rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   ArgVar = {var, 1, unique("Arg")},
   ModuleRep = eabs(Module, 1),
-  IsMemberCall = call(gb_sets, is_member, [ModuleRep, ArgVar], 1),
+  IsMemberCall = call(ordsets, is_element, [ModuleRep, ArgVar], 1),
 
   % might be unused if there are no deps
   InitSetVar = {var, 1, unique("_InitSet")},
   MatchAddCall = {match, 1, InitSetVar,
-    call(gb_sets, add, [ModuleRep, ArgVar], 1)},
+    call(ordsets, add_element, [ModuleRep, ArgVar], 1)},
 
   StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, gm(Module)}]},
   InitCalls = lists:map(fun({DepModule, _}) ->
@@ -970,10 +971,10 @@ rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
 
     {ImplReps, NewSeenVs, NewOuterCG} = lists:foldl(fun({Is, V}, Memo) ->
       {FoldImplReps, FoldSeenVs, FoldCG} = Memo,
-      case gb_sets:is_member(V, FoldSeenVs) of
+      case ordsets:is_element(V, FoldSeenVs) of
         true -> Memo;
         false ->
-          {NewImplReps, NewCG} = gb_sets:fold(fun(I, NestedMemo) ->
+          {NewImplReps, NewCG} = ordsets:fold(fun(I, NestedMemo) ->
             {NestedImplReps, NestedCG} = NestedMemo,
             ImplName = bound_impl_name(I, V),
 
@@ -990,7 +991,7 @@ rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
             end
           end, {FoldImplReps, FoldCG}, Is),
 
-          {NewImplReps, gb_sets:add(V, FoldSeenVs), NewCG}
+          {NewImplReps, ordsets:add_element(V, FoldSeenVs), NewCG}
       end
     end, {[], SeenVs, OuterCG}, IVs),
 
@@ -1000,7 +1001,7 @@ rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
     end,
 
     {FinalPatternRep, {NewSeenVs, NewOuterCG}}
-  end, {gb_sets:new(), CG}, lists:zip(ArgsRep, ArgsIVs)),
+  end, {ordsets:new(), CG}, lists:zip(ArgsRep, ArgsIVs)),
 
   {PatternReps, CG1}.
 
@@ -1045,7 +1046,7 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
       {none, none, none} -> {[], Memo};
 
       {none, NewV, NewIs} ->
-        {FirstI, _} = gb_sets:next(gb_sets:iterator(Is)),
+        FirstI = hd(Is),
         FirstImplName = bound_impl_name(child_i(FirstI, NewIs, Ifaces), NewV),
 
         IsBound = maps:is_key({Module, FirstImplName}, Env),
@@ -1055,7 +1056,7 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
           true -> [{Is, NewV}]
         end,
 
-        {NewImplReps, NewBindMap} = gb_sets:fold(
+        {NewImplReps, NewBindMap} = ordsets:fold(
           fun(I, {NestedImplReps, NestedBindMap}) ->
             ImplName = bound_impl_name(child_i(I, NewIs, Ifaces), NewV),
             ImplAtom = list_to_atom(ImplName),
@@ -1078,7 +1079,7 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
       {T, _, _} ->
         Key = utils:impl_key(T),
 
-        Result = gb_sets:fold(fun(I, FoldMemo) ->
+        Result = ordsets:fold(fun(I, FoldMemo) ->
           {NestedArgIVs, NestedImplReps, NestedBindMap, NestedSubbedVs} = FoldMemo,
           {_, _, _, ImplModule} = maps:get(Key, maps:get(I, Impls)),
           ImplName = impl_name(I, Key),
@@ -1130,10 +1131,10 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
   erlang:insert_element(1, FinalMemo, lists:flatten(FinalArgIVs)).
 
 child_i(TargetI, Is, Ifaces) ->
-  gb_sets:fold(fun(I, FoldI) ->
+  ordsets:fold(fun(I, FoldI) ->
     case FoldI of
       none ->
-        case gb_sets:is_member(TargetI, utils:family_is(I, Ifaces)) of
+        case ordsets:is_element(TargetI, utils:family_is(I, Ifaces)) of
           true -> I;
           false -> FoldI
         end;
@@ -1264,7 +1265,7 @@ rewrite({gen, {con, "Set"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
 
     {Stmts, NewElemRep} ->
       FoldSetRep = {var, Line, unique("FoldSet")},
-      AddCall = call(gb_sets, add, [NewElemRep, FoldSetRep], Line),
+      AddCall = call(gb_sets, add_element, [NewElemRep, FoldSetRep], Line),
       Body = Stmts ++ [AddCall],
       Clause = {clause, Line, [ElemRep, FoldSetRep], [], Body},
       FunRep = {'fun', Line, {clauses, [Clause]}},
@@ -1527,7 +1528,7 @@ excluder_run(Excluded) ->
       excluder_run(NewExcluded);
     {Pid, remove, Element} ->
       Pid ! remove_ok,
-      excluder_run(gb_sets:del_element(Element, Excluded));
+      excluder_run(ordsets:del_element(Element, Excluded));
     {Pid, all} ->
       Pid ! {all_ok, Excluded},
       excluder_run(Excluded);

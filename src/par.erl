@@ -143,12 +143,12 @@ main(Args) ->
               #comp{module=Module} = hd(Comps),
               {Mod, _} = hd(Compiled),
 
-              TestSet = gb_sets:fold(fun(TestName, FoldTestSet) ->
+              TestSet = ordsets:fold(fun(TestName, FoldTestSet) ->
                 [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
               end, [], utils:test_names(Module, C#ctx.env)),
 
               code:add_patha(OutDir),
-              Mod:'_@init'(gb_sets:new()),
+              Mod:'_@init'(ordsets:new()),
               eunit:test(TestSet, [no_tty, {report, {unite_compact, []}}]),
               eunit:stop();
 

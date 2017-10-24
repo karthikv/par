@@ -13,7 +13,7 @@ run_code_gen(Prg) ->
   remove(Mod),
   code:load_binary(Mod, "", Binary),
 
-  Mod:'_@init'(gb_sets:new()),
+  Mod:'_@init'(ordsets:new()),
   Mod:main().
 
 run_interpreter(Prg) ->
@@ -39,7 +39,7 @@ many_code_gen(PathPrgs, TargetPath) ->
 
   #comp{module=Module} = hd(Comps),
   Mod = list_to_atom(Module),
-  Mod:'_@init'(gb_sets:new()),
+  Mod:'_@init'(ordsets:new()),
 
   V = Mod:main(),
   code:del_path(?TMP_MANY_DIR),
@@ -1035,7 +1035,7 @@ test_interface(Run) ->
       "main() = to_int([\"378\"])"
     ))
   , ?_assertEqual(
-      {2, 1, [false, true], gb_sets:singleton(#{greeting => <<"hi">>})},
+      {2, 1, [false, true], gb_sets:from_list([#{greeting => <<"hi">>}])},
       Run(
         "interface Collection extends Mappable { len : T<A> -> Int }\n"
         "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
@@ -1044,7 +1044,7 @@ test_interface(Run) ->
         "impl Collection for Set { len = @gb_sets:size/1 }\n"
         "impl Mappable for Set {\n"
         "  map(f, s) = @gb_sets:fold(|e, new_s|\n"
-        "    @gb_sets:add(f(e), new_s)\n"
+        "    @gb_sets:add_element(f(e), new_s)\n"
         "  , #[], s)\n"
         "}\n"
         "main() =\n"

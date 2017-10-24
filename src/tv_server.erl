@@ -21,7 +21,7 @@ next_name(Pid) -> gen_server:call(Pid, next_name).
 next_gnr_id(Pid) -> gen_server:call(Pid, next_gnr_id).
 fresh(Pid) -> {tv, next_name(Pid), none, false}.
 fresh_gnr_id(Pid) -> {{tv, next_name(Pid), none, false}, next_gnr_id(Pid)}.
-fresh(I, Pid) -> {tv, next_name(Pid), gb_sets:singleton(I), false}.
+fresh(I, Pid) -> {tv, next_name(Pid), ordsets:from_list([I]), false}.
 stop(Pid) -> gen_server:stop(Pid).
 
 init({Count, NextID}) -> {ok, {Count, NextID}}.

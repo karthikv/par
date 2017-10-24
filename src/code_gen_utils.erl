@@ -187,7 +187,7 @@
     erlang:is_list(Left) ->
       Set = gb_sets:from_list(Right),
       lists:filter(fun(Elem) ->
-        not gb_sets:is_member(Elem, Set)
+        not gb_sets:is_element(Elem, Set)
       end, Left);
     true ->
       true = gb_sets:is_set(Left),

@@ -498,7 +498,7 @@ expr_test_() ->
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A ~ Num>" = ok_expr(
-      "let f = @gb_sets:add/2\n"
+      "let f = @gb_sets:add_element/2\n"
       "#[3] ++ f(2)(#[1])"
     ))
   , ?_test("A" = ok_expr("@io:printable_range()"))
@@ -1843,7 +1843,7 @@ interface_test_() ->
       "impl Collection for Set { len = @gb_sets:size/1 }\n"
       "impl Mappable for Set {\n"
       "  map(f, s) = @gb_sets:fold(|e, new_s|\n"
-      "    @gb_sets:add(f(e), new_s)\n"
+      "    @gb_sets:add_element(f(e), new_s)\n"
       "  , #[], s)\n"
       "}\n"
       "foo =\n"
@@ -2405,7 +2405,7 @@ other_errors_test_() ->
       "struct Foo<A> {\n"
       "  bar : A ~ Num\n"
       "}",
-      {?ERR_TV_IFACE("A", none, gb_sets:singleton("Num")), l(1, 8, 7)}
+      {?ERR_TV_IFACE("A", none, ordsets:from_list(["Num"])), l(1, 8, 7)}
     ))
   , ?_test(ctx_err_prg(
       "foo : A ~ Num -> A ~ Concatable\n"
@@ -2413,8 +2413,8 @@ other_errors_test_() ->
       {
         ?ERR_TV_IFACE(
           "A",
-          gb_sets:singleton("Num"),
-          gb_sets:singleton("Concatable")
+          ordsets:from_list(["Num"]),
+          ordsets:from_list(["Concatable"])
         ),
         l(17, 14)
       }

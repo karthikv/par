@@ -19,8 +19,8 @@
 %
 % fresh - a function that generates a new TV.
 % fvs - a function that computes the set of free TV names in an expression.
-% Scheme - a tuple {GVs, T} that represents a T generalized across GVs, a set of
-%   TV names.
+% Scheme - a tuple {GVs, T, BoundVs} that represents a T generalized across GVs,
+%   a set of TV names. BoundVs are the bound Vs in T.
 % Env - a Name => T mapping of bindings in the environment.
 
 % S - a solver record used to unify types and solve constraints
@@ -36,9 +36,9 @@
 %   impls - a I => {RawT, InstT, Inits} mapping of impls
 %   nested_ivs - a {I, V} => IVs mapping for impls depending on other impls
 %   passed_vs - a V => {Is, ArgT, Module, Loc} mapping of Vs that have args
-%               passed in for them
+%     passed in for them
 %   return_vs - a V => {Is, ReturnT, Module, Loc} mapping for IVs in return
-%               types that are fully applied
+%     types that are fully applied
 %   must_solve_vs - a set of Vs that must be solved because of their interface
 %   err_vs - a set of Vs that had errors unifying with a concrete type
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
@@ -61,8 +61,8 @@
   nested_ivs = #{},
   passed_vs = [],
   return_vs = [],
-  must_solve_vs = gb_sets:new(),
-  err_vs = gb_sets:new(),
+  must_solve_vs = ordsets:new(),
+  err_vs = ordsets:new(),
   gen_vs,
   t1,
   t2,
@@ -115,7 +115,7 @@
 -endif.
 
 % this also initializes the lexer by dependency
-load() -> 'Parser':'_@init'(gb_sets:new()).
+load() -> 'Parser':'_@init'(ordsets:new()).
 
 infer_file(Path) ->
   case parse_file(Path, #{}) of
@@ -251,11 +251,11 @@ infer_comps(Comps) ->
     #comp{module=Module, ast={module, _, {con_token, Loc, _}, _, _}} = Comp,
     FoldC1 = FoldC#ctx{module=Module},
 
-    case gb_sets:is_member(Module, Modules) of
+    case ordsets:is_element(Module, Modules) of
       true -> {Modules, add_ctx_err(?ERR_REDEF_MODULE(Module), Loc, FoldC1)};
-      false -> {gb_sets:add(Module, Modules), FoldC1}
+      false -> {ordsets:add_element(Module, Modules), FoldC1}
     end
-  end, {gb_sets:new(), #ctx{pid=Pid}}, Comps),
+  end, {ordsets:new(), #ctx{pid=Pid}}, Comps),
 
   C1 = populate_env_and_types(Comps, C),
   C2 = infer_defs(Comps, C1),
@@ -282,7 +282,8 @@ infer_comps(Comps) ->
           {no_dep, TV} -> TV;
           {add_dep, TV, _} -> TV
         end,
-        {inst(maps:get(V, Schemes), Pid), Exported}
+        {GVs, T, _} = maps:get(V, Schemes),
+        {inst(GVs, T, Pid), Exported}
       end, C2#ctx.env),
 
       SubbedInstRefsPairs = lists:filtermap(fun
@@ -396,7 +397,7 @@ populate_env_and_types(Comps, C) ->
           end,
           ModuleC1 = define_type(Con, true, NumParams, Loc, ModuleC),
 
-          Value = {Fields, none, gb_sets:new()},
+          Value = {Fields, none, ordsets:new()},
           NewIfaces = (ModuleC1#ctx.ifaces)#{Con => Value},
           NewImpls = (ModuleC1#ctx.impls)#{Con => #{}},
           ModuleC2 = ModuleC1#ctx{ifaces=NewIfaces, impls=NewImpls},
@@ -484,9 +485,9 @@ infer_defs(Comps, C) ->
     NewImportedPairs = lists:map(fun({DepModule, _}) ->
       {Module, DepModule}
     end, Deps),
-    NewImported = gb_sets:union(
+    NewImported = ordsets:union(
       FoldC#ctx.imported,
-      gb_sets:from_list(NewImportedPairs)
+      ordsets:from_list(NewImportedPairs)
     ),
 
     FoldC1 = FoldC#ctx{module=Module, imported=NewImported},
@@ -678,8 +679,8 @@ infer_ifaces(CompsEnvs, C) ->
               false -> {FoldParents, NestedC1};
               true ->
                 ParentFamily = utils:family_is(ParentCon, NestedC1#ctx.ifaces),
-                case gb_sets:is_member(Con, ParentFamily) of
-                  false -> {gb_sets:add(ParentCon, FoldParents), NestedC1};
+                case ordsets:is_element(Con, ParentFamily) of
+                  false -> {ordsets:add_element(ParentCon, FoldParents), NestedC1};
                   true ->
                     NestedC2 = add_ctx_err(
                       ?ERR_CYCLE(Con, ParentCon),
@@ -689,7 +690,7 @@ infer_ifaces(CompsEnvs, C) ->
                     {FoldParents, NestedC2}
                 end
             end
-          end, {gb_sets:new(), ModuleC}, Extends),
+          end, {ordsets:new(), ModuleC}, Extends),
 
           Ifaces = ModuleC1#ctx.ifaces,
           NewIfaces = Ifaces#{Con => {Fields, none, Parents}},
@@ -742,8 +743,8 @@ infer_csts_first(Csts, UntilGs, GnrArgs, C) ->
   finish_gnr(C2#ctx{gnrs=Gs}, C#ctx.gnr).
 
 infer({fn, _, Ref, Args, Expr}, C) ->
-  Names = gb_sets:union(lists:map(fun pattern_names/1, Args)),
-  C1 = gb_sets:fold(fun(Name, FoldC) ->
+  Names = ordsets:union(lists:map(fun pattern_names/1, Args)),
+  C1 = ordsets:fold(fun(Name, FoldC) ->
     TV = tv_server:fresh(FoldC#ctx.pid),
     env_add(Name, {no_dep, TV}, false, FoldC)
   end, C, Names),
@@ -816,7 +817,7 @@ infer({enum, _, EnumTE, Options}, C) ->
       {some, {atom, _, Key_}} -> Key_
     end,
 
-    NewGenOptions = case gb_sets:is_empty(fvs(OptionT)) of
+    NewGenOptions = case ordsets:size(fvs(OptionT)) == 0 of
       true -> FoldGenOptions;
       false ->
         TupleT = {tuple, [{con, "Atom"} | ArgTs]},
@@ -873,7 +874,7 @@ infer({enum, _, EnumTE, Options}, C) ->
 
 infer({exception, Loc, ConToken, ArgTEs}, C) ->
   Option = {option, Loc, ConToken, ArgTEs, none},
-  {_, _, C1} = infer_option(Option, {con, "Exception"}, gb_sets:new(), #{}, C),
+  {_, _, C1} = infer_option(Option, {con, "Exception"}, ordsets:new(), #{}, C),
   {none, C1};
 
 infer({struct, Loc, StructTE, Fields}, C) ->
@@ -924,16 +925,16 @@ infer({interface, Loc, {con_token, _, RawCon}, _, Fields}, C) ->
     C
   ),
 
-  Subs = #{"T" => {set_ifaces, gb_sets:from_list([Con])}},
+  Subs = #{"T" => {set_ifaces, ordsets:from_list([Con])}},
   % type sigs don't need consolidation, so don't pass aliases
   {record, _, RawFieldMap} = utils:subs(RawRecordT, #sub_opts{subs=Subs}),
 
   Ifaces = C1#ctx.ifaces,
-  Ancestors = gb_sets:subtract(
-    gb_sets:del_element(Con, utils:family_is(Con, Ifaces)),
+  Ancestors = ordsets:subtract(
+    ordsets:del_element(Con, utils:family_is(Con, Ifaces)),
     utils:builtin_is()
   ),
-  FieldOrigins = gb_sets:fold(fun(AncestorCon, FoldFieldOrigins) ->
+  FieldOrigins = ordsets:fold(fun(AncestorCon, FoldFieldOrigins) ->
     {AncestorFields, _, _} = maps:get(AncestorCon, Ifaces),
     lists:foldl(fun({sig, _, {var, _, Name}, _}, NestedFieldOrigins) ->
       NestedFieldOrigins#{Name => AncestorCon}
@@ -1023,7 +1024,7 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
               CaseC = C1#ctx{impls=NewImpls},
 
               V = tv_server:next_name(CaseC#ctx.pid),
-              GVs = gb_sets:singleton(V),
+              GVs = ordsets:from_list([V]),
               InstTV = {inst, Ref, GVs, {tv, V, Parents, false}},
 
               From = ?FROM_PARENT_IFACES,
@@ -1047,10 +1048,10 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
             C2
           ),
 
-          ExpNames = gb_sets:from_list(maps:keys(FieldLocTs)),
-          MissingNames = gb_sets:difference(ExpNames, ActualNames),
+          ExpNames = ordsets:from_list(maps:keys(FieldLocTs)),
+          MissingNames = ordsets:subtract(ExpNames, ActualNames),
 
-          C4 = gb_sets:fold(fun(Name, FoldC) ->
+          C4 = ordsets:fold(fun(Name, FoldC) ->
             add_ctx_err(?ERR_MISSING_FIELD_IMPL(Name, IfaceCon), Loc, FoldC)
           end, C3, MissingNames),
           ImplRefs = C4#ctx.impl_refs,
@@ -1255,7 +1256,7 @@ infer({field, Loc, Expr, Prop}, C) ->
         {con_token, _, Name_} -> {none, Name_}
       end,
 
-      case gb_sets:is_member({C#ctx.module, Module}, C#ctx.imported) of
+      case ordsets:is_element({C#ctx.module, Module}, C#ctx.imported) of
         true -> lookup(Module, Name, Loc, Ref, C);
         false ->
           TV = tv_server:fresh(C#ctx.pid),
@@ -1554,12 +1555,12 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
 
             case maps:find(I, C#ctx.types) of
               {ok, {true, 0}} ->
-                {FoldBaseIfaceTokens, gb_sets:add(I, FoldGenIsSet)};
+                {FoldBaseIfaceTokens, ordsets:add_element(I, FoldGenIsSet)};
               _ -> {[ConToken | FoldBaseIfaceTokens], FoldGenIsSet}
             end
-          end, {[], gb_sets:new()}, IfaceTokens),
+          end, {[], ordsets:new()}, IfaceTokens),
 
-          GenIs_ = case gb_sets:is_empty(GenIsSet) of
+          GenIs_ = case ordsets:size(GenIsSet) == 0 of
             true -> none;
             false -> GenIsSet
           end,
@@ -1600,7 +1601,7 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
   C1 = case RestrictVs of
     false -> C;
     {T, AllowedVs} ->
-      case gb_sets:is_member(V, AllowedVs) of
+      case ordsets:is_element(V, AllowedVs) of
         true -> C;
         false ->
           case T of
@@ -1626,9 +1627,9 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
     _ ->
       lists:foldl(fun({con_token, ConLoc, RawI_}, {FoldIs, FoldC}) ->
         I = utils:resolve_con(RawI_, C1),
-        NewFoldIs = gb_sets:add(I, FoldIs),
+        NewFoldIs = ordsets:add_element(I, FoldIs),
         {NewFoldIs, validate_type(I, true, NumParams, ConLoc, FoldC)}
-      end, {gb_sets:new(), C1}, IfaceTokens)
+      end, {ordsets:new(), C1}, IfaceTokens)
   end,
 
   case no_ctx_errs(C1, C2) of
@@ -1733,7 +1734,7 @@ with_pattern_env(Pattern, C) ->
   ID = C#ctx.gnr#gnr.id,
   Names = pattern_names(Pattern),
 
-  {Vs, C1} = gb_sets:fold(fun(Name, {FoldVs, FoldC}) ->
+  {Vs, C1} = ordsets:fold(fun(Name, {FoldVs, FoldC}) ->
     TV = tv_server:fresh(C#ctx.pid),
     {tv, V, _, _} = TV,
     {[V | FoldVs], env_add(Name, {add_dep, TV, ID}, false, FoldC)}
@@ -1741,20 +1742,20 @@ with_pattern_env(Pattern, C) ->
 
   C1#ctx{gnr=C1#ctx.gnr#gnr{vs=Vs}}.
 
-pattern_names([]) -> gb_sets:new();
+pattern_names([]) -> ordsets:new();
 pattern_names([Node | Rest]) ->
-  gb_sets:union(pattern_names(Node), pattern_names(Rest));
+  ordsets:union(pattern_names(Node), pattern_names(Rest));
 pattern_names({N, _, _}) when N == int; N == float; N == bool; N == char;
     N == str; N == atom; N == var_value ->
-  gb_sets:new();
-pattern_names({var, _, Name}) -> gb_sets:singleton(Name);
-pattern_names({N, _}) when N == unit; N == '_' -> gb_sets:new();
+  ordsets:new();
+pattern_names({var, _, Name}) -> ordsets:from_list([Name]);
+pattern_names({N, _}) when N == unit; N == '_' -> ordsets:new();
 pattern_names({field, _, ModuleConToken, ConToken}) ->
-  gb_sets:union(pattern_names(ModuleConToken), pattern_names(ConToken));
+  ordsets:union(pattern_names(ModuleConToken), pattern_names(ConToken));
 pattern_names({variant, _, _, Args}) -> pattern_names(Args);
 pattern_names({list, _, Elems}) -> pattern_names(Elems);
 pattern_names({cons, _, Elems, Tail}) ->
-  gb_sets:union(pattern_names(Elems), pattern_names(Tail));
+  ordsets:union(pattern_names(Elems), pattern_names(Tail));
 pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 
 lookup(Module, Name, Loc, Ref, C) ->
@@ -1810,12 +1811,12 @@ infer_impl_inits(
   lists:foldl(fun(Init, {Names, FoldC}) ->
     {init, _, {var, VarLoc, Name}, Expr} = Init,
 
-    case gb_sets:is_member(Name, Names) of
+    case ordsets:is_element(Name, Names) of
       true ->
         {Names, add_ctx_err(?ERR_DUP_FIELD_IMPL(Name), VarLoc, FoldC)};
 
       false ->
-        NewNames = gb_sets:add(Name, Names),
+        NewNames = ordsets:add_element(Name, Names),
         NewC = case maps:find(Name, FieldLocTs) of
           error ->
             add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, IfaceCon), VarLoc, FoldC);
@@ -1847,8 +1848,8 @@ infer_impl_inits(
             end,
 
             TupleSigT = utils:subs(RawFieldT, #sub_opts{subs=TupleSubs}),
-            FVs = gb_sets:delete_any("T", fvs(TupleSigT)),
-            RigidVs = gb_sets:to_list(FVs),
+            FVs = ordsets:del_element("T", fvs(TupleSigT)),
+            RigidVs = ordsets:to_list(FVs),
 
             NormT = norm_sig_type(TupleSigT, RigidVs, FVs, FoldC#ctx.pid),
             NewV = tv_server:next_name(FoldC#ctx.pid),
@@ -1907,7 +1908,7 @@ infer_impl_inits(
 
         {NewNames, NewC}
     end
-  end, {gb_sets:new(), C}, Inits).
+  end, {ordsets:new(), C}, Inits).
 
 env_exists(Name, C) ->
   Key = {C#ctx.module, Name},
@@ -1934,16 +1935,16 @@ env_remove(Name, C) ->
 
 new_gnr(C) ->
   ID = tv_server:next_gnr_id(C#ctx.pid),
-  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=gb_sets:new()},
+  G = #gnr{id=ID, vs=[], env=C#ctx.env, csts=[], deps=ordsets:new()},
   C#ctx{gnr=G}.
 
 new_gnr({tv, V, _, _}, ID, C) ->
-  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=gb_sets:new()},
+  G = #gnr{id=ID, vs=[V], env=C#ctx.env, csts=[], deps=ordsets:new()},
   C#ctx{gnr=G}.
 
 finish_gnr(C, OldG) -> C#ctx{gnrs=[C#ctx.gnr | C#ctx.gnrs], gnr=OldG}.
 
-add_gnr_dep(ID, G) -> G#gnr{deps=gb_sets:add(ID, G#gnr.deps)}.
+add_gnr_dep(ID, G) -> G#gnr{deps=ordsets:add_element(ID, G#gnr.deps)}.
 
 add_cst(T1, T2, Loc, From, C) ->
   G = C#ctx.gnr,
@@ -1990,11 +1991,11 @@ norm_sig_type(SigT, RigidVs, Pid) ->
   norm_sig_type(SigT, RigidVs, fvs(SigT), Pid).
 
 norm_sig_type(SigT, RigidVs, FVs, Pid) ->
-  RigidVsSet = gb_sets:from_list(RigidVs),
+  RigidVsSet = ordsets:from_list(RigidVs),
 
   % TODO: is it more intuitive to change each fv to *fv and then replace?
-  Subs = gb_sets:fold(fun(V, FoldSubs) ->
-    case gb_sets:is_member(V, RigidVsSet) of
+  Subs = ordsets:fold(fun(V, FoldSubs) ->
+    case ordsets:is_element(V, RigidVsSet) of
       true -> FoldSubs#{V => {rigid, tv_server:next_name(Pid)}};
       false -> FoldSubs#{V => tv_server:next_name(Pid)}
     end
@@ -2025,28 +2026,28 @@ solve(Gs, S) ->
     err_vs=ErrVs
   }=S1 = T#tarjan.solver,
 
-  SubbedMustSolveVs = gb_sets:fold(fun(V, FoldMustSolveVs) ->
+  SubbedMustSolveVs = ordsets:fold(fun(V, FoldMustSolveVs) ->
     % Is and Rigid don't matter for subs.
     case subs_s({tv, V, none, false}, S1) of
       % Rigidity doesn't matter; if NewV is rigid, it should still be solved
       % for by means of a bound impl.
-      {tv, NewV, _, _} -> gb_sets:add(NewV, FoldMustSolveVs);
-      {gen, NewV, _, _, _} -> gb_sets:add(NewV, FoldMustSolveVs);
+      {tv, NewV, _, _} -> ordsets:add_element(NewV, FoldMustSolveVs);
+      {gen, NewV, _, _, _} -> ordsets:add_element(NewV, FoldMustSolveVs);
       _ -> FoldMustSolveVs
     end
-  end, gb_sets:new(), MustSolveVs),
+  end, ordsets:new(), MustSolveVs),
 
-  SubbedErrVs = gb_sets:fold(fun(ErrV, FoldErrVs) ->
+  SubbedErrVs = ordsets:fold(fun(ErrV, FoldErrVs) ->
     % Is and Rigid don't matter for subs.
     case subs_s({tv, ErrV, none, false}, S1) of
       % Rigidity doesn't matter; we tried to unify ErrV/NewV with a concrete
       % type at some point, so don't report ambiguity error until the user
       % decides which it actually is.
-      {tv, NewV, _, _} -> gb_sets:add(NewV, FoldErrVs);
-      {gen, NewV, _, _, _} -> gb_sets:add(NewV, FoldErrVs);
+      {tv, NewV, _, _} -> ordsets:add_element(NewV, FoldErrVs);
+      {gen, NewV, _, _, _} -> ordsets:add_element(NewV, FoldErrVs);
       _ -> FoldErrVs
     end
-  end, gb_sets:new(), ErrVs),
+  end, ordsets:new(), ErrVs),
 
   {ReportedVs, S2} = lists:foldl(fun(PassedV, {FoldReportedVs, FoldS}) ->
     {OrigV, ArgT, Module, Loc, Env} = PassedV,
@@ -2054,7 +2055,7 @@ solve(Gs, S) ->
     SubbedT = subs_s({tv, OrigV, none, false}, FoldS),
     BoundVs = bound_vs(Env, FoldS),
 
-    gb_sets:fold(fun(V, {NestedReportedVs, NestedS}) ->
+    ordsets:fold(fun(V, {NestedReportedVs, NestedS}) ->
       validate_solved(
         {V, ArgT, Module, Loc, Env},
         true,
@@ -2065,7 +2066,7 @@ solve(Gs, S) ->
         NestedS
       )
     end, {FoldReportedVs, FoldS}, fvs(SubbedT))
-  end, {gb_sets:new(), S1}, PassedVs),
+  end, {ordsets:new(), S1}, PassedVs),
 
   {_, FinalS} = lists:foldl(fun(ReturnV, {FoldReportedVs, FoldS}) ->
     {_, _, _, _, Env} = ReturnV,
@@ -2122,10 +2123,10 @@ validate_solved(
   ReportedVs,
   S
 ) ->
-  MustSolveV = gb_sets:is_member(V, MustSolveVs),
-  IsErrV = gb_sets:is_member(V, ErrVs),
-  Bound = gb_sets:is_member(V, BoundVs),
-  Reported = gb_sets:is_member(V, ReportedVs),
+  MustSolveV = ordsets:is_element(V, MustSolveVs),
+  IsErrV = ordsets:is_element(V, ErrVs),
+  Bound = ordsets:is_element(V, BoundVs),
+  Reported = ordsets:is_element(V, ReportedVs),
 
   if
     MustSolveV, not IsErrV, not Bound, not Reported ->
@@ -2153,7 +2154,7 @@ validate_solved(
       end,
 
       NewErrs = [{Msg, Module, Loc} | S#solver.errs],
-      NewReportedVs = gb_sets:add(V, ReportedVs),
+      NewReportedVs = ordsets:add_element(V, ReportedVs),
       {NewReportedVs, S#solver{errs=NewErrs}};
 
     true -> {ReportedVs, S}
@@ -2165,7 +2166,7 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
   Map1 = Map#{ID := G#gnr{index=NextIndex, low_link=NextIndex, on_stack=true}},
 
   T1 = #tarjan{stack=Stack1, map=Map1, next_index=NextIndex + 1, solver=S},
-  T2 = gb_sets:fold(fun(AdjID, FoldT) ->
+  T2 = ordsets:fold(fun(AdjID, FoldT) ->
     #{AdjID := #gnr{index=AdjIndex, on_stack=AdjOnStack}} = FoldT#tarjan.map,
 
     if
@@ -2227,10 +2228,11 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         lists:foldl(fun(SolV, NestedS) ->
           SolTV = {tv, SolV, none, false},
           T = subs_s(SolTV, NestedS),
-          GVs = gb_sets:subtract(fvs(T), BoundVs),
+          GVs = ordsets:subtract(fvs(T), BoundVs),
 
           #solver{schemes=Schemes} = NestedS,
-          Schemes1 = Schemes#{SolV => {GVs, T}},
+          Scheme = {GVs, T, ordsets:subtract(fvs(T), GVs)},
+          Schemes1 = Schemes#{SolV => Scheme},
           NestedS#solver{schemes=Schemes1}
         end, FoldS, SolG#gnr.vs)
       end, S3, SolvableIDs),
@@ -2305,10 +2307,10 @@ resolve({inst, Ref, {tv, InstV, _, _}=TV}, #solver{inst_refs=InstRefs}=S) ->
       NewInstRefs = InstRefs#{Ref => {deferred, TV, S#solver.env}},
       resolve(TV, S#solver{inst_refs=NewInstRefs});
 
-    {ok, {GVs, T}} -> resolve({inst, Ref, GVs, T}, S)
+    {ok, {GVs, T, _}} -> resolve({inst, Ref, GVs, T}, S)
   end;
 resolve({inst, Ref, GVs, T}, #solver{inst_refs=InstRefs}=S) ->
-  InstT = inst({GVs, T}, S#solver.pid),
+  InstT = inst(GVs, T, S#solver.pid),
   S1 = case Ref of
     none -> S;
     _ ->
@@ -2322,9 +2324,9 @@ resolve({inst, Ref, GVs, T}, #solver{inst_refs=InstRefs}=S) ->
         _ ->
           SubbedVs = add_subbed_vs(IVs, #{}),
           NewIVOrigins = lists:foldl(fun({Is, V}, FoldIVOrigins) ->
-            Origins = gb_sets:singleton({Ref, V}),
+            Origins = ordsets:from_list([{Ref, V}]),
 
-            gb_sets:fold(fun(I, NestedIVOrigins) ->
+            ordsets:fold(fun(I, NestedIVOrigins) ->
               NestedIVOrigins#{{I, V} => Origins}
             end, FoldIVOrigins, Is)
           end, IVOrigins, IVs),
@@ -2355,8 +2357,8 @@ resolve({record_ext, A, BaseT, Ext}, S) ->
   {{record_ext, A, ResBaseT, maps:from_list(ResPairs)}, S2};
 resolve(unit, S) -> {unit, S}.
 
-inst({GVs, T}, Pid) ->
-  Subs = gb_sets:fold(fun(V, FoldSubs) ->
+inst(GVs, T, Pid) ->
+  Subs = ordsets:fold(fun(V, FoldSubs) ->
     FoldSubs#{V => tv_server:next_name(Pid)}
   end, #{}, GVs),
   % consolidation already happened when finalizing scheme; no aliases needed
@@ -2381,7 +2383,7 @@ unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     must_solve_vs=MustSolveVs
   } = S,
 
-  NewPassedVs = gb_sets:fold(fun(V, FoldPassedVs) ->
+  NewPassedVs = ordsets:fold(fun(V, FoldPassedVs) ->
     [{V, ArgT2, Module, Loc, Env} | FoldPassedVs]
   end, PassedVs, fvs(ArgT2)),
 
@@ -2392,10 +2394,10 @@ unify({lam, Env, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     _ -> lists:map(fun({_, V}) -> V end, utils:ivs(ReturnT2))
   end,
 
-  NewMustSolveVs = gb_sets:union([
+  NewMustSolveVs = ordsets:union([
     MustSolveVs,
-    gb_sets:from_list(VsWithIs),
-    gb_sets:from_list(ReturnVsWithIs)
+    ordsets:from_list(VsWithIs),
+    ordsets:from_list(ReturnVsWithIs)
   ]),
   NewReturnVs = lists:foldl(fun(V, FoldReturnVs) ->
     % Use OrigLoc, which spans the entire app, to represent the return type.
@@ -2438,13 +2440,13 @@ unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   end;
 
 unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
-  Keys1 = gb_sets:from_list(maps:keys(FieldMap1)),
-  Keys2 = gb_sets:from_list(maps:keys(FieldMap2)),
+  Keys1 = ordsets:from_list(maps:keys(FieldMap1)),
+  Keys2 = ordsets:from_list(maps:keys(FieldMap2)),
 
   if
     Keys1 /= Keys2 -> add_err(S);
     true ->
-      S1 = gb_sets:fold(fun(Key, FoldS) ->
+      S1 = ordsets:fold(fun(Key, FoldS) ->
         sub_unify(maps:get(Key, FieldMap1), maps:get(Key, FieldMap2), FoldS)
       end, S, Keys1),
 
@@ -2455,16 +2457,16 @@ unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
   end;
 
 unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
-  Keys = gb_sets:from_list(maps:keys(FieldMap)),
-  KeysExt = gb_sets:from_list(maps:keys(Ext)),
+  Keys = ordsets:from_list(maps:keys(FieldMap)),
+  KeysExt = ordsets:from_list(maps:keys(Ext)),
 
-  case gb_sets:is_subset(KeysExt, Keys) of
+  case ordsets:is_subset(KeysExt, Keys) of
     true ->
-      S1 = gb_sets:fold(fun(Key, FoldS) ->
+      S1 = ordsets:fold(fun(Key, FoldS) ->
         sub_unify(maps:get(Key, FieldMap), maps:get(Key, Ext), FoldS)
       end, S, KeysExt),
 
-      RelaxedFieldMap = gb_sets:fold(fun(Key, FoldFieldMap) ->
+      RelaxedFieldMap = ordsets:fold(fun(Key, FoldFieldMap) ->
         TV = tv_server:fresh(S#solver.pid),
         FoldFieldMap#{Key => TV}
       end, FieldMap, KeysExt),
@@ -2483,11 +2485,11 @@ unify({record_ext, _, _, _}=T1, {record, _, _}=T2, S) ->
   sub_unify(T2, T1, S);
 
 unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
-  Keys1 = gb_sets:from_list(maps:keys(Ext1)),
-  Keys2 = gb_sets:from_list(maps:keys(Ext2)),
-  CommonKeys = gb_sets:intersection(Keys1, Keys2),
+  Keys1 = ordsets:from_list(maps:keys(Ext1)),
+  Keys2 = ordsets:from_list(maps:keys(Ext2)),
+  CommonKeys = ordsets:intersection(Keys1, Keys2),
 
-  {RelaxedExt1, RelaxedExt2, S1} = gb_sets:fold(fun(Key, Memo) ->
+  {RelaxedExt1, RelaxedExt2, S1} = ordsets:fold(fun(Key, Memo) ->
     {FoldExt1, FoldExt2, FoldS} = Memo,
     NewFoldExt1 = maps:remove(Key, FoldExt1),
     NewFoldExt2 = maps:remove(Key, FoldExt2),
@@ -2531,8 +2533,8 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
 
 unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
   #solver{bound_vs=BoundVs, ifaces=Ifaces} = S,
-  Bound1 = gb_sets:is_member(V1, BoundVs),
-  Bound2 = gb_sets:is_member(V2, BoundVs),
+  Bound1 = ordsets:is_element(V1, BoundVs),
+  Bound2 = ordsets:is_element(V2, BoundVs),
   Occurs = occurs(V1, TV2) or occurs(V2, TV1),
 
   if
@@ -2578,7 +2580,7 @@ unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
 
 unify({tv, V, Is, Rigid}, T, #solver{bound_vs=BoundVs}=S) ->
   Occurs = occurs(V, T),
-  Bound = gb_sets:is_member(V, BoundVs),
+  Bound = ordsets:is_element(V, BoundVs),
   WouldEscape = Bound and occurs(true, T),
 
   S1 = if
@@ -2610,7 +2612,7 @@ unify({tv, V, Is, Rigid}, T, #solver{bound_vs=BoundVs}=S) ->
           CaseS = add_sub(V1, MergedSub, S),
           merge_iv_origins(Is, V, V1, CaseS);
 
-        _ -> gb_sets:fold(fun(I, FoldS) -> instance(T, I, V, FoldS) end, S, Is)
+        _ -> ordsets:fold(fun(I, FoldS) -> instance(T, I, V, FoldS) end, S, Is)
       end
   end,
 
@@ -2814,27 +2816,27 @@ sub_unify_gen_vs(
 merge_is(none, Is2, _) -> Is2;
 merge_is(Is1, none, _) -> Is1;
 merge_is(Is1, Is2, Ifaces) ->
-  Union = gb_sets:union(Is1, Is2),
-  {MergedIs, _} = gb_sets:fold(fun(I, {FoldIs, FoldFamily}) ->
-    case gb_sets:is_member(I, FoldFamily) of
+  Union = ordsets:union(Is1, Is2),
+  {MergedIs, _} = ordsets:fold(fun(I, {FoldIs, FoldFamily}) ->
+    case ordsets:is_element(I, FoldFamily) of
       true -> {FoldIs, FoldFamily};
       false ->
         NewFamily = utils:family_is(I, Ifaces),
-        NewIs = gb_sets:filter(fun(ExistingI) ->
-          not gb_sets:is_member(ExistingI, NewFamily)
+        NewIs = ordsets:filter(fun(ExistingI) ->
+          not ordsets:is_element(ExistingI, NewFamily)
         end, FoldIs),
-        {gb_sets:add(I, NewIs), gb_sets:union(FoldFamily, NewFamily)}
+        {ordsets:add_element(I, NewIs), ordsets:union(FoldFamily, NewFamily)}
     end
-  end, {gb_sets:new(), gb_sets:new()}, Union),
+  end, {ordsets:new(), ordsets:new()}, Union),
   MergedIs.
 
 merge_iv_origins(Is, V, TargetV, S) ->
-  IsExceptBuiltin = gb_sets:difference(Is, utils:builtin_is()),
-  NewIVOrigins = gb_sets:fold(fun(I, FoldIVOrigins) ->
+  IsExceptBuiltin = ordsets:subtract(Is, utils:builtin_is()),
+  NewIVOrigins = ordsets:fold(fun(I, FoldIVOrigins) ->
     VOrigins = maps:get({I, V}, FoldIVOrigins),
     case maps:find({I, TargetV}, FoldIVOrigins) of
       {ok, TargetVOrigins} ->
-        MergedOrigins = gb_sets:union(VOrigins, TargetVOrigins),
+        MergedOrigins = ordsets:union(VOrigins, TargetVOrigins),
         FoldIVOrigins#{{I, TargetV} => MergedOrigins};
       error -> FoldIVOrigins#{{I, TargetV} => VOrigins}
     end
@@ -2858,13 +2860,13 @@ add_sub(V, RawSub, S) ->
   end,
 
   BoundVs = S1#solver.bound_vs,
-  case {Sub, gb_sets:is_member(V, BoundVs)} of
+  case {Sub, ordsets:is_element(V, BoundVs)} of
     % no change in fvs
     {{set_ifaces, _}, _} -> S1;
     % when subbing a tv not in env or an anchor
     {_, false} -> S1;
     {_, true} ->
-      NewBoundVs = gb_sets:union(fvs(Sub), gb_sets:delete(V, BoundVs)),
+      NewBoundVs = ordsets:union(fvs(Sub), ordsets:del_element(V, BoundVs)),
       S1#solver{bound_vs=NewBoundVs}
   end.
 
@@ -2877,7 +2879,7 @@ add_err(S) ->
   S#solver{errs=[Err | S#solver.errs]}.
 
 add_err_v(V, #solver{err_vs=ErrVs}=S) ->
-  S#solver{err_vs=gb_sets:add(V, ErrVs)}.
+  S#solver{err_vs=ordsets:add_element(V, ErrVs)}.
 
 no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
 
@@ -2929,7 +2931,7 @@ instance(T, I, V, S) ->
           % TODO: is there a case where this fails?
           Origins = maps:get({I, V}, IVOrigins),
 
-          {NewInstRefs, NewNestedIVs} = gb_sets:fold(fun({Ref, OrigV}, Memo) ->
+          {NewInstRefs, NewNestedIVs} = ordsets:fold(fun({Ref, OrigV}, Memo) ->
             {FoldInstRefs, FoldNestedIVs} = Memo,
             {InstT, SubbedVs} = maps:get(Ref, FoldInstRefs),
             SubbedVs1 = add_subbed_vs(IVs, SubbedVs),
@@ -2940,11 +2942,11 @@ instance(T, I, V, S) ->
           end, {InstRefs, NestedIVs}, Origins),
 
           NewIVOrigins = lists:foldl(fun({NestedIs, NestedV}, FoldIVOrigins) ->
-            NestedOrigins = gb_sets:fold(fun({Ref, _}, FoldOrigins) ->
-              gb_sets:add({Ref, NestedV}, FoldOrigins)
-            end, gb_sets:new(), Origins),
+            NestedOrigins = ordsets:fold(fun({Ref, _}, FoldOrigins) ->
+              ordsets:add_element({Ref, NestedV}, FoldOrigins)
+            end, ordsets:new(), Origins),
 
-            gb_sets:fold(fun(NestedI, NestedIVOrigins) ->
+            ordsets:fold(fun(NestedI, NestedIVOrigins) ->
               NestedIVOrigins#{{NestedI, NestedV} => NestedOrigins}
             end, FoldIVOrigins, NestedIs)
           end, IVOrigins, IVs),
@@ -2980,7 +2982,7 @@ subs_s(T, #solver{subs=Subs, aliases=Aliases}, Opts) ->
 bound_vs(Env, #solver{schemes=Schemes}=S) ->
   maps:fold(fun(_, {Value, _}, FoldVs) ->
     case Value of
-      {no_dep, T} -> gb_sets:union(FoldVs, fvs(subs_s(T, S)));
+      {no_dep, T} -> ordsets:union(FoldVs, fvs(subs_s(T, S)));
 
       % 1) If a given other binding has been fully generalized already,
       %    we'll add the bound type variables from its scheme.
@@ -2988,39 +2990,32 @@ bound_vs(Env, #solver{schemes=Schemes}=S) ->
       %    its TV can be generalized over, and so we shouldn't add it here.
       {add_dep, {tv, V, _, _}, _} ->
         case maps:find(V, Schemes) of
-          {ok, {GVs, T}} ->
-            gb_sets:union(FoldVs, gb_sets:difference(fvs(T), GVs));
+          {ok, {_, _, BoundVs}} -> ordsets:union(FoldVs, BoundVs);
           error -> FoldVs
         end
     end
-  end, gb_sets:new(), Env).
+  end, ordsets:new(), Env).
 
-fvs({lam, ArgT, ReturnT}) -> gb_sets:union(fvs(ArgT), fvs(ReturnT));
-fvs({lam, _, _, ArgT, ReturnT}) -> fvs({lam, ArgT, ReturnT});
-fvs({tuple, ElemTs}) ->
-  lists:foldl(fun(T, FVs) ->
-    gb_sets:union(FVs, fvs(T))
-  end, gb_sets:new(), ElemTs);
-fvs({tv, V, _, _}) -> gb_sets:singleton(V);
-fvs({con, _}) -> gb_sets:new();
-fvs({gen, _, ParamTs}) ->
-  lists:foldl(fun(T, FVs) ->
-    gb_sets:union(FVs, fvs(T))
-  end, gb_sets:new(), ParamTs);
-fvs({gen, V, _, BaseT, ParamTs}) ->
+fvs(T) -> ordsets:from_list(fvs_list(T, [])).
+
+fvs_list({lam, ArgT, ReturnT}, L) -> fvs_list(ReturnT, fvs_list(ArgT, L));
+fvs_list({lam, _, _, ArgT, ReturnT}, L) -> fvs_list({lam, ArgT, ReturnT}, L);
+fvs_list({tuple, ElemTs}, L) -> lists:foldl(fun fvs_list/2, L, ElemTs);
+fvs_list({tv, V, _, _}, L) -> [V | L];
+fvs_list({con, _}, L) -> L;
+fvs_list({gen, _, ParamTs}, L) -> lists:foldl(fun fvs_list/2, L, ParamTs);
+fvs_list({gen, V, _, BaseT, ParamTs}, L) ->
   % V only exists to track ifaces associated with this gen TV; it isn't a
   % regular type variable. That being said, it still must be included in FVs.
   % We assume FVs is a superset of IVs, and often use FVs to determine IVs;
   % V is an IV, and hence it must be incldued in FVs.
-  gb_sets:add(V, gb_sets:union(fvs(BaseT), fvs({gen, {con, ""}, ParamTs})));
-% fvs({inst, ...}) ommitted; they should be resolved
-fvs({record, _, FieldMap}) ->
-  maps:fold(fun(_, T, S) ->
-    gb_sets:union(S, fvs(T))
-  end, gb_sets:new(), FieldMap);
-fvs({record_ext, _, BaseT, Ext}) ->
-  gb_sets:union(fvs(BaseT), fvs({record, none, Ext}));
-fvs(unit) -> gb_sets:new().
+  fvs_list(BaseT, fvs_list({gen, {con, ""}, ParamTs}, [V | L]));
+% fvs_list({inst, ...}) ommitted; they should be resolved
+fvs_list({record, _, FieldMap}, L) ->
+  lists:foldl(fun fvs_list/2, L, maps:values(FieldMap));
+fvs_list({record_ext, _, BaseT, Ext}, L) ->
+  fvs_list(BaseT, fvs_list({record, none, Ext}, L));
+fvs_list(unit, L) -> L.
 
 add_gen_vs(InstT, Record) ->
   GenVsList = gen_vs_list(InstT),

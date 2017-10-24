@@ -142,30 +142,30 @@ impl_key({record, _, _}) -> "record";
 impl_key({record_ext, _, _, _}) -> "record";
 impl_key(unit) -> "()".
 
-ivs(T) -> ivs(T, gb_sets:new()).
+ivs(T) -> ivs(T, ordsets:new()).
 
 ivs(T, InitSeenVs) ->
   {IVs, _} = lists:foldl(fun({AllIs, V}, {IVs, SeenVs}) ->
-    Is = gb_sets:difference(AllIs, builtin_is()),
-    Seen = gb_sets:is_member(V, SeenVs),
-    Empty = gb_sets:is_empty(Is),
+    Is = ordsets:subtract(AllIs, builtin_is()),
+    Seen = ordsets:is_element(V, SeenVs),
+    Empty = ordsets:size(Is) == 0,
 
     if
-      not Seen and not Empty -> {[{Is, V} | IVs], gb_sets:add(V, SeenVs)};
+      not Seen and not Empty -> {[{Is, V} | IVs], ordsets:add_element(V, SeenVs)};
       true -> {IVs, SeenVs}
     end
   end, {[], InitSeenVs}, ivs_list(T)),
   IVs.
 
-builtin_is() -> gb_sets:from_list(["Num", "Ord", "Concatable", "Separable"]).
+builtin_is() -> ordsets:from_list(["Num", "Ord", "Concatable", "Separable"]).
 
 all_ivs(T) ->
   {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
-    case gb_sets:is_member(V, SeenVs) of
+    case ordsets:is_element(V, SeenVs) of
       true -> {IVs, SeenVs};
-      _ -> {[IV | IVs], gb_sets:add(V, SeenVs)}
+      _ -> {[IV | IVs], ordsets:add_element(V, SeenVs)}
     end
-  end, {[], gb_sets:new()}, ivs_list(T)),
+  end, {[], ordsets:new()}, ivs_list(T)),
   IVs.
 
 ivs_list({lam, ArgT, ReturnT}) -> ivs_list(ArgT) ++ ivs_list(ReturnT);
@@ -191,7 +191,7 @@ ivs_list({record_ext, _, BaseT, Ext}) ->
   ivs_list(BaseT) ++ ivs_list({record, none, Ext});
 ivs_list(unit) -> [].
 
-args_ivs(T) -> args_ivs(T, gb_sets:new()).
+args_ivs(T) -> args_ivs(T, ordsets:new()).
 
 args_ivs({lam, ArgT, ReturnT}, InitSeenVs) ->
   case ReturnT of
@@ -201,20 +201,20 @@ args_ivs({lam, ArgT, ReturnT}, InitSeenVs) ->
   end.
 
 family_is(I, _) when I == "Ord"; I == "Concatable"; I == "Separable" ->
-  gb_sets:singleton(I);
-family_is("Num", _) -> gb_sets:from_list(["Num", "Ord"]);
+  ordsets:from_list([I]);
+family_is("Num", _) -> ordsets:from_list(["Num", "Ord"]);
 family_is(I, Ifaces) ->
   {_, _, Parents} = maps:get(I, Ifaces),
-  gb_sets:fold(fun(ParentI, Family) ->
-    gb_sets:union(Family, family_is(ParentI, Ifaces))
-  end, gb_sets:add(I, Parents), Parents).
+  ordsets:fold(fun(ParentI, Family) ->
+    ordsets:union(Family, family_is(ParentI, Ifaces))
+  end, ordsets:add_element(I, Parents), Parents).
 
 test_names(Module, Env) ->
   maps:fold(fun
     ({M, Name}, {{con, "Test"}, _}, Set) when M == Module ->
-      gb_sets:add(Name, Set);
+      ordsets:add_element(Name, Set);
     (_, _, Set) -> Set
-  end, gb_sets:new(), Env).
+  end, ordsets:new(), Env).
 
 all_idents(Module, Loc, Env) ->
   maps:fold(fun
@@ -267,7 +267,7 @@ pretty({tv, RawV, Is, Rigid}) ->
       % TODO: keep qualified when ambiguous
       Unqualified = lists:map(fun(I) ->
         utils:unqualify(I)
-      end, gb_sets:to_list(Is)),
+      end, ordsets:to_list(Is)),
       ?FMT("~s ~~ ~s", [V, string:join(Unqualified, " ~ ")])
   end,
 
@@ -278,7 +278,7 @@ pretty({tv, RawV, Is, Rigid}) ->
 pretty({set_ifaces, Is}) ->
   Unqualified = lists:map(fun(I) ->
     utils:unqualify(I)
-  end, gb_sets:to_list(Is)),
+  end, ordsets:to_list(Is)),
   ?FMT("set ifaces ~s", [string:join(Unqualified, " ~ ")]);
 % TODO: keep qualified when ambiguous
 pretty({con, Con}) -> utils:unqualify(Con);
@@ -293,7 +293,7 @@ pretty({gen, _, Is, BaseT, ParamTs}) ->
       MergedIs = if
         Is == none -> BaseIs;
         BaseIs == none -> Is;
-        true -> gb_sets:union(Is, BaseIs)
+        true -> ordsets:union(Is, BaseIs)
       end,
       {pretty({tv, V, none, Rigid}), MergedIs};
 
@@ -305,13 +305,13 @@ pretty({gen, _, Is, BaseT, ParamTs}) ->
     _ ->
       Unqualified = lists:map(fun(I) ->
         utils:unqualify(I)
-      end, gb_sets:to_list(AllIs)),
+      end, ordsets:to_list(AllIs)),
       ?FMT(" ~~ ~s", [string:join(Unqualified, " ~ ")])
   end,
   ?FMT("~s<~s>~s", [PrettyBaseT, string:join(PrettyParamTs, ", "), PrettyIs]);
 pretty({inst, _, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
 pretty({inst, _, GVs, T}) ->
-  ?FMT("inst(~s, ~s)", [gb_sets:to_list(GVs), pretty(T)]);
+  ?FMT("inst(~s, ~s)", [ordsets:to_list(GVs), pretty(T)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, BaseT, Ext}) ->
   ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
