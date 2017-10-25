@@ -1312,6 +1312,10 @@ infer({variant, Loc, Expr, Args}, C) ->
   end;
 
 infer({native, Loc, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
+  % For now, ignore return value. We'll get a native function error below if
+  % this fails.
+  code:ensure_loaded(Module),
+
   C1 = case erlang:function_exported(Module, list_to_atom(Name), Arity) of
     true -> C;
     false -> add_ctx_err(?ERR_NOT_DEF_NATIVE(Module, Name, Arity), Loc, C)

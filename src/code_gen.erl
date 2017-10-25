@@ -1467,15 +1467,13 @@ unique_name(Prefix) -> lists:concat([Prefix, '@', counter_next()]).
 counter_spawn() ->
   case whereis(?COUNTER_NAME) of
     undefined ->
-      Pid = spawn(?MODULE, counter_run, [1]),
+      Pid = spawn_link(?MODULE, counter_run, [1]),
       register(?COUNTER_NAME, Pid);
 
     Pid ->
       Pid ! {self(), reset},
       receive
-        reset_ok -> true;
-        Unexpected ->
-          error({"unexpected reset response", Unexpected})
+        reset_ok -> true
       after 1000 ->
         error("couldn't reset count")
       end
@@ -1488,18 +1486,13 @@ counter_run(Count) ->
       counter_run(1);
     {Pid, next} ->
       Pid ! {next_ok, Count},
-      counter_run(Count + 1);
-    Unexpected ->
-      io:format("unexpected counter message ~p~n", [Unexpected]),
-      counter_run(Count)
+      counter_run(Count + 1)
   end.
 
 counter_next() ->
   ?COUNTER_NAME ! {self(), next},
   receive
-    {next_ok, Next} -> Next;
-    Unexpected ->
-      error({"unexpected next response", Unexpected})
+    {next_ok, Next} -> Next
   after 1000 ->
     error("couldn't get next count")
   end.
@@ -1507,15 +1500,13 @@ counter_next() ->
 excluder_spawn(Excluded) ->
   case whereis(?EXCLUDER_NAME) of
     undefined ->
-      Pid = spawn(?MODULE, excluder_run, [Excluded]),
+      Pid = spawn_link(?MODULE, excluder_run, [Excluded]),
       register(?EXCLUDER_NAME, Pid);
 
     Pid ->
       Pid ! {self(), reset, Excluded},
       receive
-        reset_ok -> true;
-        Unexpected ->
-          error({"unexpected reset response", Unexpected})
+        reset_ok -> true
       after 1000 ->
         error("couldn't reset excluder")
       end
@@ -1531,18 +1522,13 @@ excluder_run(Excluded) ->
       excluder_run(ordsets:del_element(Element, Excluded));
     {Pid, all} ->
       Pid ! {all_ok, Excluded},
-      excluder_run(Excluded);
-    Unexpected ->
-      io:format("unexpected excluder message ~p~n", [Unexpected]),
       excluder_run(Excluded)
   end.
 
 excluder_remove(Element) ->
   ?EXCLUDER_NAME ! {self(), remove, Element},
   receive
-    remove_ok -> ok;
-    Unexpected ->
-      error({"unexpected remove response", Unexpected})
+    remove_ok -> ok
   after 1000 ->
     error("couldn't remove element from excluder")
   end.
@@ -1550,9 +1536,7 @@ excluder_remove(Element) ->
 excluder_all() ->
   ?EXCLUDER_NAME ! {self(), all},
   receive
-    {all_ok, Excluded} -> Excluded;
-    Unexpected ->
-      error({"unexpected all response", Unexpected})
+    {all_ok, Excluded} -> Excluded
   after 1000 ->
     error("couldn't get all excluded elements")
   end.

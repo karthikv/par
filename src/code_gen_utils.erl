@@ -103,12 +103,11 @@
       {value, Value, _} = erl_eval:expr(Expr, Bindings),
       Value;
 
-    NumArgs >= Arity ->
+    NumArgs == Arity -> erlang:apply(Fun, Args);
+
+    NumArgs > Arity ->
       {ImmArgs, RestArgs} = lists:split(Arity, Args),
-      if
-        RestArgs == [] -> erlang:apply(Fun, ImmArgs);
-        true -> '_@curry'(erlang:apply(Fun, ImmArgs), RestArgs, Line)
-      end
+       '_@curry'(erlang:apply(Fun, ImmArgs), RestArgs, Line)
   end.
 
 '_@wrap_with_impls'(Fun, PatternReps, ImplReps, BindList, Line) ->
