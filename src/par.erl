@@ -86,6 +86,7 @@
 %   - Use | to separate cases for match/try?
 %   - Use -> instead of => for match/try?
 %   - Lowercase for type variables?
+% - Accessing tag of enum?
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

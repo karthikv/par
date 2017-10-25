@@ -1310,22 +1310,28 @@ many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|(item, rest)|
   )
 )
 
-delim_cb : (Loc -> Token) -> String -> T -> [Token] -> Parsed<(Bool, [Token])>
-delim_cb(delim, delim_str, _, tokens) =
+zero_loc : Loc
+zero_loc = Loc {
+  start_line = 0
+  end_line = 0
+  start_col = 0
+  end_col = 0
+}
+
+delim_cb : Atom -> String -> T -> [Token] -> Parsed<(Bool, [Token])>
+delim_cb(delim_tag, delim_str, _, tokens) =
   if let [] = tokens then
     parsed((false, []))
   else
     let [h | t] = tokens
-    let l = token_loc(h)
-
-    if h == delim(l) then
+    if token_tag(h) == delim_tag then
       parsed((t != [], t))
     else
       head_loc(tokens) |> one_err(
         "Expected " ++ delim_str ++ " delimiter after expression"
       )
 
-delim_comma_cb = delim_cb(Lexer.Comma, "comma ','")
+delim_comma_cb = delim_cb(token_tag(Lexer.Comma(zero_loc)), "comma ','")
 
 many_delim : (T -> [Token] -> Parsed<(Bool, [Token])>) ->
   ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<[T]>
@@ -1335,15 +1341,14 @@ many_delim(cb, f, tokens) =
 many_delim_comma : ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<[T]>
 many_delim_comma = many_delim(delim_comma_cb)
 
-delim_or_nl_cb : (Loc -> Token) -> String -> Node -> [Token] ->
-  Parsed<(Bool, [Token])>
-delim_or_nl_cb(delim, delim_str, node, tokens) =
+delim_or_nl_cb : Atom -> String -> Node -> [Token] -> Parsed<(Bool, [Token])>
+delim_or_nl_cb(delim_tag, delim_str, node, tokens) =
   if let [] = tokens then
     parsed((false, []))
   else
     let [h | t] = tokens
     let l = token_loc(h)
-    let delim? = h == delim(l)
+    let delim? = token_tag(h) == delim_tag
     let node_l = node_loc(node)
 
     if delim? && t == [] then
@@ -1371,52 +1376,68 @@ delim_or_nl_cb(delim, delim_str, node, tokens) =
       )
 
 delim_comma_or_nl_cb : Node -> [Token] -> Parsed<(Bool, [Token])>
-delim_comma_or_nl_cb = delim_or_nl_cb(Lexer.Comma, "comma ','")
+delim_comma_or_nl_cb = delim_or_nl_cb(
+  token_tag(Lexer.Comma(zero_loc)),
+  "comma ','"
+)
 
 many_delim_comma_or_nl : ([Token] -> Parsed<(Node, [Token])>) -> [Token] ->
   Parsed<[Node]>
 many_delim_comma_or_nl(f, tokens) =
   many_delim_cb(delim_comma_or_nl_cb, f, tokens) |> pmap(|(items, [])| items)
 
-enclosed : (Loc -> Token) -> (Loc -> Token) -> String -> Loc -> [Token] ->
+enclosed : Atom -> Atom -> String -> Loc -> [Token] ->
   Parsed<(Loc, [Token], [Token])>
 enclosed = enclosed_r([], 1)
 
-enclosed_r : [Token] -> Int -> (Loc -> Token) -> (Loc -> Token) -> String ->
-  Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
-enclosed_r(inner, depth, open, close, close_str, s, tokens) =
+enclosed_r : [Token] -> Int -> Atom -> Atom -> String -> Loc -> [Token] ->
+  Parsed<(Loc, [Token], [Token])>
+enclosed_r(inner, depth, open_tag, close_tag, close_str, s, tokens) =
   match tokens {
     [h | t] =>
-      let l = token_loc(h)
-
       // By checking close first, we allow the caller to set open = close
       // without us recursing forever. Instead, setting open = close means
       // just find the nearest close token, ignoring any nesting.
-      if h == close(l) then
+      if token_tag(h) == close_tag then
         if depth == 1 then
-          parsed((range(s, l), reverse(inner), t))
+          parsed((range(s, token_loc(h)), reverse(inner), t))
         else
-          enclosed_r([h | inner], depth - 1, open, close, close_str, s, t)
-      else if h == open(l) then
-        enclosed_r([h | inner], depth + 1, open, close, close_str, s, t)
+          enclosed_r([h | inner], depth - 1, open_tag, close_tag, close_str, s, t)
+      else if token_tag(h) == open_tag then
+        enclosed_r([h | inner], depth + 1, open_tag, close_tag, close_str, s, t)
       else
-        enclosed_r([h | inner], depth, open, close, close_str, s, t)
+        enclosed_r([h | inner], depth, open_tag, close_tag, close_str, s, t)
 
     [] => Some(s) |> one_err("Couldn't find matching " ++ close_str)
   }
 
 enclosed_bracket : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
-enclosed_bracket =
-  enclosed(Lexer.LBracket, Lexer.RBracket, "closing bracket ']'")
+enclosed_bracket = enclosed(
+  token_tag(Lexer.LBracket(zero_loc)),
+  token_tag(Lexer.RBracket(zero_loc)),
+  "closing bracket ']'"
+)
 
 enclosed_paren : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
-enclosed_paren = enclosed(Lexer.LParen, Lexer.RParen, "closing paren ')'")
+enclosed_paren = enclosed(
+  token_tag(Lexer.LParen(zero_loc)),
+  token_tag(Lexer.RParen(zero_loc)),
+  "closing paren ')'"
+)
 
 enclosed_brace : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
-enclosed_brace = enclosed(Lexer.LBrace, Lexer.RBrace, "closing brace '}'")
+enclosed_brace = enclosed(
+  token_tag(Lexer.LBrace(zero_loc)),
+  token_tag(Lexer.RBrace(zero_loc)),
+  "closing brace '}'"
+)
 
 enclosed_tag : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
-enclosed_tag = enclosed(Lexer.Lt, Lexer.Gt, "closing greater than '>'")
+enclosed_tag = enclosed(
+  token_tag(Lexer.Lt(zero_loc)),
+  token_tag(Lexer.Gt(zero_loc)),
+  "closing greater than '>'"
+)
 
 split_bar : [Token] -> Parsed<([Token], [Token])>
 split_bar(tokens) = split_bar_r(tokens, [], false, [], 1)
@@ -1463,6 +1484,9 @@ node_loc(node) = @erlang:element(2, node)
 
 token_loc : Token -> Loc
 token_loc(token) = @erlang:element(2, token)
+
+token_tag : Token -> Atom
+token_tag(v) = @erlang:element(1, v)
 
 range : Loc -> Loc -> Loc
 range(start, end) = Loc {

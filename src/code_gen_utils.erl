@@ -104,13 +104,10 @@
       Value;
 
     NumArgs >= Arity ->
-      ImmArgs = lists:sublist(Args, Arity),
-      RestArgs = lists:sublist(Args, Arity + 1, NumArgs),
-
-      case erlang:length(RestArgs) of
-        0 -> erlang:apply(Fun, ImmArgs);
-        _ ->
-          '_@curry'(erlang:apply(Fun, ImmArgs), RestArgs, Line)
+      {ImmArgs, RestArgs} = lists:split(Arity, Args),
+      if
+        RestArgs == [] -> erlang:apply(Fun, ImmArgs);
+        true -> '_@curry'(erlang:apply(Fun, ImmArgs), RestArgs, Line)
       end
   end.
 

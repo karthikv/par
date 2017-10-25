@@ -33,8 +33,9 @@ elif [ "$1" == "stop" ]; then
   fi
 elif [ "$1" == "finish" ]; then
   if [ -f $OLD_PAR_PATH ]; then
+    bin/par -o ebin src/parser.par
+    bin/parse_utils
     set +e
-    # this builds any par files with the new compiler
     rebar3 eunit
     succeeded=$?
     set -e
