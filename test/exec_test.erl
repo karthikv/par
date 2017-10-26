@@ -1555,6 +1555,7 @@ test_import(Many) ->
         {"bar",
           "module Bar\n"
           "import \"./foo\" (*)\n"
+          "main : () -> (Foo, Foo, Baz, Bool)\n"
           "main() = (Hello(@h), Hi, Baz { first = 'f', second = \"s\" }, x)"
         }
       ], "bar")

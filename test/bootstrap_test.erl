@@ -4,7 +4,7 @@
 check_infer(Path) ->
   case type_system:infer_file(Path) of
     {ok, _, _} -> ?assert(true);
-    Errors ->
+    {errors, _, _}=Errors ->
       io:format("~s", [reporter:format(Errors)]),
       ?assert(false)
   end.

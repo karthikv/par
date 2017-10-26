@@ -1310,12 +1310,12 @@ many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|(item, rest)|
   )
 )
 
-zero_loc : Loc
-zero_loc = Loc {
-  start_line = 0
-  end_line = 0
-  start_col = 0
-  end_col = 0
+fake_loc : Loc
+fake_loc = Loc {
+  start_line = -1
+  end_line = -1
+  start_col = -1
+  end_col = -1
 }
 
 delim_cb : Atom -> String -> T -> [Token] -> Parsed<(Bool, [Token])>
@@ -1331,7 +1331,7 @@ delim_cb(delim_tag, delim_str, _, tokens) =
         "Expected " ++ delim_str ++ " delimiter after expression"
       )
 
-delim_comma_cb = delim_cb(token_tag(Lexer.Comma(zero_loc)), "comma ','")
+delim_comma_cb = delim_cb(token_tag(Lexer.Comma(fake_loc)), "comma ','")
 
 many_delim : (T -> [Token] -> Parsed<(Bool, [Token])>) ->
   ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<[T]>
@@ -1377,7 +1377,7 @@ delim_or_nl_cb(delim_tag, delim_str, node, tokens) =
 
 delim_comma_or_nl_cb : Node -> [Token] -> Parsed<(Bool, [Token])>
 delim_comma_or_nl_cb = delim_or_nl_cb(
-  token_tag(Lexer.Comma(zero_loc)),
+  token_tag(Lexer.Comma(fake_loc)),
   "comma ','"
 )
 
@@ -1413,29 +1413,29 @@ enclosed_r(inner, depth, open_tag, close_tag, close_str, s, tokens) =
 
 enclosed_bracket : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
 enclosed_bracket = enclosed(
-  token_tag(Lexer.LBracket(zero_loc)),
-  token_tag(Lexer.RBracket(zero_loc)),
+  token_tag(Lexer.LBracket(fake_loc)),
+  token_tag(Lexer.RBracket(fake_loc)),
   "closing bracket ']'"
 )
 
 enclosed_paren : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
 enclosed_paren = enclosed(
-  token_tag(Lexer.LParen(zero_loc)),
-  token_tag(Lexer.RParen(zero_loc)),
+  token_tag(Lexer.LParen(fake_loc)),
+  token_tag(Lexer.RParen(fake_loc)),
   "closing paren ')'"
 )
 
 enclosed_brace : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
 enclosed_brace = enclosed(
-  token_tag(Lexer.LBrace(zero_loc)),
-  token_tag(Lexer.RBrace(zero_loc)),
+  token_tag(Lexer.LBrace(fake_loc)),
+  token_tag(Lexer.RBrace(fake_loc)),
   "closing brace '}'"
 )
 
 enclosed_tag : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
 enclosed_tag = enclosed(
-  token_tag(Lexer.Lt(zero_loc)),
-  token_tag(Lexer.Gt(zero_loc)),
+  token_tag(Lexer.Lt(fake_loc)),
+  token_tag(Lexer.Gt(fake_loc)),
   "closing greater than '>'"
 )
 

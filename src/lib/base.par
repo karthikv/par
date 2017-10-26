@@ -1,0 +1,108 @@
+module Base
+
+
+//-- Types --//
+enum Option<T> {
+  Some(T) @some
+  None @none
+}
+
+
+//-- Interfaces --//
+interface Sized {
+  length : T -> Int
+  empty? : T -> Bool
+}
+
+interface Mappable {
+  map : (A -> B) -> T<A> -> T<B>
+}
+
+
+//-- Implementations --//
+impl Sized for String {
+  length = @erlang:size/1
+  empty?(s) = s == ""
+}
+
+impl Sized for [A] {
+  length = @erlang:length/1
+  empty?(l) = l == []
+}
+
+impl Sized for Set<A> {
+  length = @gb_sets:size/1
+  empty? = @gb_sets:is_empty/1
+}
+
+impl Sized for Map<A, B> {
+  length = @erlang:map_size/1
+  empty?(m) = m == {}
+}
+
+impl Mappable for Option {
+  map(f, o) = match o {
+    Some(a) => Some(f(a))
+    None => None
+  }
+}
+
+impl Mappable for List {
+  map = @lists:map/2
+}
+
+impl Mappable for Set {
+  map(f, s) = @gb_sets:fold(|a, new_s|
+    @gb_sets:add(f(a), new_s)
+  , #[], s)
+}
+
+impl Mappable for Map {
+  map(f, m) = @maps:fold(|k, v, new_m|
+    @maps:put(k, v, new_m)
+  , {}, m)
+}
+
+
+//-- Collections --//
+first : (A, B) -> A
+export first((a, _)) = a
+
+second : (A, B) -> B
+export second((_, b)) = b
+
+head : [A] -> A
+export head = @erlang:hd/1
+
+tail : [A] -> [A]
+export tail = @erlang:tl/1
+
+
+//-- Math --//
+abs : A ~ Num -> A ~ Num
+export abs = @erlang:abs/1
+
+// TODO: OTP 19?
+//ceil : Float -> Int
+//export ceil = @erlang:ceil/1
+//
+//floor : Float -> Int
+//export floor = @erlang:floor/1
+
+max : A ~ Ord -> A ~ Ord -> A ~ Ord
+export max(a, b) = if a > b then a else b
+
+min : A ~ Ord -> A ~ Ord -> A ~ Ord
+export min(a, b) = if a < b then a else b
+
+round : Float -> Int
+export round = @erlang:round/1
+
+trunc : Float -> Int
+export trunc = @erlang:trunc/1
+
+
+//-- Conversions --//
+
+
+//-- Misc --//

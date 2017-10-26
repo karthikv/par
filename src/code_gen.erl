@@ -152,8 +152,7 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
   Enums = CG#cg.ctx#ctx.enums,
   lists:foldl(fun({DepModule, Idents}, ModuleCG) ->
     Expanded = case Idents of
-      [{all, AllLoc}] ->
-        utils:all_idents(DepModule, AllLoc, CG#cg.ctx#ctx.g_env);
+      [{all, AllLoc}] -> utils:exported_idents(DepModule, AllLoc, CG#cg.ctx);
       _ -> Idents
     end,
 

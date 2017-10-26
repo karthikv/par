@@ -11,12 +11,12 @@ format({read_error, Path, Reason}) ->
   Msg = ?FMT("Couldn't read file ~s: ~s", [Path, reason_str(Reason)]),
   [wrap(Msg, ?LINE_WIDTH), $\n];
 
-format({import_error, Loc, ImportPath, Reason, Comp}) ->
+format({import_error, Loc, PathOrCon, Reason, Comp}) ->
   #comp{module=Module, path=Path, prg_lines=PrgLines} = Comp,
   Prefix = ?FMT("*** module ~s *** (~s)~n~n", [Module, Path]),
   Code = extract_code(Loc, PrgLines),
 
-  Msg = ?FMT("Couldn't import ~s: ~s", [ImportPath, reason_str(Reason)]),
+  Msg = ?FMT("Couldn't import ~s: ~s", [PathOrCon, reason_str(Reason)]),
   [Prefix, wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n];
 
 format({lexer_errors, Errs, Path, PrgLines}) ->

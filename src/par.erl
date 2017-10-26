@@ -6,12 +6,14 @@
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ref type?
+%   - Import error reporting
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
+% - Think about bug with passing curried function to native
 % - Ensure module can't import itself
 % - Enforce newline between defs
 % - _atom for a module
@@ -49,6 +51,8 @@
 %   - Improve error when iface needs HKT and impl type has wrong # of params
 %     - Ditto for interface extension that has wrong # of params
 %   - Add explicit error when assert let w/ a pattern that'll always match
+%   - Impl error due to iface type sig, where type sig can be in another module
+%   - Explanation for how to circumvent builtin redef error?
 % - Website + Documentation
 %
 % Defer

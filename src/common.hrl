@@ -9,6 +9,8 @@
 %     below
 %   gnrs - an array of finalized gnr records that need to be solved
 %   env - a Name => T mapping of bindings in the environment
+%   exports - a Module => set of names mapping of exported identifiers (incl.
+%     types) in a given module
 %   types - a Name => NumParams map for types in the env
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
@@ -33,6 +35,7 @@
   gnrs = [],
   g_env = #{},
   l_env = #{},
+  exports = #{},
   types = #{
     "Int" => {false, 0},
     "Float" => {false, 0},
@@ -90,6 +93,10 @@
 
 -define(FROM_GLOBAL_DEF(Name), ?FMT("global definition of ~s", [Name])).
 -define(FROM_GLOBAL_SIG(Name), ?FMT("global type signature of ~s", [Name])).
+-define(
+  FROM_IFACE_SIG(Con),
+  ?FMT("satisfying interface ~s", [utils:unqualify(Con)])
+).
 -define(FROM_EXPR_SIG, "expression type signature").
 -define(FROM_EXPR_SIG_RESULT, "result of expression type signature").
 -define(FROM_ENUM_CTOR, "enum constructor").
@@ -122,7 +129,17 @@
 -define(FROM_PARENT_IFACES, "satisfying parent interfaces").
 
 
--define(ERR_REDEF(Name), ?FMT("~s is already defined", [Name])).
+-define(
+  ERR_REDEF(Name, Loc),
+  ?FMT(
+    "~s is already defined on line ~p, column ~p",
+    [Name, ?START_LINE(Loc), ?START_COL(Loc)]
+  )
+).
+-define(
+  ERR_REDEF_BUILTIN(Name),
+  ?FMT("~s is already defined as a builtin", [Name])
+).
 -define(
   ERR_REDEF_TYPE(Con),
   ?FMT("~s is already defined as a type", [utils:unqualify(Con)])

@@ -122,10 +122,9 @@ infer_file(Path) ->
     {errors, Errors, _} -> Errors
   end.
 
-std_modules() ->
-  #{
-    "Base" => "base.par"
-  }.
+stdlib_dir() -> filename:join(code:lib_dir(par, src), "lib").
+
+stdlib_modules() -> #{"Base" => "base.par"}.
 
 parse_file(RawPath, Parsed) ->
   Path = case filename:extension(RawPath) of
@@ -138,7 +137,19 @@ parse_file(RawPath, Parsed) ->
     {ok, skip} -> skip;
 
     error ->
-      case file:read_file(Path) of
+      StdlibDir = stdlib_dir(),
+      IsStdlib = lists:prefix(StdlibDir, Path),
+
+      Result = case IsStdlib of
+        true ->
+          case erl_prim_loader:get_file(Path) of
+            {ok, Bin, _} -> {ok, Bin};
+            error -> {error, "builtin module of that name doesn't exist"}
+          end;
+        false -> file:read_file(Path)
+      end,
+
+      case Result of
         {error, Reason} ->
           {errors, [{read_error, Path, Reason}], Parsed#{Path => skip}};
 
@@ -146,7 +157,12 @@ parse_file(RawPath, Parsed) ->
           Prg = binary_to_list(Binary),
 
           case parse_prg(Prg, Path) of
-            {ok, Ast, PrgLines} ->
+            {ok, RawAst, PrgLines} ->
+              Ast = case IsStdlib of
+                true -> RawAst;
+                false -> add_stdlib_imports(RawAst)
+              end,
+
               {module, _, {con_token, _, Module}, Imports, _} = Ast,
               Parsed1 = Parsed#{Path => {module, Module}},
 
@@ -166,14 +182,13 @@ parse_file(RawPath, Parsed) ->
                 DepPath = case From of
                   {str, _, DepPath_} ->
                     filename:join(Dir, binary_to_list(DepPath_));
-                  {con_token, _, StdModule} ->
-                    PrivDir = code:priv_dir(par),
-                    case maps:find(StdModule, std_modules()) of
-                      {ok, DepPath_} -> filename:join(PrivDir, DepPath_);
+                  {con_token, _, StdlibModule} ->
+                    case maps:find(StdlibModule, stdlib_modules()) of
+                      {ok, DepPath_} -> filename:join(StdlibDir, DepPath_);
 
-                      % priv/null doesn't exist and will cause a read error
+                      % The file null doesn't exist and will cause a read error
                       % below, which will translate to an import error.
-                      error -> filename:join(PrivDir, null)
+                      error -> filename:join(StdlibDir, null)
                     end
                 end,
 
@@ -183,13 +198,9 @@ parse_file(RawPath, Parsed) ->
                      FoldAllErrors, FoldParsed1};
 
                   {errors, [{read_error, ImportPath, Reason}], FoldParsed1} ->
-                    ImportError = case From of
-                      {str, DepLoc, _} ->
-                        {import_error, DepLoc, ImportPath, Reason, Comp};
-                      {con_token, DepLoc, DepModule} ->
-                        {import_error, DepLoc, DepModule, Comp}
-                    end,
-                    {FoldDeps, FoldComps, [[ImportError] | FoldAllErrors],
+                    DepLoc = element(2, From),
+                    Error = {import_error, DepLoc, ImportPath, Reason, Comp},
+                    {FoldDeps, FoldComps, [[Error] | FoldAllErrors],
                      FoldParsed1};
 
                   {errors, DepAllErrors, FoldParsed1} ->
@@ -211,6 +222,24 @@ parse_file(RawPath, Parsed) ->
           end
       end
   end.
+
+add_stdlib_imports({module, _, _, RawImports, _}=Ast) ->
+  Imported = lists:filtermap(fun
+    ({import, _, {con_token, _, Con}, _}) -> {true, Con};
+    (_) -> false
+  end, RawImports),
+  ImportedSet = ordsets:from_list(Imported),
+
+  % placeholder loc representing a builtin import
+  Loc = builtin,
+  RawStdlibImports = [
+    {import, Loc, {con_token, Loc, "Base"}, [{all, Loc}]}
+  ],
+  StdlibImports = lists:filter(fun({import, _, {con_token, _, Con}, _}) ->
+    not ordsets:is_element(Con, ImportedSet)
+  end, RawStdlibImports),
+
+  setelement(4, Ast, StdlibImports ++ RawImports).
 
 infer_prg(Prg) ->
   case parse_prg(Prg, "[infer-prg]") of
@@ -252,7 +281,10 @@ infer_comps(Comps) ->
 
     case ordsets:is_element(Module, Modules) of
       true -> {Modules, add_ctx_err(?ERR_REDEF_MODULE(Module), Loc, FoldC1)};
-      false -> {ordsets:add_element(Module, Modules), FoldC1}
+      false ->
+        Exports = FoldC1#ctx.exports,
+        NewExports = Exports#{Module => ordsets:new()},
+        {ordsets:add_element(Module, Modules), FoldC1#ctx{exports=NewExports}}
     end
   end, {ordsets:new(), #ctx{pid=Pid}}, Comps),
 
@@ -414,14 +446,25 @@ populate_env_and_types(Comps, C) ->
     end, FoldC#ctx{module=Module}, Defs)
   end, C, Comps).
 
-define(Name, B, #ctx{module=Module, g_env=GEnv}=C) ->
-  case maps:is_key({Module, Name}, GEnv) of
-    true -> add_ctx_err(?ERR_REDEF(Name), B#binding.loc, C);
-    false -> C#ctx{g_env=GEnv#{{Module, Name} => B}}
+define(Name, B, #ctx{module=Module, g_env=GEnv, exports=Exports}=C) ->
+  case maps:find({Module, Name}, GEnv) of
+    {ok, #binding{loc=OrigLoc}} ->
+      case B#binding.loc of
+        builtin -> add_ctx_err(?ERR_REDEF_BUILTIN(Name), OrigLoc, C);
+        Loc -> add_ctx_err(?ERR_REDEF(Name, OrigLoc), Loc, C)
+      end;
+    error ->
+      NewExports = if
+        B#binding.exported ->
+          Names = maps:get(Module, Exports),
+          Exports#{Module => ordsets:add_element(Name, Names)};
+        true -> Exports
+      end,
+      C#ctx{g_env=GEnv#{{Module, Name} => B}, exports=NewExports}
   end.
 
 define_type(Con, IsIface, NumParams, Loc, C) ->
-  Types = C#ctx.types,
+  #ctx{module=Module, types=Types, exports=Exports} = C,
   Builtin = string:chr(Con, $.) == 0,
 
   case maps:find(Con, Types) of
@@ -435,7 +478,11 @@ define_type(Con, IsIface, NumParams, Loc, C) ->
         Builtin -> add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), Loc, C);
         true -> add_ctx_err(?ERR_REDEF_TYPE(Con), Loc, C)
       end;
-    error -> C#ctx{types=Types#{Con => {IsIface, NumParams}}}
+    error ->
+      Names = maps:get(Module, Exports),
+      RawCon = utils:unqualify(Con),
+      NewExports = Exports#{Module => ordsets:add_element(RawCon, Names)},
+      C#ctx{types=Types#{Con => {IsIface, NumParams}}, exports=NewExports}
   end.
 
 gen_t_num_params({lam_te, _, ArgTE, ReturnTE}) ->
@@ -582,7 +629,7 @@ infer_defs(Comps, C) ->
 populate_direct_imports(Deps, C) ->
   lists:foldl(fun({DepModule, Idents}, ModuleC) ->
     Expanded = case Idents of
-      [{all, AllLoc}] -> utils:all_idents(DepModule, AllLoc, C#ctx.g_env);
+      [{all, AllLoc}] -> utils:exported_idents(DepModule, AllLoc, C);
       _ -> Idents
     end,
 
@@ -823,9 +870,10 @@ infer({enum, _, EnumTE, Options}, C) ->
     {NewKeys, FoldC2} = case KeyNode of
       none ->
         case maps:find(Key, Keys) of
-          {ok, {default, _, _}} ->
-            % we've already added an ERR_REDEF; no need to add another
-            {Keys, FoldC1};
+          % We've already added an ERR_REDEF for the option. There's no need to
+          % add an ERR_DUP_KEY as well.
+          {ok, {default, _, _}} -> {Keys, FoldC1};
+
           {ok, {custom, _, CustomLoc}} ->
             % TODO: show actual code instead of just line for ERR_DUP_KEY
             CaseC = add_ctx_err(
@@ -1827,7 +1875,8 @@ infer_impl_inits(
           error ->
             add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, IfaceCon), VarLoc, FoldC);
 
-          {ok, {FieldLoc, RawFieldT}} ->
+          % TODO: incorporate _FieldLoc into sig error messages
+          {ok, {_FieldLoc, RawFieldT}} ->
             {TupleSubs, NumParams} = case IfaceNumParams of
               1 ->
                 {con, ImplCon} = ImplT,
@@ -1901,8 +1950,8 @@ infer_impl_inits(
             SigCst = make_cst(
               TV,
               SigT,
-              FieldLoc,
-              ?FROM_GLOBAL_SIG(Name),
+              VarLoc,
+              ?FROM_IFACE_SIG(IfaceCon),
               FoldC3
             ),
 

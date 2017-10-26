@@ -12,7 +12,12 @@ type_check(Prg) -> type_system:infer_prg(?PRG_PREFIX ++ Prg).
 type_check(Prefix, Prg) -> type_system:infer_prg(Prefix ++ Prg).
 
 norm_prg(Prefix, Prg, Name) ->
-  {ok, _, #ctx{g_env=GEnv}} = type_check(Prefix, Prg),
+  GEnv = case type_check(Prefix, Prg) of
+    {ok, _, #ctx{g_env=GEnv_}} -> GEnv_;
+    {errors, _, _}=Errors ->
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
   Key = {"Mod", Name},
   #binding{inst=T} = maps:get(Key, GEnv),
 
@@ -27,11 +32,30 @@ ok_prg(Prg, Name) ->
 bad_prg(Prg, Err) -> bad_prg(?PRG_PREFIX, Prg, Err).
 
 bad_prg(Prefix, Prg, {Exp1, Exp2, ExpLoc, ExpFrom}) ->
-  {errors, [Err], _} = type_check(Prefix, Prg),
+  Err = case type_check(Prefix, Prg) of
+    {ok, _, _} ->
+      io:format("Expected 1 error, but got valid program~n"),
+      ?assert(false);
+    {errors, [Err_], _} -> Err_;
+    {errors, _, _}=Errors ->
+      io:format("Expected 1 error, but got:~n"),
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
   assert_err_equal(Err, {Exp1, Exp2, "Mod", ExpLoc, ExpFrom});
 
 bad_prg(Prefix, Prg, ExpErrs) when is_list(ExpErrs) ->
-  {errors, Errs, _} = type_check(Prefix, Prg),
+  NumExpErrs = length(ExpErrs),
+  Errs = case type_check(Prefix, Prg) of
+    {ok, _, _} ->
+      io:format("Expected ~p errors, but got valid program~n", [NumExpErrs]),
+      ?assert(false);
+    {errors, Errs_, _} when length(Errs_) == NumExpErrs -> Errs_;
+    {errors, _, _}=Errors ->
+      io:format("Expected ~p errors, but got:~n", [NumExpErrs]),
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
 
   % for simplicitly, we assume errors are in the same order
   lists:foreach(fun({Err, {Exp1, Exp2, ExpLoc, ExpFrom}}) ->
@@ -39,7 +63,16 @@ bad_prg(Prefix, Prg, ExpErrs) when is_list(ExpErrs) ->
   end, lists:zip(Errs, ExpErrs)).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLoc}) ->
-  {errors, [{Msg, "Mod", Loc}], _} = type_check(?PRG_PREFIX, Prg),
+  {Msg, "Mod", Loc} = case type_check(?PRG_PREFIX, Prg) of
+    {ok, _, _} ->
+      io:format("Expected 1 ctx error, but got valid program~n"),
+      ?assert(false);
+    {errors, [{_, _, _}=Err], _} -> Err;
+    {errors, _, _}=Errors ->
+      io:format("Expected 1 ctx error, but got:~n"),
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
   ?assertEqual(ExpMsg, Msg),
   ?assertEqual(ExpLoc, Loc).
 
@@ -61,7 +94,12 @@ type_check_many(Dir, PathPrgs, TargetPath) ->
   type_system:infer_file(AbsTargetPath).
 
 ok_many(PathPrgs, TargetPath, Name) ->
-  {ok, Comps, C} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  {Comps, C} = case type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath) of
+    {ok, Comps_, C_} -> {Comps_, C_};
+    {errors, _, _}=Errors ->
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
   #ctx{g_env=GEnv} = C,
   #comp{module=Module} = hd(Comps),
   #binding{inst=T} = maps:get({Module, Name}, GEnv),
@@ -72,15 +110,34 @@ ok_many(PathPrgs, TargetPath, Name) ->
   utils:pretty(NormT).
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
-  {errors, [Err], _} = type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath),
+  Err = case type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath) of
+    {ok, _, _} ->
+      io:format("Expected 1 error, but got valid program~n"),
+      ?assert(false);
+    {errors, [Err_], _} -> Err_;
+    {errors, _, _}=Errors ->
+      io:format("Expected 1 error, but got:~n"),
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
   assert_err_equal(Err, ExpErr).
 
 ctx_err_many(PathPrgs, TargetPath, {ExpMsg, ExpModule, ExpLoc}) ->
-  {errors, [{Msg, Module, Loc}], _} = type_check_many(
+  Result = type_check_many(
     ?TMP_MANY_DIR,
     PathPrgs,
     TargetPath
   ),
+  {Msg, Module, Loc} = case Result of
+    {ok, _, _} ->
+      io:format("Expected 1 ctx error, but got valid program~n"),
+      ?assert(false);
+    {errors, [{_, _, _}=Err], _} -> Err;
+    {errors, _, _}=Errors ->
+      io:format("Expected 1 ctx error, but got:~n"),
+      io:format("~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end,
   ?assertEqual(ExpMsg, Msg),
   ?assertEqual(ExpModule, Module),
   ?assertEqual(ExpLoc, Loc).
@@ -1492,7 +1549,7 @@ interface_test_() ->
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for Atom { foo(a) = @hi }",
-      {"Atom -> Atom", "Atom -> Bool", l(16, 15), ?FROM_GLOBAL_SIG("foo")}
+      {"Atom -> Atom", "Atom -> Bool", l(1, 20, 3), ?FROM_IFACE_SIG("Foo")}
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
@@ -2292,17 +2349,17 @@ other_errors_test_() ->
   [ ?_test(ctx_err_prg(
       "foo = 3\n"
       "foo = 4",
-      {?ERR_REDEF("foo"), l(1, 0, 3)}
+      {?ERR_REDEF("foo", l(0, 3)), l(1, 0, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo { Bar(Int) }\n"
       "struct Bar { foo : Float }",
-      {?ERR_REDEF("Bar"), l(1, 7, 3)}
+      {?ERR_REDEF("Bar", l(11, 3)), l(1, 7, 3)}
     ))
   , ?_test(ctx_err_prg(
       "struct Bar<A> { foo : Float }\n"
       "enum Foo<K, V> { Bar(Int) }",
-      {?ERR_REDEF("Bar"), l(1, 17, 3)}
+      {?ERR_REDEF("Bar", l(7, 3)), l(1, 17, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Int { Zero }",
@@ -2523,7 +2580,7 @@ other_errors_test_() ->
       "  Bar(Char)\n"
       "  Bar\n"
       "}",
-      {?ERR_REDEF("Bar"), l(2, 2, 3)}
+      {?ERR_REDEF("Bar", l(1, 2, 3)), l(2, 2, 3)}
     ))
   , ?_test("Foo" = ok_prg(
       "enum Foo {\n"
@@ -2768,6 +2825,7 @@ import_test_() ->
       {"bar",
         "module Bar\n"
         "import \"./foo\" (*)\n"
+        "y : (Foo, Foo, Baz, Bool)\n"
         "y = (Hello(@h), Hi, Baz { first = 'f', second = \"s\" }, x)"
       }
     ], "bar", "y"))
@@ -2781,7 +2839,7 @@ import_test_() ->
         "import \"./foo\" (x)\n"
         "x = 4"
       }
-    ], "bar", {?ERR_REDEF("x"), "Bar", l(16, 1)}))
+    ], "bar", {?ERR_REDEF("x", l(1, 0, 1)), "Bar", l(16, 1)}))
   , ?_test(ctx_err_many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
@@ -2806,7 +2864,7 @@ import_test_() ->
         "import \"./foo\" (x, x)\n"
         "y = x + 4"
       }
-    ], "bar", {?ERR_REDEF("x"), "Bar", l(19, 1)}))
+    ], "bar", {?ERR_REDEF("x", l(16, 1)), "Bar", l(19, 1)}))
   , ?_test(ctx_err_many([
       {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
@@ -2814,7 +2872,7 @@ import_test_() ->
         "import \"./foo\" (Foo, One, variants Foo)\n"
         "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
-    ], "bar", {?ERR_REDEF("One"), "Bar", l(26, 12)}))
+    ], "bar", {?ERR_REDEF("One", l(21, 3)), "Bar", l(26, 12)}))
   , ?_test(ctx_err_many([
       {"foo",
         "module Foo\n"
@@ -2825,7 +2883,7 @@ import_test_() ->
       {"bar",
         "module Bar\n"
         "import \"./foo\" (*)\n"
-        "enum Baz { None }\n"
+        "enum Baz { Other }\n"
       }
     ], "bar", {?ERR_REDEF_TYPE("Baz"), "Bar", l(16, 1)}))
   , ?_test(ctx_err_many([

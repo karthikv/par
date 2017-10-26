@@ -16,11 +16,12 @@ ok_prg(Prg) ->
 ok_prefix(Prefix, Prg) ->
   Ast = ok_prg(Prefix ++ Prg),
   % l() assumes we're starting after the module line, but we're testing the
-  % module line itself, so pass -1
+  % module line itself, so pass -1.
   ModuleLoc = l(-1, 0, 10),
   ConLoc = l(-1, 7, 3),
 
-  {module, ModuleLoc, {con_token, ConLoc, "Mod"}, [], Defs} = Ast,
+  % Don't match imports, as they include all stdlib imports.
+  {module, ModuleLoc, {con_token, ConLoc, "Mod"}, _, Defs} = Ast,
   [Def] = Defs,
   Def.
 

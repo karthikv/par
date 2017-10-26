@@ -15,14 +15,18 @@ if [ $# -ne 1 ]; then
 fi
 
 if [ "$1" == "start" ]; then
-  echo "Compiling new par..."
-  bin/par -o ebin src/parser.par
-  bin/parse_utils
-  rebar3 as escript escriptize
+  if [ -f $OLD_PAR_PATH ]; then
+    echo "Already bootstrapped"
+  else
+    echo "Compiling new par..."
+    bin/par -o ebin src/parser.par
+    bin/parse_utils
+    rebar3 as escript escriptize
 
-  mv "$PAR_PATH" "$OLD_PAR_PATH"
-  mv _build/escript/bin/par "$PAR_PATH"
-  echo "Done"
+    mv "$PAR_PATH" "$OLD_PAR_PATH"
+    mv _build/escript/bin/par "$PAR_PATH"
+    echo "Done"
+  fi
 elif [ "$1" == "stop" ]; then
   if [ -f $OLD_PAR_PATH ]; then
     echo -n "Reverting to old par... "

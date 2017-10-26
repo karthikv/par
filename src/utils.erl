@@ -14,7 +14,7 @@
   args_ivs/2,
   family_is/2,
   test_names/2,
-  all_idents/3,
+  exported_idents/3,
   absolute/1,
   pretty_csts/1,
   pretty/1
@@ -216,16 +216,12 @@ test_names(Module, GEnv) ->
     (_, _, Set) -> Set
   end, ordsets:new(), GEnv).
 
-all_idents(Module, Loc, GEnv) ->
-  maps:fold(fun
-    ({M, [H | _]=Name}, #binding{exported=true}, FoldIdents) when M == Module ->
-      if
-        H >= $a andalso H =< $z -> [{var, Loc, Name} | FoldIdents];
-        true -> [{con_token, Loc, Name} | FoldIdents]
-      end;
-
-    (_, _, FoldIdents) -> FoldIdents
-  end, [], GEnv).
+exported_idents(Module, Loc, #ctx{exports=Exports}) ->
+  Names = maps:get(Module, Exports),
+  lists:map(fun
+    ([H | _]=Name) when H >= $a andalso H =< $z -> {var, Loc, Name};
+    (Name) -> {con_token, Loc, Name}
+  end, ordsets:to_list(Names)).
 
 absolute(Path) ->
   FullPath = filename:absname(Path),
