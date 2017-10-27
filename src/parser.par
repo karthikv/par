@@ -106,10 +106,12 @@ enum UnaryOpAtom {
   Not @"!"
   Pound @"#"
   Dollar @"$"
-  Raise @"raise"
-  Discard @"discard"
-  Test @"test"
-  Assert @"assert"
+  Raise @raise
+  Discard @discard
+  Assume @assume
+
+  Test @test
+  Assert @assert
 }
 
 enum OpAtom {
@@ -636,6 +638,8 @@ expr_r(expr_s, state, stack, tokens) = match state {
         expr_r(expr_s, Start, [UnaryOp(l, Raise) | stack], t)
       [Lexer.Discard(l) | t] =>
         expr_r(expr_s, Start, [UnaryOp(l, Discard) | stack], t)
+      [Lexer.Assume(l) | t] =>
+        expr_r(expr_s, Start, [UnaryOp(l, Assume) | stack], t)
 
       // lam, test, and assert have lowest prec, so it's fine to recurse
       [Lexer.Test(s) | t] =>
@@ -1176,7 +1180,7 @@ opa_prec_list = [
   [Bin(Add), Bin(Sub), Bin(Concat), Bin(Separate)]
   [Bin(Mul), Bin(Div), Bin(Mod)]
   [Bin(Colon)]
-  [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Raise), Un(Discard)]
+  [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Raise), Un(Discard), Un(Assume)]
 ]
 
 try_qualify_con : Loc -> [Char] -> [Token] -> (Node, [Token])

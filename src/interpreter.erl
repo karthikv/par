@@ -242,10 +242,12 @@ eval({unary_op, _, Op, Expr}, ID) ->
   case Op of
     '!' -> not V;
     '#' -> gb_sets:from_list(V);
-    % $ used by the type system to treat Char as Int, but they're the same
+    % $ is used to convert Char to Int, but the underlying rep is the same
     '$' -> V;
     '-' -> -V;
-    'discard' -> {}
+    'discard' -> {};
+    % assume is used to subvert the type system; it doesn't modify value
+    'assume' -> V
   end.
 
 eval_pattern({var, _, Name}, {fn, _, _, _, _}=Expr, ID) ->

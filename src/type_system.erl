@@ -1580,6 +1580,8 @@ infer({unary_op, Loc, Op, Expr}, C) ->
       {NumT, NumT};
     Op == 'raise' -> {{con, "Exception"}, tv_server:fresh(C1#ctx.pid)};
     Op == 'discard' -> {ExprT, unit};
+    Op == 'assume' -> {ExprT, tv_server:fresh(C1#ctx.pid)};
+
     Op == 'test' -> {{con, "Assertion"}, {con, "Test"}};
     Op == 'assert' ->
       case Expr of

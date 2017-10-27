@@ -13,10 +13,8 @@
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
 % - Think about bug with passing curried function to native
-% - Ensure module can't import itself
 % - Enforce newline between defs
-% - _atom for a module
-% - Use expr_single in parsing list instead of expr_multi to avoid bugs
+% - _atom field for a module
 % - Syntax: List, Set, Map, Record
 %   - New: [a, b], #[a, b], #{a => b, c => d}, {a = b, c = d}
 %   - Put: [a, b | c], #[a, b | c], #{a => b, c => d | m}, {a = b, c = d | r}

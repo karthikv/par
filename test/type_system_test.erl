@@ -446,6 +446,7 @@ expr_test_() ->
   , ?_test("Bool" = ok_expr("!false"))
   , ?_test("Bool" = ok_expr("!(-3 == 4)"))
   , ?_test("Int" = ok_expr("$'h'"))
+  , ?_test("A" = ok_expr("assume @foo"))
   , ?_test(bad_expr("-true", {"Bool", "A ~ Num", l(1, 4), ?FROM_UNARY_OP('-')}))
   , ?_test(bad_expr("!15.0", {"Float", "Bool", l(1, 4), ?FROM_UNARY_OP('!')}))
   , ?_test(bad_expr(
@@ -457,6 +458,7 @@ expr_test_() ->
 
   , ?_test("Bool" = ok_expr("true : Bool"))
   , ?_test("Int" = ok_expr("3 : Int"))
+  , ?_test("Char" = ok_expr("assume @foo : Char"))
   , ?_test("A ~ Num" = ok_expr("3 : A ~ Num"))
   , ?_test("Bool -> Bool" = ok_expr("|x| x : Bool"))
   , ?_test("A -> A" = ok_expr("(|x| x) : A -> A"))

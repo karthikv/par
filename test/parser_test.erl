@@ -600,6 +600,17 @@ expr_test_() ->
       },
       ok_expr("assert let x = 4\nx")
     )
+  , ?_assertEqual(
+      {unary_op, l(0, 11), assume, {atom, l(7, 4), hey}},
+      ok_expr("assume @hey")
+    )
+  , ?_assertEqual(
+      {expr_sig, l(0, 17), ref,
+        {unary_op, l(0, 11), assume, {atom, l(7, 4), hey}},
+        {con_token, l(14, 3), "Int"}
+      },
+      ok_expr("assume @hey : Int")
+    )
 
 
   , ?_assertEqual(

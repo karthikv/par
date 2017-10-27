@@ -888,11 +888,13 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
   case Op of
     '!' -> {op, Line, 'not', ExprRep};
     '#' -> call(gb_sets, from_list, [ExprRep], Line);
-    % $ used by the type system to treat Char as Int, but they're the same
+    % $ is used to convert Char to Int, but the underlying rep is the same
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
     'raise' -> call(erlang, throw, [ExprRep], Line);
     'discard' -> {block, Line, [ExprRep, eabs({}, Line)]};
+    % assume is used to subvert the type system; it doesn't modify value
+    'assume' -> ExprRep;
 
     'test' ->
       Clause = {clause, Line, [], [], [ExprRep]},

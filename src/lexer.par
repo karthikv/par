@@ -73,6 +73,7 @@ enum Token {
   Ensure(Loc) @ensure
   After(Loc) @after
   Discard(Loc) @discard
+  Assume(Loc) @assume
   Test(Loc) @test
   Assert(Loc) @assert
 
@@ -363,6 +364,8 @@ chs_to_token_fn = {
   to_list("ensure") => Ensure,
   to_list("after") => After,
   to_list("discard") => Discard,
+  to_list("assume") => Assume,
+
   to_list("test") => Test,
   to_list("assert") => Assert,
 

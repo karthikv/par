@@ -218,6 +218,7 @@ test_expr(Expr) ->
   , ?_test(false = Expr("!true"))
   , ?_test(true = Expr("!false && true"))
   , ?_test($h = Expr("$'h'"))
+  , ?_test(foo = Expr("assume @foo"))
 
 
   , ?_test([4, 6] = Expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
