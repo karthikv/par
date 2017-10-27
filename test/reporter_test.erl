@@ -204,6 +204,13 @@ expr_test_() ->
         "a = 1"
       }
     ], "foo")
+  , ?golden_many_("self-import", [
+      {"foo",
+        "module Foo\n"
+        "import \"./foo\"\n"
+        "a = 1"
+      }
+    ], "foo")
 
   % type system errors
   , ?golden_expr_("ts-mismatch", "true + 5")

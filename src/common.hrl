@@ -1,17 +1,34 @@
 -ifndef(COMMON_HRL_).
 -define(COMMON_HRL_, 1).
 
+-define(BUILTIN_LOC, builtin).
+
+-define(
+  BUILTIN_TYPE(IsIface, NumParams),
+  #type_binding{
+    is_iface = IsIface,
+    num_params = NumParams,
+    loc = ?BUILTIN_LOC
+  }
+).
+
 % a component to compile, representing a module and its metadata
 -record(comp, {module, ast, deps, path, prg, prg_lines}).
+
+% a variable binding in the global or local env
+-record(binding, {tv, id, exported = false, arity, inst, loc}).
+
+% a global type binding; types are exported by default
+-record(type_binding, {is_iface, num_params, exported = true, loc}).
 
 % C - A context record for type inference with the following fields:
 %   gnr - the current gnr record that constraints are being added to; see G
 %     below
 %   gnrs - an array of finalized gnr records that need to be solved
-%   env - a Name => T mapping of bindings in the environment
+%   env - a Name => binding record mapping of bindings in the environment
 %   exports - a Module => set of names mapping of exported identifiers (incl.
 %     types) in a given module
-%   types - a Name => NumParams map for types in the env
+%   types - a Name => type binding record mapping of types in the env
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
 %   structs - a Name => {T, SigVs} map for structs in the env
@@ -37,25 +54,25 @@
   l_env = #{},
   exports = #{},
   types = #{
-    "Int" => {false, 0},
-    "Float" => {false, 0},
-    "Bool" => {false, 0},
-    "Atom" => {false, 0},
-    "Char" => {false, 0},
-    "String" => {false, 0},
-    "Ref" => {false, 0},
-    "Exception" => {false, 0},
-    "Test" => {false, 0},
-    "Assertion" => {false, 0},
-    "List" => {false, 1},
-    "Set" => {false, 1},
-    "Map" => {false, 2},
+    "Int" => ?BUILTIN_TYPE(false, 0),
+    "Float" => ?BUILTIN_TYPE(false, 0),
+    "Bool" => ?BUILTIN_TYPE(false, 0),
+    "Atom" => ?BUILTIN_TYPE(false, 0),
+    "Char" => ?BUILTIN_TYPE(false, 0),
+    "String" => ?BUILTIN_TYPE(false, 0),
+    "Ref" => ?BUILTIN_TYPE(false, 0),
+    "Exception" => ?BUILTIN_TYPE(false, 0),
+    "Test" => ?BUILTIN_TYPE(false, 0),
+    "Assertion" => ?BUILTIN_TYPE(false, 0),
+    "List" => ?BUILTIN_TYPE(false, 1),
+    "Set" => ?BUILTIN_TYPE(false, 1),
+    "Map" => ?BUILTIN_TYPE(false, 2),
 
     % ifaces
-    "Num" => {true, 0},
-    "Ord" => {true, 0},
-    "Concatable" => {true, 0},
-    "Separable" => {true, 0}
+    "Num" => ?BUILTIN_TYPE(true, 0),
+    "Ord" => ?BUILTIN_TYPE(true, 0),
+    "Concatable" => ?BUILTIN_TYPE(true, 0),
+    "Separable" => ?BUILTIN_TYPE(true, 0)
   },
   aliases = #{},
   structs = #{},
@@ -79,9 +96,6 @@
   imported = ordsets:new(),
   pid
 }).
-
-% a binding in the global or local env
--record(binding, {tv, id, exported = false, arity, inst, loc}).
 
 % options while performing substitution on a type
 -record(sub_opts, {subs, aliases = #{}, for_err = false}).
@@ -141,16 +155,22 @@
   ?FMT("~s is already defined as a builtin", [Name])
 ).
 -define(
-  ERR_REDEF_TYPE(Con),
-  ?FMT("~s is already defined as a type", [utils:unqualify(Con)])
+  ERR_REDEF_TYPE(Con, Loc),
+  ?FMT(
+    "~s is already defined as a type on line ~p, column ~p",
+    [utils:unqualify(Con), ?START_LINE(Loc), ?START_COL(Loc)]
+  )
 ).
 -define(
   ERR_REDEF_BUILTIN_TYPE(Con),
   ?FMT("~s is already defined as a builtin type", [utils:unqualify(Con)])
 ).
 -define(
-  ERR_REDEF_IFACE(Con),
-  ?FMT("~s is already defined as an interface", [utils:unqualify(Con)])
+  ERR_REDEF_IFACE(Con, Loc),
+  ?FMT(
+    "~s is already defined as an interface on line ~p, column ~p",
+    [utils:unqualify(Con), ?START_LINE(Loc), ?START_COL(Loc)]
+  )
 ).
 -define(
   ERR_REDEF_BUILTIN_IFACE(Con),

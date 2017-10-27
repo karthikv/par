@@ -1,14 +1,12 @@
 module Base
 
-
-//-- Types --//
+//-- Types
 enum Option<T> {
   Some(T) @some
   None @none
 }
 
-
-//-- Interfaces --//
+//-- Interfaces
 interface Sized {
   length : T -> Int
   empty? : T -> Bool
@@ -18,8 +16,7 @@ interface Mappable {
   map : (A -> B) -> T<A> -> T<B>
 }
 
-
-//-- Implementations --//
+//-- Implementations
 impl Sized for String {
   length = @erlang:size/1
   empty?(s) = s == ""
@@ -59,12 +56,12 @@ impl Mappable for Set {
 
 impl Mappable for Map {
   map(f, m) = @maps:fold(|k, v, new_m|
-    @maps:put(k, v, new_m)
+    let (new_k, new_v) = f((k, v))
+    @maps:put(new_k, new_v, new_m)
   , {}, m)
 }
 
-
-//-- Collections --//
+//-- Collections
 first : (A, B) -> A
 export first((a, _)) = a
 
@@ -77,8 +74,7 @@ export head = @erlang:hd/1
 tail : [A] -> [A]
 export tail = @erlang:tl/1
 
-
-//-- Math --//
+//-- Math
 abs : A ~ Num -> A ~ Num
 export abs = @erlang:abs/1
 
@@ -101,8 +97,6 @@ export round = @erlang:round/1
 trunc : Float -> Int
 export trunc = @erlang:trunc/1
 
+//-- Conversions
 
-//-- Conversions --//
-
-
-//-- Misc --//
+//-- Misc

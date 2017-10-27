@@ -1,0 +1,8 @@
+*** module Foo *** (/tmp/reporter-test-many/foo.par)
+
+Couldn't import /tmp/reporter-test-many/foo.par: this is a recursive self 
+import:
+
+2: import "./foo"
+          ^^^^^^^
+

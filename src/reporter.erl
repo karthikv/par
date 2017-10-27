@@ -114,12 +114,14 @@ format({errors, Errs, Comps}) ->
 
   StrErrs.
 
+% pass strings through w/o modification
+reason_str(Str) when is_list(Str) -> Str;
 reason_str(enoent) -> "file doesn't exist";
 reason_str(eaccess) -> "don't have necessary permissions";
 reason_str(eisdir) -> "file is a directory";
 reason_str(enotdir) -> "one of the directories in the path doesn't exist";
 reason_str(enomem) -> "not enough memory";
-reason_str(Err) -> ?FMT("unknown error: ~p", Err).
+reason_str(Err) -> ?FMT("unknown error: ~p", [Err]).
 
 wrap(Str, Width) ->
   Words = re:split(Str, " ", [{return, list}]),

@@ -247,6 +247,7 @@ expr_test_() ->
   , ?_test("Atom" = ok_expr("@hello"))
   , ?_test("Atom" = ok_expr("@\"hello world\""))
 
+
   , ?_test("[A]" = ok_expr("[]"))
   , ?_test("[A ~ Num]" = ok_expr("[3, 5, 6]"))
   , ?_test("[Float]" = ok_expr("[3, 5.0, 6]"))
@@ -256,10 +257,12 @@ expr_test_() ->
       {"Float", "Bool", l(6, 4), ?FROM_LIST_ELEM}
     ))
 
+
   , ?_test("(Bool, Float)" = ok_expr("(true, 3.0)"))
   , ?_test("(A ~ Num, B ~ Num, [C ~ Num])" = ok_expr("(1, 2, [30, 40])"))
   , ?_test("((A ~ Num, Bool), Float)" = ok_expr("((3, false), 4.0)"))
   , ?_test("(A ~ Num, (Bool, Float))" = ok_expr("(3, (false, 4.0))"))
+
 
   , ?_test("Map<A, B>" = ok_expr("{}"))
   , ?_test("Map<String, String>" = ok_expr("{\"key\" => \"value\"}"))
@@ -268,6 +271,7 @@ expr_test_() ->
       "{\"a\" => true, \"b\" => \"c\"}",
       {"Bool", "String", l(21, 3), ?FROM_MAP_VALUE}
     ))
+
 
   , ?_test("Set<A>" = ok_expr("#[]"))
   , ?_test("Set<A ~ Num>" = ok_expr("#[1, 2]"))
@@ -281,6 +285,7 @@ expr_test_() ->
       "#[\"hi\", true]",
       {"Bool", "String", l(8, 4), ?FROM_LIST_ELEM}
     ))
+
 
   , ?_test("Bool" = ok_expr("1 == 2"))
   , ?_test("Bool" = ok_expr("1.0 == 2.0"))
@@ -299,6 +304,7 @@ expr_test_() ->
       {"A ~ Num", "Bool", l(5, 4), ?FROM_OP_RHS('!=')}
     ))
 
+
   , ?_test("Bool" = ok_expr("true || false"))
   , ?_test("Bool" = ok_expr("true && false"))
   , ?_test(bad_expr(
@@ -310,26 +316,22 @@ expr_test_() ->
       {"A ~ Num", "Bool", l(0, 1), ?FROM_OP_LHS('&&')}
     ))
 
+
   , ?_test("Bool" = ok_expr("1 > 2"))
   , ?_test("Bool" = ok_expr("1.2 > 2.34"))
   , ?_test("Bool" = ok_expr("1.1 > 2"))
-
   , ?_test("Bool" = ok_expr("1 < 2"))
   , ?_test("Bool" = ok_expr("1.2 < 2.34"))
   , ?_test("Bool" = ok_expr("1 < 2.34"))
-
   , ?_test("Bool" = ok_expr("1 >= 2"))
   , ?_test("Bool" = ok_expr("1.2 >= 2.34"))
   , ?_test("Bool" = ok_expr("1.1 >= 2"))
-
   , ?_test("Bool" = ok_expr("1 <= 2"))
   , ?_test("Bool" = ok_expr("1.2 <= 2.34"))
   , ?_test("Bool" = ok_expr("1 <= 2.34"))
-
   , ?_test("Bool" = ok_expr("\"hi\" < \"hello\""))
   , ?_test("Bool" = ok_expr("'n' > 'm'"))
   , ?_test("Bool" = ok_expr("\"some\" >= \"some\""))
-
   , ?_test(bad_expr(
       "@hey > @hello",
       [{"Atom", "A ~ Ord", l(7, 6), ?FROM_OP_RHS('>')},
@@ -344,6 +346,7 @@ expr_test_() ->
       {"String", "Char", l(8, 3), ?FROM_OP_RHS('<=')}
     ))
 
+
   , ?_test("A ~ Num" = ok_expr("100 + 50"))
   , ?_test("Float" = ok_expr("100.1 + 50.23"))
   , ?_test("Float" = ok_expr("100 + 50.23"))
@@ -351,6 +354,7 @@ expr_test_() ->
       "true + 30",
       {"Bool", "A ~ Num", l(0, 4), ?FROM_OP_LHS('+')}
     ))
+
 
   , ?_test("A ~ Num" = ok_expr("100 - 50"))
   , ?_test("Float" = ok_expr("100.1 - 50.23"))
@@ -360,6 +364,7 @@ expr_test_() ->
       {"Bool", "Float", l(0, 4), ?FROM_OP_LHS('-')}
     ))
 
+
   , ?_test("A ~ Num" = ok_expr("100 * 50"))
   , ?_test("Float" = ok_expr("100.1 * 50.23"))
   , ?_test("Float" = ok_expr("100.1 * 50"))
@@ -367,6 +372,7 @@ expr_test_() ->
       "30 * false",
       {"Bool", "A ~ Num", l(5, 5), ?FROM_OP_RHS('*')}
     ))
+
 
   , ?_test("Float" = ok_expr("100 / 50"))
   , ?_test("Float" = ok_expr("100.1 / 50.23"))
@@ -376,17 +382,20 @@ expr_test_() ->
       {"Bool", "A ~ Num", l(5, 5), ?FROM_OP_RHS('/')}
     ))
 
+
   , ?_test("A ~ Num" = ok_expr("5 % 3"))
   , ?_test(bad_expr(
       "5.3 % 3",
       {"Float", "Int", l(0, 3), ?FROM_OP_LHS('%')}
     ))
 
+
   , ?_test("Float" = ok_expr("3 + 5 * 7 - 4 / 2 + 38 % 6 - 8"))
   , ?_test(bad_expr(
       "7 - 12 / 5 % 6",
       {"Float", "Int", l(4, 6), ?FROM_OP_LHS('%')}
     ))
+
 
   , ?_test("String" = ok_expr("\"hello \" ++ \"world\""))
   , ?_test("[Float]" = ok_expr("[3.0 | []]"))
@@ -417,6 +426,7 @@ expr_test_() ->
       {"[Bool]", "[A ~ Num]", l(10, 6), ?FROM_OP_RHS('++')}
     ))
 
+
   , ?_test("Set<A>" = ok_expr("#[] -- #[]"))
   , ?_test("Set<Float>" = ok_expr("#[3.0, 5.7, 6.8] -- #[3.0]"))
   , ?_test("[A]" = ok_expr("[] -- []"))
@@ -430,6 +440,7 @@ expr_test_() ->
       {"Set<A ~ Num>", "[B ~ Num]", l(7, 7), ?FROM_OP_RHS('--')}
     ))
 
+
   , ?_test("A ~ Num" = ok_expr("-15"))
   , ?_test("Float" = ok_expr("-15.0"))
   , ?_test("Bool" = ok_expr("!false"))
@@ -442,6 +453,7 @@ expr_test_() ->
       {"A ~ Num", "Bool", l(1, 1), ?FROM_UNARY_OP('!')}
     ))
   , ?_test(bad_expr("$false", {"Bool", "Char", l(1, 5), ?FROM_UNARY_OP('$')}))
+
 
   , ?_test("Bool" = ok_expr("true : Bool"))
   , ?_test("Int" = ok_expr("3 : Int"))
@@ -469,9 +481,11 @@ expr_test_() ->
       {"A", "rigid(B) -> rigid(B)", l(4, 10), ?FROM_EXPR_SIG}
     ))
 
+
   , ?_test("A ~ Num" = ok_expr("7 - (3 + -5)"))
   , ?_test("Float" = ok_expr("7 - (3.0 + -5)"))
   , ?_test("Bool" = ok_expr("7 == 5.0 || !true && -8 == 3 || false != false"))
+
 
   , ?_test("A ~ Num" = ok_expr("if 3 == 5 then 3 else 5"))
   , ?_test("Bool" = ok_expr("if !(true && false) then false else true"))
@@ -485,6 +499,7 @@ expr_test_() ->
       "if true then 3.0 else true",
       {"Float", "Bool", l(22, 4), ?FROM_ELSE_BODY}
     ))
+
 
   , ?_test("()" = ok_expr("let x = @hey"))
   , ?_test("Float" = ok_expr(
@@ -527,6 +542,7 @@ expr_test_() ->
       {"Bool", "A ~ Num", l(2, 4, 4), ?FROM_APP}
     ))
 
+
   , ?_test("Bool" = ok_expr("@foo\ntrue"))
   , ?_test("Map<String, A ~ Num>" = ok_expr(
       "let x = 5\n"
@@ -534,6 +550,7 @@ expr_test_() ->
       "3.0\n"
       "{ \"hi\" => x }"
     ))
+
 
   , ?_test("() -> A ~ Num" = ok_expr("|-| 3"))
   , ?_test("A -> A" = ok_expr("|x| x"))
@@ -553,6 +570,7 @@ expr_test_() ->
       {"A ~ Num -> B ~ Num -> C", "A ~ Num -> A ~ Num", l(0, 13), ?FROM_APP}
     ))
 
+
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A ~ Num>" = ok_expr(
       "let f = @gb_sets:add_element/2\n"
@@ -568,6 +586,7 @@ expr_test_() ->
       "@io:printable_range/0(1, 2)",
       {"()", "A ~ Num", l(22, 1), ?FROM_APP}
     ))
+
 
   , ?_test("String" = ok_expr("\"hello\" |> |x| x ++ \" world\""))
   , ?_test("A ~ Num" = ok_expr(
@@ -2351,6 +2370,10 @@ other_errors_test_() ->
       "foo = 4",
       {?ERR_REDEF("foo", l(0, 3)), l(1, 0, 3)}
     ))
+  % already defined in stdlib; must use many for stdlib to be included
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo\nhead(x) = x"}
+    ], "foo", {?ERR_REDEF_BUILTIN("head"), "Foo", l(0, 4)}))
   , ?_test(ctx_err_prg(
       "enum Foo { Bar(Int) }\n"
       "struct Bar { foo : Float }",
@@ -2369,6 +2392,10 @@ other_errors_test_() ->
       "enum Bool<A> { Stuff(A) }",
       {?ERR_REDEF_BUILTIN_TYPE("Bool"), l(5, 4)}
     ))
+  % type from stdlib; must use many for stdlib to be included
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo\nstruct Option { optional? : Bool }"}
+    ], "foo", {?ERR_REDEF_BUILTIN_TYPE("Option"), "Foo", l(7, 6)}))
   , ?_test(ctx_err_prg(
       "interface Num { add : T -> T -> T }",
       {?ERR_REDEF_BUILTIN_IFACE("Num"), l(10, 3)}
@@ -2377,25 +2404,29 @@ other_errors_test_() ->
       "interface Separable { to_bool : T -> Bool }",
       {?ERR_REDEF_BUILTIN_IFACE("Separable"), l(10, 9)}
     ))
+  % iface from stdlib; must use many for stdlib to be included
+  , ?_test(ctx_err_many([
+      {"foo", "module Foo\nenum Sized { HasSize(Int) }"}
+    ], "foo", {?ERR_REDEF_BUILTIN_IFACE("Sized"), "Foo", l(5, 5)}))
   , ?_test(ctx_err_prg(
       "enum Foo { Bar }\n"
       "struct Foo { baz : String }",
-      {?ERR_REDEF_TYPE("Foo"), l(1, 7, 3)}
+      {?ERR_REDEF_TYPE("Foo", l(5, 3)), l(1, 7, 3)}
     ))
   , ?_test(ctx_err_prg(
       "struct Foo<A, B> { baz : String }\n"
       "enum Foo<T> { Bar }",
-      {?ERR_REDEF_TYPE("Foo"), l(1, 5, 3)}
+      {?ERR_REDEF_TYPE("Foo", l(7, 3)), l(1, 5, 3)}
     ))
   , ?_test(ctx_err_prg(
       "interface Foo { baz : T -> String }\n"
       "enum Foo<T> { Bar }",
-      {?ERR_REDEF_IFACE("Foo"), l(1, 5, 3)}
+      {?ERR_REDEF_IFACE("Foo", l(10, 3)), l(1, 5, 3)}
     ))
   , ?_test(ctx_err_prg(
       "interface Foo { baz : T -> String }\n"
       "interface Foo { bar : T -> T }",
-      {?ERR_REDEF_IFACE("Foo"), l(1, 10, 3)}
+      {?ERR_REDEF_IFACE("Foo", l(10, 3)), l(1, 10, 3)}
     ))
   , ?_test(ctx_err_prg(
       "enum Foo<A, A> { Baz(A) }",
@@ -2885,7 +2916,7 @@ import_test_() ->
         "import \"./foo\" (*)\n"
         "enum Baz { Other }\n"
       }
-    ], "bar", {?ERR_REDEF_TYPE("Baz"), "Bar", l(16, 1)}))
+    ], "bar", {?ERR_REDEF_TYPE("Baz", l(1, 5, 3)), "Bar", l(16, 1)}))
   , ?_test(ctx_err_many([
       {"foo",
         "module Foo\n"
@@ -2904,6 +2935,61 @@ import_test_() ->
         "z = 5"
       }
     ], "foo", {?ERR_NOT_DEF("x", "Bar"), "Baz", l(16, 1)}))
+
+
+  % prevent stdlib imports; must use many for stdlib to be included
+  , ?_test("A ~ Num -> A ~ Num" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "import Base\n"
+        "abs(x) = Base.abs(x)\n"
+        "foo : Base.Option<Char>\n"
+        "foo = Base.Some('a')"
+      }
+    ], "foo", "abs"))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "import Base (*)\n"
+        "abs(x) = if x < 0 then -x else x"
+      }
+    ], "foo", {?ERR_REDEF("abs", l(1, 0, 3)), "Foo", l(13, 1)}))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "import Base\n"
+        "export head(x) = x"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (head)\n"
+        "a = 1"
+      }
+    ], "bar", {?ERR_REDEF_BUILTIN("head"), "Bar", l(16, 4)}))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "import Base\n"
+        "struct Mappable<T> { map : T }"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Mappable)\n"
+        "a = 1"
+      }
+    ], "bar", {?ERR_REDEF_BUILTIN_IFACE("Mappable"), "Bar", l(16, 8)}))
+  , ?_test(ctx_err_many([
+      {"foo",
+        "module Foo\n"
+        "import Base\n"
+        "interface Option { optional? : T -> Bool }"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (Option)\n"
+        "a = 1"
+      }
+    ], "bar", {?ERR_REDEF_BUILTIN_TYPE("Option"), "Bar", l(16, 6)}))
 
 
   , ?_test("Int" = ok_many([
