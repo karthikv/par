@@ -444,9 +444,6 @@ foldl = @lists:foldl/3
 flip : (A -> B -> C) -> B -> A -> C
 flip(f, b, a) = f(a, b)
 
-length : [A] -> Int
-length = @erlang:length/1
-
 to_str : [Char] -> String
 to_str = @erlang:list_to_binary/1
 

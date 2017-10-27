@@ -6,6 +6,7 @@ enum Option<T> {
   None @none
 }
 
+
 //-- Interfaces
 interface Sized {
   length : T -> Int
@@ -15,6 +16,7 @@ interface Sized {
 interface Mappable {
   map : (A -> B) -> T<A> -> T<B>
 }
+
 
 //-- Implementations
 impl Sized for String {
@@ -61,6 +63,7 @@ impl Mappable for Map {
   , {}, m)
 }
 
+
 //-- Collections
 first : (A, B) -> A
 export first((a, _)) = a
@@ -73,6 +76,7 @@ export head = @erlang:hd/1
 
 tail : [A] -> [A]
 export tail = @erlang:tl/1
+
 
 //-- Math
 abs : A ~ Num -> A ~ Num
@@ -97,6 +101,8 @@ export round = @erlang:round/1
 trunc : Float -> Int
 export trunc = @erlang:trunc/1
 
+
 //-- Conversions
+
 
 //-- Misc

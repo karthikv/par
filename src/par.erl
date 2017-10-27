@@ -5,8 +5,7 @@
 % TODO:
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
-%   - Ref type?
-%   - Import error reporting
+%   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering

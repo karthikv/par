@@ -2,11 +2,6 @@ module Parser
 
 import "./lexer" (Loc, Token)
 
-enum Option<T> {
-  Some(T) @some
-  None @none
-}
-
 enum Node {
   Module(Loc, Node, [Node], [Node]) @module
   Import(Loc, Node, [Node]) @import
@@ -1548,23 +1543,11 @@ map_index(f, l) =
   let (mapped, _) = @lists:mapfoldl(|a, i| (f(a, i), i + 1), 0, l)
   mapped
 
-map : (A -> B) -> [A] -> [B]
-map = @lists:map/2
-
 filter : (A -> Bool) -> [A] -> [A]
 filter = @lists:filter/2
 
-head : [A] -> A
-head = @erlang:hd/1
-
-tail : [A] -> [A]
-tail = @erlang:tl/1
-
 reverse : [A] -> [A]
 reverse = @lists:reverse/1
-
-length : [A] -> Int
-length = @erlang:length/1
 
 to_list : String -> [Char]
 to_list = @erlang:binary_to_list/1
