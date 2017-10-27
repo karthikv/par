@@ -1,0 +1,7 @@
+*** file /tmp/reporter-test-many/foo.par ***
+
+Expected 'module' keyword at start of file:
+
+1: a = 1
+   ^
+

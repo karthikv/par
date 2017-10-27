@@ -137,16 +137,15 @@ export parse(tokens) = match tokens {
     )
 
   [Lexer.Module(_) | t] =>
-    add_err(
-      many(def, tokens),
-      "Expected module name to follow module keyword",
-      head_loc(t)
+    head_loc(t) |> one_err(
+      "Expected capitalized module name to follow 'module' keyword"
     )
 
   _ =>
+    let parsed = imports(tokens) |> pbind(|(_, rest)| many(def, rest))
     add_err(
-      many(def, tokens),
-      "Expected 'module' keyword",
+      parsed,
+      "Expected 'module' keyword at start of file",
       head_loc(tokens)
     )
 }

@@ -1,0 +1,7 @@
+*** module Foo *** (/tmp/reporter-test-many/foo.par)
+
+Couldn't import Bar: builtin module of that name doesn't exist:
+
+2: import Bar
+          ^^^
+

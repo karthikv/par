@@ -160,6 +160,9 @@ expr_test_() ->
       "import List (foo, *)\n"
       "a = 1"
     )
+  , ?golden_many_("p-no-module", [
+      {"foo", "a = 1"}
+    ], "foo")
   , ?golden_many_("p-multiple-modules-errors", [
       {"foo",
         "module Foo\n"
@@ -204,7 +207,15 @@ expr_test_() ->
         "a = 1"
       }
     ], "foo")
-  , ?golden_many_("self-import", [
+  % need to use many here because prg assumes no imports
+  , ?golden_many_("import-builtin", [
+      {"foo",
+        "module Foo\n"
+        "import Bar\n"
+        "a = 1"
+      }
+    ], "foo")
+  , ?golden_many_("import-self", [
       {"foo",
         "module Foo\n"
         "import \"./foo\"\n"

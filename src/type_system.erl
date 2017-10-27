@@ -206,16 +206,21 @@ parse_file(RawPath, Parsed) ->
                     case parse_file(DepPath, FoldParsed) of
                       {ok, DepModule, DepComps, NewParsed} ->
                         {[{DepModule, Idents} | FoldDeps],
-                         [DepComps | FoldComps], FoldAllErrors, NewParsed};
+                          [DepComps | FoldComps], FoldAllErrors, NewParsed};
 
                       {errors, [{read_error, ImportPath, Reason}], NewParsed} ->
-                        Err = {import_error, DepLoc, ImportPath, Reason, Comp},
+                        ImportPathOrModule = case From of
+                          {str, _, _} -> ImportPath;
+                          {con_token, _, ImportModule} -> ImportModule
+                        end,
+                        Err = {import_error, DepLoc, ImportPathOrModule,
+                          Reason, Comp},
                         {FoldDeps, FoldComps, [[Err] | FoldAllErrors],
-                         NewParsed};
+                          NewParsed};
 
                       {errors, DepAllErrors, NewParsed} ->
                         {FoldDeps, FoldComps, [DepAllErrors | FoldAllErrors],
-                         NewParsed};
+                          NewParsed};
 
                       skip -> Memo
                     end
@@ -256,7 +261,11 @@ infer_prg(Prg) ->
   case parse_prg(Prg, "[infer-prg]") of
     {ok, Ast, PrgLines} ->
       % infer_prg should only be used only when there are no imports
-      {module, _, {con_token, _, Module}, [], _} = Ast,
+      {module, _, {con_token, _, Module}, Imports, _} = Ast,
+      case Imports of
+        [] -> ok;
+        _ -> error("infer_prg expects no imports")
+      end,
       %% ?LOG("Ast", Ast),
 
       Comp = #comp{
