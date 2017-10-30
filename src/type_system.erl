@@ -124,7 +124,11 @@ infer_file(Path) ->
 
 stdlib_dir() -> filename:join(code:lib_dir(par, src), "lib").
 
-stdlib_modules() -> #{"Base" => "base.par"}.
+stdlib_modules() ->
+  #{
+    "Base" => "base.par",
+    "Test" => "test.par"
+  }.
 
 resolve_dep_path(RawPath) ->
   case filename:extension(RawPath) of

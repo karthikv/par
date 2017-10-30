@@ -132,7 +132,7 @@ main(Args) ->
 
       case type_system:infer_file(Path) of
         {ok, Comps, C} ->
-          {Time, Compiled} = timer:tc(code_gen, compile_comps, [Comps, C]),
+          Compiled = code_gen:compile_comps(Comps, C),
           OutDir = proplists:get_value(out_dir, Opts),
 
           Filenames = lists:map(fun({Mod, Binary}) ->
@@ -156,11 +156,7 @@ main(Args) ->
               eunit:stop();
 
             false ->
-              io:format(
-                standard_error,
-                "~s~n~pms~n",
-                [string:join(Filenames, "\n"), Time div 1000]
-              )
+              io:format(standard_error, "~s~n", [string:join(Filenames, "\n")])
           end;
 
         Errors ->

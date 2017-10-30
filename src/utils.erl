@@ -17,7 +17,8 @@
   exported_idents/3,
   absolute/1,
   pretty_csts/1,
-  pretty/1
+  pretty/1,
+  remove_mod/1
 ]).
 -include("common.hrl").
 
@@ -318,3 +319,8 @@ pretty_field_map(FieldMap) ->
     [?FMT("~s : ~s", [Name, pretty(T)]) | Strs]
   end, [], FieldMap),
   string:join(lists:sort(FieldStrs), ", ").
+
+remove_mod(Mod) ->
+  code:purge(Mod),
+  code:delete(Mod),
+  code:purge(Mod).

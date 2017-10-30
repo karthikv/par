@@ -1,23 +1,18 @@
 -module(type_system_test).
--export([type_check/1, type_check_many/3, bad_expr/2]).
+-export([infer_prefix/1, infer_many/3, bad_expr/2, check_ok/1]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/common.hrl").
 
--define(TMP_MANY_DIR, "/tmp/type-system-test-many").
+-define(MANY_DIR, "/tmp/type-system-test-many").
 -define(PRG_PREFIX, "module Mod\n").
 -define(EXPR_PREFIX, "module Mod expr =\n").
 
-type_check(Prg) -> type_system:infer_prg(?PRG_PREFIX ++ Prg).
-type_check(Prefix, Prg) -> type_system:infer_prg(Prefix ++ Prg).
+infer_prefix(Prg) -> type_system:infer_prg(?PRG_PREFIX ++ Prg).
+infer_prefix(Prefix, Prg) -> type_system:infer_prg(Prefix ++ Prg).
 
 norm_prg(Prefix, Prg, Name) ->
-  GEnv = case type_check(Prefix, Prg) of
-    {ok, _, #ctx{g_env=GEnv_}} -> GEnv_;
-    {errors, _, _}=Errors ->
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
+  {ok, _, #ctx{g_env=GEnv}} = check_ok(infer_prefix(Prefix, Prg)),
   Key = {"Mod", Name},
   #binding{inst=T} = maps:get(Key, GEnv),
 
@@ -26,61 +21,27 @@ norm_prg(Prefix, Prg, Name) ->
   ok = tv_server:stop(Pid),
   NormT.
 
-ok_prg(Prg, Name) ->
-  utils:pretty(norm_prg(?PRG_PREFIX, Prg, Name)).
+ok_prg(Prg, Name) -> utils:pretty(norm_prg(?PRG_PREFIX, Prg, Name)).
 
 bad_prg(Prg, Err) -> bad_prg(?PRG_PREFIX, Prg, Err).
 
-bad_prg(Prefix, Prg, {Exp1, Exp2, ExpLoc, ExpFrom}) ->
-  Err = case type_check(Prefix, Prg) of
-    {ok, _, _} ->
-      io:format("Expected 1 error, but got valid program~n"),
-      ?assert(false);
-    {errors, [Err_], _} -> Err_;
-    {errors, _, _}=Errors ->
-      io:format("Expected 1 error, but got:~n"),
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
-  assert_err_equal(Err, {Exp1, Exp2, "Mod", ExpLoc, ExpFrom});
+bad_prg(Prefix, Prg, {T1, T2, Loc, From}) ->
+  check_errors(infer_prefix(Prefix, Prg), [{T1, T2, "Mod", Loc, From}]);
 
-bad_prg(Prefix, Prg, ExpErrs) when is_list(ExpErrs) ->
-  NumExpErrs = length(ExpErrs),
-  Errs = case type_check(Prefix, Prg) of
-    {ok, _, _} ->
-      io:format("Expected ~p errors, but got valid program~n", [NumExpErrs]),
-      ?assert(false);
-    {errors, Errs_, _} when length(Errs_) == NumExpErrs -> Errs_;
-    {errors, _, _}=Errors ->
-      io:format("Expected ~p errors, but got:~n", [NumExpErrs]),
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
-
-  % for simplicitly, we assume errors are in the same order
-  lists:foreach(fun({Err, {Exp1, Exp2, ExpLoc, ExpFrom}}) ->
-    assert_err_equal(Err, {Exp1, Exp2, "Mod", ExpLoc, ExpFrom})
-  end, lists:zip(Errs, ExpErrs)).
+bad_prg(Prefix, Prg, ExpErrsNoModule) ->
+  ExpErrs = lists:map(fun({T1, T2, Loc, From}) ->
+    {T1, T2, "Mod", Loc, From}
+  end, ExpErrsNoModule),
+  check_errors(infer_prefix(Prefix, Prg), ExpErrs).
 
 ctx_err_prg(Prg, {ExpMsg, ExpLoc}) ->
-  {Msg, "Mod", Loc} = case type_check(?PRG_PREFIX, Prg) of
-    {ok, _, _} ->
-      io:format("Expected 1 ctx error, but got valid program~n"),
-      ?assert(false);
-    {errors, [{_, _, _}=Err], _} -> Err;
-    {errors, _, _}=Errors ->
-      io:format("Expected 1 ctx error, but got:~n"),
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
-  ?assertEqual(ExpMsg, Msg),
-  ?assertEqual(ExpLoc, Loc).
+  check_errors(infer_prefix(Prg), [{ExpMsg, "Mod", ExpLoc}]).
 
 ok_expr(Expr) -> utils:pretty(norm_prg(?EXPR_PREFIX, Expr, "expr")).
 
 bad_expr(Expr, Err) -> bad_prg(?EXPR_PREFIX, Expr, Err).
 
-type_check_many(Dir, PathPrgs, TargetPath) ->
+infer_many(Dir, PathPrgs, TargetPath) ->
   ok = filelib:ensure_dir(Dir),
   os:cmd(["rm -rf ",  Dir]),
 
@@ -94,12 +55,7 @@ type_check_many(Dir, PathPrgs, TargetPath) ->
   type_system:infer_file(AbsTargetPath).
 
 ok_many(PathPrgs, TargetPath, Name) ->
-  {Comps, C} = case type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath) of
-    {ok, Comps_, C_} -> {Comps_, C_};
-    {errors, _, _}=Errors ->
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
+  {ok, Comps, C} = check_ok(infer_many(?MANY_DIR, PathPrgs, TargetPath)),
   #ctx{g_env=GEnv} = C,
   #comp{module=Module} = hd(Comps),
   #binding{inst=T} = maps:get({Module, Name}, GEnv),
@@ -110,50 +66,50 @@ ok_many(PathPrgs, TargetPath, Name) ->
   utils:pretty(NormT).
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
-  Err = case type_check_many(?TMP_MANY_DIR, PathPrgs, TargetPath) of
-    {ok, _, _} ->
-      io:format("Expected 1 error, but got valid program~n"),
-      ?assert(false);
-    {errors, [Err_], _} -> Err_;
-    {errors, _, _}=Errors ->
-      io:format("Expected 1 error, but got:~n"),
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
-  assert_err_equal(Err, ExpErr).
+  check_errors(infer_many(?MANY_DIR, PathPrgs, TargetPath), [ExpErr]).
 
-ctx_err_many(PathPrgs, TargetPath, {ExpMsg, ExpModule, ExpLoc}) ->
-  Result = type_check_many(
-    ?TMP_MANY_DIR,
-    PathPrgs,
-    TargetPath
-  ),
-  {Msg, Module, Loc} = case Result of
-    {ok, _, _} ->
-      io:format("Expected 1 ctx error, but got valid program~n"),
-      ?assert(false);
-    {errors, [{_, _, _}=Err], _} -> Err;
-    {errors, _, _}=Errors ->
-      io:format("Expected 1 ctx error, but got:~n"),
-      io:format("~s", [reporter:format(Errors)]),
-      ?assert(false)
-  end,
-  ?assertEqual(ExpMsg, Msg),
-  ?assertEqual(ExpModule, Module),
-  ?assertEqual(ExpLoc, Loc).
+ctx_err_many(PathPrgs, TargetPath, ExpErr) ->
+  check_errors(infer_many(?MANY_DIR, PathPrgs, TargetPath), [ExpErr]).
 
-assert_err_equal(
+check_ok({ok, _, _}=Ok) -> Ok;
+check_ok({errors, _, _}=Errors) ->
+  io:format("~s", [reporter:format(Errors)]),
+  ?assert(false).
+
+check_errors({errors, Errs, _}=Errors, ExpErrs) ->
+  Matching = if
+    length(Errs) == length(ExpErrs) ->
+      lists:all(fun({Err, ExpErr}) ->
+        are_errors_equal(Err, ExpErr)
+      end, lists:zip(Errs, ExpErrs));
+    true -> false
+  end,
+
+  if
+    Matching -> ok;
+    true ->
+      io:format("--- Expected: ---~n~p~n~n", [ExpErrs]),
+      io:format("--- Actual: ---~n~s", [reporter:format(Errors)]),
+      ?assert(false)
+  end;
+check_errors({ok, _, _}, ExpErrs) ->
+  NumExpErrs = length(ExpErrs),
+  io:format("Expected ~p error(s), but got valid program~n", [NumExpErrs]),
+  ?assert(false).
+
+are_errors_equal({Msg, Mod, Loc}, {Msg, Mod, Loc}) -> true;
+are_errors_equal(
   {T1, T2, Module, Loc, From},
-  {Exp1, Exp2, ExpModule, ExpLoc, ExpFrom}
- ) ->
+  {ExpT1, ExpT2, ExpModule, ExpLoc, ExpFrom}
+) ->
   {ok, Pid} = tv_server:start_link(),
   {NormT1, N} = norm(T1, {#{}, Pid}),
   {NormT2, _} = norm(T2, N),
   ok = tv_server:stop(Pid),
 
-  case {utils:pretty(NormT1), utils:pretty(NormT2)} of
-    {Exp1, Exp2} -> true;
-    {Exp2, Exp1} -> true;
+  TsEqual = case {utils:pretty(NormT1), utils:pretty(NormT2)} of
+    {ExpT1, ExpT2} -> true;
+    {ExpT2, ExpT1} -> true;
     _ ->
       {ok, FlipPid} = tv_server:start_link(),
       {FlipNormT2, FlipN} = norm(T2, {#{}, FlipPid}),
@@ -161,14 +117,15 @@ assert_err_equal(
       ok = tv_server:stop(FlipPid),
 
       case {utils:pretty(FlipNormT1), utils:pretty(FlipNormT2)} of
-        {Exp1, Exp2} -> true;
-        {Exp2, Exp1} -> true
+        {ExpT1, ExpT2} -> true;
+        {ExpT2, ExpT1} -> true;
+        _ -> false
       end
   end,
 
-  ?assertEqual(ExpModule, Module),
-  ?assertEqual(ExpLoc, Loc),
-  ?assertEqual(ExpFrom, From).
+  TsEqual andalso Module == ExpModule andalso Loc == ExpLoc andalso
+    From == ExpFrom;
+are_errors_equal(_, _) -> false.
 
 % We don't use type_system:fvs() and type_system:subs() to implement this
 % because it'll normalize variables in an arbitrary order (e.g. C -> D could

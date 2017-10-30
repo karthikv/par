@@ -1,0 +1,32 @@
+module BaseTest
+
+import Test (group)
+
+//-- Collections
+first_test : Test
+first_test = group([
+  test assert first((1, 2)) == 1
+  test assert first(('a', true)) = 'a'
+])
+
+second_test : Test
+second_test = group([
+  test assert second((1, 2)) == 2
+  test assert second(('a', true)) = true
+])
+
+head_test : Test
+head_test = test assert head([@hi, @hey]) == @hi
+
+tail_test : Test
+tail_test = test assert tail([@hi, @hey]) == [@hey]
+
+
+//-- Math
+abs_test : Test
+abs_test = group([
+  test assert abs(1) == 1
+  test assert abs(35.8) == 35.8
+  test assert abs(-1) == 1
+  test assert abs(-35.8) == 35.8
+])

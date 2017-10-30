@@ -4,11 +4,16 @@
 
 -define(TMP_MANY_DIR, "/tmp/reporter-test-many").
 
+check_has_errors({ok, _, _}) ->
+  io:format("Expected errors, but got valid program~n"),
+  ?assert(false);
+check_has_errors(_) -> ok.
+
 -define(
   golden_expr_(Name, Expr),
   {?LINE, fun() ->
-    Errors = type_system_test:type_check("expr =\n" ++ Expr),
-    ?assertNot(is_tuple(Errors) andalso element(1, Errors) == ok),
+    Errors = type_system_test:infer_prefix("expr =\n" ++ Expr),
+    check_has_errors(Errors),
     Str = lists:flatten(reporter:format(Errors)),
     check(Name, Str)
   end}
@@ -17,8 +22,8 @@
 -define(
   golden_prg_(Name, Prg),
   {?LINE, fun() ->
-    Errors = type_system_test:type_check(Prg),
-    ?assertNot(is_tuple(Errors) andalso element(1, Errors) == ok),
+    Errors = type_system_test:infer_prefix(Prg),
+    check_has_errors(Errors),
     Str = lists:flatten(reporter:format(Errors)),
     check(Name, Str)
   end}
@@ -27,12 +32,12 @@
 -define(
   golden_many_(Name, PathPrgs, TargetPath),
   {?LINE, fun() ->
-    Errors = type_system_test:type_check_many(
+    Errors = type_system_test:infer_many(
       ?TMP_MANY_DIR,
       PathPrgs,
       TargetPath
     ),
-    ?assertNot(is_tuple(Errors) andalso element(1, Errors) == ok),
+    check_has_errors(Errors),
     Str = lists:flatten(reporter:format(Errors)),
     check(Name, Str)
   end}

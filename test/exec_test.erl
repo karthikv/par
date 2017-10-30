@@ -7,34 +7,37 @@
 -define(TMP_MANY_DIR, "/tmp/exec-test-many").
 
 run_code_gen(Prg) ->
-  {ok, Comps, C} = type_system_test:type_check(Prg),
+  Result = type_system_test:infer_prefix(Prg),
+  {ok, Comps, C} = type_system_test:check_ok(Result),
   [{Mod, Binary}] = code_gen:compile_comps(Comps, C),
 
-  remove(Mod),
+  utils:remove_mod(Mod),
   code:load_binary(Mod, "", Binary),
 
   Mod:'_@init'(ordsets:new()),
   Mod:main().
 
 run_interpreter(Prg) ->
-  {ok, [#comp{ast=Ast}], _} = type_system_test:type_check(Prg),
+  Result = type_system_test:infer_prefix(Prg),
+  {ok, [#comp{ast=Ast}], _} = type_system_test:check_ok(Result),
   interpreter:run_ast(Ast, []).
 
 expr_code_gen(Expr) -> run_code_gen("main() =\n" ++ Expr).
 expr_interpreter(Expr) -> run_interpreter("main() =\n" ++ Expr).
 
 many_code_gen(PathPrgs, TargetPath) ->
-  {ok, Comps, C} = type_system_test:type_check_many(
+  Result = type_system_test:infer_many(
     ?TMP_MANY_DIR,
     PathPrgs,
     TargetPath
   ),
+  {ok, Comps, C} = type_system_test:check_ok(Result),
 
   code:add_patha(?TMP_MANY_DIR),
   lists:foreach(fun({Mod, Binary}) ->
     Path = filename:join(?TMP_MANY_DIR, lists:concat([Mod, ".beam"])),
     file:write_file(Path, Binary),
-    remove(Mod)
+    utils:remove_mod(Mod)
   end, code_gen:compile_comps(Comps, C)),
 
   #comp{module=Module} = hd(Comps),
@@ -44,11 +47,6 @@ many_code_gen(PathPrgs, TargetPath) ->
   V = Mod:main(),
   code:del_path(?TMP_MANY_DIR),
   V.
-
-remove(Mod) ->
-  code:purge(Mod),
-  code:delete(Mod),
-  code:purge(Mod).
 
 code_gen_expr_test_() -> test_expr(fun expr_code_gen/1).
 interpreter_expr_test_() -> test_expr(fun expr_interpreter/1).
