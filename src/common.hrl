@@ -216,7 +216,7 @@
 ).
 -define(
   ERR_TV_SCOPE(V),
-  "Type variable ~s isn't in scope; you must specify a concrete type."
+  "Type variable ~s isn't in scope; you must specify a concrete type"
 ).
 -define(
   ERR_TV_SCOPE(V, Con),
@@ -322,7 +322,7 @@
     "Ambiguous argument of type ~s. I need to know the concrete type of the "
     "type variable ~s so I can ensure its interfaces are satisifed. Please "
     "provide a type signature for this argument that specifies the concrete "
-    "type.",
+    "type",
     [PrettyArgT, PrettyTV]
   )
 ).
@@ -332,7 +332,7 @@
     "Ambiguous return type ~s. The function that needs to be called here "
     "depends on what the return type is. Specifically, I need to know the "
     "concrete type of the type variable ~s. Please provide a type signature "
-    "for the return value that specifies the concrete type.",
+    "for the return value that specifies the concrete type",
     [PrettyReturnT, PrettyTV]
   )
 ).
@@ -341,7 +341,7 @@
   ?FMT(
     "The interface ~s must be implemented for a type constructor. Please "
     "specify a type constructor as a single, capitalized name, like List or "
-    "Set.",
+    "Set",
     [utils:unqualify(Con)]
   )
 ).
@@ -349,7 +349,7 @@
   ERR_CYCLE(Con, ParentCon),
   ?FMT(
     "Making ~s extend ~s would cause a cycle. ~s is already an ancestor "
-    "interface of ~s.", [
+    "interface of ~s", [
       utils:unqualify(Con),
       utils:unqualify(ParentCon),
       utils:unqualify(Con),
@@ -359,12 +359,12 @@
 ).
 -define(
   ERR_MATCH_STRUCT,
-  "Pattern matching against structs is not supported."
+  "Pattern matching against structs is not supported"
 ).
 -define(
   ERR_OPTION_ARITY(Con, ExpArity, Arity),
   ?FMT(
-    "In a pattern, ~s must be given all ~p arguments, but it's only given ~p.",
+    "In a pattern, ~s must be given all ~p arguments, but it's only given ~p",
     [Con, ExpArity, Arity]
   )
 ).

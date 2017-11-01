@@ -286,10 +286,10 @@ rep({struct, Loc, StructTE, FieldTEs}, CG) ->
     {rep(Var, FoldCG1), FoldCG1}
   end, CG, FieldTEs),
 
-  Pairs = lists:map(fun({sig, _, {var, FieldLoc, FieldName}=Var, _}) ->
-    {{atom, FieldLoc, list_to_atom(FieldName)}, Var}
+  Assocs = lists:map(fun({sig, SigLoc, {var, FieldLoc, FieldName}=Var, _}) ->
+    {assoc, SigLoc, {atom, FieldLoc, list_to_atom(FieldName)}, Var}
   end, FieldTEs),
-  Body = [rep({map, Loc, Pairs}, CG1)],
+  Body = [rep({map, Loc, Assocs}, CG1)],
 
   Clause = {clause, Line, ArgsRep, [], Body},
   {function, Line, list_to_atom(Con), length(FieldTEs), [Clause]};
@@ -458,13 +458,13 @@ rep({cons, _, Elems, Tail}, CG) ->
 rep({tuple, Loc, Elems}, CG) ->
   {tuple, ?START_LINE(Loc), lists:map(fun(E) -> rep(E, CG) end, Elems)};
 
-rep({map, Loc, Pairs}, CG) ->
-  PairsRep = lists:map(fun({K, V}) ->
-    KRep = rep(K, CG),
-    VRep = rep(V, CG),
-    {map_field_assoc, element(2, KRep), KRep, VRep}
-  end, Pairs),
-  {map, ?START_LINE(Loc), PairsRep};
+rep({map, Loc, Assocs}, CG) ->
+  AssocReps = lists:map(fun({assoc, AssocLoc, Key, Value}) ->
+    KeyRep = rep(Key, CG),
+    ValueRep = rep(Value, CG),
+    {map_field_assoc, ?START_LINE(AssocLoc), KeyRep, ValueRep}
+  end, Assocs),
+  {map, ?START_LINE(Loc), AssocReps};
 
 rep({N, Loc, Name}, CG) when N == var; N == con_token; N == var_value ->
   Line = ?START_LINE(Loc),
@@ -887,7 +887,12 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
 
   case Op of
     '!' -> {op, Line, 'not', ExprRep};
-    '#' -> call(gb_sets, from_list, [ExprRep], Line);
+    '#' ->
+      ElemRep = {var, Line, unique("Elem")},
+      TupleRep = {tuple, Line, [ElemRep, eabs(true, Line)]},
+      Clause = {clause, Line, [ElemRep], [], [TupleRep]},
+      Fun = {'fun', Line, {clauses, [Clause]}},
+      call(maps, from_list, [call(lists, map, [Fun, ExprRep], Line)], Line);
     % $ is used to convert Char to Int, but the underlying rep is the same
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
@@ -1265,16 +1270,15 @@ rewrite({gen, {con, "Set"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
     {[], _} -> {[], VarRep};
 
     {Stmts, NewElemRep} ->
-      FoldSetRep = {var, Line, unique("FoldSet")},
-      AddCall = call(gb_sets, add_element, [NewElemRep, FoldSetRep], Line),
-      Body = Stmts ++ [AddCall],
-      Clause = {clause, Line, [ElemRep, FoldSetRep], [], Body},
+      Body = Stmts ++ [{tuple, Line, [NewElemRep, eabs(true, Line)]}],
+      Clause = {clause, Line, [ElemRep], [], Body},
       FunRep = {'fun', Line, {clauses, [Clause]}},
 
-      NewSetRep = call(gb_sets, new, [], Line),
-      FoldCall = call(gb_sets, fold, [FunRep, NewSetRep, VarRep], Line),
+      KeysCall = call(maps, keys, [VarRep], Line),
+      MapCall = call(lists, map, [FunRep, KeysCall], Line),
+      FromListCall = call(maps, from_list, [MapCall], Line),
       ResultRep = {var, Line, unique("List")},
-      {[{match, Line, ResultRep, FoldCall}], ResultRep}
+      {[{match, Line, ResultRep, FromListCall}], ResultRep}
   end;
 
 rewrite({gen, {con, "Map"}, [KeyT, ValueT]}, VarRep, Loc, SubbedVs, CG) ->

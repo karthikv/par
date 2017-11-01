@@ -100,10 +100,10 @@ eval({cons, Loc, Elems, List}, ID) ->
 eval({tuple, Loc, Elems}, ID) ->
   list_to_tuple(eval({list, Loc, Elems}, ID));
 
-eval({map, _, Pairs}, ID) ->
-  List = lists:map(fun({K, V}) ->
-    {eval(K, ID), eval(V, ID)}
-  end, Pairs),
+eval({map, _, Assocs}, ID) ->
+  List = lists:map(fun({assoc, _, Key, Value}) ->
+    {eval(Key, ID), eval(Value, ID)}
+  end, Assocs),
   maps:from_list(List);
 
 eval({N, _, Name}, ID) when N == var; N == con_token ->
@@ -241,7 +241,7 @@ eval({unary_op, _, Op, Expr}, ID) ->
 
   case Op of
     '!' -> not V;
-    '#' -> gb_sets:from_list(V);
+    '#' -> maps:from_list(lists:map(fun(E) -> {E, true} end, V));
     % $ is used to convert Char to Int, but the underlying rep is the same
     '$' -> V;
     '-' -> -V;

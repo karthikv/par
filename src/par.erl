@@ -6,6 +6,7 @@
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ensure stdlib functions in lexer/parser are all eliminated
+% - Fork eunite and fix macro display
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering
@@ -88,6 +89,7 @@
 %   - Use -> instead of => for match/try?
 %   - Lowercase for type variables?
 % - Accessing tag of enum?
+% - Dot operator for composition?
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

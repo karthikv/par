@@ -172,10 +172,7 @@
   if
     erlang:is_binary(Left) -> <<Left/binary, Right/binary>>;
     erlang:is_list(Left) -> Left ++ Right;
-    erlang:is_map(Left) -> maps:merge(Left, Right);
-    true ->
-      true = gb_sets:is_set(Left),
-      gb_sets:union(Left, Right)
+    erlang:is_map(Left) -> maps:merge(Left, Right)
   end.
 
 '_@separate'(Left, Right) ->
@@ -185,7 +182,5 @@
       lists:filter(fun(Elem) ->
         not gb_sets:is_element(Elem, Set)
       end, Left);
-    true ->
-      true = gb_sets:is_set(Left),
-      gb_sets:subtract(Left, Right)
+    erlang:is_map(Left) -> maps:without(maps:keys(Right), Left)
   end.

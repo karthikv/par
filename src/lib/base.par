@@ -17,6 +17,22 @@ interface Mappable {
   map : (A -> B) -> T<A> -> T<B>
 }
 
+interface Collection extends Mappable {
+  fold : (A -> F -> F) -> F -> T<A> -> F
+  filter : (A -> Bool) -> T<A> -> T<A>
+  find : (A -> Bool) -> T<A> -> Option<A>
+
+  filter_map : (A -> Option<B>) -> T<A> -> T<B>
+  map_fold : (A -> F -> (B, F)) -> F -> T<A> -> (T<B>, F)
+
+  put : A -> T<A> -> T<A>
+  delete : A -> T<A> -> T<A>
+
+  contains? : A -> T<A> -> Bool
+  all? : (A -> Bool) -> T<A> -> Bool
+  any? : (A -> Bool) -> T<A> -> Bool
+}
+
 
 //-- Implementations
 impl Sized for String {
@@ -30,8 +46,8 @@ impl Sized for [A] {
 }
 
 impl Sized for Set<A> {
-  length = @gb_sets:size/1
-  empty? = @gb_sets:is_empty/1
+  length = @erlang:map_size/1
+  empty?(s) = s == assume {}
 }
 
 impl Sized for Map<A, B> {
@@ -51,9 +67,9 @@ impl Mappable for List {
 }
 
 impl Mappable for Set {
-  map(f, s) = @gb_sets:fold(|a, new_s|
-    @gb_sets:add(f(a), new_s)
-  , #[], s)
+  map(f, s) =
+    @lists:map(|a| (f(a), true), @maps:keys(s))
+    |> @maps:from_list/1
 }
 
 impl Mappable for Map {
@@ -61,6 +77,114 @@ impl Mappable for Map {
     let (new_k, new_v) = f((k, v))
     @maps:put(new_k, new_v, new_m)
   , {}, m)
+}
+
+impl Collection for List {
+  fold = @lists:foldl/3
+  filter = @lists:filter/2
+  find(f, l) = match l {
+    [] => None
+    [h | t] => if f(h) then Some(h) else find(f, t)
+  }
+
+  filter_map(f, l) = @lists:filtermap(|a|
+    if let Some(b) = f(a) then
+      assume (true, b)
+    else
+      false
+  , l)
+  map_fold = @lists:mapfoldl/3
+
+  put(h, t) = [h | t]
+  delete(a, l) = match l {
+    [] => []
+    [&a | t] => delete(a, t)
+    [h | t] => [h | delete(a, t)]
+  }
+
+  contains?(a, l) = match l {
+    [] => false
+    [&a | _] => true
+    [_ | t] => contains?(a, t)
+  }
+  all? = @lists:all/2
+  any? = @lists:any/2
+
+  //TODO move into list module
+  //max_in(l) = match l {
+  //  [] => None
+  //  _ => Some(@lists:max(l))
+  //}
+  //min_in(l) = match l {
+  //  [] => None
+  //  _ => Some(@lists:min(l))
+  //}
+  //max_by(f, l) = match l {
+  //  [] => None
+  //  [h | t] =>
+  //    let (max, _) = fold(|x, (max, max_key)|
+  //      let x_key = f(x)
+  //      if x_key > max_key then (x, x_key) else (max, max_key)
+  //    , (h, f(h)), t)
+  //    Some(max)
+  //}
+  //min_by(f, l) = match l {
+  //  [] => None
+  //  [h | t] =>
+  //    let (min, _) = fold(|x, (min, min_key)|
+  //      let x_key = f(x)
+  //      if x_key < min_key then (x, x_key) else (min, min_key)
+  //    , (h, f(h)), t)
+  //    Some(min)
+  //}
+}
+
+impl Collection for Set {
+  fold(f, init, s) = to_list(s) |> fold(f, init)
+  filter(f, s) = @maps:filter(|k, _| f(k), s)
+  find(f, s) = to_list(s) |> find(f)
+
+  filter_map(f, s) =
+    to_list(s)
+    |> filter_map(|a| match f(a) {
+      Some(b) => Some((b, true))
+      None => None
+    })
+    |> @maps:from_list/1
+  map_fold(f, init, s) =
+    let (pairs, memo) = to_list(s) |> map_fold(|a, memo|
+      let (b, new_memo) = f(a, memo)
+      ((b, true), new_memo)
+    , init)
+    (@maps:from_list(pairs), memo)
+
+  put(a, s) = @maps:put(a, true, s)
+  delete = @maps:remove/2
+
+  contains? = @maps:is_key/2
+  all?(f, s) = to_list(s) |> all?(f)
+  any?(f, s) = to_list(s) |> any?(f)
+}
+
+impl Collection for Map {
+  fold(f, init, m) = @maps:fold(|k, v, memo| f((k, v), memo), init, m)
+  filter(f, m) = @maps:filter(|k, v| f((k, v)), m)
+  find(f, m) = to_list(m) |> find(f)
+
+  filter_map(f, m) = to_list(m) |> filter_map(f) |> @maps:from_list/1
+  map_fold(f, init, m) =
+    let (pairs, memo) = to_list(m) |> map_fold(f, init)
+    (@maps:from_list(pairs), memo)
+
+  put((k, v), m) = @maps:put(k, v, m)
+  delete((k, v), m) = if contains?((k, v), m) then @maps:remove(k, m) else m
+
+  contains?((k, v), m) = match @maps:find(k, m) {
+    (@ok, &v) => true
+    _ => false
+  }
+  all?(f, m) = to_list(m) |> all?(f)
+  any?(f, m) = to_list(m) |> any?(f)
 }
 
 
@@ -82,12 +206,23 @@ export tail = @erlang:tl/1
 abs : A ~ Num -> A ~ Num
 export abs = @erlang:abs/1
 
-// TODO: OTP 19?
-//ceil : Float -> Int
-//export ceil = @erlang:ceil/1
-//
-//floor : Float -> Int
-//export floor = @erlang:floor/1
+ceil : Float -> Int
+export ceil(a) =
+  let truncated = trunc(a)
+  // truncated > a when a is negative
+  if to_float(truncated) < a then
+    truncated + 1
+  else
+    truncated
+
+floor : Float -> Int
+export floor(a) =
+  let truncated = trunc(a)
+  // truncated > a when a is negative
+  if to_float(truncated) > a then
+    truncated - 1
+  else
+    truncated
 
 max : A ~ Ord -> A ~ Ord -> A ~ Ord
 export max(a, b) = if a > b then a else b
@@ -103,6 +238,28 @@ export trunc = @erlang:trunc/1
 
 
 //-- Conversions
+interface ToList {
+  to_list : T<A> -> [A]
+}
+
+interface ToMap {
+  to_map : T<K, V> -> Map<K, V>
+}
+
+impl ToList for Set {
+  to_list(s) = @maps:keys(s)
+}
+
+impl ToList for Map {
+  to_list(m) = @maps:to_list(m)
+}
+
+// TODO fix type system error
+//impl ToMap for List {
+//  to_map(l) = @maps:from_list(l)
+//}
+
+to_float(i) = @erlang:float(i)
 
 
 //-- Misc

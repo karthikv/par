@@ -182,27 +182,29 @@ expr_test_() ->
 
   , ?_assertEqual({map, l(0, 2), []}, ok_expr("{}"))
   , ?_assertEqual(
-      {map, l(0, 12), [{{str, l(1, 5), <<"key">>}, {int, l(10, 1), 3}}]},
+      {map, l(0, 12), [
+        {assoc, l(1, 10), {str, l(1, 5), <<"key">>}, {int, l(10, 1), 3}}
+      ]},
       ok_expr("{\"key\" => 3}")
     )
   , ?_assertEqual(
       {map, l(0, 34), [
-        {{atom, l(1, 3), hi}, {map, l(8, 2), []}},
-        {{atom, l(12, 4), hey}, {map, l(20, 13), [
-          {{bool, l(21, 4), true}, {float, l(29, 3), 4.0}}
+        {assoc, l(1, 9), {atom, l(1, 3), hi}, {map, l(8, 2), []}},
+        {assoc, l(12, 21), {atom, l(12, 4), hey}, {map, l(20, 13), [
+          {assoc, l(21, 11), {bool, l(21, 4), true}, {float, l(29, 3), 4.0}}
         ]}}
       ]},
       ok_expr("{@hi => {}, @hey => {true => 4.0}}")
     )
   , ?_assertEqual(
       {map, l(0, 0, 3, 1), [
-        {{atom, l(1, 2, 2), a}, {atom, l(1, 8, 2), b}},
-        {{atom, l(2, 2, 2), c}, {atom, l(2, 8, 2), d}}
+        {assoc, l(1, 2, 8), {atom, l(1, 2, 2), a}, {atom, l(1, 8, 2), b}},
+        {assoc, l(2, 2, 8), {atom, l(2, 2, 2), c}, {atom, l(2, 8, 2), d}}
       ]},
       ok_expr(
         "{\n"
-        "  @a => @b,\n"
-        "  @c => @d,\n"
+        "  @a => @b\n"
+        "  @c => @d\n"
         "}"
       )
     )
@@ -834,7 +836,9 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {expr_sig, l(0, 37), ref,
-        {map, l(0, 9), [{{atom, l(1, 2), a}, {int, l(7, 1), 3}}]},
+        {map, l(0, 9), [
+          {assoc, l(1, 7), {atom, l(1, 2), a}, {int, l(7, 1), 3}}
+        ]},
         {gen_te, l(12, 25), {con_token, l(12, 3), "Map"}, [
           {con_token, l(16, 4), "Atom"},
           {tv_te, l(22, 14), "A", [{con_token, l(26, 10), "Concatable"}]}
@@ -1471,10 +1475,12 @@ expr_test_() ->
   , ?_assertEqual(
       {block, l(0, 0, 2, 5), [
         {atom, l(0, 4), foo},
-        {map, l(1, 0, 15), [{
-          {str, l(1, 2, 4), <<"hi">>},
-          {var_ref, l(1, 10, 3), ref, "var"}
-        }]},
+        {map, l(1, 0, 15), [
+          {assoc, l(1, 2, 11),
+            {str, l(1, 2, 4), <<"hi">>},
+            {var_ref, l(1, 10, 3), ref, "var"}
+          }
+        ]},
         {bool, l(2, 0, 5), false}
       ]},
       ok_expr("@foo\n{ \"hi\" => var }\nfalse")

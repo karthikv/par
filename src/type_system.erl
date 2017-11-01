@@ -1002,25 +1002,14 @@ infer({struct, Loc, StructTE, Fields}, C) ->
 
   {none, C5};
 
-infer({interface, Loc, {con_token, _, RawCon}, _, Fields}, C) ->
+infer({interface, _, {con_token, _, RawCon}, _, Fields}, C) ->
   Con = utils:qualify(RawCon, C),
   #type_binding{
     is_iface=true,
     num_params=NumParams
   } = maps:get(Con, C#ctx.types),
-  {RawRecordT, C1} = infer_sig(
-    false,
-    false,
-    #{"T" => {none, NumParams}},
-    {record_te, Loc, Fields},
-    C
-  ),
 
-  Subs = #{"T" => {set_ifaces, ordsets:from_list([Con])}},
-  % type sigs don't need consolidation, so don't pass aliases
-  {record, _, RawFieldMap} = utils:subs(RawRecordT, #sub_opts{subs=Subs}),
-
-  Ifaces = C1#ctx.ifaces,
+  Ifaces = C#ctx.ifaces,
   Ancestors = ordsets:subtract(
     ordsets:del_element(Con, utils:family_is(Con, Ifaces)),
     utils:builtin_is()
@@ -1032,7 +1021,11 @@ infer({interface, Loc, {con_token, _, RawCon}, _, Fields}, C) ->
     end, FoldFieldOrigins, AncestorFields)
   end, #{}, Ancestors),
 
-  {FieldTs, C2} = lists:mapfoldl(fun(Sig, FoldC) ->
+  % type sigs don't need consolidation, so don't pass aliases
+  SubOpts = #sub_opts{subs=#{"T" => {set_ifaces, ordsets:from_list([Con])}}},
+  SigVs = #{"T" => {none, NumParams}},
+
+  {FieldTs, C1} = lists:mapfoldl(fun(Sig, FoldC) ->
     {sig, FieldLoc, {var, _, Name}, FieldTE} = Sig,
     FoldC1 = case maps:find(Name, FieldOrigins) of
       error -> FoldC;
@@ -1046,18 +1039,19 @@ infer({interface, Loc, {con_token, _, RawCon}, _, Fields}, C) ->
     end,
 
     % don't need to make any Vs rigid; inst still works correctly
-    #{Name := RawT} = RawFieldMap,
-    T = norm_sig_type(RawT, [], FoldC2#ctx.pid),
+    {SigT, FoldC3} = infer_sig(false, false, SigVs, FieldTE, FoldC2),
+    RawT = utils:subs(SigT, SubOpts),
+    T = norm_sig_type(RawT, [], FoldC3#ctx.pid),
 
-    #binding{tv=TV, id=ID} = g_env_get(Name, FoldC2),
-    FoldC3 = new_gnr(TV, ID, FoldC2),
-    FoldC4 = add_cst(TV, T, FieldLoc, ?FROM_GLOBAL_SIG(Name), FoldC3),
-    {RawT, finish_gnr(FoldC4, FoldC2#ctx.gnr)}
-  end, C1, Fields),
+    #binding{tv=TV, id=ID} = g_env_get(Name, FoldC3),
+    FoldC4 = new_gnr(TV, ID, FoldC3),
+    FoldC5 = add_cst(TV, T, FieldLoc, ?FROM_GLOBAL_SIG(Name), FoldC4),
+    {RawT, finish_gnr(FoldC5, FoldC3#ctx.gnr)}
+  end, C, Fields),
 
   Value = setelement(2, maps:get(Con, Ifaces), FieldTs),
   NewIfaces = Ifaces#{Con => Value},
-  {none, C2#ctx{ifaces=NewIfaces}};
+  {none, C1#ctx{ifaces=NewIfaces}};
 
 infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
   ImplLoc = ?LOC(ImplTE),
@@ -1185,16 +1179,16 @@ infer({tuple, _, Elems}, C) ->
   end, C, Elems),
   {{tuple, ElemTs}, C1};
 
-infer({map, _, Pairs}, C) ->
+infer({map, _, Assocs}, C) ->
   KeyTV = tv_server:fresh(C#ctx.pid),
   ValueTV = tv_server:fresh(C#ctx.pid),
 
-  C1 = lists:foldl(fun({Key, Value}, FoldC) ->
+  C1 = lists:foldl(fun({assoc, _, Key, Value}, FoldC) ->
     {KeyT, FoldC1} = infer(Key, FoldC),
     FoldC2 = add_cst(KeyT, KeyTV, ?LOC(Key), ?FROM_MAP_KEY, FoldC1),
     {ValueT, FoldC3} = infer(Value, FoldC2),
     add_cst(ValueT, ValueTV, ?LOC(Value), ?FROM_MAP_VALUE, FoldC3)
-  end, C, Pairs),
+  end, C, Assocs),
 
   {{gen, {con, "Map"}, [KeyTV, ValueTV]}, C1};
 
@@ -2622,6 +2616,12 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
     false -> S3
   end;
 
+% If BaseT is *not* a TV, then this gen TV should've been replaced with
+% a regular gen. It hasn't been replaced due to a unification error. Avoid
+% propagating errors.
+unify({gen, _, _, BaseT, _}, _, S) when element(1, BaseT) /= tv -> S;
+unify(_, {gen, _, _, BaseT, _}, S) when element(1, BaseT) /= tv -> S;
+
 unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
   #solver{bound_vs=BoundVs, ifaces=Ifaces} = S,
   Bound1 = ordsets:is_element(V1, BoundVs),
@@ -2727,12 +2727,6 @@ unify({gen, {con, Con}, ParamTs1}, {gen, {con, Con}, ParamTs2}, S) ->
         sub_unify(T1, T2, FoldS)
       end, S, lists:zip(ParamTs1, ParamTs2))
   end;
-
-% If BaseT is *not* a TV, then this gen TV should've been replaced with
-% a regular gen. It hasn't been replaced due to a unification error. Avoid
-% propagating errors.
-unify({gen, _, _, BaseT, _}, _, S) when element(1, BaseT) /= tv -> S;
-unify(_, {gen, _, _, BaseT, _}, S) when element(1, BaseT) /= tv -> S;
 
 unify({gen, ConT, ParamTs1}=GenT, {gen, V, Is, BaseTV, ParamTs2}=GenTV, S) ->
   Length1 = length(ParamTs1),
@@ -3134,6 +3128,8 @@ gen_vs_list({con, _}) -> [];
 gen_vs_list({gen, _, ParamTs}) -> lists:flatmap(fun gen_vs_list/1, ParamTs);
 gen_vs_list({gen, _, _, {tv, V, _, _}, ParamTs}=GenTV) ->
   [{V, GenTV} | gen_vs_list({gen, {con, ""}, ParamTs})];
+% concrete base type means that there was an error somewhere
+gen_vs_list({gen, _, _, _, _}) -> [];
 % gen_vs_list({inst, ...}) ommitted; they should be resolved
 gen_vs_list({record, _, FieldMap}) ->
   lists:flatmap(fun(Key) ->

@@ -1,5 +1,5 @@
 -module(type_system_test).
--export([infer_prefix/1, infer_many/3, bad_expr/2, check_ok/1]).
+-export([infer_prefix/1, infer_many/3, bad_expr/2, check_ok/1, check_ok/2]).
 
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/common.hrl").
@@ -71,9 +71,11 @@ bad_many(PathPrgs, TargetPath, ExpErr) ->
 ctx_err_many(PathPrgs, TargetPath, ExpErr) ->
   check_errors(infer_many(?MANY_DIR, PathPrgs, TargetPath), [ExpErr]).
 
-check_ok({ok, _, _}=Ok) -> Ok;
-check_ok({errors, _, _}=Errors) ->
-  io:format("~s", [reporter:format(Errors)]),
+check_ok(Result) -> check_ok(Result, standard_io).
+
+check_ok({ok, _, _}=Ok, _) -> Ok;
+check_ok(Errors, Device) ->
+  io:format(Device, "~s", [reporter:format(Errors)]),
   ?assert(false).
 
 check_errors({errors, Errs, _}=Errors, ExpErrs) ->
@@ -95,6 +97,12 @@ check_errors({errors, Errs, _}=Errors, ExpErrs) ->
 check_errors({ok, _, _}, ExpErrs) ->
   NumExpErrs = length(ExpErrs),
   io:format("Expected ~p error(s), but got valid program~n", [NumExpErrs]),
+  ?assert(false);
+check_errors(Errors, _) ->
+  io:format(
+    "Expected type system error(s), but got~n~s",
+    [reporter:format(Errors)]
+  ),
   ?assert(false).
 
 are_errors_equal({Msg, Mod, Loc}, {Msg, Mod, Loc}) -> true;
@@ -1635,24 +1643,24 @@ interface_test_() ->
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE_ARG("O ~ ToInt", "O ~ ToInt"), l(2, 13, 18)}
+      {?ERR_MUST_SOLVE_ARG("N ~ ToInt", "N ~ ToInt"), l(2, 13, 18)}
     ))
   , ?_test(ctx_err_prg(
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(3)",
-      {?ERR_MUST_SOLVE_ARG("K ~ ToInt ~ Num", "K ~ ToInt ~ Num"), l(2, 13, 1)}
+      {?ERR_MUST_SOLVE_ARG("J ~ ToInt ~ Num", "J ~ ToInt ~ Num"), l(2, 13, 1)}
     ))
   , ?_test(ctx_err_prg(
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = (|x| to_int(x))(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE_ARG("R ~ ToInt", "R ~ ToInt"), l(2, 22, 18)}
+      {?ERR_MUST_SOLVE_ARG("Q ~ ToInt", "Q ~ ToInt"), l(2, 22, 18)}
     ))
   , ?_test(ctx_err_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo = (|x| x + from_str(\"1\"))(5)",
-      {?ERR_MUST_SOLVE_ARG("K ~ FromStr ~ Num", "K ~ FromStr ~ Num"),
+      {?ERR_MUST_SOLVE_ARG("J ~ FromStr ~ Num", "J ~ FromStr ~ Num"),
        l(1, 30, 1)}
     ))
   , ?_test(ctx_err_prg(
@@ -1661,7 +1669,7 @@ interface_test_() ->
       "foo =\n"
       "  let to_i(x) = to_int(x)\n"
       "  to_i(3)",
-      {?ERR_MUST_SOLVE_ARG("Q ~ ToInt ~ Num", "Q ~ ToInt ~ Num"), l(4, 7, 1)}
+      {?ERR_MUST_SOLVE_ARG("P ~ ToInt ~ Num", "P ~ ToInt ~ Num"), l(4, 7, 1)}
     ))
   , ?_test(ctx_err_prg(
       ToIntIface ++
@@ -1669,33 +1677,38 @@ interface_test_() ->
       "foo(b, x) =\n"
       "  |y| (to_int(y), foo(b, y))\n"
       "  if b then @hi else foo(true, @io:printable_range())",
-      {?ERR_MUST_SOLVE_ARG("V ~ ToInt", "V ~ ToInt"), l(4, 31, 21)}
+      {?ERR_MUST_SOLVE_ARG("U ~ ToInt", "U ~ ToInt"), l(4, 31, 21)}
     ))
   , ?_test(ctx_err_prg(
       ToIntIface ++
       "foo = (|[x]| to_int(x))(@io:printable_range())",
-      {?ERR_MUST_SOLVE_ARG("M ~ ToInt", "[M ~ ToInt]"), l(1, 24, 21)}
+      {?ERR_MUST_SOLVE_ARG("L ~ ToInt", "[L ~ ToInt]"), l(1, 24, 21)}
     ))
   , ?_test(ctx_err_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo = from_str(\"93\")",
-      {?ERR_MUST_SOLVE_RETURN("G ~ FromStr", "G ~ FromStr"), l(1, 6, 14)}
+      {?ERR_MUST_SOLVE_RETURN("F ~ FromStr", "F ~ FromStr"), l(1, 6, 14)}
     ))
   , ?_test(ctx_err_prg(
       "interface FromStr { from_str : String -> [T] }\n"
       "foo = from_str(\"hello\")",
-      {?ERR_MUST_SOLVE_RETURN("G ~ FromStr", "[G ~ FromStr]"), l(1, 6, 17)}
+      {?ERR_MUST_SOLVE_RETURN("F ~ FromStr", "[F ~ FromStr]"), l(1, 6, 17)}
     ))
   , ?_test(ctx_err_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo = (|x| from_str(x))(\"hi\")",
-      {?ERR_MUST_SOLVE_RETURN("J ~ FromStr", "J ~ FromStr"), l(1, 6, 23)}
+      {?ERR_MUST_SOLVE_RETURN("I ~ FromStr", "I ~ FromStr"), l(1, 6, 23)}
     ))
 
 
   , ?_test("(A -> B) -> C<A> ~ Mappable -> C<B> ~ Mappable" = ok_prg(
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }",
       "map"
+    ))
+  % to ensure sig ifaces from foo isn't carried over to bar
+  , ?_test("A<B ~ Ord> ~ Foo -> Bool" = ok_prg(
+      "interface Foo { foo : T<A> -> Bool, bar : T<A ~ Ord> -> Bool }",
+      "bar"
     ))
   , ?_test("[Bool]" = ok_prg(
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
@@ -1727,6 +1740,11 @@ interface_test_() ->
       "impl FromList for Map { from_list([(k, v)]) = { k => v } }\n"
       "foo = from_list([(\"key\", @value)]) : Map<String, Atom>",
       "foo"
+    ))
+  , ?_test("" = ok_prg(
+      "interface FromList { from_list : [A ~ Ord] -> T<A ~ Ord> }\n"
+      "impl FromList for Map { from_list(_) = {} }\n",
+      "from_list"
     ))
   , ?_test("Bool" = ok_prg(
       "interface Foo { foo : T -> T }\n"
@@ -1779,12 +1797,12 @@ interface_test_() ->
   , ?_test(ctx_err_prg(
       ToIntIface ++
       "foo = to_int(@io:printable_range() : T<A>)",
-      {?ERR_MUST_SOLVE_ARG("R<Q> ~ ToInt", "R<Q> ~ ToInt"), l(1, 13, 28)}
+      {?ERR_MUST_SOLVE_ARG("Q<P> ~ ToInt", "Q<P> ~ ToInt"), l(1, 13, 28)}
     ))
   , ?_test(ctx_err_prg(
       "interface ToInt { to_int : T<A> -> Int }\n"
       "foo = to_int(@io:printable_range())",
-      {?ERR_MUST_SOLVE_ARG("N ~ ToInt", "N<M> ~ ToInt"), l(1, 13, 21)}
+      {?ERR_MUST_SOLVE_ARG("M ~ ToInt", "M<L> ~ ToInt"), l(1, 13, 21)}
     ))
   % Technically this should be ERR_MUST_SOLVE_RETURN, but disambiguating here
   % is difficult. The current error message seems sufficient for now.
@@ -1793,7 +1811,7 @@ interface_test_() ->
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar = foo(from_int(3))",
-      {?ERR_MUST_SOLVE_ARG("V<U> ~ FromInt", "V<U> ~ FromInt"), l(3, 10, 11)}
+      {?ERR_MUST_SOLVE_ARG("U<T> ~ FromInt", "U<T> ~ FromInt"), l(3, 10, 11)}
     ))
   , ?_test(ctx_err_prg(
       "interface FromInt { from_int : Int -> T }\n"
@@ -1802,12 +1820,12 @@ interface_test_() ->
       "bar =\n"
       "  let x = from_int(3)\n"
       "  foo(x)",
-      {?ERR_MUST_SOLVE_RETURN("V ~ FromInt", "V ~ FromInt"), l(4, 10, 11)}
+      {?ERR_MUST_SOLVE_RETURN("U ~ FromInt", "U ~ FromInt"), l(4, 10, 11)}
     ))
   , ?_test(ctx_err_prg(
       "interface FromInt { from_int : Int -> T<A> }\n"
       "foo = from_int(3)",
-      {?ERR_MUST_SOLVE_RETURN("M ~ FromInt", "M<L> ~ FromInt"), l(1, 6, 11)}
+      {?ERR_MUST_SOLVE_RETURN("L ~ FromInt", "L<K> ~ FromInt"), l(1, 6, 11)}
     ))
 
 

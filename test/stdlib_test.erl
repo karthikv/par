@@ -5,7 +5,7 @@
 
 stdlib_test_() ->
   Result = type_system:infer_file("test/lib/base_test.par"),
-  {ok, Comps, C} = type_system_test:check_ok(Result),
+  {ok, Comps, C} = type_system_test:check_ok(Result, user),
   Compiled = code_gen:compile_comps(Comps, C),
 
   lists:map(fun({Mod, Binary}) ->

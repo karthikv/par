@@ -70,9 +70,9 @@ test_expr(Expr) ->
       #{<<"hello">> => <<"world">>, <<"some">> => <<"thing">>},
       Expr("{\"hello\" => \"world\", \"some\" => \"thing\"}")
     )
-  , ?_assertEqual(gb_sets:new(), Expr("#[]"))
+  , ?_assertEqual(#{}, Expr("#[]"))
   , ?_assertEqual(
-      gb_sets:from_list([2, 4, 6, 8]),
+      #{2 => true, 4 => true, 6 => true, 8 => true},
       Expr("#[2, 4, 2, 6, 4, 8, 6]")
     )
 
@@ -200,7 +200,7 @@ test_expr(Expr) ->
       Expr("{\"a\" => 1} ++ {\"b\" => 2.0}")
     )
   , ?_assertEqual(
-      gb_sets:from_list([1, 2, 3]),
+      #{1 => true, 2 => true, 3 => true},
       Expr("#[1] ++ #[2, 3]")
     )
   , ?_assertEqual(
@@ -208,7 +208,7 @@ test_expr(Expr) ->
       Expr("[5, 3, 1, 4, 5, 8, 7] -- [4, 1, 5, 7]")
     )
   , ?_assertEqual(
-      gb_sets:from_list([3]),
+      #{3 => true},
       Expr("#[3, 2, 3, 1, 2] -- #[1, 8, 6, 2]")
     )
   , ?_test(-3 = Expr("-3"))
@@ -642,7 +642,7 @@ test_interface(Run) ->
   , ?_test(2 = Run(
       ToIntIface ++
       "impl ToInt for Set<A> {\n"
-      "  to_int(s) = @gb_sets:size(s)\n"
+      "  to_int(s) = @erlang:map_size(s)\n"
       "}\n"
       "main() = to_int(#['a', 'b'])"
     ))
@@ -683,7 +683,9 @@ test_interface(Run) ->
     ))
   , ?_test(0 = Run(
       IfaceImpl ++
-      "foo(set) = (@gb_sets:largest/1 : Set<A> -> A)(set, false)\n"
+      "first : Set<A> -> A\n"
+      "first(set) = @erlang:hd(@maps:keys(set))\n"
+      "foo(set) = first(set, false)\n"
       "main() =\n"
       "  let set = #[to_int]\n"
       "  foo(set)"
@@ -743,14 +745,14 @@ test_interface(Run) ->
       IfaceImpl ++
       "struct Foo<A> { a : A, other_a : A }\n"
       "enum Bar<A, B> { Cat(A), Dog(B) }\n"
-      "largest : Set<A> -> A\n"
-      "largest = @gb_sets:largest/1\n"
+      "first : Set<A> -> A\n"
+      "first(set) = @erlang:hd(@maps:keys(set))\n"
       "key : Map<K, V> -> K\n"
       "key(map) = @erlang:hd(@maps:keys(map))\n"
       "bar(foo) =\n"
       "  let Cat(s) = foo.a\n"
       "  let Dog([m]) = foo.other_a\n"
-      "  largest(s, true) + key(m)(true)\n"
+      "  first(s, true) + key(m)(true)\n"
       "main() =\n"
       "  let foo = Foo {\n"
       "    a = Cat(#[to_int])\n"
@@ -1034,17 +1036,16 @@ test_interface(Run) ->
       "main() = to_int([\"378\"])"
     ))
   , ?_assertEqual(
-      {2, 1, [false, true], gb_sets:from_list([#{greeting => <<"hi">>}])},
+      {2, 1, [false, true], #{#{greeting => <<"hi">>} => true}},
       Run(
         "interface Collection extends Mappable { len : T<A> -> Int }\n"
         "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
         "impl Collection for List { len = @erlang:length/1 }\n"
         "impl Mappable for List { map = @lists:map/2 }\n"
-        "impl Collection for Set { len = @gb_sets:size/1 }\n"
+        "impl Collection for Set { len = @erlang:map_size/1 }\n"
         "impl Mappable for Set {\n"
-        "  map(f, s) = @gb_sets:fold(|e, new_s|\n"
-        "    @gb_sets:add_element(f(e), new_s)\n"
-        "  , #[], s)\n"
+        "  map(f, s) = @lists:map(|e| (f(e), true), @maps:keys(s))\n"
+        "    |> @maps:from_list/1\n"
         "}\n"
         "main() =\n"
         "  let l = [1, 2]\n"
@@ -1057,7 +1058,7 @@ test_interface(Run) ->
 code_gen_gen_tv_test_() -> test_gen_tv(fun run_code_gen/1).
 interpreter_gen_tv_test_() -> test_gen_tv(fun run_interpreter/1).
 test_gen_tv(Run) ->
-  [ ?_assertEqual({[1, 2, 3], gb_sets:from_list([hey, hi])}, Run(
+  [ ?_assertEqual({[1, 2, 3], #{hey => true, hi => true}}, Run(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
@@ -1067,7 +1068,7 @@ test_gen_tv(Run) ->
       "foo(x) = x\n"
       "main() = foo([1])"
     ))
-  , ?_assertEqual({[1, 2, 3], gb_sets:from_list([hey, hi])}, Run(
+  , ?_assertEqual({[1, 2, 3], #{hey => true, hi => true}}, Run(
       "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
       "foo(x) = x\n"
       "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
