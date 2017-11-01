@@ -345,32 +345,32 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
 
 chs_to_token_fn : Map<[Char], Loc -> Token>
 chs_to_token_fn = {
-  to_list("module") => Module,
-  to_list("import") => Import,
-  to_list("export") => Export,
-  to_list("enum") => Enum,
-  to_list("exception") => Exception,
-  to_list("struct") => Struct,
-  to_list("interface") => Interface,
-  to_list("impl") => Impl,
+  str_to_list("module") => Module
+  str_to_list("import") => Import
+  str_to_list("export") => Export
+  str_to_list("enum") => Enum
+  str_to_list("exception") => Exception
+  str_to_list("struct") => Struct
+  str_to_list("interface") => Interface
+  str_to_list("impl") => Impl
 
-  to_list("if") => If,
-  to_list("then") => Then,
-  to_list("else") => Else,
-  to_list("let") => Let,
-  to_list("match") => Match,
-  to_list("try") => Try,
-  to_list("raise") => Raise,
-  to_list("ensure") => Ensure,
-  to_list("after") => After,
-  to_list("discard") => Discard,
-  to_list("assume") => Assume,
+  str_to_list("if") => If
+  str_to_list("then") => Then
+  str_to_list("else") => Else
+  str_to_list("let") => Let
+  str_to_list("match") => Match
+  str_to_list("try") => Try
+  str_to_list("raise") => Raise
+  str_to_list("ensure") => Ensure
+  str_to_list("after") => After
+  str_to_list("discard") => Discard
+  str_to_list("assume") => Assume
 
-  to_list("test") => Test,
-  to_list("assert") => Assert,
+  str_to_list("test") => Test
+  str_to_list("assert") => Assert
 
-  to_list("true") => flip(LitBool, true),
-  to_list("false") => flip(LitBool, false),
+  str_to_list("true") => flip(LitBool, true)
+  str_to_list("false") => flip(LitBool, false)
 }
 
 get : A -> Map<A, B> -> B -> B
@@ -462,8 +462,8 @@ to_int = @erlang:list_to_integer/1
 to_float : [Char] -> Float
 to_float = @erlang:list_to_float/1
 
-to_list : String -> [Char]
-to_list = @erlang:binary_to_list/1
+str_to_list : String -> [Char]
+str_to_list = @erlang:binary_to_list/1
 
 reverse : [A] -> [A]
 reverse = @lists:reverse/1

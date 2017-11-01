@@ -1,0 +1,8 @@
+*** file [infer-prg] ***
+
+Native functions need to be annotated with their arity (e.g. @lists:filter/2) 
+or called immediately so the arity is implied:
+
+3: @erlang:length
+   ^^^^^^^^^^^^^^
+

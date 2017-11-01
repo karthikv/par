@@ -196,7 +196,7 @@ imports(tokens) = match tokens {
 
 import_ident : [Token] -> Parsed<(Node, [Token])>
 import_ident(tokens) =
-  let variants = to_list("variants")
+  let variants = str_to_list("variants")
   match tokens {
     [Lexer.Var(s, &variants), Lexer.Con(e, name) | t] =>
       parsed((Variants(range(s, e), name), t))
@@ -419,7 +419,7 @@ tv_node(tokens) = match tokens {
 iface : Loc -> [Token] -> Parsed<(Node, [Token])>
 iface(s, tokens) = match tokens {
   [Lexer.Con(con_l, name) | t] =>
-    let extends = to_list("extends")
+    let extends = str_to_list("extends")
     let parsed_parents =
       if let [Lexer.Var(_, &extends) | t] = t then
         many_delim_cb(|node, rest| match rest {
@@ -456,7 +456,7 @@ qualified_con(tokens) = match tokens {
 }
 
 implementation(s, tokens) =
-  let for = to_list("for")
+  let for = str_to_list("for")
   match tokens {
     [Lexer.Con(con_s, mod) | t] =>
       let (con_node, t) = try_qualify_con(con_s, mod, t)
@@ -912,7 +912,7 @@ type_expr_r(lhs, tokens) = match lhs {
               parsed([param])
           )
           |> pmap_or(|v| v, [])
-          |> pmap(|params| Gen(l, Con(l, to_list("List")), params))
+          |> pmap(|params| Gen(l, Con(l, str_to_list("List")), params))
           |> pbind(recurse(rest))
         )
 
@@ -1564,14 +1564,11 @@ map_index(f, l) =
   let (mapped, _) = @lists:mapfoldl(|a, i| (f(a, i), i + 1), 0, l)
   mapped
 
-filter : (A -> Bool) -> [A] -> [A]
-filter = @lists:filter/2
-
 reverse : [A] -> [A]
 reverse = @lists:reverse/1
 
-to_list : String -> [Char]
-to_list = @erlang:binary_to_list/1
+str_to_list : String -> [Char]
+str_to_list = @erlang:binary_to_list/1
 
 make_ref : () -> Ref
 make_ref = @erlang:make_ref/0
