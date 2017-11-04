@@ -1,6 +1,7 @@
 *** module Mod *** ([infer-prg])
 
-Mismatched types D ~ Num and Bool from left-hand side of '+' operator:
+Mismatched types A ~ Num and Bool from left-hand side of '+' operator:
+
 3: true + 5
    ^^^^
 

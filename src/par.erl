@@ -6,7 +6,9 @@
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ensure stdlib functions in lexer/parser are all eliminated
+% - Norm types for error messages and for ERR_MUST_SOLVE ctx err
 % - Fork eunite and fix macro display
+% - Holes
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering
@@ -29,7 +31,6 @@
 %   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
 %     - Error message with context when there's no else clause
-%   - Norm types for error messages and for ERR_MUST_SOLVE ctx err
 %   - Detect basic infinite loop conditions
 %   - Helpful message if main() not exported
 %   - Struct/Enum name conflict w/ global causes hard-to-understand errors
@@ -51,6 +52,7 @@
 %   - Add explicit error when assert let w/ a pattern that'll always match
 %   - Impl error due to iface type sig, where type sig can be in another module
 %   - Explanation for how to circumvent builtin redef error?
+%   - For rigid errors, use same TVs as are in signatures
 % - Website + Documentation
 %
 % Defer

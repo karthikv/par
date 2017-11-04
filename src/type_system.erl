@@ -1,5 +1,11 @@
 -module(type_system).
--export([infer_file/1, infer_prg/1, pattern_names/1, parse_file/2]).
+-export([
+  infer_file/1,
+  infer_prg/1,
+  pattern_names/1,
+  parse_file/2,
+  rigid_err/4
+]).
 -on_load(load/0).
 -include("common.hrl").
 
@@ -434,8 +440,8 @@ populate_env_and_types(Comps, C) ->
               B = #binding{tv=TV, id=ID, exported=true, loc=Loc},
               ModuleC2 = define(Name, B, ModuleC1),
 
-              {T, ModuleC3} = infer_sig(false, true, #{}, TE, ModuleC2),
-              StructInfo = {T, ModuleC3#ctx.sig_vs},
+              {RawT, ModuleC3} = infer_sig(false, true, #{}, TE, ModuleC2),
+              StructInfo = {RawT, ModuleC3#ctx.sig_vs},
               ModuleC3#ctx{structs=(ModuleC3#ctx.structs)#{Con => StructInfo}}
           end;
 
@@ -479,14 +485,14 @@ define(Name, #binding{loc=Loc}=B, C) ->
   #ctx{module=Module, g_env=GEnv, exports=Exports} = C,
   case maps:find({Module, Name}, GEnv) of
     {ok, #binding{loc=OrigLoc}} ->
-      {From, ErrLoc} = if
+      {Err, ErrLoc} = if
         % e.g. global has the same name as a builtin
         Loc == ?BUILTIN_LOC -> {?ERR_REDEF_BUILTIN(Name), OrigLoc};
         % e.g. direct import has the same name as a builtin
         OrigLoc == ?BUILTIN_LOC -> {?ERR_REDEF_BUILTIN(Name), Loc};
         true -> {?ERR_REDEF(Name, OrigLoc), Loc}
       end,
-      add_ctx_err(From, ErrLoc, C);
+      add_ctx_err(Err, ErrLoc, C);
 
     error ->
       NewExports = if
@@ -515,9 +521,9 @@ define_type(Con, #type_binding{is_iface=IsIface, loc=Loc}=TB, C) ->
       add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), OrigLoc, C);
 
     {ok, #type_binding{is_iface=true, loc=OrigLoc}} ->
-      add_ctx_err(?ERR_REDEF_IFACE(Con, OrigLoc), Loc, C);
+      add_ctx_err(?ERR_REDEF(Con, OrigLoc), Loc, C);
     {ok, #type_binding{is_iface=false, loc=OrigLoc}} ->
-      add_ctx_err(?ERR_REDEF_TYPE(Con, OrigLoc), Loc, C);
+      add_ctx_err(?ERR_REDEF(Con, OrigLoc), Loc, C);
 
     error ->
       NewExports = if
@@ -639,21 +645,29 @@ infer_defs(Comps, C) ->
               % There's no active gnr right now. Inferring a signature doesn't
               % add any constraints, so this is OK.
               {SigT, ModuleC7} = infer(Sig, ModuleC6),
-              SigCst = make_cst(
-                TV,
-                SigT,
-                ?LOC(Sig),
-                ?FROM_GLOBAL_SIG(Name),
-                ModuleC7
-              ),
+              case SigT of
+                % Couldn't determine a valid signature. If we try to generalize,
+                % we'll get a rigid TV, which will propagate errors. Instead,
+                % just stop here.
+                {hole, false} -> {none, ModuleC7};
 
-              ModuleC8 = infer_csts_first(
-                [SigCst],
-                ModuleC2#ctx.gnrs,
-                [TV, ID],
-                ModuleC7
-              ),
-              {none, ModuleC8}
+                _ ->
+                  SigCst = make_cst(
+                    TV,
+                    SigT,
+                    ?LOC(Sig),
+                    ?FROM_GLOBAL_SIG(Name),
+                    ModuleC7
+                  ),
+
+                  ModuleC8 = infer_csts_first(
+                    [SigCst],
+                    ModuleC2#ctx.gnrs,
+                    [TV, ID],
+                    ModuleC7
+                  ),
+                  {none, ModuleC8}
+              end
           end;
 
         _ when element(1, Node) == sig -> {Node, ModuleC1};
@@ -866,7 +880,8 @@ infer({fn, _, Ref, Args, Expr}, C) ->
 
 infer({sig, _, _, Sig}, C) ->
   {SigT, C1} = infer_sig(false, false, #{}, Sig, C),
-  {norm_sig_type(SigT, maps:keys(C1#ctx.sig_vs), C#ctx.pid), C1};
+  {NormT, _} = norm_sig_type(SigT, false, C1#ctx.pid),
+  {NormT, C1};
 
 infer({expr_sig, Loc, Ref, Expr, Sig}, C) ->
   G = C#ctx.gnr,
@@ -874,10 +889,10 @@ infer({expr_sig, Loc, Ref, Expr, Sig}, C) ->
 
   {ExprT, C1} = infer(Expr, new_gnr(TV, ID, C)),
   {SigT, C2} = infer_sig(false, false, #{}, Sig, C1),
-  NormSigT = norm_sig_type(SigT, maps:keys(C2#ctx.sig_vs), C2#ctx.pid),
+  {NormT, _} = norm_sig_type(SigT, false, C2#ctx.pid),
 
   C3 = add_cst(TV, ExprT, ?LOC(Expr), ?FROM_EXPR_SIG, C2),
-  C4 = add_cst(TV, NormSigT, Loc, ?FROM_EXPR_SIG, C3),
+  C4 = add_cst(TV, NormT, Loc, ?FROM_EXPR_SIG, C3),
   C5 = finish_gnr(C4, add_gnr_dep(ID, G)),
 
   % We don't want to return {inst, ...} directly; if it's added to two separate
@@ -891,13 +906,13 @@ infer({expr_sig, Loc, Ref, Expr, Sig}, C) ->
   {InstTV, C6};
 
 infer({enum, _, EnumTE, Options}, C) ->
-  {T, C1} = infer_sig(false, true, #{}, EnumTE, C),
+  {RawT, C1} = infer_sig(false, true, #{}, EnumTE, C),
   SigVs = C1#ctx.sig_vs,
-  FVs = fvs(T),
+  FVs = fvs(RawT),
 
   {GenOptions, _, C2} = lists:foldl(fun(Option, {FoldGenOptions, Keys, FoldC}) ->
     {option, _, {con_token, Loc, Con}, _, KeyNode} = Option,
-    {OptionT, ArgTs, FoldC1} = infer_option(Option, T, FVs, SigVs, FoldC),
+    {OptionT, ArgTs, FoldC1} = infer_option(Option, RawT, FVs, SigVs, FoldC),
 
     Key = case KeyNode of
       none -> list_to_atom(Con);
@@ -949,7 +964,7 @@ infer({enum, _, EnumTE, Options}, C) ->
     {NewGenOptions, NewKeys, FoldC2}
   end, {[], #{}, C1}, Options),
 
-  {Con, Vs} = case T of
+  {Con, Vs} = case RawT of
     {con, Con_} -> {Con_, []};
     {gen, {con, Con_}, ParamTs} ->
       {Con_, lists:map(fun({tv, V, none, _}) -> V end, ParamTs)}
@@ -972,9 +987,9 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   end,
   Con = utils:qualify(Name, C),
 
-  {T, SigVs} = maps:get(Con, C#ctx.structs),
+  {RawT, SigVs} = maps:get(Con, C#ctx.structs),
   {{record, _, RawFieldMap}, C1} = infer_sig(
-    {T, fvs(T)},
+    {RawT, fvs(RawT)},
     false,
     SigVs,
     {record_te, Loc, Fields},
@@ -984,12 +999,10 @@ infer({struct, Loc, StructTE, Fields}, C) ->
   FnT = lists:foldr(fun({sig, _, {var, _, FieldName}, _}, LastT) ->
     #{FieldName := FieldT} = RawFieldMap,
     {lam, FieldT, LastT}
-  end, T, Fields),
+  end, RawT, Fields),
 
-  % don't need to make any Vs rigid; inst still works correctly
-  NormFnT = norm_sig_type(FnT, [], C1#ctx.pid),
-
-  Vs = case T of
+  {NormFnT, _} = norm_sig_type(FnT, false, C1#ctx.pid),
+  Vs = case RawT of
     {con, _} -> [];
     {gen, _, ParamTs} -> lists:map(fun({tv, V, none, _}) -> V end, ParamTs)
   end,
@@ -1038,10 +1051,9 @@ infer({interface, _, {con_token, _, RawCon}, _, Fields}, C) ->
       _ -> add_ctx_err(?ERR_IFACE_TYPE(Name), FieldLoc, FoldC1)
     end,
 
-    % don't need to make any Vs rigid; inst still works correctly
     {SigT, FoldC3} = infer_sig(false, false, SigVs, FieldTE, FoldC2),
     RawT = utils:subs(SigT, SubOpts),
-    T = norm_sig_type(RawT, [], FoldC3#ctx.pid),
+    {T, _} = norm_sig_type(RawT, false, FoldC3#ctx.pid),
 
     #binding{tv=TV, id=ID} = g_env_get(Name, FoldC3),
     FoldC4 = new_gnr(TV, ID, FoldC3),
@@ -1097,7 +1109,7 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
       case no_ctx_errs(C1, C) of
         false -> {none, C1};
         true ->
-          ImplT = norm_sig_type(RawT, maps:keys(C1#ctx.sig_vs), C1#ctx.pid),
+          {ImplT, _} = norm_sig_type(RawT, false, C1#ctx.pid),
           Key = utils:impl_key(RawT),
           Impls = C1#ctx.impls,
           SubImpls = maps:get(IfaceCon, Impls),
@@ -1115,7 +1127,12 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
 
               V = tv_server:next_name(CaseC#ctx.pid),
               GVs = ordsets:from_list([V]),
-              InstTV = {inst, Ref, GVs, {tv, V, Parents, false}},
+
+              EmptySet = ordsets:new(),
+              InstTV = case Parents of
+                EmptySet -> {inst, Ref, GVs, {tv, V, none, false}};
+                _ -> {inst, Ref, GVs, {tv, V, Parents, false}}
+              end,
 
               From = ?FROM_PARENT_IFACES,
               CaseC1 = add_cst(ImplT, InstTV, ImplLoc, From, new_gnr(CaseC)),
@@ -1684,7 +1701,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
       end,
       {T, C2};
 
-    true -> {tv_server:fresh(C2#ctx.pid), C2}
+    true -> {{hole, false}, C2}
   end;
 infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
   C1 = case RestrictVs of
@@ -1743,11 +1760,9 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
         error -> C2#ctx{sig_vs=SigVs#{V => {Is, NumParams}}}
       end,
 
-      % This TV should be rigid in signatures, but it'll be reset to flex in
-      % norm_sig_type. Hence, we don't set rigid here.
-      {{tv, V, Is, false}, C3};
+      {{tv, V, Is, true}, C3};
 
-    false -> {{tv, V, none, false}, C2}
+    false -> {{hole, false}, C2}
   end;
 infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
   Con = utils:resolve_con(RawCon, C),
@@ -1760,7 +1775,7 @@ infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
 
   case no_ctx_errs(C, C1) of
     true -> {unalias_except_struct({con, Con}, C1#ctx.aliases), C1};
-    false -> {tv_server:fresh(C1#ctx.pid), C1}
+    false -> {{hole, false}, C1}
   end;
 infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
   {FieldMap, C1} = lists:foldl(fun({sig, _, Var, FieldTE}, {FoldMap, FoldC}) ->
@@ -1796,7 +1811,7 @@ infer_option(Option, T, FVs, SigVs, C) ->
   end, T, ArgTs),
 
   % don't need to make any Vs rigid; inst still works correctly
-  OptionT = norm_sig_type(RawOptionT, [], C1#ctx.pid),
+  {OptionT, _} = norm_sig_type(RawOptionT, false, C1#ctx.pid),
   #binding{tv=TV, id=ID} = g_env_get(Con, C1),
 
   C2 = new_gnr(TV, ID, C1),
@@ -1925,67 +1940,63 @@ infer_impl_inits(
 
           % TODO: incorporate _FieldLoc into sig error messages
           {ok, {_FieldLoc, RawFieldT}} ->
-            {TupleSubs, NumParams} = case IfaceNumParams of
-              1 ->
-                {con, ImplCon} = ImplT,
-                #type_binding{num_params=Num} = maps:get(ImplCon, C#ctx.types),
+            % Remove ifaces on T so we can unify with a gen.
+            NoIsOpts = #sub_opts{subs=#{"T" => {set_ifaces, none}}},
+            RawNoIs = utils:subs(RawFieldT, NoIsOpts),
 
-                TupleSubs_ = if
-                  Num /= 1 ->
-                    lists:foldl(fun({_, {gen, _, _, _, [ParamT]}}, FoldSubs) ->
-                      ElemTs = lists:map(fun(_) ->
-                        tv_server:fresh(FoldC#ctx.pid)
-                      end, lists:seq(1, Num)),
+            % Don't make anything rigid yet. We still need to unify with a gen
+            % that has a concrete base type. Rigidity will come naturally
+            % during generalization.
+            {FlexSigT, NormSubs} = norm_sig_type(RawNoIs, true, FoldC#ctx.pid),
 
-                      case ParamT of
-                        {tv, V, _, _} -> FoldSubs#{V => {tuple, ElemTs}};
-                        _ -> FoldSubs
-                      end
-                    end, #{}, gen_vs_list(RawFieldT));
-
-                  true -> #{}
-                end,
-                {TupleSubs_, Num};
-
-              _ -> {#{}, IfaceNumParams}
+            NewTV = case maps:find("T", NormSubs) of
+              {ok, NewV} -> {tv, NewV, none, false};
+              % Could happen if the interface FieldT is invalid and doesn't
+              % contain T.
+              error -> tv_server:fresh(FoldC#ctx.pid)
             end,
 
-            TupleSigT = utils:subs(RawFieldT, #sub_opts{subs=TupleSubs}),
-            FVs = ordsets:del_element("T", fvs(TupleSigT)),
-            RigidVs = ordsets:to_list(FVs),
+            {SigTV, ID} = tv_server:fresh_gnr_id(FoldC#ctx.pid),
+            FoldC1 = new_gnr(SigTV, ID, FoldC),
+            FoldC2 = add_cst(SigTV, FlexSigT, ImplLoc, ?FROM_IMPL_TYPE, FoldC1),
 
-            NormT = norm_sig_type(TupleSigT, RigidVs, FVs, FoldC#ctx.pid),
-            NewV = tv_server:next_name(FoldC#ctx.pid),
-            NewTV = {tv, NewV, none, false},
-            % type sigs don't need consolidation, so don't pass aliases
-            SigT = utils:subs(NormT, #sub_opts{subs=#{"T" => NewTV}}),
+            FoldC3 = case IfaceNumParams of
+              0 -> add_cst(NewTV, ImplT, ImplLoc, ?FROM_IMPL_TYPE, FoldC2);
+
+              _ ->
+                CaseC = add_gen_vs(FlexSigT, FoldC2),
+                GenV = tv_server:next_name(CaseC#ctx.pid),
+
+                GenTVParamTs = lists:map(fun(_) ->
+                  tv_server:fresh(CaseC#ctx.pid)
+                end, lists:seq(1, IfaceNumParams)),
+                GenTV = {gen, GenV, none, NewTV, GenTVParamTs},
+
+                Types = CaseC#ctx.types,
+                {con, ImplCon} = ImplT,
+                #type_binding{num_params=NumParams} = maps:get(ImplCon, Types),
+
+                ParamTs = lists:map(
+                  fun(_) -> unit end,
+                  lists:seq(1, NumParams)
+                ),
+                GenT = {gen, ImplT, ParamTs},
+                add_cst(GenTV, GenT, ImplLoc, ?FROM_IMPL_TYPE, CaseC)
+            end,
+
+            FoldC4 = finish_gnr(FoldC3, FoldC#ctx.gnr),
 
             % All IVs within ImplT will be in the environment during code gen.
             % To make sure they're treated as bound variables, whose impls
             % shouldn't be passed to the Expr here, we add ImplT in the env
             % under some fake variable name.
-            FoldC1 = new_gnr(l_env_add("_@Impl", #binding{tv=ImplT}, FoldC)),
+            FoldC5 = new_gnr(l_env_add("_@Impl", #binding{tv=ImplT}, FoldC4)),
 
-            FoldC2 = case IfaceNumParams of
-              0 -> add_cst(NewTV, ImplT, ImplLoc, ?FROM_IMPL_TYPE, FoldC1);
+            % Must add SigTV gnr as a dependency so it's solved first.
+            FoldC6 = FoldC5#ctx{gnr=add_gnr_dep(ID, FoldC5#ctx.gnr)},
+            {ExprT, FoldC7} = infer(Expr, FoldC6),
 
-              _ ->
-                CaseC = add_gen_vs(SigT, FoldC1),
-                GenV = tv_server:next_name(CaseC#ctx.pid),
-
-                GenTVParamTs = lists:map(fun(_) ->
-                  {tv, tv_server:next_name(CaseC#ctx.pid), none, false}
-                end, lists:seq(1, IfaceNumParams)),
-                GenTV = {gen, GenV, none, NewTV, GenTVParamTs},
-
-                ParamTs = lists:map(fun(_) -> unit end, lists:seq(1, NumParams)),
-                GenT = {gen, ImplT, ParamTs},
-                add_cst(GenTV, GenT, ImplLoc, ?FROM_IMPL_TYPE, CaseC)
-            end,
-
-            {ExprT, FoldC3} = infer(Expr, FoldC2),
-
-            TV = tv_server:fresh(FoldC3#ctx.pid),
+            TV = tv_server:fresh(FoldC7#ctx.pid),
             % From doesn't really matter; this cst is always inferred first, so
             % it'll never fail.
             ExprCst = make_cst(
@@ -1993,20 +2004,21 @@ infer_impl_inits(
               ExprT,
               ?LOC(Expr),
               ?FROM_GLOBAL_DEF(Name),
-              FoldC3
+              FoldC7
             ),
             SigCst = make_cst(
               TV,
-              SigT,
+              SigTV,
               VarLoc,
               ?FROM_IFACE_SIG(IfaceCon),
-              FoldC3
+              FoldC7
             ),
 
             % Infer ExprCst first, as inference is in reverse order.
-            FoldC4 = append_csts([SigCst, ExprCst], FoldC3),
-            FoldC5 = finish_gnr(FoldC4, FoldC#ctx.gnr),
-            FoldC5#ctx{l_env=FoldC#ctx.l_env}
+            FoldC8 = append_csts([SigCst, ExprCst], FoldC7),
+            % Must add the SigTV gnr as a dependency so it gets solved first.
+            FoldC9 = finish_gnr(FoldC8, FoldC4#ctx.gnr),
+            FoldC9#ctx{l_env=FoldC4#ctx.l_env}
         end,
 
         {NewNames, NewC}
@@ -2072,22 +2084,34 @@ no_ctx_errs(C1, C2) -> length(C1#ctx.errs) == length(C2#ctx.errs).
 add_alias(Con, Vs, T, IsStruct, C) ->
   C#ctx{aliases=(C#ctx.aliases)#{Con => {Vs, T, IsStruct}}}.
 
-norm_sig_type(SigT, RigidVs, Pid) ->
-  norm_sig_type(SigT, RigidVs, fvs(SigT), Pid).
+norm_sig_type(SigT, Inst, Pid) ->
+  TVsList = utils:tvs_list(SigT),
 
-norm_sig_type(SigT, RigidVs, FVs, Pid) ->
-  RigidVsSet = ordsets:from_list(RigidVs),
+  Subs = lists:foldl(fun(T, FoldSubs) ->
+    NewV = tv_server:next_name(Pid),
 
-  % TODO: is it more intuitive to change each fv to *fv and then replace?
-  Subs = ordsets:fold(fun(V, FoldSubs) ->
-    case ordsets:is_element(V, RigidVsSet) of
-      true -> FoldSubs#{V => {rigid, tv_server:next_name(Pid)}};
-      false -> FoldSubs#{V => tv_server:next_name(Pid)}
+    MakeRigid = case T of
+      {tv, V, _, true} -> not Inst;
+
+      % Non-rigid TVs in a signature are caused by errors in infer_sig(), and
+      % should not be made rigid.
+      {tv, V, _, false} -> false;
+
+      % Gen TVs are newly generated during each call to infer_sig(), but we
+      % still need to normalize them because the same signature may be passed
+      % through norm_sig_type() multiple times, and we must ensure each time
+      % produces a new, independent type.
+      {gen, V, _, _, _} -> not Inst
+    end,
+
+    case MakeRigid of
+      true -> FoldSubs#{V => {rigid, NewV}};
+      false -> FoldSubs#{V => NewV}
     end
-  end, #{}, FVs),
+  end, #{}, TVsList),
 
   % type sigs don't need consolidation, so don't pass aliases
-  utils:subs(SigT, #sub_opts{subs=Subs}).
+  {utils:subs(SigT, #sub_opts{subs=Subs, shallow=true}), Subs}.
 
 solve(Gs, S) ->
   Map = lists:foldl(fun(G, FoldMap) -> FoldMap#{G#gnr.id => G} end, #{}, Gs),
@@ -2171,29 +2195,13 @@ solve(Gs, S) ->
     [] -> {ok, FinalS};
 
     Errs ->
-      Aliases = FinalS#solver.aliases,
-      SubbedErrs = lists:map(fun
-        ({T1, T2, Module, Loc, From}) ->
-          SubbedT1 = subs_s(T1, FinalS, #sub_opts{for_err=true}),
-          SubbedT2 = subs_s(T2, FinalS, #sub_opts{for_err=true}),
-
-          IsRecord1 = is_tuple(SubbedT1) andalso (
-            element(1, SubbedT1) == record orelse
-            element(1, SubbedT1) == record_ext
-          ),
-          IsRecord2 = is_tuple(SubbedT2) andalso (
-            element(1, SubbedT2) == record orelse
-            element(1, SubbedT2) == record_ext
-          ),
-
-          {FinalT1, FinalT2} = case {IsRecord1, IsRecord2} of
-            {true, false} -> {SubbedT1, utils:unalias(SubbedT2, Aliases)};
-            {false, true} -> {utils:unalias(SubbedT1, Aliases), SubbedT2};
-            _ -> {SubbedT1, SubbedT2}
-          end,
-          {FinalT1, FinalT2, Module, Loc, From};
-
-        ({_, _, _}=Err) -> Err
+      SubbedErrs = lists:map(fun({Msg, Module, Loc}) ->
+        NewMsg = lists:map(fun
+          (ErrT) when is_tuple(ErrT) orelse ErrT == unit ->
+            subs_s(ErrT, FinalS, #sub_opts{for_err=true});
+          (Part) -> Part
+        end, Msg),
+        {NewMsg, Module, Loc}
       end, Errs),
 
       {errors, SubbedErrs}
@@ -2231,11 +2239,9 @@ validate_solved(
         _ -> GenTV
       end,
 
-      PrettyMustSolveT = utils:pretty(MustSolveT),
-      PrettySubbedT = utils:pretty(SubbedT),
       Msg = if
-        IsArg -> ?ERR_MUST_SOLVE_ARG(PrettyMustSolveT, PrettySubbedT);
-        true -> ?ERR_MUST_SOLVE_RETURN(PrettyMustSolveT, PrettySubbedT)
+        IsArg -> ?ERR_MUST_SOLVE_ARG(SubbedT, MustSolveT);
+        true -> ?ERR_MUST_SOLVE_RETURN(SubbedT, MustSolveT)
       end,
 
       NewErrs = [{Msg, Module, Loc} | S#solver.errs],
@@ -2313,12 +2319,32 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
         lists:foldl(fun(SolV, NestedS) ->
           SolTV = {tv, SolV, none, false},
           T = subs_s(SolTV, NestedS),
-          GVs = ordsets:subtract(fvs(T), BoundVs),
 
-          #solver{schemes=Schemes} = NestedS,
-          Scheme = {GVs, T, ordsets:subtract(fvs(T), GVs)},
+          GVs = ordsets:subtract(fvs(T), BoundVs),
+          NestedS1 = lists:foldl(fun
+            ({tv, V, _, false}, DeepS) ->
+              case ordsets:is_element(V, GVs) of
+                true ->
+                  case maps:find(V, DeepS#solver.subs) of
+                    {ok, {set_ifaces, Is}} ->
+                      add_sub(V, {set_ifaces_rigid, Is}, DeepS);
+                    error -> add_sub(V, {rigid, V}, DeepS);
+
+                    % Either of these occur if we loop over the same V twice.
+                    {ok, {rigid, V}} -> DeepS;
+                    {ok, {set_ifaces_rigid, _}} -> DeepS
+                  end;
+
+                false -> DeepS
+              end;
+
+            (_, DeepS) -> DeepS
+          end, NestedS, utils:tvs_list(T)),
+
+          #solver{schemes=Schemes} = NestedS1,
+          Scheme = {GVs, subs_s(T, NestedS1), ordsets:subtract(fvs(T), GVs)},
           Schemes1 = Schemes#{SolV => Scheme},
-          NestedS#solver{schemes=Schemes1}
+          NestedS1#solver{schemes=Schemes1}
         end, FoldS, SolG#gnr.vs)
       end, S3, SolvableIDs),
 
@@ -2440,6 +2466,7 @@ resolve({record_ext, A, BaseT, Ext}, S) ->
     {{Name, ResT}, FoldS1}
   end, S1, Pairs),
   {{record_ext, A, ResBaseT, maps:from_list(ResPairs)}, S2};
+resolve({hole, Report}, S) -> {{hole, Report}, S};
 resolve(unit, S) -> {unit, S}.
 
 inst(GVs, T, Pid) ->
@@ -2451,12 +2478,14 @@ inst(GVs, T, Pid) ->
 
 unify(T1, T2, S) when T1 == T2 -> S;
 
+% TODO: test and make {hole, true} work?
+unify({hole, false}, _, S) -> S;
+unify({hole, true}, T, S) -> add_err(?ERR_HOLE(T), S);
+unify(T1, {hole, _}=T2, S) -> sub_unify(T2, T1, S);
+
 unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   S1 = sub_unify(ArgT1, ArgT2, S),
-  case no_errs(S1, S) of
-    true -> sub_unify(ReturnT1, ReturnT2, S1);
-    false -> S1
-  end;
+  sub_unify(ReturnT1, ReturnT2, S1);
 unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   #solver{
     module=Module,
@@ -2630,22 +2659,29 @@ unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
 
   if
     Occurs -> add_err(S);
+    Rigid1, Rigid2 -> add_rigid_err(?ERR_RIGID_RIGID(TV1, TV2), S);
 
-    not Rigid1, not Bound1, Rigid2 ->
-      IsSubset = merge_is(Is1, Is2, Ifaces) == Is2,
+    Rigid1 ->
       if
-        IsSubset -> add_sub(V1, TV2, S);
-        true -> add_err(S)
+        Bound2 -> add_rigid_err(?ERR_RIGID_BOUND(TV1, TV2), S);
+        true ->
+          case merge_is(Is1, Is2, Ifaces) == Is1 of
+            true -> add_sub(V2, TV1, S);
+            false -> add_rigid_err(?ERR_RIGID_TV(TV1, TV2), S)
+          end
       end;
 
-    not Rigid2, not Bound2, Rigid1 ->
-      IsSubset = merge_is(Is1, Is2, Ifaces) == Is1,
+    Rigid2 ->
       if
-        IsSubset -> add_sub(V2, TV1, S);
-        true -> add_err(S)
+        Bound1 -> add_rigid_err(?ERR_RIGID_BOUND(TV2, TV1), S);
+        true ->
+          case merge_is(Is1, Is2, Ifaces) == Is2 of
+            true -> add_sub(V1, TV2, S);
+            false -> add_rigid_err(?ERR_RIGID_TV(TV2, TV1), S)
+          end
       end;
 
-    not Rigid1, not Rigid2 ->
+    true ->
       GenVs = S#solver.gen_vs,
       NewGenVs = case {maps:find(V1, GenVs), maps:find(V2, GenVs)} of
         {error, error} -> GenVs;
@@ -2664,19 +2700,24 @@ unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
           MergedSub = {set_ifaces, merge_is(Is1, Is2, Ifaces)},
           CaseS1 = add_sub(V1, MergedSub, add_sub(V2, TV1, CaseS)),
           merge_iv_origins(Is2, V2, V1, CaseS1)
-      end;
-
-    true -> add_err(S)
+      end
   end;
 
-unify({tv, V, Is, Rigid}, T, #solver{bound_vs=BoundVs}=S) ->
+unify({tv, V, Is, Rigid}=TV, T, #solver{bound_vs=BoundVs}=S) ->
   Occurs = occurs(V, T),
   Bound = ordsets:is_element(V, BoundVs),
   WouldEscape = Bound and occurs(true, T),
 
   S1 = if
-    Rigid -> add_err(S);
-    Occurs or WouldEscape -> add_err(S);
+    Rigid -> add_rigid_err(?ERR_RIGID_CON(TV), S);
+    Occurs -> add_err(S);
+
+    WouldEscape ->
+      [RigidTV | _] = lists:filter(fun
+        ({tv, _, _, true}) -> true;
+        (_) -> false
+      end, utils:tvs_list(T)),
+      add_rigid_err(?ERR_RIGID_BOUND(RigidTV, TV), S);
 
     true ->
       case {T, Is} of
@@ -2687,7 +2728,8 @@ unify({tv, V, Is, Rigid}, T, #solver{bound_vs=BoundVs}=S) ->
         {{gen, _, Is, _, _}, _} -> S;
 
         % different interfaces and GenTV is rigid, so fail
-        {{gen, _, _, {tv, _, _, true}, _}, _} -> add_err(S);
+        {{gen, _, _, {tv, _, _, true}, _}=GenTV, _} ->
+          add_rigid_err(?ERR_RIGID_TV(GenTV, TV), S);
 
         % different interfaces and GenTV isn't rigid
         {{gen, V1, Is1, _, _}, _} ->
@@ -2830,15 +2872,29 @@ unify(
   end;
 
 unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
-  case utils:unalias(T1, S#solver.aliases) of
+  #solver{t1=FullT1, t2=FullT2, aliases=Aliases} = S,
+  case utils:unalias(T1, Aliases) of
     T1 -> add_err(S);
     NewT1 ->
-      S1 = sub_unify(NewT1, T2, S),
+      % Show the unaliased FullT1/FullT2 for clarity. We *cannot* assume FullT1
+      % is T1 for the following reasons:
+      %
+      % (a) We may be sub-unifying a part of FullT1, so T1 will be a type
+      % contained within FullT1.
+      %
+      % (b) T1 could actually correspond to FullT2; we don't maintain ordering
+      % when calling sub_unify().
+      S1 = sub_unify(NewT1, T2, S#solver{
+        t1=utils:unalias(FullT1, Aliases),
+        t2=utils:unalias(FullT2, Aliases)
+      }),
+      NoErrs = no_errs(S1, S),
+      S2 = S1#solver{t1=FullT1, t2=FullT2},
+
       A = element(2, T2),
-      NoErrs = no_errs(S, S1),
       if
-        NoErrs andalso A /= none -> add_sub(A, T1, S1);
-        true -> S1
+        NoErrs andalso A /= none -> add_sub(A, T1, S2);
+        true -> S2
       end
   end;
 unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
@@ -2847,8 +2903,13 @@ unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
 unify(T1, T2, #solver{aliases=Aliases}=S) ->
   case {utils:unalias(T1, Aliases), utils:unalias(T2, Aliases)} of
     {T1, T2} -> add_err(S);
-    % at least one type was an alias
-    {NewT1, NewT2} -> sub_unify(NewT1, NewT2, S)
+
+    % At least one type was an alias:
+    {NewT1, NewT2} ->
+      % If we were to unalias S#solver.t1/t2 here, we would never show
+      % unification errors between a struct Foo and some other type, since
+      % Foo would always get unaliased. Hence, leave t1/t2 as is.
+      sub_unify(NewT1, NewT2, S)
   end.
 
 sub_unify(T1, T2, S) -> unify(subs_s(T1, S), subs_s(T2, S), S).
@@ -2959,9 +3020,43 @@ add_sub_anchor(A1, A2, S) when A1 == none; A2 == none; A1 == A2 -> S;
 add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
 
 add_err(S) ->
-  #solver{t1=T1, t2=T2, module=Module, loc=Loc, from=From} = S,
-  Err = {T1, T2, Module, Loc, From},
-  S#solver{errs=[Err | S#solver.errs]}.
+  #solver{t1=T1, t2=T2, from=From} = S,
+  Msg = case {T1, T2} of
+    {{lam, _, _, _, _}, {lam, _, _}} ->
+      ?ERR_ARITY(given_arity(T1), max_arity(T2));
+    {{lam, _, _}, {lam, _, _, _, _}} ->
+      ?ERR_ARITY(given_arity(T2), max_arity(T1));
+    _ -> ?ERR_TYPE_MISMATCH(T1, T2, From)
+  end,
+  add_err(Msg, S).
+
+given_arity(T) -> given_arity(T, 0).
+given_arity({lam, _, _, _, ReturnT}, Arity) -> given_arity(ReturnT, Arity + 1);
+given_arity(_, Arity) -> Arity.
+
+max_arity(T) -> max_arity(T, 0).
+max_arity({lam, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
+max_arity({lam, _, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
+max_arity(_, Arity) -> Arity.
+
+add_err(Msg, #solver{module=Module, loc=Loc, errs=Errs}=S) ->
+  S#solver{errs=[{Msg, Module, Loc} | S#solver.errs]}.
+  % TODO: use this de-duping
+  %% case Errs of
+  %%   % De-duplicate mismatched types errors.
+  %%   [{OtherMsg, Module, Loc}] when hd(Msg) == hd(OtherMsg),
+  %%       hd(Msg) == ?MISMATCHED_TYPES_PREFIX ->
+  %%     S;
+
+  %%   _ -> S#solver{errs=[{Msg, Module, Loc} | Errs]}
+  %% end.
+
+add_rigid_err(Err, S) ->
+  #solver{t1=T1, t2=T2, from=From} = S,
+  add_err(rigid_err(T1, T2, From, Err), S).
+
+rigid_err(T1, T2, From, Err) ->
+  ?ERR_TYPE_MISMATCH(T1, T2, From) ++ [$., $\s | Err].
 
 add_err_v(V, #solver{err_vs=ErrVs}=S) ->
   S#solver{err_vs=ordsets:add_element(V, ErrVs)}.
@@ -3001,7 +3096,7 @@ instance(T, I, V, S) ->
   Key = utils:impl_key(T),
   case maps:find(Key, maps:get(I, S#solver.impls)) of
     {ok, {RawT, _, _, _}} ->
-      NormT = norm_sig_type(RawT, [], S#solver.pid),
+      {NormT, _} = norm_sig_type(RawT, true, S#solver.pid),
       IVs = utils:ivs(NormT),
 
       S1 = case IVs of
@@ -3080,26 +3175,19 @@ bound_vs(LEnv, #solver{schemes=Schemes}=S) ->
       end
   end, ordsets:new(), LEnv).
 
-fvs(T) -> ordsets:from_list(fvs_list(T, [])).
+fvs(T) ->
+  FVsList = lists:filtermap(fun
+    ({tv, V, _, _}) -> {true, V};
+    ({gen, V, _, _, _}) ->
+      % V only exists to track ifaces associated with this gen TV; it isn't a
+      % regular type variable. That being said, it still must be included in FVs.
+      % We assume FVs is a superset of IVs, and often use FVs to determine IVs;
+      % V is an IV, and hence it must be incldued in FVs.
+      {true, V};
+    (_) -> false
+  end, utils:tvs_list(T)),
 
-fvs_list({lam, ArgT, ReturnT}, L) -> fvs_list(ReturnT, fvs_list(ArgT, L));
-fvs_list({lam, _, _, ArgT, ReturnT}, L) -> fvs_list({lam, ArgT, ReturnT}, L);
-fvs_list({tuple, ElemTs}, L) -> lists:foldl(fun fvs_list/2, L, ElemTs);
-fvs_list({tv, V, _, _}, L) -> [V | L];
-fvs_list({con, _}, L) -> L;
-fvs_list({gen, _, ParamTs}, L) -> lists:foldl(fun fvs_list/2, L, ParamTs);
-fvs_list({gen, V, _, BaseT, ParamTs}, L) ->
-  % V only exists to track ifaces associated with this gen TV; it isn't a
-  % regular type variable. That being said, it still must be included in FVs.
-  % We assume FVs is a superset of IVs, and often use FVs to determine IVs;
-  % V is an IV, and hence it must be incldued in FVs.
-  fvs_list(BaseT, fvs_list({gen, {con, ""}, ParamTs}, [V | L]));
-% fvs_list({inst, ...}) ommitted; they should be resolved
-fvs_list({record, _, FieldMap}, L) ->
-  lists:foldl(fun fvs_list/2, L, maps:values(FieldMap));
-fvs_list({record_ext, _, BaseT, Ext}, L) ->
-  fvs_list(BaseT, fvs_list({record, none, Ext}, L));
-fvs_list(unit, L) -> L.
+  ordsets:from_list(FVsList).
 
 add_gen_vs(InstT, Record) ->
   GenVsList = gen_vs_list(InstT),
@@ -3120,45 +3208,17 @@ add_gen_vs(InstT, Record) ->
     solver -> Record#solver{gen_vs=NewGenVs}
   end.
 
-gen_vs_list({lam, ArgT, ReturnT}) -> gen_vs_list(ArgT) ++ gen_vs_list(ReturnT);
-gen_vs_list({lam, _, _, ArgT, ReturnT}) -> gen_vs_list({lam, ArgT, ReturnT});
-gen_vs_list({tuple, ElemTs}) -> lists:flatmap(fun gen_vs_list/1, ElemTs);
-gen_vs_list({tv, _, _, _}) -> [];
-gen_vs_list({con, _}) -> [];
-gen_vs_list({gen, _, ParamTs}) -> lists:flatmap(fun gen_vs_list/1, ParamTs);
-gen_vs_list({gen, _, _, {tv, V, _, _}, ParamTs}=GenTV) ->
-  [{V, GenTV} | gen_vs_list({gen, {con, ""}, ParamTs})];
-% concrete base type means that there was an error somewhere
-gen_vs_list({gen, _, _, _, _}) -> [];
-% gen_vs_list({inst, ...}) ommitted; they should be resolved
-gen_vs_list({record, _, FieldMap}) ->
-  lists:flatmap(fun(Key) ->
-    gen_vs_list(maps:get(Key, FieldMap))
-  end, maps:keys(FieldMap));
-gen_vs_list({record_ext, _, BaseT, Ext}) ->
-  gen_vs_list(BaseT) ++ gen_vs_list({record, none, Ext});
-gen_vs_list(unit) -> [].
+gen_vs_list(T) ->
+  lists:filtermap(fun
+    ({gen, _, _, {tv, V, _, _}, _}=GenTV) -> {true, {V, GenTV}};
+    (_) -> false
+  end, utils:tvs_list(T)).
 
-occurs(V, {lam, ArgT, ReturnT}) ->
-  occurs(V, ArgT) orelse occurs(V, ReturnT);
-occurs(V, {lam, _, _, ArgT, ReturnT}) -> occurs(V, {lam, ArgT, ReturnT});
-occurs(V, {tuple, ElemTs}) ->
-  lists:foldl(fun(T, Occurs) ->
-    Occurs orelse occurs(V, T)
-  end, false, ElemTs);
-occurs(V, {tv, V1, _, Rigid}) -> (V == Rigid) orelse (V == V1);
-occurs(_, {con, _}) -> false;
-occurs(V, {gen, _, ParamTs}) ->
-  lists:foldl(fun(T, Occurs) ->
-    Occurs orelse occurs(V, T)
-  end, false, ParamTs);
-occurs(V, {gen, V1, _, BaseT, ParamTs}) ->
-  (V == V1) orelse occurs(V, BaseT) orelse occurs(V, {gen, {con, ""}, ParamTs});
-% occurs({inst, ...}) ommitted; they should be resolved
-occurs(V, {record, _, FieldMap}) ->
-  maps:fold(fun(_, T, Occurs) ->
-    Occurs or occurs(V, T)
-  end, false, FieldMap);
-occurs(V, {record_ext, _, BaseT, Ext}) ->
-  occurs(V, BaseT) orelse occurs(V, {record, none, Ext});
-occurs(_, unit) -> false.
+occurs(V, T) ->
+  lists:any(fun
+    ({tv, V1, _, _}) when V == V1 -> true;
+    % occurs(true, T) means look for *any* rigid TV
+    ({tv, _, _, Rigid}) when V == Rigid -> true;
+    ({gen, V1, _, _, _}) when V == V1 -> true;
+    (_) -> false
+  end, utils:tvs_list(T)).

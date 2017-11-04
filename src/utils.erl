@@ -10,6 +10,7 @@
   ivs/2,
   builtin_is/0,
   all_ivs/1,
+  tvs_list/1,
   args_ivs/1,
   args_ivs/2,
   family_is/2,
@@ -47,20 +48,8 @@ unqualify(Con) ->
     Index -> lists:sublist(Con, Index + 1, length(Con))
   end.
 
-unalias({con, Con}, Aliases) ->
-  case maps:find(Con, Aliases) of
-    {ok, {[], T, _}} -> unalias(T, Aliases);
-    error -> {con, Con}
-  end;
-unalias({gen, {con, Con}, ParamTs}, Aliases) ->
-  case maps:find(Con, Aliases) of
-    {ok, {Vs, T, _}} ->
-      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
-      unalias(subs(T, #sub_opts{subs=Subs, aliases=Aliases}), Aliases);
-    % no need to unalias ParamTs because we'll sub_unify them
-    error -> {gen, {con, Con}, ParamTs}
-  end;
-unalias(T, _) -> T.
+unalias(T, Aliases) ->
+  subs(T, #sub_opts{subs=#{}, aliases=Aliases, unalias=true}).
 
 subs({lam, ArgT, ReturnT}, Opts) ->
   {lam, subs(ArgT, Opts), subs(ReturnT, Opts)};
@@ -68,14 +57,12 @@ subs({lam, LEnv, Loc, ArgT, ReturnT}, Opts) ->
   {lam, LEnv, Loc, subs(ArgT, Opts), subs(ReturnT, Opts)};
 subs({tuple, ElemTs}, Opts) ->
   {tuple, lists:map(fun(T) -> subs(T, Opts) end, ElemTs)};
-subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs}=Opts) ->
+subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs, shallow=Shallow}=Opts) ->
   case maps:find(V, Subs) of
     error -> TV;
     {ok, {rigid, V1}} -> {tv, V1, Is, true};
-
-    {ok, {set_ifaces, NewIs}} ->
-      false = Rigid,
-      {tv, V, NewIs, Rigid};
+    {ok, {set_ifaces, NewIs}} -> {tv, V, NewIs, Rigid};
+    {ok, {set_ifaces_rigid, NewIs}} -> {tv, V, NewIs, true};
 
     {ok, Value} ->
       Sub = if
@@ -84,11 +71,37 @@ subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs}=Opts) ->
         % Replacing with a new type entirely
         true -> Value
       end,
-      subs(Sub, Opts)
+      if
+        Shallow -> Sub;
+        true -> subs(Sub, Opts)
+      end
+  end;
+subs({con, Con}, #sub_opts{aliases=Aliases, unalias=true}=Opts) ->
+  case maps:find(Con, Aliases) of
+    {ok, {[], T, _}} ->
+      % Don't recursively unalias, as this can cause an infinite loop with
+      % recursive struct types.
+      subs(T, Opts#sub_opts{unalias=false});
+    error -> {con, Con}
   end;
 subs({con, Con}, _) -> {con, Con};
-subs({gen, ConT, ParamTs}, Opts) ->
-  {gen, subs(ConT, Opts), lists:map(fun(T) -> subs(T, Opts) end, ParamTs)};
+subs({gen, {con, Con}, ParamTs}, Opts) ->
+  #sub_opts{aliases=Aliases, unalias=Unalias} = Opts,
+  Alias = maps:find(Con, Aliases),
+
+  if
+    not Unalias; Alias == error ->
+      {gen, {con, Con}, lists:map(fun(T) -> subs(T, Opts) end, ParamTs)};
+
+    true ->
+      {ok, {Vs, T, _}} = Alias,
+      AliasSubs = maps:from_list(lists:zip(Vs, ParamTs)),
+
+      % Don't recursively unalias, as this can cause an infinite loop with
+      % recursive struct types.
+      UnaliasedT = subs(T, #sub_opts{subs=AliasSubs}),
+      subs(UnaliasedT, Opts#sub_opts{unalias=false})
+  end;
 subs({gen, V, Is, BaseT, ParamTs}, #sub_opts{for_err=ForErr}=Opts) ->
   case subs({tv, V, Is, false}, Opts) of
     {tv, NewV, NewIs, _} ->
@@ -103,7 +116,7 @@ subs({gen, V, Is, BaseT, ParamTs}, #sub_opts{for_err=ForErr}=Opts) ->
       {gen, _, SubbedParamTs} = subs({gen, {con, ""}, ParamTs}, Opts),
       {gen, NewV, NewIs, SubbedBaseT, SubbedParamTs};
 
-    SubbedT -> subs(SubbedT, Opts)
+    SubbedT -> SubbedT
   end;
 subs({record, A, FieldMap}, #sub_opts{subs=Subs}=Opts) ->
   case maps:find(A, Subs) of
@@ -120,6 +133,7 @@ subs({record_ext, A, BaseT, Ext}, #sub_opts{subs=Subs, aliases=Aliases}=Opts) ->
       subs({record_ext, NewA, BaseT, Ext}, Opts);
     {ok, T} -> subs(T, Opts)
   end;
+subs({hole, Report}, _) -> {hole, Report};
 subs(unit, _) -> unit.
 
 consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Aliases) ->
@@ -169,28 +183,33 @@ all_ivs(T) ->
   end, {[], ordsets:new()}, ivs_list(T)),
   IVs.
 
-ivs_list({lam, ArgT, ReturnT}) -> ivs_list(ArgT) ++ ivs_list(ReturnT);
-ivs_list({lam, _, _, ArgT, ReturnT}) -> ivs_list({lam, ArgT, ReturnT});
-ivs_list({tuple, ElemTs}) -> lists:flatmap(fun ivs_list/1, ElemTs);
-ivs_list({tv, _, none, _}) -> [];
-ivs_list({tv, V, Is, _}) -> [{Is, V}];
-ivs_list({con, _}) -> [];
-ivs_list({gen, _, ParamTs}) -> lists:flatmap(fun ivs_list/1, ParamTs);
-ivs_list({gen, V, Is, BaseT, ParamTs}) ->
-  BaseIVs = case Is of
-    none -> ivs_list(BaseT);
-    _ -> [{Is, V} | ivs_list(BaseT)]
-  end,
-  BaseIVs ++ ivs_list({gen, {con, ""}, ParamTs});
-% ivs_list({inst, ...}) ommitted; they should be resolved
-ivs_list({record, _, FieldMap}) ->
-  SortedKeys = lists:sort(maps:keys(FieldMap)),
-  lists:flatmap(fun(Key) ->
-    ivs_list(maps:get(Key, FieldMap))
-  end, SortedKeys);
-ivs_list({record_ext, _, BaseT, Ext}) ->
-  ivs_list(BaseT) ++ ivs_list({record, none, Ext});
-ivs_list(unit) -> [].
+ivs_list(T) ->
+  lists:filtermap(fun
+    ({tv, V, Is, _}) when Is /= none -> {true, {Is, V}};
+    ({gen, V, Is, _, _}) when Is /= none -> {true, {Is, V}};
+    (_) -> false
+  end, tvs_list(T)).
+
+tvs_list(T) -> tvs_list(T, []).
+
+% The order in which we recurse is important, as we want the TVs to be listed
+% from left-to-right.
+tvs_list({lam, ArgT, ReturnT}, L) -> tvs_list(ArgT, tvs_list(ReturnT, L));
+tvs_list({lam, _, _, ArgT, ReturnT}, L) -> tvs_list({lam, ArgT, ReturnT}, L);
+tvs_list({tuple, ElemTs}, L) -> lists:foldr(fun tvs_list/2, L, ElemTs);
+tvs_list({tv, _, _, _}=TV, L) -> [TV | L];
+tvs_list({con, _}, L) -> L;
+tvs_list({gen, _, ParamTs}, L) -> lists:foldr(fun tvs_list/2, L, ParamTs);
+tvs_list({gen, _, _, BaseT, ParamTs}=GenTV, L) ->
+  % GenTVs are also included, as they're needed to compute ivs and fvs.
+  [GenTV | tvs_list(BaseT, tvs_list({gen, {con, ""}, ParamTs}, L))];
+% tvs_list({inst, ...}) ommitted; they should be resolved
+tvs_list({record, _, FieldMap}, L) ->
+  lists:foldr(fun tvs_list/2, L, maps:values(FieldMap));
+tvs_list({record_ext, _, BaseT, Ext}, L) ->
+  tvs_list(BaseT, tvs_list({record, none, Ext}, L));
+tvs_list({hole, _}, L) -> L;
+tvs_list(unit, L) -> L.
 
 args_ivs(T) -> args_ivs(T, ordsets:new()).
 
@@ -251,14 +270,14 @@ pretty({lam, _, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
 pretty({tuple, ElemTs}) ->
   PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
   ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);
-pretty({tv, RawV, Is, Rigid}) ->
+pretty({tv, RawV, Is, _}) ->
   % all generated Vs are prefixed with *, but user-inputted ones in signatures
   % lack the leading *
   V = case RawV of
     [$* | T] -> T;
     _ -> RawV
   end,
-  Str = if
+  if
     Is == none -> V;
     true ->
       % TODO: keep qualified when ambiguous
@@ -266,17 +285,17 @@ pretty({tv, RawV, Is, Rigid}) ->
         utils:unqualify(I)
       end, ordsets:to_list(Is)),
       ?FMT("~s ~~ ~s", [V, string:join(Unqualified, " ~ ")])
-  end,
-
-  case Rigid of
-    false -> Str;
-    true -> ?FMT("rigid(~s)", [Str])
   end;
 pretty({set_ifaces, Is}) ->
   Unqualified = lists:map(fun(I) ->
     utils:unqualify(I)
   end, ordsets:to_list(Is)),
-  ?FMT("set ifaces ~s", [string:join(Unqualified, " ~ ")]);
+  ?FMT("set_ifaces(~s)", [string:join(Unqualified, " ~ ")]);
+pretty({set_ifaces_rigid, Is}) ->
+  Unqualified = lists:map(fun(I) ->
+    utils:unqualify(I)
+  end, ordsets:to_list(Is)),
+  ?FMT("set_ifaces_rigid(~s)", [string:join(Unqualified, " ~ ")]);
 % TODO: keep qualified when ambiguous
 pretty({con, Con}) -> utils:unqualify(Con);
 pretty({gen, {con, "List"}, [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
@@ -308,10 +327,11 @@ pretty({gen, _, Is, BaseT, ParamTs}) ->
   ?FMT("~s<~s>~s", [PrettyBaseT, string:join(PrettyParamTs, ", "), PrettyIs]);
 pretty({inst, _, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
 pretty({inst, _, GVs, T}) ->
-  ?FMT("inst(~s, ~s)", [ordsets:to_list(GVs), pretty(T)]);
+  ?FMT("inst(~s, ~p)", [pretty(T), ordsets:to_list(GVs)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, BaseT, Ext}) ->
   ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
+pretty({hole, _}) -> "_";
 pretty(unit) -> "()".
 
 pretty_field_map(FieldMap) ->

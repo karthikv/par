@@ -1,5 +1,5 @@
 -module(reporter).
--export([format/1, extract_snippet/2]).
+-export([format/1, format/3, norm/3, extract_snippet/2]).
 
 -include("common.hrl").
 -define(LINE_WIDTH, 80).
@@ -80,39 +80,49 @@ format({errors, Errs, Comps}) ->
   SortedErrs = lists:sort(fun type_system_err_lte/2, Errs),
 
   {StrErrs, _} = lists:mapfoldl(fun(Err, LastModule) ->
-    {Module, Loc} = case Err of
-      {_, _, Module_, Loc_, _} -> {Module_, Loc_};
-      {_, Module_, Loc_} -> {Module_, Loc_}
-    end,
-    #comp{path=Path, prg_lines=PrgLines} = maps:get(Module, CompMap),
+    {Msg, Module, Loc} = Err,
+    #comp{path=Path}=Comp = maps:get(Module, CompMap),
 
     Prefix = if
       Module /= LastModule ->
         ?FMT("*** module ~s *** (~s)~n~n", [Module, Path]);
       true -> ""
     end,
-    Code = extract_code(Loc, PrgLines),
 
-    Str = case Err of
-      {{lam, _, _, _, _}=T1, {lam, _, _}=T2, _, _, From} ->
-        format_arity(T1, T2, From);
-      {{lam, _, _}=T1, {lam, _, _, _, _}=T2, _, _, From} ->
-        format_arity(T2, T1, From);
-
-      {T1, T2, _, _, From} ->
-        Msg = ?FMT(
-          "Mismatched types ~s and ~s from ~s",
-          [utils:pretty(T1), utils:pretty(T2), From]
-        ),
-        [wrap(Msg, ?LINE_WIDTH), $:, $\n];
-
-      {Msg, _, _} -> [wrap(Msg, ?LINE_WIDTH), $:, $\n]
-    end,
-
-    {[Prefix, Str, Code, $\n], Module}
+    Formatted = format(Msg, Loc, Comp),
+    {[Prefix, wrap(Formatted, ?LINE_WIDTH)], Module}
   end, none, SortedErrs),
 
   StrErrs.
+
+format(Msg, Loc, #comp{prg_lines=PrgLines}) ->
+  {ok, Pid} = tv_server:start_link(),
+  {Parts, _} = lists:mapfoldl(fun
+    (OtherLoc, Subs) when is_map(OtherLoc) ->
+      {[$:, $\n, $\n, extract_code(OtherLoc, PrgLines), $\n], Subs};
+
+    (T, Subs) when is_tuple(T) orelse T == unit ->
+      {NormT, NewSubs} = norm(T, Subs, Pid),
+      {utils:pretty(NormT), NewSubs};
+
+    (Arg, Subs) -> {Arg, Subs}
+  end, #{}, Msg),
+
+  ok = tv_server:stop(Pid),
+  IOList = [Parts, [$:, $\n, $\n, extract_code(Loc, PrgLines), $\n]],
+  lists:flatten(IOList).
+
+norm(T, Subs, Pid) ->
+  NewSubs = lists:foldl(fun
+    ({tv, V, _, _}, FoldSubs) ->
+      case maps:is_key(V, FoldSubs) of
+        true -> FoldSubs;
+        false -> FoldSubs#{V => tv_server:next_name(Pid)}
+      end;
+    (_, FoldSubs) -> FoldSubs
+  end, Subs, utils:tvs_list(T)),
+
+  {utils:subs(T, #sub_opts{subs=NewSubs, shallow=true}), NewSubs}.
 
 % pass strings through w/o modification
 reason_str(Str) when is_list(Str) -> Str;
@@ -124,8 +134,21 @@ reason_str(enomem) -> "not enough memory";
 reason_str(Err) -> ?FMT("unknown error: ~p", [Err]).
 
 wrap(Str, Width) ->
-  Words = re:split(Str, " ", [{return, list}]),
-  wrap(Words, Width, 0, []).
+  {ok, CodeRegex} = re:compile("^\\s*(\\d+:|\\^+)", [no_auto_capture]),
+  Lines = re:split(Str, "(\n)", [{return, list}]),
+
+  lists:map(fun(Line) ->
+    if
+      Line == "\n"; Line == [] -> Line;
+      true ->
+        case re:run(Line, CodeRegex) of
+          {match, _} -> Line;
+          nomatch ->
+            Words = re:split(Line, " ", [{return, list}]),
+            wrap(Words, Width, 0, [])
+        end
+    end
+  end, Lines).
 
 wrap([], _, _, Accum) -> lists:reverse(tl(Accum));
 wrap([Word | Words], Width, Length, Accum) ->
@@ -138,30 +161,6 @@ wrap([Word | Words], Width, Length, Accum) ->
     true ->
       wrap(Words, Width, Length + WordLength, [$\s, Word | Accum])
   end.
-
-format_arity(T1, T2, From) ->
-  GivenArity = given_arity(T1),
-  NeedArity = max_arity(T2),
-
-  true = GivenArity > NeedArity,
-  Plural = case NeedArity of
-    1 -> "";
-    _ -> "s"
-  end,
-
-  ?FMT(
-    "From ~s, given ~p arguments, but need at most ~p argument~s:~n",
-    [From, GivenArity, NeedArity, Plural]
-  ).
-
-given_arity(T) -> given_arity(T, 0).
-given_arity({lam, _, _, _, ReturnT}, Arity) -> given_arity(ReturnT, Arity + 1);
-given_arity(_, Arity) -> Arity.
-
-max_arity(T) -> max_arity(T, 0).
-max_arity({lam, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
-max_arity({lam, _, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
-max_arity(_, Arity) -> Arity.
 
 type_system_err_lte(Err1, Err2) ->
   {Module1, Loc1} = case Err1 of

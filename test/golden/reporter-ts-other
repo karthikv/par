@@ -1,6 +1,7 @@
 *** module Mod *** ([infer-prg])
 
 b is not defined:
+
 4: (a, true, b)
              ^
 

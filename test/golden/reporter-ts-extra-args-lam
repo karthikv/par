@@ -1,6 +1,7 @@
 *** module Mod *** ([infer-prg])
 
-From function call, given 2 arguments, but need at most 1 argument:
+You provided 2 argument(s), but this needs at most 1 argument(s):
+
 3: (|x| x)(true, @hi)
    ^^^^^^^^^^^^^^^^^^
 

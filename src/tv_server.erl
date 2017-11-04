@@ -13,7 +13,8 @@
   handle_cast/2,
   handle_info/2,
   terminate/2,
-  code_change/3
+  code_change/3,
+  gen_name/1
 ]).
 
 start_link() -> gen_server:start_link(?MODULE, {0, 0}, []).
@@ -26,6 +27,8 @@ stop(Pid) -> gen_server:stop(Pid).
 
 init({Count, NextID}) -> {ok, {Count, NextID}}.
 handle_call(next_name, _, {Count, NextID}) ->
+  % We prefix generated TVs with * to disambiguate them from user-inputted TVs
+  % in a type signature.
   {reply, [$* | lists:reverse(gen_name(Count))], {Count + 1, NextID}};
 handle_call(next_gnr_id, _, {Count, NextID}) ->
   {reply, NextID, {Count, NextID + 1}}.

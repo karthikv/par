@@ -1,6 +1,7 @@
 *** module Mod *** ([infer-prg])
 
-Mismatched types String -> J and String from right-hand side of '|>' operator:
+Mismatched types String -> A and String from right-hand side of '|>' operator:
+
 3: expr = "bye" |> f("hey", "hi")
                    ^^^^^^^^^^^^^^
 

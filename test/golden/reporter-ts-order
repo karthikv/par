@@ -1,10 +1,12 @@
 *** module Mod *** ([infer-prg])
 
-Mismatched types C ~ Num and Bool from expression type signature:
+Mismatched types A ~ Num and Bool from expression type signature:
+
 3: let a = 3 : Bool
            ^^^^^^^^
 
-Mismatched types L ~ Num and { I | field : H } from accessing field field:
+Mismatched types A ~ Num and { B | field : C } from accessing field field:
+
 4: a.field
    ^^^^^^^
 

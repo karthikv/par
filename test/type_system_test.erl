@@ -17,27 +17,28 @@ norm_prg(Prefix, Prg, Name) ->
   #binding{inst=T} = maps:get(Key, GEnv),
 
   {ok, Pid} = tv_server:start_link(),
-  {NormT, _} = norm(T, {#{}, Pid}),
+  {NormT, _} = reporter:norm(T, #{}, Pid),
   ok = tv_server:stop(Pid),
-  NormT.
+  utils:pretty(NormT).
 
-ok_prg(Prg, Name) -> utils:pretty(norm_prg(?PRG_PREFIX, Prg, Name)).
+ok_prg(Prg, Name) -> norm_prg(?PRG_PREFIX, Prg, Name).
 
 bad_prg(Prg, Err) -> bad_prg(?PRG_PREFIX, Prg, Err).
 
 bad_prg(Prefix, Prg, {T1, T2, Loc, From}) ->
   check_errors(infer_prefix(Prefix, Prg), [{T1, T2, "Mod", Loc, From}]);
 
+bad_prg(Prefix, Prg, {Msg, Loc}) ->
+  check_errors(infer_prefix(Prefix, Prg), [{Msg, "Mod", Loc}]);
+
 bad_prg(Prefix, Prg, ExpErrsNoModule) ->
-  ExpErrs = lists:map(fun({T1, T2, Loc, From}) ->
-    {T1, T2, "Mod", Loc, From}
+  ExpErrs = lists:map(fun
+    ({Msg, Loc}) -> {Msg, "Mod", Loc};
+    ({T1, T2, Loc, From}) -> {T1, T2, "Mod", Loc, From}
   end, ExpErrsNoModule),
   check_errors(infer_prefix(Prefix, Prg), ExpErrs).
 
-ctx_err_prg(Prg, {ExpMsg, ExpLoc}) ->
-  check_errors(infer_prefix(Prg), [{ExpMsg, "Mod", ExpLoc}]).
-
-ok_expr(Expr) -> utils:pretty(norm_prg(?EXPR_PREFIX, Expr, "expr")).
+ok_expr(Expr) -> norm_prg(?EXPR_PREFIX, Expr, "expr").
 
 bad_expr(Expr, Err) -> bad_prg(?EXPR_PREFIX, Expr, Err).
 
@@ -61,14 +62,11 @@ ok_many(PathPrgs, TargetPath, Name) ->
   #binding{inst=T} = maps:get({Module, Name}, GEnv),
 
   {ok, Pid} = tv_server:start_link(),
-  {NormT, _} = norm(T, {#{}, Pid}),
+  {NormT, _} = reporter:norm(T, #{}, Pid),
   ok = tv_server:stop(Pid),
   utils:pretty(NormT).
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
-  check_errors(infer_many(?MANY_DIR, PathPrgs, TargetPath), [ExpErr]).
-
-ctx_err_many(PathPrgs, TargetPath, ExpErr) ->
   check_errors(infer_many(?MANY_DIR, PathPrgs, TargetPath), [ExpErr]).
 
 check_ok(Result) -> check_ok(Result, standard_io).
@@ -78,11 +76,17 @@ check_ok(Errors, Device) ->
   io:format(Device, "~s", [reporter:format(Errors)]),
   ?assert(false).
 
-check_errors({errors, Errs, _}=Errors, ExpErrs) ->
+check_errors({errors, Errs, Comps}=Errors, ExpErrs) ->
+  CompMapPairs = lists:map(fun(#comp{module=Module}=Comp) ->
+    {Module, Comp}
+  end, Comps),
+  CompMap = maps:from_list(CompMapPairs),
+
   Matching = if
     length(Errs) == length(ExpErrs) ->
-      lists:all(fun({Err, ExpErr}) ->
-        are_errors_equal(Err, ExpErr)
+      lists:all(fun({{_, Module, _}=Err, ExpErr}) ->
+        Comp = maps:get(Module, CompMap),
+        are_errors_equal(Err, ExpErr, Comp)
       end, lists:zip(Errs, ExpErrs));
     true -> false
   end,
@@ -105,84 +109,38 @@ check_errors(Errors, _) ->
   ),
   ?assert(false).
 
-are_errors_equal({Msg, Mod, Loc}, {Msg, Mod, Loc}) -> true;
 are_errors_equal(
-  {T1, T2, Module, Loc, From},
-  {ExpT1, ExpT2, ExpModule, ExpLoc, ExpFrom}
+  {Msg, Module, Loc},
+  {T1Str, T2Str, Module, ExpLoc, ExpFrom},
+  Comp
 ) ->
-  {ok, Pid} = tv_server:start_link(),
-  {NormT1, N} = norm(T1, {#{}, Pid}),
-  {NormT2, _} = norm(T2, N),
-  ok = tv_server:stop(Pid),
+  Actual = reporter:format(Msg, Loc, Comp),
+  Err = ?ERR_TYPE_MISMATCH(T1Str, T2Str, ExpFrom),
+  Exp = reporter:format(Err, ExpLoc, Comp),
 
-  TsEqual = case {utils:pretty(NormT1), utils:pretty(NormT2)} of
-    {ExpT1, ExpT2} -> true;
-    {ExpT2, ExpT1} -> true;
-    _ ->
-      {ok, FlipPid} = tv_server:start_link(),
-      {FlipNormT2, FlipN} = norm(T2, {#{}, FlipPid}),
-      {FlipNormT1, _} = norm(T1, FlipN),
-      ok = tv_server:stop(FlipPid),
+  if
+    Actual == Exp -> true;
 
-      case {utils:pretty(FlipNormT1), utils:pretty(FlipNormT2)} of
-        {ExpT1, ExpT2} -> true;
-        {ExpT2, ExpT1} -> true;
-        _ -> false
-      end
-  end,
+    hd(Msg) == hd(Err) ->
+      [T1, T2 | _] = lists:filter(fun(Part) ->
+        is_tuple(Part) orelse Part == unit
+      end, Msg),
+      {FlipMsg, []} = lists:mapfoldl(fun
+        (Part, [H | T]) when is_tuple(Part) orelse Part == unit ->
+          {H, T};
+        (Part, Ts) -> {Part, Ts}
+      end, [T2, T1], Msg),
 
-  TsEqual andalso Module == ExpModule andalso Loc == ExpLoc andalso
-    From == ExpFrom;
-are_errors_equal(_, _) -> false.
+      Exp == reporter:format(FlipMsg, Loc, Comp);
 
-% We don't use type_system:fvs() and type_system:subs() to implement this
-% because it'll normalize variables in an arbitrary order (e.g. C -> D could
-% become B -> A instead of A -> B). By doing it ourselves, we always guarantee
-% a left-to-right normalization.
-norm({lam, ArgT, ReturnT}, N) ->
-  {NormArgT, N1} = norm(ArgT, N),
-  {NormReturnT, N2} = norm(ReturnT, N1),
-  {{lam, NormArgT, NormReturnT}, N2};
-norm({lam, Env, Loc, ArgT, ReturnT}, N) ->
-  {NormArgT, N1} = norm(ArgT, N),
-  {NormReturnT, N2} = norm(ReturnT, N1),
-  {{lam, Env, Loc, NormArgT, NormReturnT}, N2};
-norm({tuple, ElemTs}, N) ->
-  {NormElemTs, N1} = lists:mapfoldl(fun(T, FoldN) ->
-    norm(T, FoldN)
-  end, N, ElemTs),
-  {{tuple, NormElemTs}, N1};
-norm({tv, V, Is, Cat}, {Subs, Pid}) ->
-  {NewV, N1} = case maps:find(V, Subs) of
-    {ok, V1} -> {V1, {Subs, Pid}};
-    error ->
-      V1 = tv_server:next_name(Pid),
-      {V1, {Subs#{V => V1}, Pid}}
-  end,
-  {{tv, NewV, Is, Cat}, N1};
-norm({con, Con}, N) -> {{con, Con}, N};
-norm({gen, ConT, ParamTs}, N) ->
-  {NormConT, N1} = norm(ConT, N),
-  {NormParamTs, N2} = lists:mapfoldl(fun(T, FoldN) ->
-    norm(T, FoldN)
-  end, N1, ParamTs),
-  {{gen, NormConT, NormParamTs}, N2};
-norm({gen, V, Is, BaseT, ParamTs}, N) ->
-  % Don't need to norm V; it isn't displayed.
-  {NormBaseT, N1} = norm(BaseT, N),
-  {{gen, _, NormParamTs}, N2} = norm({gen, {con, ""}, ParamTs}, N1),
-  {{gen, V, Is, NormBaseT, NormParamTs}, N2};
-norm({record, A, FieldMap}, N) ->
-  {NewFieldMap, N1} = maps:fold(fun(Name, FieldT, {FoldMap, FoldN}) ->
-    {NormT, FoldN1} = norm(FieldT, FoldN),
-    {FoldMap#{Name => NormT}, FoldN1}
-  end, {#{}, N}, FieldMap),
-  {{record, A, NewFieldMap}, N1};
-norm({record_ext, A, BaseT, Ext}, N) ->
-  {NormBaseT, N1} = norm(BaseT, N),
-  {{record, _, NewExt}, N2} = norm({record, none, Ext}, N1),
-  {{record_ext, A, NormBaseT, NewExt}, N2};
-norm(unit, N) -> {unit, N}.
+    true -> false
+  end;
+are_errors_equal({Msg, Module, Loc}, {ExpMsg, Module, ExpLoc}, Comp) ->
+  reporter:format(Msg, Loc, Comp) == reporter:format(ExpMsg, ExpLoc, Comp);
+are_errors_equal(_, _, _) -> false.
+
+rigid_err(T1, T2, Loc, From, RigidErr) ->
+  {type_system:rigid_err(T1, T2, From, RigidErr), Loc}.
 
 l(Offset, Len) -> l(0, Offset, Len).
 l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
@@ -431,21 +389,45 @@ expr_test_() ->
   , ?_test("(A -> B) -> A -> B" = ok_expr("(|x| x) : (A -> B) -> A -> B"))
   , ?_test(bad_expr(
       "true : A",
-      {"Bool", "rigid(A)", l(0, 8), ?FROM_EXPR_SIG}
+      rigid_err("Bool", "A", l(0, 8), ?FROM_EXPR_SIG, ?ERR_RIGID_CON("A"))
     ))
-  , ?_test(bad_expr("3 : A", {"A ~ Num", "rigid(B)", l(0, 5), ?FROM_EXPR_SIG}))
+  , ?_test(bad_expr(
+      "3 : A",
+      rigid_err(
+        "A ~ Num",
+        "B",
+        l(0, 5),
+        ?FROM_EXPR_SIG,
+        ?ERR_RIGID_TV("B", "A ~ Num")
+      )
+    ))
   , ?_test(bad_expr(
       "5.0 : A ~ Num",
-      {"Float", "rigid(A ~ Num)", l(0, 13), ?FROM_EXPR_SIG}
+      rigid_err(
+        "Float",
+        "A ~ Num",
+        l(0, 13),
+        ?FROM_EXPR_SIG,
+        ?ERR_RIGID_CON("A ~ Num")
+      )
     ))
   , ?_test(bad_expr(
       "5.0 : Int",
       {"Float", "Int", l(0, 9), ?FROM_EXPR_SIG}
     ))
-  , ?_test(bad_expr("|x| x : B", {"A", "rigid(B)", l(4, 5), ?FROM_EXPR_SIG}))
+  , ?_test(bad_expr(
+      "|x| x : B",
+      rigid_err("A", "B", l(4, 5), ?FROM_EXPR_SIG, ?ERR_RIGID_BOUND("B", "A"))
+    ))
   , ?_test(bad_expr(
       "|x| x : B -> B",
-      {"A", "rigid(B) -> rigid(B)", l(4, 10), ?FROM_EXPR_SIG}
+      rigid_err(
+        "A",
+        "B -> B",
+        l(4, 10),
+        ?FROM_EXPR_SIG,
+        ?ERR_RIGID_BOUND("B", "A")
+      )
     ))
 
 
@@ -532,10 +514,7 @@ expr_test_() ->
       "|x| x + true",
       {"Bool", "A ~ Num", l(8, 4), ?FROM_OP_RHS('+')}
     ))
-  , ?_test(bad_expr(
-      "(|x| x)(1, 2)",
-      {"A ~ Num -> B ~ Num -> C", "A ~ Num -> A ~ Num", l(0, 13), ?FROM_APP}
-    ))
+  , ?_test(bad_expr("(|x| x)(1, 2)", {?ERR_ARITY(2, 1), l(0, 13)}))
 
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
@@ -582,6 +561,22 @@ expr_test_() ->
       "3 |> |x| [x] |> |x| x ++ [4] |> |x| 2 * x",
       {"[A ~ Num]", "B ~ Num", l(20, 8), ?FROM_OP_LHS('|>')}
     ))
+
+
+  % Ensure no duplicate errors for compound types w/ multiple mismatches.
+  %% , ?_test(bad_expr(
+  %%     "(3, 'a') == (true, @hey)",
+  %%     {"(A ~ Num, Char)", "(Bool, Atom)", l(12, 12), ?FROM_OP_RHS('==')}
+  %%   ))
+  %% , ?_test(bad_expr(
+  %%     "{ a = 3.7, b = \"hi\" } == { a = false, b = @hey }",
+  %%     {"{ a : Float, b : String }", "{ a : Bool, b : Atom }", l(25, 23),
+  %%      ?FROM_OP_RHS('==')}
+  %%   ))
+  %% , ?_test(bad_expr(
+  %%     "(|x| x && true) : Int -> Int",
+  %%     {"Bool -> Bool", "Int -> Int", l(0, 28), ?FROM_EXPR_SIG}
+  %%   ))
   ].
 
 para_poly_test_() ->
@@ -743,29 +738,58 @@ sig_test_() ->
   , ?_test(bad_prg(
       "id : A -> B\n"
       "id(x) = x",
-      {"rigid(A) -> rigid(B)", "rigid(A) -> rigid(A)", l(0, 11),
-       ?FROM_GLOBAL_SIG("id")}
+      rigid_err(
+        "A -> B",
+        "A -> A",
+        l(0, 11),
+        ?FROM_GLOBAL_SIG("id"),
+        ?ERR_RIGID_RIGID("B", "A")
+      )
     ))
   , ?_test(bad_prg(
       "inc(x) = x : B ~ Num + 1 : A ~ Num",
-      {"A ~ Num", "rigid(B ~ Num)", l(9, 11), ?FROM_EXPR_SIG}
+      rigid_err(
+        "A ~ Num",
+        "B ~ Num",
+        l(9, 11),
+        ?FROM_EXPR_SIG,
+        ?ERR_RIGID_BOUND("B ~ Num", "A ~ Num")
+      )
     ))
   , ?_test(bad_prg(
       "foo : Int -> Int\n"
       "foo(x) = x + 3\n"
       "bar : A ~ Num -> Int\n"
       "bar(x) = foo(x)",
-      {"Int", "rigid(A ~ Num)", l(3, 13, 1), ?FROM_APP}
+      rigid_err(
+        "A ~ Num",
+        "Int",
+        l(3, 13, 1),
+        ?FROM_APP,
+        ?ERR_RIGID_CON("A ~ Num")
+      )
     ))
   , ?_test(bad_prg(
       "push : [Float] -> [A ~ Num]\n"
       "push(x) = x ++ [1.0]",
-      {"[rigid(A ~ Num)]", "[Float]", l(1, 10, 10), ?FROM_OP_RESULT('++')}
+      rigid_err(
+        "[Float]",
+        "[A ~ Num]",
+        l(1, 10, 10),
+        ?FROM_OP_RESULT('++'),
+        ?ERR_RIGID_CON("A ~ Num")
+      )
     ))
   , ?_test(bad_prg(
       "empty : List<A> -> List<B> -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
-      {"[rigid(A)]", "[rigid(B)]", l(1, 22, 2), ?FROM_OP_RHS('++')}
+      rigid_err(
+        "[A]",
+        "[B]",
+        l(1, 22, 2),
+        ?FROM_OP_RHS('++'),
+        ?ERR_RIGID_RIGID("A", "B")
+      )
     ))
   , ?_test(bad_prg(
       "foo : { bar : String, baz : A ~ Num } -> String\n"
@@ -785,8 +809,13 @@ sig_test_() ->
   , ?_test(bad_prg(
       "foo : A -> Bool\n"
       "foo = (|a, b| a + b)(1)",
-      {"rigid(A) -> Bool", "B ~ Num -> B ~ Num", l(1, 6, 17),
-       ?FROM_APP}
+      rigid_err(
+        "A -> Bool",
+        "B ~ Num -> B ~ Num",
+        l(1, 6, 17),
+        ?FROM_APP,
+        ?ERR_RIGID_TV("A", "B ~ Num")
+      )
     ))
   ].
 
@@ -906,8 +935,8 @@ exception_test_() ->
       "expr = Bar(true)",
       "expr"
     ))
-  , ?_test(ctx_err_prg("exception Bar(A)", {?ERR_TV_SCOPE("A"), l(14, 1)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg("exception Bar(A)", {?ERR_TV_SCOPE("A"), l(14, 1)}))
+  , ?_test(bad_prg(
       "exception Bar(T<Int>)",
       {?ERR_TV_SCOPE("T"), l(14, 6)}
     ))
@@ -1017,7 +1046,7 @@ record_test_() ->
       {"Bool -> A ~ Num", "A ~ Num -> A ~ Num", l(2, 39), ?FROM_FIELD_DEF("abs")}
     ))
   % to ensure env is reset properly
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo =\n"
       "  let f =\n"
       "    let g = true\n"
@@ -1254,7 +1283,7 @@ record_test_() ->
     ))
   , ?_test(bad_prg(
       "f(x) = (x.bar(1) && true, x.bar(2, 3))",
-      {"A ~ Num -> Bool", "A ~ Num -> B ~ Num -> C", l(26, 11), ?FROM_APP}
+      {?ERR_ARITY(2, 1), l(26, 11)}
     ))
   , ?_test(bad_prg(
       "f(x) = (x.bar(2, 3), x.bar(1) && true)",
@@ -1265,7 +1294,7 @@ record_test_() ->
       "  let y = x.bar(2)\n"
       "  (y, g(true, x.bar))\n"
       "g(a, b) = b(a)",
-      {"A ~ Num -> B", "Bool -> C", l(2, 14, 5), ?FROM_APP}
+      {"A ~ Num -> B", "Bool -> B", l(2, 14, 5), ?FROM_APP}
     ))
   , ?_test(bad_prg(
       "struct Foo<A> { bar : A }\n"
@@ -1549,7 +1578,7 @@ interface_test_() ->
       "    t(a)\n"
       "    a\n"
       "}",
-      {"rigid(A)", "rigid(B)", l(3, 6, 1), ?FROM_APP}
+      rigid_err("A", "B", l(3, 6, 1), ?FROM_APP, ?ERR_RIGID_RIGID("A", "B"))
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
@@ -1557,42 +1586,42 @@ interface_test_() ->
       "bar = foo(\"hi\")",
       {"String", "A ~ Foo", l(2, 10, 4), ?FROM_APP}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for String { foo(_) = true foo(_) = false }",
       {?ERR_DUP_FIELD_IMPL("foo"), l(1, 36, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for String { baz(_) = \"hi\" foo(_) = false }",
       {?ERR_EXTRA_FIELD_IMPL("baz", "Foo"), l(1, 22, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool, bar : T -> String }\n"
       "impl Foo for String { bar(_) = \"hi\" }",
       {?ERR_MISSING_FIELD_IMPL("foo", "Foo"), l(1, 0, 37)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for [A] { foo(_) = true }\n"
       "impl Foo for [Int] { foo(_) = true }",
       {?ERR_DUP_IMPL("Foo", "List", "[A]"), l(2, 13, 5)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for Int -> Bool { foo(_) = true }\n"
       "impl Foo for (Atom -> A) -> A { foo(_) = true }",
       {?ERR_DUP_IMPL("Foo", "function", "Int -> Bool"), l(2, 13, 16)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : Bool }",
       {?ERR_IFACE_TYPE("foo"), l(16, 10)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T -> Int, bar : Int -> Bool }",
       {?ERR_IFACE_TYPE("bar"), l(32, 17)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T, bar : T -> T }",
       {?ERR_IFACE_TYPE("foo"), l(16, 7)}
     ))
@@ -1639,65 +1668,65 @@ interface_test_() ->
       "foo(x) = x == from_str(\"hi\")",
       "foo"
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE_ARG("N ~ ToInt", "N ~ ToInt"), l(2, 13, 18)}
+      {?ERR_MUST_SOLVE_ARG("A ~ ToInt", "A ~ ToInt"), l(2, 13, 18)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = to_int(3)",
-      {?ERR_MUST_SOLVE_ARG("J ~ ToInt ~ Num", "J ~ ToInt ~ Num"), l(2, 13, 1)}
+      {?ERR_MUST_SOLVE_ARG("A ~ ToInt ~ Num", "A ~ ToInt ~ Num"), l(2, 13, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo = (|x| to_int(x))(@erlang:round(5.3))",
-      {?ERR_MUST_SOLVE_ARG("Q ~ ToInt", "Q ~ ToInt"), l(2, 22, 18)}
+      {?ERR_MUST_SOLVE_ARG("A ~ ToInt", "A ~ ToInt"), l(2, 22, 18)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo = (|x| x + from_str(\"1\"))(5)",
-      {?ERR_MUST_SOLVE_ARG("J ~ FromStr ~ Num", "J ~ FromStr ~ Num"),
+      {?ERR_MUST_SOLVE_ARG("A ~ FromStr ~ Num", "A ~ FromStr ~ Num"),
        l(1, 30, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "impl ToInt for Int { to_int(i) = i }\n"
       "foo =\n"
       "  let to_i(x) = to_int(x)\n"
       "  to_i(3)",
-      {?ERR_MUST_SOLVE_ARG("P ~ ToInt ~ Num", "P ~ ToInt ~ Num"), l(4, 7, 1)}
+      {?ERR_MUST_SOLVE_ARG("A ~ ToInt ~ Num", "A ~ ToInt ~ Num"), l(4, 7, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "foo : Bool -> A ~ ToInt -> Atom\n"
       "foo(b, x) =\n"
       "  |y| (to_int(y), foo(b, y))\n"
       "  if b then @hi else foo(true, @io:printable_range())",
-      {?ERR_MUST_SOLVE_ARG("U ~ ToInt", "U ~ ToInt"), l(4, 31, 21)}
+      {?ERR_MUST_SOLVE_ARG("A ~ ToInt", "A ~ ToInt"), l(4, 31, 21)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "foo = (|[x]| to_int(x))(@io:printable_range())",
-      {?ERR_MUST_SOLVE_ARG("L ~ ToInt", "[L ~ ToInt]"), l(1, 24, 21)}
+      {?ERR_MUST_SOLVE_ARG("[A ~ ToInt]", "A ~ ToInt"), l(1, 24, 21)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo = from_str(\"93\")",
-      {?ERR_MUST_SOLVE_RETURN("F ~ FromStr", "F ~ FromStr"), l(1, 6, 14)}
+      {?ERR_MUST_SOLVE_RETURN("A ~ FromStr", "A ~ FromStr"), l(1, 6, 14)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromStr { from_str : String -> [T] }\n"
       "foo = from_str(\"hello\")",
-      {?ERR_MUST_SOLVE_RETURN("F ~ FromStr", "[F ~ FromStr]"), l(1, 6, 17)}
+      {?ERR_MUST_SOLVE_RETURN("[A ~ FromStr]", "A ~ FromStr"), l(1, 6, 17)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo = (|x| from_str(x))(\"hi\")",
-      {?ERR_MUST_SOLVE_RETURN("I ~ FromStr", "I ~ FromStr"), l(1, 6, 23)}
+      {?ERR_MUST_SOLVE_RETURN("A ~ FromStr", "A ~ FromStr"), l(1, 6, 23)}
     ))
 
 
@@ -1741,8 +1770,13 @@ interface_test_() ->
       "foo = from_list([(\"key\", @value)]) : Map<String, Atom>",
       "foo"
     ))
-  , ?_test("" = ok_prg(
+  , ?_test(bad_prg(
       "interface FromList { from_list : [A ~ Ord] -> T<A ~ Ord> }\n"
+      "impl FromList for Map { from_list(_) = {} }\n",
+      {"A<B ~ Ord>", "Map<C, D>", l(1, 18, 3), ?FROM_IMPL_TYPE}
+    ))
+  , ?_test("A<B ~ Ord> -> C<D> ~ FromList" = ok_prg(
+      "interface FromList { from_list : A<B ~ Ord> -> T<C> }\n"
       "impl FromList for Map { from_list(_) = {} }\n",
       "from_list"
     ))
@@ -1782,50 +1816,56 @@ interface_test_() ->
       ToIntIface ++
       "foo : T<A> -> Int\n"
       "foo(x) = to_int(x)",
-      {"rigid(A)<rigid(B)>", "C ~ ToInt", l(2, 16, 1), ?FROM_APP}
+      rigid_err(
+        "A<B>",
+        "C ~ ToInt",
+        l(2, 16, 1),
+        ?FROM_APP,
+        ?ERR_RIGID_TV("A<B>", "C ~ ToInt")
+      )
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T<A> -> Int }\n"
       "impl Foo for [A] { foo(_) = 3 }",
       {?ERR_IMPL_TYPE("Foo"), l(1, 13, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T<A> -> Int }\n"
       "impl Foo for Int { foo(_) = 3 }",
       {?ERR_TYPE_PARAMS("Int", 0, 1), l(1, 13, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       ToIntIface ++
       "foo = to_int(@io:printable_range() : T<A>)",
-      {?ERR_MUST_SOLVE_ARG("Q<P> ~ ToInt", "Q<P> ~ ToInt"), l(1, 13, 28)}
+      {?ERR_MUST_SOLVE_ARG("A<B> ~ ToInt", "A<B> ~ ToInt"), l(1, 13, 28)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface ToInt { to_int : T<A> -> Int }\n"
       "foo = to_int(@io:printable_range())",
-      {?ERR_MUST_SOLVE_ARG("M ~ ToInt", "M<L> ~ ToInt"), l(1, 13, 21)}
+      {?ERR_MUST_SOLVE_ARG("A<B> ~ ToInt", "A ~ ToInt"), l(1, 13, 21)}
     ))
   % Technically this should be ERR_MUST_SOLVE_RETURN, but disambiguating here
   % is difficult. The current error message seems sufficient for now.
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromInt { from_int : Int -> T }\n"
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar = foo(from_int(3))",
-      {?ERR_MUST_SOLVE_ARG("U<T> ~ FromInt", "U<T> ~ FromInt"), l(3, 10, 11)}
+      {?ERR_MUST_SOLVE_ARG("A<B> ~ FromInt", "A<B> ~ FromInt"), l(3, 10, 11)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromInt { from_int : Int -> T }\n"
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar =\n"
       "  let x = from_int(3)\n"
       "  foo(x)",
-      {?ERR_MUST_SOLVE_RETURN("U ~ FromInt", "U ~ FromInt"), l(4, 10, 11)}
+      {?ERR_MUST_SOLVE_RETURN("A ~ FromInt", "A ~ FromInt"), l(4, 10, 11)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface FromInt { from_int : Int -> T<A> }\n"
       "foo = from_int(3)",
-      {?ERR_MUST_SOLVE_RETURN("L ~ FromInt", "L<K> ~ FromInt"), l(1, 6, 11)}
+      {?ERR_MUST_SOLVE_RETURN("A<B> ~ FromInt", "A ~ FromInt"), l(1, 6, 11)}
     ))
 
 
@@ -1927,28 +1967,33 @@ interface_test_() ->
       "interface ToInt extends Foo { to_int : T -> Int }\n"
       "bar : A ~ Foo -> Int\n"
       "bar = to_int",
-      {"rigid(A ~ Foo) -> Int", "B ~ ToInt -> Int", l(3, 6, 6),
-       ?FROM_VAR("to_int")}
+      rigid_err(
+        "A ~ Foo -> Int",
+        "B ~ ToInt -> Int",
+        l(3, 6, 6),
+        ?FROM_VAR("to_int"),
+        ?ERR_RIGID_TV("A ~ Foo", "B ~ ToInt")
+      )
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface ToInt extends Foo { to_int : T -> Int }",
       {?ERR_NOT_DEF_IFACE("Foo"), l(24, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface ToInt extends Int { to_int : T -> Int }",
       {?ERR_TYPE_NOT_IFACE("Int"), l(24, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface ToInt extends Foo { to_int : T -> Int }\n"
       "interface Foo extends ToInt { foo : T -> String }\n",
       {?ERR_CYCLE("Foo", "ToInt"), l(1, 22, 5)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { foo : T<A> -> Int }\n"
       "interface ToInt extends Foo { to_int : T -> Int }",
       {?ERR_TYPE_PARAMS("Foo", 1, 0), l(1, 24, 3)}
     ))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "interface Foo { to_int : T -> Int }\n"
@@ -2070,7 +2115,7 @@ gen_tv_test_() ->
       "  let y = foo(x)\n"
       "  y + 3\n"
       "  x == []",
-      {"B<A> ~ Num", "[A]", l(5, 7, 2), ?FROM_OP_RHS('==')}
+      {"A<B> ~ Num", "[B]", l(5, 7, 2), ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
       "foo : T<A, B> -> T<A, B>\n"
@@ -2205,37 +2250,37 @@ pattern_test_() ->
       "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
       {"Int", "Char", l(1, 23, 1), ?FROM_APP}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Baz(5) { Baz => 1 }",
       {?ERR_OPTION_ARITY("Baz", 1, 0), l(1, 22, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Baz(5) { Baz(1, 2) => 1 }",
       {?ERR_OPTION_ARITY("Baz", 1, 2), l(1, 22, 9)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
       "expr = match Bar { Bar(2) => 1 }",
       {?ERR_OPTION_ARITY("Bar", 0, 1), l(1, 19, 6)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "exception Baz(Int)\n"
       "expr = match Baz(5) { Baz => 1 }",
       {?ERR_OPTION_ARITY("Baz", 1, 0), l(1, 22, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "exception Baz(Int)\n"
       "expr = match Baz(5) { Baz(1, 2) => 1 }",
       {?ERR_OPTION_ARITY("Baz", 1, 2), l(1, 22, 9)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "exception Bar\n"
       "expr = match Bar { Bar(2) => 1 }",
       {?ERR_OPTION_ARITY("Bar", 0, 1), l(1, 19, 6)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Foo { a : Int }\n"
       "expr = match Foo(1) { Foo(1) => 1 }",
       {?ERR_MATCH_STRUCT, l(1, 22, 3)}
@@ -2282,7 +2327,13 @@ pattern_test_() ->
       "  let (a, _) = t\n"
       "  a\n"
       "g(t) = f(t) : B",
-      {"A", "rigid(B)", l(3, 7, 8), ?FROM_EXPR_SIG}
+      rigid_err(
+        "A",
+        "B",
+        l(3, 7, 8),
+        ?FROM_EXPR_SIG,
+        ?ERR_RIGID_BOUND("B", "A")
+      )
     ))
 
 
@@ -2342,114 +2393,114 @@ assert_test_() ->
   ].
 
 other_errors_test_() ->
-  [ ?_test(ctx_err_prg(
+  [ ?_test(bad_prg(
       "foo = 3\n"
       "foo = 4",
       {?ERR_REDEF("foo", l(0, 3)), l(1, 0, 3)}
     ))
   % already defined in stdlib; must use many for stdlib to be included
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo\nhead(x) = x"}
     ], "foo", {?ERR_REDEF_BUILTIN("head"), "Foo", l(0, 4)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo { Bar(Int) }\n"
       "struct Bar { foo : Float }",
       {?ERR_REDEF("Bar", l(11, 3)), l(1, 7, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Bar<A> { foo : Float }\n"
       "enum Foo<K, V> { Bar(Int) }",
       {?ERR_REDEF("Bar", l(7, 3)), l(1, 17, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Int { Zero }",
       {?ERR_REDEF_BUILTIN_TYPE("Int"), l(5, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Bool<A> { Stuff(A) }",
       {?ERR_REDEF_BUILTIN_TYPE("Bool"), l(5, 4)}
     ))
   % type from stdlib; must use many for stdlib to be included
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo\nstruct Option { optional? : Bool }"}
     ], "foo", {?ERR_REDEF_BUILTIN_TYPE("Option"), "Foo", l(7, 6)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Num { add : T -> T -> T }",
       {?ERR_REDEF_BUILTIN_IFACE("Num"), l(10, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Separable { to_bool : T -> Bool }",
       {?ERR_REDEF_BUILTIN_IFACE("Separable"), l(10, 9)}
     ))
   % iface from stdlib; must use many for stdlib to be included
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo\nenum Sized { HasSize(Int) }"}
     ], "foo", {?ERR_REDEF_BUILTIN_IFACE("Sized"), "Foo", l(5, 5)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo { Bar }\n"
       "struct Foo { baz : String }",
-      {?ERR_REDEF_TYPE("Foo", l(5, 3)), l(1, 7, 3)}
+      {?ERR_REDEF("Foo", l(5, 3)), l(1, 7, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Foo<A, B> { baz : String }\n"
       "enum Foo<T> { Bar }",
-      {?ERR_REDEF_TYPE("Foo", l(7, 3)), l(1, 5, 3)}
+      {?ERR_REDEF("Foo", l(7, 3)), l(1, 5, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { baz : T -> String }\n"
       "enum Foo<T> { Bar }",
-      {?ERR_REDEF_IFACE("Foo", l(10, 3)), l(1, 5, 3)}
+      {?ERR_REDEF("Foo", l(10, 3)), l(1, 5, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { baz : T -> String }\n"
       "interface Foo { bar : T -> T }",
-      {?ERR_REDEF_IFACE("Foo", l(10, 3)), l(1, 10, 3)}
+      {?ERR_REDEF("Foo", l(10, 3)), l(1, 10, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo<A, A> { Baz(A) }",
       {?ERR_REDEF_TV("A"), l(12, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Foo<A, A> { baz : A }",
       {?ERR_REDEF_TV("A"), l(14, 1)}
     ))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo\na = 1"},
       {"bar", "module Foo\nimport \"./foo\" b = 1"}
     ], "bar", {?ERR_REDEF_MODULE("Foo"), "Foo", l(-1, 7, 3)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo : Int",
       {?ERR_SIG_NO_DEF("foo"), l(0, 9)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo : Int\n"
       "bar = 3",
       {?ERR_SIG_NO_DEF("foo"), l(0, 9)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = 4\n"
       "foo : Int\n"
       "bar = 3",
       {?ERR_SIG_NO_DEF("foo"), l(1, 0, 9)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo : { a : Int, a : Float }\n"
       "foo = { a = 3 }",
       {?ERR_DUP_FIELD("a"), l(17, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "\nfoo = { bar = 3, baz = 4, baz = \"hi\" }",
       {?ERR_DUP_FIELD("baz"), l(1, 26, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "\n\nfoo = Bar { baz = 4 }",
       {?ERR_NOT_DEF_TYPE("Bar"), l(2, 6, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = Bar { { baz = 3 } | baz = 4 }",
       {?ERR_NOT_DEF_TYPE("Bar"), l(6, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo {\n"
       "  Bar(\n"
       "    [\n"
@@ -2459,20 +2510,20 @@ other_errors_test_() ->
       "}",
       {?ERR_TV_SCOPE("A", "Foo"), l(3, 6, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Foo {\n"
       "  bar :\n"
       "    [A]\n"
       "}",
       {?ERR_TV_SCOPE("A", "Foo"), l(2, 5, 1)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Foo<A> {\n"
       "  bar : A ~ Num\n"
       "}",
       {?ERR_TV_IFACE("A", none, ordsets:from_list(["Num"])), l(1, 8, 7)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo : A ~ Num -> A ~ Concatable\n"
       "foo(a) = @io:printable_range()",
       {
@@ -2484,106 +2535,126 @@ other_errors_test_() ->
         l(17, 14)
       }
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo : T<A> -> T\n"
       "foo(a) = @io:printable_range()",
       {?ERR_TV_NUM_PARAMS("T", 1, 0), l(14, 1)}
     ))
-  , ?_test(ctx_err_prg("\n\n\nfoo = a\n", {?ERR_NOT_DEF("a"), l(3, 6, 1)}))
-  , ?_test(ctx_err_prg("foo = 3 + foo", {?ERR_NOT_DEF("foo"), l(10, 3)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_prg("\n\n\nfoo = a\n", {?ERR_NOT_DEF("a"), l(3, 6, 1)}))
+  , ?_test(bad_prg("foo = 3 + foo", {?ERR_NOT_DEF("foo"), l(10, 3)}))
+  , ?_test(bad_many([
       {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
     ], "bar", {?ERR_NOT_DEF("x", "Foo"), "Bar", l(1, 4, 5)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = \"hi\" : Bar",
       {?ERR_NOT_DEF_TYPE("Bar"), l(13, 3)}
     ))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_prg(
+      "foo : Bar\n"
+      "foo = 1",
+      {?ERR_NOT_DEF_TYPE("Bar"), l(6, 3)}
+    ))
+  , ?_test(bad_prg(
+      "foo = { @a => 3 } : Map<Bar, Int>",
+      {?ERR_NOT_DEF_TYPE("Bar"), l(24, 3)}
+    ))
+  , ?_test(bad_prg(
+      "foo : Map<Bar, Int>\n"
+      "foo = { @a => 3 }",
+      {?ERR_NOT_DEF_TYPE("Bar"), l(10, 3)}
+    ))
+  , ?_test(bad_prg(
+      "foo : (Bar, Bool)\n"
+      "foo = (@a, 3)",
+      [{"(_, Bool)", "(Atom, A ~ Num)", l(0, 17), ?FROM_GLOBAL_SIG("foo")},
+       {?ERR_NOT_DEF_TYPE("Bar"), l(7, 3)}]
+    ))
+  , ?_test(bad_many([
       {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = 3 : Foo.FooType"}
     ], "bar", {?ERR_NOT_DEF_TYPE("FooType"), "Bar", l(1, 8, 11)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = 1 : A ~ Bar",
       {?ERR_NOT_DEF_IFACE("Bar"), l(14, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "impl Foo for Bool { a = 3 }",
       {?ERR_NOT_DEF_IFACE("Foo"), l(5, 3)}
     ))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo a = 1"},
       {"bar", "module Bar\nimport \"./foo\"\ny = 3 : A ~ Foo.FooIface"}
     ], "bar", {?ERR_NOT_DEF_IFACE("FooIface"), "Bar", l(1, 12, 12)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "\nfoo = @erlang:asdf(true)",
       {?ERR_NOT_DEF_NATIVE(erlang, "asdf", 1), l(1, 6, 12)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "bar = @io:format()",
       {?ERR_NOT_DEF_NATIVE(io, "format", 0), l(6, 10)}
     ))
-  , ?_test(ctx_err_prg("expr = Foo.hi", {?ERR_NOT_DEF_MODULE("Foo"), l(7, 3)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_prg("expr = Foo.hi", {?ERR_NOT_DEF_MODULE("Foo"), l(7, 3)}))
+  , ?_test(bad_many([
       {"foo", "module Foo x = 3"},
       {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
     ], "bar", {?ERR_NOT_EXPORTED("x", "Foo"), "Bar", l(1, 4, 5)}))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo : Map<K>\n"
       "foo = {}",
       {?ERR_TYPE_PARAMS("Map", 2, 1), l(6, 6)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "struct Foo<A> { bar : A }\n"
       "foo = 'a' : Foo",
       {?ERR_TYPE_PARAMS("Foo", 1, 0), l(1, 12, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = 3 : Num",
       {?ERR_IFACE_NOT_TYPE("Num"), l(10, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = Separable { a = 3 }",
       {?ERR_IFACE_NOT_TYPE("Separable"), l(6, 9)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "interface Foo { a : T -> Int }\n"
       "foo : Foo\n"
       "foo = @hi",
       {?ERR_IFACE_NOT_TYPE("Foo"), l(1, 6, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "foo = 3 : A ~ Int",
       {?ERR_TYPE_NOT_IFACE("Int"), l(14, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Bar { Bar(Int) }\n"
       "bar : A ~ Bar\n"
       "bar = Bar(3)",
       {?ERR_TYPE_NOT_IFACE("Bar"), l(1, 10, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo {\n"
       "  Bar(Char)\n"
       "  Baz @Bar\n"
       "}",
-      {?ERR_DUP_KEY("Bar", "Bar", l(1, 2, 3)), l(2, 6, 4)}
+      {?ERR_DUP_KEY('Bar', "Bar", l(1, 2, 3)), l(2, 6, 4)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo {\n"
       "  Bar(Char) @Baz\n"
       "  Baz\n"
       "}",
-      {?ERR_DUP_KEY("Baz", "Baz", l(2, 2, 3)), l(1, 12, 4)}
+      {?ERR_DUP_KEY('Baz', "Baz", l(2, 2, 3)), l(1, 12, 4)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo {\n"
       "  Bar(Char) @hi\n"
       "  Baz @hi\n"
       "}",
-      {?ERR_DUP_KEY("hi", "Bar", l(1, 12, 3)), l(2, 6, 3)}
+      {?ERR_DUP_KEY(hi, "Bar", l(1, 12, 3)), l(2, 6, 3)}
     ))
-  , ?_test(ctx_err_prg(
+  , ?_test(bad_prg(
       "enum Foo {\n"
       "  Bar(Char)\n"
       "  Bar\n"
@@ -2837,7 +2908,7 @@ import_test_() ->
         "y = (Hello(@h), Hi, Baz { first = 'f', second = \"s\" }, x)"
       }
     ], "bar", "y"))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "export x = 3"
@@ -2848,7 +2919,7 @@ import_test_() ->
         "x = 4"
       }
     ], "bar", {?ERR_REDEF("x", l(1, 0, 1)), "Bar", l(16, 1)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
         "module Bar\n"
@@ -2856,7 +2927,7 @@ import_test_() ->
         "x = 3"
       }
     ], "bar", {?ERR_NOT_DEF("SomeEnum", "Foo"), "Bar", l(16, 8)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
@@ -2865,7 +2936,7 @@ import_test_() ->
         "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", {?ERR_NOT_DEF_TYPE("Foo"), "Bar", l(1, 4, 3)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo export x = 3"},
       {"bar",
         "module Bar\n"
@@ -2873,7 +2944,7 @@ import_test_() ->
         "y = x + 4"
       }
     ], "bar", {?ERR_REDEF("x", l(16, 1)), "Bar", l(19, 1)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo", "module Foo enum Foo { One, Two(Bool), Three }"},
       {"bar",
         "module Bar\n"
@@ -2881,7 +2952,7 @@ import_test_() ->
         "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", {?ERR_REDEF("One", l(21, 3)), "Bar", l(26, 12)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "enum Foo { Hello(Atom), Hi }\n"
@@ -2893,8 +2964,8 @@ import_test_() ->
         "import \"./foo\" (*)\n"
         "enum Baz { Other }\n"
       }
-    ], "bar", {?ERR_REDEF_TYPE("Baz", l(1, 5, 3)), "Bar", l(16, 1)}))
-  , ?_test(ctx_err_many([
+    ], "bar", {?ERR_REDEF("Baz", l(1, 5, 3)), "Bar", l(16, 1)}))
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "import \"./bar\"\n"
@@ -2924,14 +2995,14 @@ import_test_() ->
         "foo = Base.Some('a')"
       }
     ], "foo", "abs"))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "import Base (*)\n"
         "abs(x) = if x < 0 then -x else x"
       }
     ], "foo", {?ERR_REDEF("abs", l(1, 0, 3)), "Foo", l(13, 1)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "import Base\n"
@@ -2943,7 +3014,7 @@ import_test_() ->
         "a = 1"
       }
     ], "bar", {?ERR_REDEF_BUILTIN("head"), "Bar", l(16, 4)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "import Base\n"
@@ -2955,7 +3026,7 @@ import_test_() ->
         "a = 1"
       }
     ], "bar", {?ERR_REDEF_BUILTIN_IFACE("Mappable"), "Bar", l(16, 8)}))
-  , ?_test(ctx_err_many([
+  , ?_test(bad_many([
       {"foo",
         "module Foo\n"
         "import Base\n"
