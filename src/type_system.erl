@@ -1215,7 +1215,12 @@ infer({N, Loc, Name}, C) when N == var; N == con_token; N == var_value ->
 
 infer({var_ref, Loc, Ref, Name}, C) -> lookup_inst(Name, Loc, Ref, C);
 
-% only occurs when pattern matching to designate anything
+
+% Holes are underscores in exprs that the user can introduce to "ask" the type
+% system what type it needs.
+infer({hole, _}, C) -> {{hole, true}, C};
+
+% Underscores in patterns are used to match anything.
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
 infer({anon_record, _, Inits}, C) ->

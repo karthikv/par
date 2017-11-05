@@ -577,6 +577,19 @@ expr_test_() ->
       "(|x| x && true) : Int -> Int",
       {"Bool -> Bool", "Int -> Int", l(0, 28), ?FROM_EXPR_SIG}
     ))
+
+  , ?_test(bad_expr("3 + _", {?ERR_HOLE("A ~ Num"), l(4, 1)}))
+  , ?_test(bad_expr(
+      "let f(x) = x == @hey\n"
+      "f(_)",
+      {?ERR_HOLE("Atom"), l(1, 2, 1)}
+    ))
+  % Hole should be ignored because it's not actually a valid argument.
+  , ?_test(bad_expr(
+      "let f(x) = x == @hey\n"
+      "f(@hi, _)",
+      {?ERR_ARITY(2, 1), l(1, 0, 9)}
+    ))
   ].
 
 para_poly_test_() ->

@@ -1,0 +1,7 @@
+*** module Mod *** ([infer-prg])
+
+I'm looking for a value of type Bool here:
+
+3: true && _
+           ^
+

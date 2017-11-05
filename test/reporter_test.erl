@@ -231,6 +231,7 @@ expr_test_() ->
 
   % type system errors
   , ?golden_expr_("ts-mismatch", "true + 5")
+  , ?golden_expr_("ts-hole", "true && _")
   , ?golden_expr_("ts-other", "let a = 3\n(a, true, b)")
   , ?golden_expr_("ts-order", "let a = 3 : Bool\na.field")
   , ?golden_expr_("ts-extra-args-lam", "(|x| x)(true, @hi)")

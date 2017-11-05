@@ -6,9 +6,7 @@
 % - [2 weeks] Stdlib
 %   - Map/Set operations?
 %   - Ensure stdlib functions in lexer/parser are all eliminated
-% - Norm types for error messages and for ERR_MUST_SOLVE ctx err
 % - Fork eunite and fix macro display
-% - Holes
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering
@@ -27,7 +25,6 @@
 %   - Interpreter better error messages and backtraces
 % - [3 days] Second pass for error messages (see TODOs in code)
 %   - Specify expected type for operators
-%   - Only show rigid if it matters
 %   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
 %     - Error message with context when there's no else clause
@@ -35,7 +32,7 @@
 %   - Helpful message if main() not exported
 %   - Struct/Enum name conflict w/ global causes hard-to-understand errors
 %   - Alias from utils:qualify because of struct/enum name conflict?
-%   - Import errors: import from same file twice, import self
+%   - Import errors: import from same file twice
 %   - More descriptive error when there's a dup import from variant
 %   - Show both locations for redef + other relevant errors
 %   - "Expected closing '}'" messages might have wrong start location b/c
@@ -45,10 +42,7 @@
 %     type that matches
 %   - Better message for T<A> <=> anon record or anon record ext
 %   - Fix other_errors_test that ensures sig cst is unified first
-%   - Suppress dup errors if multiple params/elems don't unify
 %   - Better messages for indirect errors from T<B> due to T<A> being unified
-%   - Improve error when iface needs HKT and impl type has wrong # of params
-%     - Ditto for interface extension that has wrong # of params
 %   - Add explicit error when assert let w/ a pattern that'll always match
 %   - Impl error due to iface type sig, where type sig can be in another module
 %   - Explanation for how to circumvent builtin redef error?

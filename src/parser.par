@@ -30,6 +30,7 @@ enum Node {
   Var(Loc, [Char]) @var
   VarRef(Loc, Ref, [Char]) @var_ref
   VarValue(Loc, [Char]) @var_value
+  Hole(Loc) @"hole"
   Underscore(Loc) @"_"
 
   List(Loc, [Node]) @list
@@ -532,6 +533,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
       [Lexer.LitAtom(l, atom) | t] => LitAtom(l, atom) |> Push(t)
 
       [Lexer.Var(l, name) | t] => VarRef(l, make_ref(), name) |> Push(t)
+      [Lexer.Underscore(l) | t] => Hole(l) |> Push(t)
 
       [Lexer.LBracket(s), Lexer.RBracket(e) | t] =>
         List(range(s, e), []) |> Push(t)
