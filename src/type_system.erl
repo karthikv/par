@@ -2327,8 +2327,11 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
                 true ->
                   case maps:find(V, DeepS#solver.subs) of
                     {ok, {set_ifaces, Is}} ->
-                      add_sub(V, {set_ifaces_rigid, Is}, DeepS);
-                    error -> add_sub(V, {rigid, V}, DeepS);
+                      {_, DeepS1} = add_sub(V, {set_ifaces_rigid, Is}, DeepS),
+                      DeepS1;
+                    error ->
+                      {_, DeepS1} = add_sub(V, {rigid, V}, DeepS),
+                      DeepS1;
 
                     % Either of these occur if we loop over the same V twice.
                     {ok, {rigid, V}} -> DeepS;
@@ -2374,7 +2377,8 @@ unify_csts(#gnr{csts=Csts, l_env=LEnv}, S) ->
       from=From
     },
 
-    unify(SubbedT1, SubbedT2, FoldS3)
+    {_, FoldS4} = unify(SubbedT1, SubbedT2, FoldS3),
+    FoldS4
   end, S#solver{bound_vs=BoundVs, l_env=LEnv}, Csts).
 
 resolve({lam, ArgT, ReturnT}, S) ->
@@ -2476,16 +2480,19 @@ inst(GVs, T, Pid) ->
   % consolidation already happened when finalizing scheme; no aliases needed
   utils:subs(T, #sub_opts{subs=Subs}).
 
-unify(T1, T2, S) when T1 == T2 -> S;
+unify(T1, T2, S) when T1 == T2 -> {true, S};
 
 % TODO: test and make {hole, true} work?
-unify({hole, false}, _, S) -> S;
+% Always return false when there's a hole, as this indicates that we can't
+% unify successfully.
+unify({hole, false}, _, S) -> {false, S};
 unify({hole, true}, T, S) -> add_err(?ERR_HOLE(T), S);
 unify(T1, {hole, _}=T2, S) -> sub_unify(T2, T1, S);
 
 unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
-  S1 = sub_unify(ArgT1, ArgT2, S),
-  sub_unify(ReturnT1, ReturnT2, S1);
+  {ArgValid, S1} = sub_unify(ArgT1, ArgT2, S),
+  {ReturnValid, S2} = sub_unify(ReturnT1, ReturnT2, S1),
+  {ArgValid andalso ReturnValid, S2};
 unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   #solver{
     module=Module,
@@ -2526,10 +2533,10 @@ unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     return_vs=NewReturnVs,
     must_solve_vs=NewMustSolveVs
   },
-  S2 = sub_unify(ArgT1, ArgT2, S1),
+  {ArgValid, S2} = sub_unify(ArgT1, ArgT2, S1),
   S3 = S2#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2},
 
-  case ReturnT1 of
+  {ReturnValid, S4} = case ReturnT1 of
     % We're continuing to unify arguments passed in a function application.
     % Retain the same t1/t2 as before, so if an error occurs between a lam and
     % a non-lam type, the entire lam types will be included in the error,
@@ -2541,16 +2548,18 @@ unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     % is it confusing to the user, but it'll also be misconstrued by the
     % reporter as too many arguments), so set the return types to be t1/t2.
     _ -> sub_unify(ReturnT1, ReturnT2, S3#solver{t1=ReturnT1, t2=ReturnT2})
-  end;
+  end,
+  {ArgValid andalso ReturnValid, S4};
 unify({lam, _, _}=T1, {lam, _, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
 
 unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   if
     length(ElemTs1) /= length(ElemTs2) -> add_err(S);
     true ->
-      lists:foldl(fun({T1, T2}, FoldS) ->
-        sub_unify(T1, T2, FoldS)
-      end, S, lists:zip(ElemTs1, ElemTs2))
+      lists:foldl(fun({T1, T2}, {FoldValid, FoldS}) ->
+        {ElemValid, FoldS1} = sub_unify(T1, T2, FoldS),
+        {FoldValid andalso ElemValid, FoldS1}
+      end, {true, S}, lists:zip(ElemTs1, ElemTs2))
   end;
 
 unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
@@ -2560,13 +2569,18 @@ unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
   if
     Keys1 /= Keys2 -> add_err(S);
     true ->
-      S1 = ordsets:fold(fun(Key, FoldS) ->
-        sub_unify(maps:get(Key, FieldMap1), maps:get(Key, FieldMap2), FoldS)
-      end, S, Keys1),
+      {Valid, S1} = ordsets:fold(fun(Key, {FoldValid, FoldS}) ->
+        {FieldValid, FoldS1} = sub_unify(
+          maps:get(Key, FieldMap1),
+          maps:get(Key, FieldMap2),
+          FoldS
+        ),
+        {FoldValid andalso FieldValid, FoldS1}
+      end, {true, S}, Keys1),
 
-      case no_errs(S, S1) of
-        true -> add_sub_anchor(A1, A2, S1);
-        false -> S1
+      if
+        Valid -> add_sub_anchor(A1, A2, S1);
+        true -> {false, S1}
       end
   end;
 
@@ -2576,9 +2590,14 @@ unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
 
   case ordsets:is_subset(KeysExt, Keys) of
     true ->
-      S1 = ordsets:fold(fun(Key, FoldS) ->
-        sub_unify(maps:get(Key, FieldMap), maps:get(Key, Ext), FoldS)
-      end, S, KeysExt),
+      {MapValid, S1} = ordsets:fold(fun(Key, {FoldValid, FoldS}) ->
+        {FieldValid, FoldS1} = sub_unify(
+          maps:get(Key, FieldMap),
+          maps:get(Key, Ext),
+          FoldS
+        ),
+        {FoldValid andalso FieldValid, FoldS1}
+      end, {true, S}, KeysExt),
 
       RelaxedFieldMap = ordsets:fold(fun(Key, FoldFieldMap) ->
         TV = tv_server:fresh(S#solver.pid),
@@ -2586,11 +2605,11 @@ unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
       end, FieldMap, KeysExt),
 
       NewA = tv_server:next_name(S1#solver.pid),
-      S2 = sub_unify(BaseT, {record, NewA, RelaxedFieldMap}, S1),
+      {BaseValid, S2} = sub_unify(BaseT, {record, NewA, RelaxedFieldMap}, S1),
 
-      case no_errs(S, S2) of
-        true -> add_sub_anchor(A1, A2, S2);
-        false -> S2
+      if
+        MapValid, BaseValid -> add_sub_anchor(A1, A2, S2);
+        true -> {false, S2}
       end;
 
     false -> add_err(S)
@@ -2603,14 +2622,18 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
   Keys2 = ordsets:from_list(maps:keys(Ext2)),
   CommonKeys = ordsets:intersection(Keys1, Keys2),
 
-  {RelaxedExt1, RelaxedExt2, S1} = ordsets:fold(fun(Key, Memo) ->
-    {FoldExt1, FoldExt2, FoldS} = Memo,
+  {RelaxedExt1, RelaxedExt2, ExtValid, S1} = ordsets:fold(fun(Key, Memo) ->
+    {FoldExt1, FoldExt2, FoldValid, FoldS} = Memo,
     NewFoldExt1 = maps:remove(Key, FoldExt1),
     NewFoldExt2 = maps:remove(Key, FoldExt2),
 
-    NewFoldS = sub_unify(maps:get(Key, Ext1), maps:get(Key, Ext2), FoldS),
-    {NewFoldExt1, NewFoldExt2, NewFoldS}
-  end, {Ext1, Ext2, S}, CommonKeys),
+    {FieldValid, NewFoldS} = sub_unify(
+      maps:get(Key, Ext1),
+      maps:get(Key, Ext2),
+      FoldS
+    ),
+    {NewFoldExt1, NewFoldExt2, FoldValid andalso FieldValid, NewFoldS}
+  end, {Ext1, Ext2, true, S}, CommonKeys),
 
   % Note: At this point, for a successful type check, BaseT1 and BaseT2 must be
   % TVs. If they are full records or record_exts, they would have been
@@ -2624,32 +2647,32 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
   %
   % If keys are included in one ext, but not the other, we must ensure they're
   % present in the opposite base.
-  S2 = case maps:size(RelaxedExt2) of
-    0 -> S1;
+  {Base1Valid, S2} = case maps:size(RelaxedExt2) of
+    0 -> {true, S1};
     _ ->
       NewA1 = tv_server:next_name(S#solver.pid),
       TV1 = tv_server:fresh(S#solver.pid),
       sub_unify(BaseT1, {record_ext, NewA1, TV1, RelaxedExt2}, S1)
   end,
 
-  S3 = case maps:size(RelaxedExt1) of
-    0 -> S2;
+  {Base2Valid, S3} = case maps:size(RelaxedExt1) of
+    0 -> {true, S2};
     _ ->
       NewA2 = tv_server:next_name(S#solver.pid),
       TV2 = tv_server:fresh(S#solver.pid),
       sub_unify(BaseT2, {record_ext, NewA2, TV2, RelaxedExt1}, S2)
   end,
 
-  case no_errs(S, S3) of
-    true -> add_sub_anchor(A1, A2, S3);
-    false -> S3
+  if
+    ExtValid, Base1Valid, Base2Valid -> add_sub_anchor(A1, A2, S3);
+    true -> {false, S3}
   end;
 
 % If BaseT is *not* a TV, then this gen TV should've been replaced with
 % a regular gen. It hasn't been replaced due to a unification error. Avoid
 % propagating errors.
-unify({gen, _, _, BaseT, _}, _, S) when element(1, BaseT) /= tv -> S;
-unify(_, {gen, _, _, BaseT, _}, S) when element(1, BaseT) /= tv -> S;
+unify({gen, _, _, BaseT, _}, _, S) when element(1, BaseT) /= tv -> {false, S};
+unify(_, {gen, _, _, BaseT, _}, S) when element(1, BaseT) /= tv -> {false, S};
 
 unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
   #solver{bound_vs=BoundVs, ifaces=Ifaces} = S,
@@ -2698,8 +2721,9 @@ unify({tv, V1, Is1, Rigid1}=TV1, {tv, V2, Is2, Rigid2}=TV2, S) ->
         Is2 == none -> add_sub(V2, TV1, CaseS);
         true ->
           MergedSub = {set_ifaces, merge_is(Is1, Is2, Ifaces)},
-          CaseS1 = add_sub(V1, MergedSub, add_sub(V2, TV1, CaseS)),
-          merge_iv_origins(Is2, V2, V1, CaseS1)
+          {_, CaseS1} = add_sub(V2, TV1, CaseS),
+          {_, CaseS2} = add_sub(V1, MergedSub, CaseS1),
+          {true, merge_iv_origins(Is2, V2, V1, CaseS2)}
       end
   end;
 
@@ -2708,7 +2732,7 @@ unify({tv, V, Is, Rigid}=TV, T, #solver{bound_vs=BoundVs}=S) ->
   Bound = ordsets:is_element(V, BoundVs),
   WouldEscape = Bound and occurs(true, T),
 
-  S1 = if
+  {Valid, S1} = if
     Rigid -> add_rigid_err(?ERR_RIGID_CON(TV), S);
     Occurs -> add_err(S);
 
@@ -2722,10 +2746,10 @@ unify({tv, V, Is, Rigid}=TV, T, #solver{bound_vs=BoundVs}=S) ->
     true ->
       case {T, Is} of
         % V can sub with anything, so just sub V with GenTV below
-        {_, none} -> S;
+        {_, none} -> {true, S};
 
         % same interfaces, so just sub V with GenTV below
-        {{gen, _, Is, _, _}, _} -> S;
+        {{gen, _, Is, _, _}, _} -> {true, S};
 
         % different interfaces and GenTV is rigid, so fail
         {{gen, _, _, {tv, _, _, true}, _}=GenTV, _} ->
@@ -2742,22 +2766,26 @@ unify({tv, V, Is, Rigid}=TV, T, #solver{bound_vs=BoundVs}=S) ->
           % previously an attempt at unification that failed, and we avoid
           % propagating errors by doing nothing else here.
           MergedSub = {set_ifaces, merge_is(Is, Is1, S#solver.ifaces)},
-          CaseS = add_sub(V1, MergedSub, S),
-          merge_iv_origins(Is, V, V1, CaseS);
+          {_, CaseS} = add_sub(V1, MergedSub, S),
+          {true, merge_iv_origins(Is, V, V1, CaseS)};
 
-        _ -> ordsets:fold(fun(I, FoldS) -> instance(T, I, V, FoldS) end, S, Is)
+        _ ->
+          ordsets:fold(fun(I, {FoldValid, FoldS}) ->
+            {ValidInst, FoldS1} = instance(T, I, V, FoldS),
+            {FoldValid andalso ValidInst, FoldS1}
+          end, {true, S}, Is)
       end
   end,
 
-  case no_errs(S1, S) of
-    true -> add_sub(V, T, S1);
+  if
+    Valid -> add_sub(V, T, S1);
 
     % There was an attempt to unify V with a concrete type; avoid reporting
     % ambiguity errors. It's possible that T is a gen TV, which isn't a concrete
     % type, but we find that still adding an ErrV results in fewer, more
     % relevant messages (if the gen TV is bound, but V isn't, then we'll get
     % a spurious ambiguity error if we don't add an ErrV).
-    false -> add_err_v(V, S1)
+    true -> add_err_v(V, S1)
   end;
 unify(T, {tv, V, Is, Rigid}, S) -> sub_unify({tv, V, Is, Rigid}, T, S);
 
@@ -2765,20 +2793,22 @@ unify({gen, {con, Con}, ParamTs1}, {gen, {con, Con}, ParamTs2}, S) ->
   if
     length(ParamTs1) /= length(ParamTs2) -> add_err(S);
     true ->
-      lists:foldl(fun({T1, T2}, FoldS) ->
-        sub_unify(T1, T2, FoldS)
-      end, S, lists:zip(ParamTs1, ParamTs2))
+      lists:foldl(fun({T1, T2}, {FoldValid, FoldS}) ->
+        {ParamValid, FoldS1} = sub_unify(T1, T2, FoldS),
+        {FoldValid andalso ParamValid, FoldS1}
+      end, {true, S}, lists:zip(ParamTs1, ParamTs2))
   end;
 
 unify({gen, ConT, ParamTs1}=GenT, {gen, V, Is, BaseTV, ParamTs2}=GenTV, S) ->
   Length1 = length(ParamTs1),
   Length2 = length(ParamTs2),
 
-  S1 = if
+  {ParamsValid, S1} = if
     Length1 == Length2 ->
-      lists:foldl(fun({T1, T2}, FoldS) ->
-        sub_unify(T1, T2, FoldS)
-      end, S, lists:zip(ParamTs1, ParamTs2));
+      lists:foldl(fun({T1, T2}, {FoldValid, FoldS}) ->
+        {ParamValid, FoldS1} = sub_unify(T1, T2, FoldS),
+        {FoldValid andalso ParamValid, FoldS1}
+      end, {true, S}, lists:zip(ParamTs1, ParamTs2));
 
     Length1 == 1 ->
       case ParamTs1 of
@@ -2791,27 +2821,29 @@ unify({gen, ConT, ParamTs1}=GenT, {gen, V, Is, BaseTV, ParamTs2}=GenTV, S) ->
 
     Length2 == 1 ->
       case ParamTs2 of
-        [{tv, _, _, _}] -> S;
-        [{tuple, Elems}] when length(Elems) == Length1 -> S;
+        [{tv, _, _, _}] -> {true, S};
+        [{tuple, Elems}] when length(Elems) == Length1 -> {true, S};
         _ -> add_err(S)
       end;
 
     true -> add_err(S)
   end,
 
-  case no_errs(S1, S) of
-    false -> S1;
-    true ->
-      S2 = sub_unify(BaseTV, ConT, S1),
-      case no_errs(S2, S1) of
-        false -> S2;
-        true ->
-          S3 = sub_unify_gen_vs(GenTV, ConT, Length1, S2),
-          case no_errs(S3, S2) of
-            false -> S3;
-            true -> sub_unify({tv, V, Is, false}, GenT, S3)
-          end
-      end
+  if
+    ParamsValid ->
+      {BaseValid, S2} = sub_unify(BaseTV, ConT, S1),
+      if
+        BaseValid ->
+          {GenValid, S3} = sub_unify_gen_vs(GenTV, ConT, Length1, S2),
+          if
+            GenValid -> sub_unify({tv, V, Is, false}, GenT, S3);
+            true -> {false, S3}
+          end;
+
+        true -> {false, S2}
+      end;
+
+    true -> {false, S1}
   end;
 unify({gen, _, _, _, _}=T1, {gen, _, _}=T2, S) -> sub_unify(T2, T1, S);
 
@@ -2824,51 +2856,55 @@ unify(
   Length2 = length(ParamTs2),
   SameLengths = Length1 == Length2,
 
-  S1 = if
+  {ParamsValid, S1} = if
     SameLengths ->
-      lists:foldl(fun({T1, T2}, FoldS) ->
-        sub_unify(T1, T2, FoldS)
-      end, S, lists:zip(ParamTs1, ParamTs2));
+      lists:foldl(fun({T1, T2}, {FoldValid, FoldS}) ->
+        {ParamValid, FoldS1} = sub_unify(T1, T2, FoldS),
+        {FoldValid andalso ParamValid, FoldS1}
+      end, {true, S}, lists:zip(ParamTs1, ParamTs2));
 
     Length1 == 1 ->
       case ParamTs1 of
-        [{tv, _, _, _}] -> S;
-        [{tuple, Elems}] when length(Elems) == Length2 -> S;
+        [{tv, _, _, _}] -> {true, S};
+        [{tuple, Elems}] when length(Elems) == Length2 -> {true, S};
         _ -> add_err(S)
       end;
 
     Length2 == 1 ->
       case ParamTs2 of
-        [{tv, _, _, _}] -> S;
-        [{tuple, Elems}] when length(Elems) == Length1 -> S;
+        [{tv, _, _, _}] -> {true, S};
+        [{tuple, Elems}] when length(Elems) == Length1 -> {true, S};
         _ -> add_err(S)
       end;
 
     true -> add_err(S)
   end,
 
-  case no_errs(S1, S) of
-    false -> S1;
-    true ->
+  if
+    ParamsValid ->
       % Do this before unifying BaseTV1 and BaseTV2 so the GenTV sets are
       % merged after params are fixed.
-      S2 = if
+      {GenValid, S2} = if
         not SameLengths andalso Length1 == 1 ->
           sub_unify_gen_vs(GenTV1, none, Length2, S1);
         not SameLengths andalso Length2 == 1 ->
           sub_unify_gen_vs(GenTV2, none, Length1, S1);
-        true -> S1
+        SameLengths -> {true, S1}
       end,
 
-      case no_errs(S2, S1) of
-        false -> S2;
-        true ->
-          S3 = sub_unify(BaseTV1, BaseTV2, S2),
-          case no_errs(S3, S2) of
-            false -> S3;
-            true -> sub_unify({tv, V1, Is1, false}, {tv, V2, Is2, false}, S3)
-          end
-      end
+      if
+        GenValid ->
+          {BaseValid, S3} = sub_unify(BaseTV1, BaseTV2, S2),
+          if
+            BaseValid ->
+              sub_unify({tv, V1, Is1, false}, {tv, V2, Is2, false}, S3);
+            true -> {false, S3}
+          end;
+
+        true -> {false, S2}
+      end;
+
+    true -> {false, S1}
   end;
 
 unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
@@ -2884,17 +2920,17 @@ unify(T1, T2, S) when element(1, T2) == record; element(1, T2) == record_ext ->
       %
       % (b) T1 could actually correspond to FullT2; we don't maintain ordering
       % when calling sub_unify().
-      S1 = sub_unify(NewT1, T2, S#solver{
+      {Valid, S1} = sub_unify(NewT1, T2, S#solver{
         t1=utils:unalias(FullT1, Aliases),
         t2=utils:unalias(FullT2, Aliases)
       }),
-      NoErrs = no_errs(S1, S),
       S2 = S1#solver{t1=FullT1, t2=FullT2},
 
       A = element(2, T2),
       if
-        NoErrs andalso A /= none -> add_sub(A, T1, S2);
-        true -> S2
+        Valid andalso A /= none -> add_sub(A, T1, S2);
+        Valid -> {true, S2};
+        true -> {false, S2}
       end
   end;
 unify(T1, T2, S) when element(1, T1) == record; element(1, T1) == record_ext ->
@@ -2923,7 +2959,7 @@ sub_unify_gen_vs(
   NumParams = length(ParamTs),
   GenVs = maps:get(BaseV, S#solver.gen_vs),
 
-  S1 = lists:foldl(fun(GenTV, FoldS) ->
+  {Valid, S1} = lists:foldl(fun(GenTV, {FoldValid, FoldS}) ->
     {gen, FoldV, FoldIs, FoldBaseTV, FoldParamTs} = GenTV,
     NewParamTs = if
       NumParams /= NewNumParams ->
@@ -2943,21 +2979,27 @@ sub_unify_gen_vs(
     end,
 
     FoldS1 = FoldS#solver{t1=GenTV, t2=TargetT},
-    FoldS2 = case NewParamTs of
-      none -> FoldS1;
+    {ParamsValid, FoldS2} = case NewParamTs of
+      none -> {true, FoldS1};
       [NewParamT] -> sub_unify(NewParamT, {tuple, FoldParamTs}, FoldS1);
       _ ->
         [FoldParamT] = FoldParamTs,
         sub_unify(FoldParamT, {tuple, NewParamTs}, FoldS1)
     end,
 
-    case no_errs(FoldS2, FoldS1) of
-      false -> FoldS2;
-      true -> sub_unify({tv, FoldV, FoldIs, false}, TargetT, FoldS2)
+    if
+      ParamsValid ->
+        {GenValid, FoldS3} = sub_unify(
+          {tv, FoldV, FoldIs, false},
+          TargetT,
+          FoldS2
+        ),
+        {FoldValid andalso GenValid, FoldS3};
+      true -> {false, FoldS2}
     end
-  end, S, GenVs),
+  end, {true, S}, GenVs),
 
-  S1#solver{t1=OrigT1, t2=OrigT2}.
+  {Valid, S1#solver{t1=OrigT1, t2=OrigT2}}.
 
 merge_is(none, Is2, _) -> Is2;
 merge_is(Is1, none, _) -> Is1;
@@ -3006,7 +3048,7 @@ add_sub(V, RawSub, S) ->
   end,
 
   BoundVs = S1#solver.bound_vs,
-  case {Sub, ordsets:is_element(V, BoundVs)} of
+  S2 = case {Sub, ordsets:is_element(V, BoundVs)} of
     % no change in fvs
     {{set_ifaces, _}, _} -> S1;
     % when subbing a tv not in env or an anchor
@@ -3014,9 +3056,10 @@ add_sub(V, RawSub, S) ->
     {_, true} ->
       NewBoundVs = ordsets:union(fvs(Sub), ordsets:del_element(V, BoundVs)),
       S1#solver{bound_vs=NewBoundVs}
-  end.
+  end,
+  {true, S2}.
 
-add_sub_anchor(A1, A2, S) when A1 == none; A2 == none; A1 == A2 -> S;
+add_sub_anchor(A1, A2, S) when A1 == none; A2 == none; A1 == A2 -> {true, S};
 add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
 
 add_err(S) ->
@@ -3040,16 +3083,15 @@ max_arity({lam, _, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
 max_arity(_, Arity) -> Arity.
 
 add_err(Msg, #solver{module=Module, loc=Loc, errs=Errs}=S) ->
-  S#solver{errs=[{Msg, Module, Loc} | S#solver.errs]}.
-  % TODO: use this de-duping
-  %% case Errs of
-  %%   % De-duplicate mismatched types errors.
-  %%   [{OtherMsg, Module, Loc}] when hd(Msg) == hd(OtherMsg),
-  %%       hd(Msg) == ?MISMATCHED_TYPES_PREFIX ->
-  %%     S;
+  IsMismatch = hd(Msg) == ?MISMATCH_PREFIX,
+  S1 = case Errs of
+    % De-duplicate mismatched types errors.
+    [{OtherMsg, Module, Loc} | _] when IsMismatch,
+      hd(OtherMsg) == ?MISMATCH_PREFIX -> S;
 
-  %%   _ -> S#solver{errs=[{Msg, Module, Loc} | Errs]}
-  %% end.
+    _ -> S#solver{errs=[{Msg, Module, Loc} | Errs]}
+  end,
+  {false, S1}.
 
 add_rigid_err(Err, S) ->
   #solver{t1=T1, t2=T2, from=From} = S,
@@ -3059,9 +3101,7 @@ rigid_err(T1, T2, From, Err) ->
   ?ERR_TYPE_MISMATCH(T1, T2, From) ++ [$., $\s | Err].
 
 add_err_v(V, #solver{err_vs=ErrVs}=S) ->
-  S#solver{err_vs=ordsets:add_element(V, ErrVs)}.
-
-no_errs(S1, S2) -> length(S1#solver.errs) == length(S2#solver.errs).
+  {false, S#solver{err_vs=ordsets:add_element(V, ErrVs)}}.
 
 unalias_except_struct({con, Con}, Aliases) ->
   case maps:find(Con, Aliases) of
@@ -3080,18 +3120,18 @@ unalias_except_struct({gen, {con, Con}, ParamTs}, Aliases) ->
   end;
 unalias_except_struct(T, _) -> T.
 
-instance({con, "Int"}, "Num", _, S) -> S;
-instance({con, "Float"}, "Num", _, S) -> S;
-instance({con, "Int"}, "Ord", _, S) -> S;
-instance({con, "Float"}, "Ord", _, S) -> S;
-instance({con, "String"}, "Ord", _, S) -> S;
-instance({con, "Char"}, "Ord", _, S) -> S;
-instance({con, "String"}, "Concatable", _, S) -> S;
-instance({gen, {con, "List"}, _}, "Concatable", _, S) -> S;
-instance({gen, {con, "Map"}, _}, "Concatable", _, S) -> S;
-instance({gen, {con, "Set"}, _}, "Concatable", _, S) -> S;
-instance({gen, {con, "List"}, _}, "Separable", _, S) -> S;
-instance({gen, {con, "Set"}, _}, "Separable", _, S) -> S;
+instance({con, "Int"}, "Num", _, S) -> {true, S};
+instance({con, "Float"}, "Num", _, S) -> {true, S};
+instance({con, "Int"}, "Ord", _, S) -> {true, S};
+instance({con, "Float"}, "Ord", _, S) -> {true, S};
+instance({con, "String"}, "Ord", _, S) -> {true, S};
+instance({con, "Char"}, "Ord", _, S) -> {true, S};
+instance({con, "String"}, "Concatable", _, S) -> {true, S};
+instance({gen, {con, "List"}, _}, "Concatable", _, S) -> {true, S};
+instance({gen, {con, "Map"}, _}, "Concatable", _, S) -> {true, S};
+instance({gen, {con, "Set"}, _}, "Concatable", _, S) -> {true, S};
+instance({gen, {con, "List"}, _}, "Separable", _, S) -> {true, S};
+instance({gen, {con, "Set"}, _}, "Separable", _, S) -> {true, S};
 instance(T, I, V, S) ->
   Key = utils:impl_key(T),
   case maps:find(Key, maps:get(I, S#solver.impls)) of
@@ -3138,7 +3178,18 @@ instance(T, I, V, S) ->
           }
       end,
 
-      sub_unify(T, NormT, S1);
+      % Unify T with NormT to ensure the instance is valid. But first, for
+      % better error messages, replace V with NormT in FullT1 and FullT2. We
+      % must do this in both FullT1 and FullT2 because we don't know which
+      % contains V.
+      #solver{t1=FullT1, t2=FullT2} = S1,
+      Opts = #sub_opts{subs=#{V => NormT}},
+      S2 = S1#solver{
+        t1=utils:subs(FullT1, Opts),
+        t2=utils:subs(FullT2, Opts)
+      },
+      {Valid, S3} = sub_unify(T, NormT, S2),
+      {Valid, S3#solver{t1=FullT1, t2=FullT2}};
 
     error -> add_err(S)
   end.

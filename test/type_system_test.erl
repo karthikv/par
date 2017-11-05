@@ -564,19 +564,19 @@ expr_test_() ->
 
 
   % Ensure no duplicate errors for compound types w/ multiple mismatches.
-  %% , ?_test(bad_expr(
-  %%     "(3, 'a') == (true, @hey)",
-  %%     {"(A ~ Num, Char)", "(Bool, Atom)", l(12, 12), ?FROM_OP_RHS('==')}
-  %%   ))
-  %% , ?_test(bad_expr(
-  %%     "{ a = 3.7, b = \"hi\" } == { a = false, b = @hey }",
-  %%     {"{ a : Float, b : String }", "{ a : Bool, b : Atom }", l(25, 23),
-  %%      ?FROM_OP_RHS('==')}
-  %%   ))
-  %% , ?_test(bad_expr(
-  %%     "(|x| x && true) : Int -> Int",
-  %%     {"Bool -> Bool", "Int -> Int", l(0, 28), ?FROM_EXPR_SIG}
-  %%   ))
+  , ?_test(bad_expr(
+      "(3, 'a') == (true, @hey)",
+      {"(A ~ Num, Char)", "(Bool, Atom)", l(12, 12), ?FROM_OP_RHS('==')}
+    ))
+  , ?_test(bad_expr(
+      "{ a = 3.7, b = \"hi\" } == { a = false, b = @hey }",
+      {"{ a : Float, b : String }", "{ a : Bool, b : Atom }", l(25, 23),
+       ?FROM_OP_RHS('==')}
+    ))
+  , ?_test(bad_expr(
+      "(|x| x && true) : Int -> Int",
+      {"Bool -> Bool", "Int -> Int", l(0, 28), ?FROM_EXPR_SIG}
+    ))
   ].
 
 para_poly_test_() ->
@@ -1960,7 +1960,13 @@ interface_test_() ->
       "interface ToInt extends Foo { to_int : T -> Int }\n"
       "impl Foo for [A ~ Foo] { foo([a]) = foo(a) }\n"
       "impl ToInt for [A] { to_int([a]) = 1 }",
-      {"A ~ Foo", "[rigid(B)]", l(3, 15, 3), ?FROM_PARENT_IFACES}
+      rigid_err(
+        "[A]",
+        "[B ~ Foo]",
+        l(3, 15, 3),
+        ?FROM_PARENT_IFACES,
+        ?ERR_RIGID_TV("A", "B ~ Foo")
+      )
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Int }\n"

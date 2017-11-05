@@ -149,9 +149,9 @@
 -define(FROM_PARENT_IFACES, "satisfying parent interfaces").
 
 
--define(MISMATCHED_TYPES_PREFIX, "Mismatched types ").
+-define(MISMATCH_PREFIX, "Mismatched types ").
 -define(ERR_TYPE_MISMATCH(T1, T2, From), [
-  ?MISMATCHED_TYPES_PREFIX, T1, " and ", T2, " from ", From
+  ?MISMATCH_PREFIX, T1, " and ", T2, " from ", From
 ]).
 -define(ERR_RIGID_CON(TV), [
   TV, " is a rigid type variable, meaning it represents some type, but you "
