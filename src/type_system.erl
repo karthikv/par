@@ -1086,7 +1086,8 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
           Con = utils:resolve_con(RawCon, C),
           NumParams = case maps:find(Con, C#ctx.types) of
             {ok, #type_binding{num_params=Num}}
-              when IfaceNumParams == 1 andalso Num > 0 -> Num;
+              when IfaceNumParams == 1 andalso Num > 1 -> Num;
+            {ok, #type_binding{num_params=1}} when IfaceNumParams > 1 -> 1;
             _ -> IfaceNumParams
           end,
 
@@ -1976,10 +1977,12 @@ infer_impl_inits(
                 {con, ImplCon} = ImplT,
                 #type_binding{num_params=NumParams} = maps:get(ImplCon, Types),
 
-                ParamTs = lists:map(
-                  fun(_) -> unit end,
-                  lists:seq(1, NumParams)
-                ),
+                ParamTs = if
+                  IfaceNumParams > 1 andalso NumParams == 1 ->
+                    [{tuple, [unit || _ <- lists:seq(1, IfaceNumParams)]}];
+                  true -> [unit || _ <- lists:seq(1, NumParams)]
+                end,
+
                 GenT = {gen, ImplT, ParamTs},
                 add_cst(GenTV, GenT, ImplLoc, ?FROM_IMPL_TYPE, CaseC)
             end,

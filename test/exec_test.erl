@@ -942,15 +942,20 @@ test_interface(Run) ->
       "impl Mappable for Map { map = map_map }\n"
       "main() = map(|(k, v)| (v, k), { 'a' => @a })"
     ))
+  , ?_test($a = Run(
+      "interface Foo { foo : T<(Int, Bool)> -> Char }\n"
+      "impl Foo for Map { foo(_) = 'a' }\n"
+      "main() = foo({ 3 => true })"
+    ))
   , ?_assertEqual(#{<<"key">> => value}, Run(
       "interface FromList { from_list : [A] -> T<A> }\n"
       "impl FromList for Map { from_list([(k, v)]) = { k => v } }\n"
       "main() = from_list([(\"key\", @value)]) : Map<String, Atom>"
     ))
-  , ?_test($a = Run(
-      "interface Foo { foo : T<(Int, Bool)> -> Char }\n"
-      "impl Foo for Map { foo(_) = 'a' }\n"
-      "main() = foo({ 3 => true })"
+  , ?_assertEqual(#{first => $f, second => $s}, Run(
+      "interface ToMap { to_map : T<K, V> -> Map<K, V> }\n"
+      "impl ToMap for List { to_map = @maps:from_list/1 }\n"
+      "main() = to_map([(@first, 'f'), (@second, 's')])"
     ))
   , ?_test(true = Run(
       "interface Foo { foo : T -> T }\n"

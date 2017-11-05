@@ -1770,15 +1770,16 @@ interface_test_() ->
       "foo = from_list([(\"key\", @value)]) : Map<String, Atom>",
       "foo"
     ))
-  , ?_test(bad_prg(
-      "interface FromList { from_list : [A ~ Ord] -> T<A ~ Ord> }\n"
-      "impl FromList for Map { from_list(_) = {} }\n",
-      {"A<B ~ Ord>", "Map<C, D>", l(1, 18, 3), ?FROM_IMPL_TYPE}
-    ))
   , ?_test("A<B ~ Ord> -> C<D> ~ FromList" = ok_prg(
       "interface FromList { from_list : A<B ~ Ord> -> T<C> }\n"
       "impl FromList for Map { from_list(_) = {} }\n",
       "from_list"
+    ))
+  , ?_test("Map<Atom, Char>" = ok_prg(
+      "interface ToMap { to_map : T<K, V> -> Map<K, V> }\n"
+      "impl ToMap for List { to_map = @maps:from_list/1 }\n"
+      "foo = to_map([(@first, 'f'), (@second, 's')])",
+      "foo"
     ))
   , ?_test("Bool" = ok_prg(
       "interface Foo { foo : T -> T }\n"
@@ -1866,6 +1867,11 @@ interface_test_() ->
       "interface FromInt { from_int : Int -> T<A> }\n"
       "foo = from_int(3)",
       {?ERR_MUST_SOLVE_RETURN("A<B> ~ FromInt", "A ~ FromInt"), l(1, 6, 11)}
+    ))
+  , ?_test(bad_prg(
+      "interface FromList { from_list : [A ~ Ord] -> T<A ~ Ord> }\n"
+      "impl FromList for Map { from_list(_) = {} }\n",
+      {"A<B ~ Ord>", "Map<C, D>", l(1, 18, 3), ?FROM_IMPL_TYPE}
     ))
 
 
