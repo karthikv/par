@@ -14,8 +14,6 @@
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
 % - Think about bug with passing curried function to native
-% - Enforce newline between defs
-% - _atom field for a module
 % - Syntax: List, Set, Map, Record
 %   - New: [a, b], #[a, b], #{a => b, c => d}, {a = b, c = d}
 %   - Put: [a, b | c], #[a, b | c], #{a => b, c => d | m}, {a = b, c = d | r}
@@ -86,6 +84,8 @@
 %   - Lowercase for type variables?
 % - Accessing tag of enum?
 % - Dot operator for composition?
+% - _atom field for a module
+% - Enforce newline between defs?
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?

@@ -572,9 +572,6 @@ rep({field, Loc, Expr, Prop}, CG) ->
   end;
 
 rep({app, Loc, Expr, RawArgs}, CG) ->
-  ExprRep = rep(Expr, CG),
-  Line = ?START_LINE(Loc),
-
   Arity = arity(Expr, CG),
   Args = case Arity of
     0 ->
@@ -584,22 +581,63 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
   end,
   NumArgs = length(Args),
 
+  ImplReps = case Expr of
+    {var_ref, _, Ref, _} ->
+      case maps:find(Ref, CG#cg.ctx#ctx.inst_refs) of
+        {ok, {{lam, _, _}=T, SubbedVs}} ->
+          {_, AllImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
+          LeftBindMaps = lists:sublist(
+            BindMaps,
+            NumArgs + 1,
+            length(BindMaps)
+          ),
+
+          % If there are no bindings for all remaining args, that means there
+          % are no additional impls that are solved for. As a result, we can
+          % directly pass impls through this application.
+          case lists:all(fun(M) -> M == #{} end, LeftBindMaps) of
+            true ->
+              FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
+              TargetImplReps = lists:sublist(AllImplReps, NumArgs),
+              inline_bindmap(TargetImplReps, FinalBindMap);
+            false -> none
+          end;
+
+        error -> none
+      end;
+
+    _ -> none
+  end,
+
+  Line = ?START_LINE(Loc),
+  case ImplReps of
+    none ->
+      ExprRep = rep(Expr, CG),
+      ArgsRep = [rep(Arg, CG) || Arg <- Args];
+
+    _ ->
+      {var_ref, VarLoc, _, Name} = Expr,
+      ExprRep = rep({var, VarLoc, Name}, CG),
+      ArgsRep = lists:map(fun
+        ({Arg, []}) -> rep(Arg, CG);
+        ({Arg, ArgImplReps}) -> {tuple, Line, [rep(Arg, CG) | ArgImplReps]}
+      end, lists:zip(Args, ImplReps))
+  end,
+
   if
     Arity == unknown ->
-      ArgsListRep = rep({list, Loc, Args}, CG),
       excluder_remove('_@curry'),
-      {call, Line, {atom, Line, '_@curry'},
-        [ExprRep, ArgsListRep, {integer, Line, Line}]};
+      {call, Line, {atom, Line, '_@curry'}, [
+        ExprRep,
+        rep_list(ArgsRep, Line),
+        {integer, Line, Line}
+      ]};
 
     NumArgs < Arity ->
-      NewArgsRep = lists:map(fun(_) ->
-        {var, Line, unique("Arg")}
-      end, lists:seq(NumArgs + 1, Arity)),
-
-      ArgsListRep = rep({list, Loc, Args}, CG),
-      NewArgsListRep = lists:foldr(fun(ArgRep, ListRep) ->
-        {cons, Line, ArgRep, ListRep}
-      end, {nil, Line}, NewArgsRep),
+      ArgsListRep = rep_list(ArgsRep, Line),
+      Seq = lists:seq(NumArgs + 1, Arity),
+      NewArgsRep = [{var, Line, unique("Arg")} || _ <- Seq],
+      NewArgsListRep = rep_list(NewArgsRep, Line),
 
       Body = [{call, Line,
         {remote, Line, {atom, Line, erlang}, {atom, Line, apply}},
@@ -608,8 +646,7 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
       {'fun', Line, {clauses, [Clause]}};
 
     NumArgs >= Arity ->
-      ImmArgs = lists:sublist(Args, Arity),
-      ImmArgsRep = lists:map(fun(Arg) -> rep(Arg, CG) end, ImmArgs),
+      ImmArgsRep = lists:sublist(ArgsRep, Arity),
 
       Call = case ExprRep of
         {'fun', _, {function, Atom, _}} ->
@@ -620,8 +657,8 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
       if
         NumArgs == Arity -> Call;
         true ->
-          RestArgs = lists:sublist(Args, Arity + 1, NumArgs),
-          RestArgsListRep = rep({list, Loc, RestArgs}, CG),
+          RestArgsRep = lists:sublist(ArgsRep, Arity + 1, NumArgs),
+          RestArgsListRep = rep_list(RestArgsRep, Line),
           excluder_remove('_@curry'),
           {call, Line, {atom, Line, '_@curry'},
             [Call, RestArgsListRep, {integer, Line, Line}]}
@@ -809,9 +846,7 @@ rep({unary_op, Loc, 'assert', Expr}, #cg{prg_lines=PrgLines}=CG) ->
           [ExpRep | BaseInfoList];
         '!=' -> BaseInfoList
       end,
-      InfoRep = lists:foldr(fun(ElemRep, FoldRep) ->
-        {cons, Line, ElemRep, FoldRep}
-      end, {nil, Line}, InfoList),
+      InfoRep = rep_list(InfoList, Line),
 
       ErrorAtom = case BinOp of
         '==' -> assertEqual;
@@ -840,9 +875,7 @@ rep({unary_op, Loc, 'assert', Expr}, #cg{prg_lines=PrgLines}=CG) ->
         eabs({expression, RightStr}, Line) |
         ModLineList
       ],
-      InfoRep = lists:foldr(fun(ElemRep, FoldRep) ->
-        {cons, Line, ElemRep, FoldRep}
-      end, {nil, Line}, InfoList),
+      InfoRep = rep_list(InfoList, Line),
 
       ErrorRep = {tuple, Line, [eabs(assertMatch, Line), InfoRep]},
       Call = call(erlang, error, [ErrorRep], Line),
@@ -868,9 +901,7 @@ rep({unary_op, Loc, 'assert', Expr}, #cg{prg_lines=PrgLines}=CG) ->
         eabs({expression, ExprStr}, Line) |
         ModLineList
       ],
-      InfoRep = lists:foldr(fun(ElemRep, FoldRep) ->
-        {cons, Line, ElemRep, FoldRep}
-      end, {nil, Line}, InfoList),
+      InfoRep = rep_list(InfoList, Line),
 
       ErrorRep = {tuple, Line, [eabs(assert, Line), InfoRep]},
       Call = call(erlang, error, [ErrorRep], Line),
@@ -906,6 +937,11 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
       FunRep = {'fun', Line, {clauses, [Clause]}},
       {tuple, Line, [eabs(Line, Line), FunRep]}
   end.
+
+rep_list(Reps, Line) ->
+  lists:foldr(fun(Rep, ListRep) ->
+    {cons, Line, Rep, ListRep}
+  end, {nil, Line}, Reps).
 
 % recursive definitions allowed for simple pattern functions
 rep_pattern({var, _, Name}=Pattern, {fn, _, _, Args, _}=Expr, CG) ->
@@ -1039,6 +1075,8 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
   {FinalArgIVs, FinalMemo} = lists:mapfoldl(fun({Is, V}, Memo) ->
     {FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
 
+    % V will not be in SubbedVs if it is bound in the env or if it has been seen
+    % before. In both these cases, we don't want to add impls.
     {T, NewV, NewIs} = case maps:find(V, FoldSubbedVs) of
       error -> {none, none, none};
       {ok, {tv, NewV_, NewIs_, _}} -> {none, NewV_, NewIs_};
@@ -1046,12 +1084,10 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
       {ok, T_} -> {T_, none, none}
     end,
 
-    % V will not be in SubbedVs if it is bound in the env or if it has been seen
-    % before. In both these cases, we don't want to add impls.
     case {T, NewV, NewIs} of
       {none, none, none} -> {[], Memo};
 
-      {none, NewV, NewIs} ->
+      {none, _, _} ->
         FirstI = hd(Is),
         FirstImplName = bound_impl_name(child_i(FirstI, NewIs, Ifaces), NewV),
 
@@ -1148,6 +1184,41 @@ child_i(TargetI, Is, Ifaces) ->
     end
   end, none, Is).
 
+inline_bindmap([], _) -> [];
+inline_bindmap([H | T], BindMap) ->
+  [inline_bindmap(H, BindMap) | inline_bindmap(T, BindMap)];
+inline_bindmap({var, _, ImplAtom}, BindMap) -> maps:get(ImplAtom, BindMap);
+inline_bindmap({call, Line, FunRep, ArgsRep}, BindMap) ->
+  InlineArgsRep = [inline_bindmap(Arg, BindMap) || Arg <- ArgsRep],
+  {call, Line, inline_bindmap(FunRep, BindMap), InlineArgsRep}.
+
+rep_arg_impls(LamT, Loc, SubbedVs, CG) ->
+  % Must fold*l* b/c impls associated with multiple args are passed through the
+  % left-most arg.
+  {ArgsIVsRev, ImplRepsRev, BindMapsRev, _} = lists:foldl(fun(IVs, Memo) ->
+    {FoldArgsIVs, FoldImplReps, FoldBindMaps, FoldSubbedVs} = Memo,
+    {NewArgIVs, NewImplReps, NewBindMap, NewSubbedVs} = rep_impls(
+      IVs,
+      Loc,
+      #{},
+      FoldSubbedVs,
+      CG
+    ),
+
+    {
+      [NewArgIVs | FoldArgsIVs],
+      [NewImplReps | FoldImplReps],
+      [NewBindMap | FoldBindMaps],
+      NewSubbedVs
+    }
+  end, {[], [], [], SubbedVs}, utils:args_ivs(LamT)),
+
+  ArgsIVs = lists:reverse(ArgsIVsRev),
+  ImplReps = lists:reverse(ImplRepsRev),
+  BindMaps = lists:reverse(BindMapsRev),
+
+  {ArgsIVs, ImplReps, BindMaps}.
+
 rewrite_ref(Rep, Ref, Loc, CG) ->
   % rewrite() expects a single var rep as a parameter, whereas Rep might be
   % a call or something more complex; store the result.
@@ -1169,35 +1240,13 @@ rewrite_ref(Rep, Ref, Loc, CG) ->
 rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
 
-  % Must fold*l* b/c impls associated with multiple args are passed through the
-  % left-most arg.
-  {ArgsRepRev, ArgsIVsRev, ImplRepsRev, BindMap, _} = lists:foldl(fun(IVs, Memo) ->
-    {FoldArgsRep, FoldArgsIVs, FoldImplReps, FoldBindMap, FoldSubbedVs} = Memo,
-    {NewArgIVs, NewImplReps, NewBindMap, NewSubbedVs} = rep_impls(
-      IVs,
-      Loc,
-      FoldBindMap,
-      FoldSubbedVs,
-      CG
-    ),
+  {ArgsIVs, ImplReps, BindMaps} = rep_arg_impls(LamT, Loc, SubbedVs, CG),
+  FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
 
-    NewArgRep = {var, Line, unique("Arg")},
-    {
-      [NewArgRep | FoldArgsRep],
-      [NewArgIVs | FoldArgsIVs],
-      [NewImplReps | FoldImplReps],
-      NewBindMap,
-      NewSubbedVs
-    }
-  end, {[], [], [], #{}, SubbedVs}, utils:args_ivs(LamT)),
-
-  ArgsRep = lists:reverse(ArgsRepRev),
-  ArgsIVs = lists:reverse(ArgsIVsRev),
-  ImplReps = lists:reverse(ImplRepsRev),
-
+  ArgsRep = [{var, Line, unique("Arg")} || _ <- ArgsIVs],
   {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, false, CG),
 
-  case maps:size(BindMap) of
+  case maps:size(FinalBindMap) of
     % If there aren't any bindings, we didn't solve for any impls (both bound
     % impls and solved impls create bindings), so don't rewrite.
     0 -> {[], VarRep};
@@ -1206,7 +1255,7 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
       BindListRep = maps:fold(fun(Atom, ValueRep, FoldListRep) ->
         TupleRep = {tuple, Line, [eabs(Atom, Line), ValueRep]},
         {cons, Line, TupleRep, FoldListRep}
-      end, {nil, Line}, BindMap),
+      end, {nil, Line}, FinalBindMap),
 
       ResultRep = {var, Line, unique("Lam")},
       excluder_remove('_@wrap_with_impls'),

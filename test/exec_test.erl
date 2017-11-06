@@ -557,128 +557,128 @@ test_record(Expr, Run) ->
 code_gen_interface_test_() -> test_interface(fun run_code_gen/1).
 %% interpreter_interface_test_() -> test_interface(fun run_interpreter/1).
 test_interface(Run) ->
-  ToIntIface = "interface ToInt { to_int : T -> Int }\n",
-  BoolImpl = "impl ToInt for Bool {\n"
-    "  to_int(b) = if b then 1 else 0\n"
+  IfaceToI = "interface ToI { to_i : T -> Int }\n",
+  BoolImpl = "impl ToI for Bool {\n"
+    "  to_i(b) = if b then 1 else 0\n"
     "}\n",
-  IfaceImpl = ToIntIface ++ BoolImpl ++ "\n",
+  IfaceImpl = IfaceToI ++ BoolImpl ++ "\n",
 
-  [ ?_test(1 = Run(IfaceImpl ++ "main() = to_int(true)"))
+  [ ?_test(1 = Run(IfaceImpl ++ "main() = to_i(true)"))
   , ?_test(3 = Run(
-      ToIntIface ++
-      "impl ToInt for Int {\n"
-      "  to_int(i) = i\n"
+      IfaceToI ++
+      "impl ToI for Int {\n"
+      "  to_i(i) = i\n"
       "}\n"
-      "main() = to_int(3 : Int)"
+      "main() = to_i(3 : Int)"
     ))
   , ?_test(2 = Run(
-      ToIntIface ++
-      "impl ToInt for Float {\n"
-      "  to_int(f) = @erlang:round(f)\n"
+      IfaceToI ++
+      "impl ToI for Float {\n"
+      "  to_i(f) = @erlang:round(f)\n"
       "}\n"
-      "main() = to_int(1.6)"
+      "main() = to_i(1.6)"
     ))
   , ?_test(3 = Run(
-      ToIntIface ++
-      "impl ToInt for String {\n"
-      "  to_int = @erlang:byte_size/1\n"
+      IfaceToI ++
+      "impl ToI for String {\n"
+      "  to_i = @erlang:byte_size/1\n"
       "}\n"
-      "main() = to_int(\"hey\")"
+      "main() = to_i(\"hey\")"
     ))
   , ?_test(8 = Run(
-      ToIntIface ++
-      "impl ToInt for Ref {\n"
-      "  to_int(_) = 8\n"
+      IfaceToI ++
+      "impl ToI for Ref {\n"
+      "  to_i(_) = 8\n"
       "}\n"
-      "main() = to_int(@erlang:make_ref() : Ref)"
+      "main() = to_i(@erlang:make_ref() : Ref)"
     ))
   , ?_test(6 = Run(
-      ToIntIface ++
-      "impl ToInt for [Int] {\n"
-      "  to_int = @lists:foldl/3(|memo, num| memo + num, 0)\n"
+      IfaceToI ++
+      "impl ToI for [Int] {\n"
+      "  to_i = @lists:foldl/3(|memo, num| memo + num, 0)\n"
       "}\n"
-      "main() = to_int([1, 2, 3])"
+      "main() = to_i([1, 2, 3])"
     ))
   , ?_test(936 = Run(
-      ToIntIface ++
-      "impl ToInt for Map<Int, V> {\n"
-      "  to_int(m) = @erlang:hd(@maps:keys(m))\n"
+      IfaceToI ++
+      "impl ToI for Map<Int, V> {\n"
+      "  to_i(m) = @erlang:hd(@maps:keys(m))\n"
       "}\n"
-      "main() = to_int({ 936 => @value })"
+      "main() = to_i({ 936 => @value })"
     ))
   , ?_test(-17 = Run(
-      ToIntIface ++
-      "impl ToInt for () -> Int {\n"
-      "  to_int(f) = f()\n"
+      IfaceToI ++
+      "impl ToI for () -> Int {\n"
+      "  to_i(f) = f()\n"
       "}\n"
-      "main() = to_int(|-| -17)"
+      "main() = to_i(|-| -17)"
     ))
   , ?_test(0 = Run(
-      ToIntIface ++
-      "impl ToInt for () {\n"
-      "  to_int(_) = 0\n"
+      IfaceToI ++
+      "impl ToI for () {\n"
+      "  to_i(_) = 0\n"
       "}\n"
-      "main() = to_int(())"
+      "main() = to_i(())"
     ))
   , ?_test(1 = Run(
-      ToIntIface ++
-      "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
-      "main() = to_int((1, true))"
+      IfaceToI ++
+      "impl ToI for (Int, Bool) { to_i((a, _)) = a }\n"
+      "main() = to_i((1, true))"
     ))
   , ?_test(28 = Run(
-      ToIntIface ++
-      "impl ToInt for { a: Int, b: Int } {\n"
-      "  to_int(r) = r.a + r.b\n"
+      IfaceToI ++
+      "impl ToI for { a: Int, b: Int } {\n"
+      "  to_i(r) = r.a + r.b\n"
       "}\n"
-      "main() = to_int({ a = 7, b = 21 })"
+      "main() = to_i({ a = 7, b = 21 })"
     ))
   , ?_test(-3 = Run(
-      ToIntIface ++
-      "impl ToInt for { A | target: Int } {\n"
-      "  to_int(r) = r.target\n"
+      IfaceToI ++
+      "impl ToI for { A | target: Int } {\n"
+      "  to_i(r) = r.target\n"
       "}\n"
-      "main() = to_int({ foo = \"hi\", bar = true, target = -3 })"
+      "main() = to_i({ foo = \"hi\", bar = true, target = -3 })"
     ))
   , ?_test(2 = Run(
-      ToIntIface ++
-      "impl ToInt for Set<A> {\n"
-      "  to_int(s) = @erlang:map_size(s)\n"
+      IfaceToI ++
+      "impl ToI for Set<A> {\n"
+      "  to_i(s) = @erlang:map_size(s)\n"
       "}\n"
-      "main() = to_int(#['a', 'b'])"
+      "main() = to_i(#['a', 'b'])"
     ))
   , ?_test(30 = Run(
-      ToIntIface ++
+      IfaceToI ++
       "enum Foo<A> { Bar(A) }\n"
-      "impl ToInt for Foo<Int> {\n"
-      "  to_int(Bar(i)) = i\n"
+      "impl ToI for Foo<Int> {\n"
+      "  to_i(Bar(i)) = i\n"
       "}\n"
-      "main() = to_int(Bar(30))"
+      "main() = to_i(Bar(30))"
     ))
   , ?_test(12 = Run(
-      ToIntIface ++
+      IfaceToI ++
       "struct Foo { a : Int, b : Int }\n"
-      "impl ToInt for Foo {\n"
-      "  to_int(r) = r.a * r.b\n"
+      "impl ToI for Foo {\n"
+      "  to_i(r) = r.a * r.b\n"
       "}\n"
-      "main() = to_int(Foo { a = 3, b = 4 })"
+      "main() = to_i(Foo { a = 3, b = 4 })"
     ))
 
 
   % rewriting cases
-  , ?_test(0 = Run(IfaceImpl ++ "main() = (to_int : Bool -> Int)(false)"))
-  , ?_test(1 = Run(IfaceImpl ++ "main() = (to_int : T ~ ToInt -> Int)(true)"))
+  , ?_test(0 = Run(IfaceImpl ++ "main() = (to_i : Bool -> Int)(false)"))
+  , ?_test(1 = Run(IfaceImpl ++ "main() = (to_i : T ~ ToI -> Int)(true)"))
   , ?_test(0 = Run(
       IfaceImpl ++
       "foo([_, f]) = f(false)\n"
       "main() =\n"
-      "  let list = [to_int, to_int]\n"
+      "  let list = [to_i, to_i]\n"
       "  foo(list)"
     ))
   , ?_test(1 = Run(
       IfaceImpl ++
       "foo((f, _)) = f(true)\n"
       "main() =\n"
-      "  let tuple = (to_int, 1)\n"
+      "  let tuple = (to_i, 1)\n"
       "  foo(tuple)"
     ))
   , ?_test(0 = Run(
@@ -687,7 +687,7 @@ test_interface(Run) ->
       "first(set) = @erlang:hd(@maps:keys(set))\n"
       "foo(set) = first(set, false)\n"
       "main() =\n"
-      "  let set = #[to_int]\n"
+      "  let set = #[to_i]\n"
       "  foo(set)"
     ))
   , ?_test(1 = Run(
@@ -696,7 +696,7 @@ test_interface(Run) ->
       "key(map) = @erlang:hd(@maps:keys(map))\n"
       "foo(map) = key(map, true)\n"
       "main() =\n"
-      "  let map = { to_int => 1 }\n"
+      "  let map = { to_i => 1 }\n"
       "  foo(map)"
     ))
   , ?_test(0 = Run(
@@ -705,21 +705,21 @@ test_interface(Run) ->
       "value(map) = @erlang:hd(@maps:values(map))\n"
       "foo(map) = value(map, false)\n"
       "main() =\n"
-      "  let map = { 1 => to_int }\n"
+      "  let map = { 1 => to_i }\n"
       "  foo(map)"
     ))
   , ?_test(1 = Run(
       IfaceImpl ++
       "foo(record) = record.b(true)\n"
       "main() =\n"
-      "  let record = { a = true, b = to_int }\n"
+      "  let record = { a = true, b = to_i }\n"
       "  foo(record)"
     ))
   , ?_test(0 = Run(
       IfaceImpl ++
       "foo(record) = record.b(false)\n"
       "bar(record) =\n"
-      "  let new_record = { record | b := to_int }\n"
+      "  let new_record = { record | b := to_i }\n"
       "  foo(new_record)\n"
       "main() = bar({ a = true, b = 35.0 })"
     ))
@@ -728,7 +728,7 @@ test_interface(Run) ->
       "struct Foo<A> { a : (), b : A }\n"
       "bar(foo) = foo.b(true)\n"
       "main() =\n"
-      "  let foo = Foo { a = (), b = to_int }\n"
+      "  let foo = Foo { a = (), b = to_i }\n"
       "  bar(foo)"
     ))
   , ?_test({0, -1} = Run(
@@ -736,7 +736,7 @@ test_interface(Run) ->
       "enum Foo<A> { Bar, Baz(Int), Call(Bool, A) }\n"
       "bar(foo) = match foo { Call(b, f) => f(b), _ => -1 }\n"
       "main() =\n"
-      "  let foo = Call(false, to_int)\n"
+      "  let foo = Call(false, to_i)\n"
       "  let baz = Baz(3)\n"
       "  foo == baz\n"
       "  (bar(foo), bar(baz))"
@@ -755,47 +755,47 @@ test_interface(Run) ->
       "  first(s, true) + key(m)(true)\n"
       "main() =\n"
       "  let foo = Foo {\n"
-      "    a = Cat(#[to_int])\n"
-      "    other_a = Dog([{to_int => 1}])\n"
+      "    a = Cat(#[to_i])\n"
+      "    other_a = Dog([{to_i => 1}])\n"
       "  }\n"
       "  bar(foo)"
     ))
   , ?_test(0 = Run(
       IfaceImpl ++
-      "impl ToInt for [Int] { to_int([i]) = i }\n"
+      "impl ToI for [Int] { to_i([i]) = i }\n"
       "hd : T<A> -> A\n"
-      "hd(_) = @erlang:hd([to_int : Bool -> Int])\n"
+      "hd(_) = @erlang:hd([to_i : Bool -> Int])\n"
       "bar(l) = hd(l, false)\n"
       "main() =\n"
-      "  let foo = @io:printable_range() : T<A ~ ToInt -> Int>\n"
+      "  let foo = @io:printable_range() : T<A ~ ToI -> Int>\n"
       "  bar(foo)"
     ))
 
 
   , ?_test(0 = Run(
       IfaceImpl ++
-      "proxy(b) = to_int(b)\n"
+      "proxy(b) = to_i(b)\n"
       "main() = proxy(false)"
     ))
   % to ensure no impl arg is added to lambda |c| ... because of bound impl b
   , ?_test(1 = Run(
       IfaceImpl ++
-      "foo(b) = |c| if b == c then to_int(c) else -1\n"
+      "foo(b) = |c| if b == c then to_i(c) else -1\n"
       "main() = foo(true, true)"
     ))
   % to test fns with multiple arguments having the same iv pair
   , ?_test(7 = Run(
-      ToIntIface ++
-      "impl ToInt for Float {\n"
-      "  to_int(n) = @erlang:round(n)\n"
+      IfaceToI ++
+      "impl ToI for Float {\n"
+      "  to_i(n) = @erlang:round(n)\n"
       "}\n"
-      "foo(a, b) = if a == b then to_int(a) * 2 else to_int(a) + to_int(b)\n"
+      "foo(a, b) = if a == b then to_i(a) * 2 else to_i(a) + to_i(b)\n"
       "main() = foo(3.7, 3.1)"
     ))
   % to test recursive fns that we can't inst
   , ?_test(2 = Run(
       IfaceImpl ++
-      "foo(twice, b) = if twice then 2 * foo(false, b) else to_int(b)\n"
+      "foo(twice, b) = if twice then 2 * foo(false, b) else to_i(b)\n"
       "main() = foo(true, true)"
     ))
   % this time, a fn that's both recursive and with bound variables
@@ -806,31 +806,31 @@ test_interface(Run) ->
       "    if twice then\n"
       "      2 * bar(false, c)\n"
       "    else if b == c then\n"
-      "      2 * to_int(c)\n"
+      "      2 * to_i(c)\n"
       "    else\n"
-      "      to_int(c)\n"
+      "      to_i(c)\n"
       "  bar(t, b)\n"
       "main() = foo(true, true)"
     ))
   , ?_test({2, 3} = Run(
-      ToIntIface ++
-      "impl ToInt for [A] { to_int(l) = @erlang:length(l) }\n"
-      "interface Foo { foo : T -> (T, A ~ ToInt) -> Int }\n"
+      IfaceToI ++
+      "impl ToI for [A] { to_i(l) = @erlang:length(l) }\n"
+      "interface Foo { foo : T -> (T, A ~ ToI) -> Int }\n"
       "impl Foo for Bool {\n"
-      "  foo(a, (b, c)) = if b && a then 2 * to_int(c) else to_int(c)\n"
+      "  foo(a, (b, c)) = if b && a then 2 * to_i(c) else to_i(c)\n"
       "}\n"
       "main() = (foo(true, (true, [1])), foo(false, (true, ['a', 'b', 'c'])))"
     ))
   , ?_test({1, 2} = Run(
-      ToIntIface ++
-      "impl ToInt for [A] { to_int(l) = @erlang:length(l) }\n"
-      "interface Foo { foo : T -> (T, A ~ ToInt) -> Int }\n"
+      IfaceToI ++
+      "impl ToI for [A] { to_i(l) = @erlang:length(l) }\n"
+      "interface Foo { foo : T -> (T, A ~ ToI) -> Int }\n"
       "impl Foo for Bool {\n"
-      "  foo(a, (b, c)) = if b && a then 2 * to_int(c) else to_int(c)\n"
+      "  foo(a, (b, c)) = if b && a then 2 * to_i(c) else to_i(c)\n"
       "}\n"
       "main() = (\n"
       "  (foo : T ~ Foo -> (T ~ Foo, [Int]) -> Int)(true, (false, [1])),\n"
-      "  (foo : Bool -> (Bool, A ~ ToInt) -> Int)(false, (false, [@a, @b]))\n"
+      "  (foo : Bool -> (Bool, A ~ ToI) -> Int)(false, (false, [@a, @b]))\n"
       ")"
     ))
   , ?_test({{ok, <<"combine">>}, false} = Run(
@@ -864,36 +864,36 @@ test_interface(Run) ->
       "  result"
     ))
   , ?_test({1, 3} = Run(
-      ToIntIface ++
-      "impl ToInt for (Int, Bool) { to_int((a, _)) = a }\n"
-      "impl ToInt for (Int, Bool, Int) { to_int((a, _, c)) = a + c }\n"
-      "main() = (to_int((1, true)), to_int((1, false, 2)))"
+      IfaceToI ++
+      "impl ToI for (Int, Bool) { to_i((a, _)) = a }\n"
+      "impl ToI for (Int, Bool, Int) { to_i((a, _, c)) = a + c }\n"
+      "main() = (to_i((1, true)), to_i((1, false, 2)))"
     ))
   , ?_test(10 = Run(
-      ToIntIface ++
-      "impl ToInt for Atom {\n"
-      "  to_int(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
+      IfaceToI ++
+      "impl ToI for Atom {\n"
+      "  to_i(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
       "}\n"
-      "impl ToInt for [A ~ ToInt] {\n"
-      "  to_int(l) = match l {\n"
-      "    [h | t] => to_int(h) + to_int(t)\n"
+      "impl ToI for [A ~ ToI] {\n"
+      "  to_i(l) = match l {\n"
+      "    [h | t] => to_i(h) + to_i(t)\n"
       "    [] => 0\n"
       "  }\n"
       "}\n"
-      "main() = to_int([@hello, @hey, @hi])"
+      "main() = to_i([@hello, @hey, @hi])"
     ))
   , ?_test(10 = Run(
-      ToIntIface ++
-      "impl ToInt for Atom {\n"
-      "  to_int(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
+      IfaceToI ++
+      "impl ToI for Atom {\n"
+      "  to_i(a) = @erlang:atom_to_list(a) |> @erlang:length/1\n"
       "}\n"
-      "impl ToInt for [A ~ ToInt] {\n"
-      "  to_int(l) = match l {\n"
-      "    [h | t] => to_int(h) + to_int(t)\n"
+      "impl ToI for [A ~ ToI] {\n"
+      "  to_i(l) = match l {\n"
+      "    [h | t] => to_i(h) + to_i(t)\n"
       "    [] => 0\n"
       "  }\n"
       "}\n"
-      "main() = (to_int : [A ~ ToInt] -> Int)([@hello, @hey, @hi])"
+      "main() = (to_i : [A ~ ToI] -> Int)([@hello, @hey, @hi])"
     ))
   , ?_assertEqual(
       {<<"hi">>, <<"(no, yes)">>, <<"Foo(no)">>, <<"Foo((hey, yes))">>},
@@ -966,11 +966,11 @@ test_interface(Run) ->
       "main() = foo(@lists:seq(1, 2) : T<Int>) == [2, 4]"
     ))
   , ?_test(48 = Run(
-      "interface ToInt { to_int : T -> Int }\n"
-      "impl ToInt for [Int] { to_int([h | _]) = h }\n"
+      "interface ToI { to_i : T -> Int }\n"
+      "impl ToI for [Int] { to_i([h | _]) = h }\n"
       "foo(x) =\n"
       "  @io:printable_range() : T<A> == x\n"
-      "  to_int(x)\n"
+      "  to_i(x)\n"
       "main() = foo([48, 7, 8])"
     ))
 
@@ -1006,9 +1006,9 @@ test_interface(Run) ->
 
 
   , ?_test(84 = Run(
-      "interface ToInt extends Num { to_int : T -> Int }\n"
-      "impl ToInt for Float { to_int(f) = @erlang:round(f) }"
-      "main() = to_int(84.1)"
+      "interface ToI extends Num { to_i : T -> Int }\n"
+      "impl ToI for Float { to_i(f) = @erlang:round(f) }"
+      "main() = to_i(84.1)"
     ))
   , ?_test({hey, $h, <<"hello">>} = Run(
       "interface First { first : T -> Atom }\n"
@@ -1022,23 +1022,23 @@ test_interface(Run) ->
     ))
   , ?_test(68 = Run(
       "interface Foo { foo : T -> String }\n"
-      "interface ToInt extends Concatable, Foo { to_int : T -> Int }\n"
+      "interface ToI extends Concatable, Foo { to_i : T -> Int }\n"
       "impl Foo for [A] { foo(_) = \"list\" }\n"
-      "impl ToInt for [Int] {\n"
-      "  to_int(l) = match l { [h | t] => h + to_int(t), [] => 0 }\n"
+      "impl ToI for [Int] {\n"
+      "  to_i(l) = match l { [h | t] => h + to_i(t), [] => 0 }\n"
       "}\n"
-      "main() = to_int([17, 48, 3])"
+      "main() = to_i([17, 48, 3])"
     ))
   , ?_test(381 = Run(
       "interface Foo { foo : T -> Int }\n"
-      "interface ToInt extends Foo { to_int : T -> Int }\n"
+      "interface ToI extends Foo { to_i : T -> Int }\n"
       "impl Foo for String { foo = @erlang:byte_size/1 }\n"
       "impl Foo for [A ~ Foo] { foo([a]) = foo(a) }\n"
-      "impl ToInt for String {\n"
-      "  to_int(s) = foo(s) + @erlang:binary_to_integer(s)\n"
+      "impl ToI for String {\n"
+      "  to_i(s) = foo(s) + @erlang:binary_to_integer(s)\n"
       "}\n"
-      "impl ToInt for [A ~ ToInt] { to_int([a]) = to_int(a) }\n"
-      "main() = to_int([\"378\"])"
+      "impl ToI for [A ~ ToI] { to_i([a]) = to_i(a) }\n"
+      "main() = to_i([\"378\"])"
     ))
   , ?_assertEqual(
       {2, 1, [false, true], #{#{greeting => <<"hi">>} => true}},
@@ -1570,82 +1570,82 @@ test_import(Many) ->
   , ?_assertEqual($a + $b, Many([
       {"foo",
         "module Foo\n"
-        "interface ToInt { to_int : T -> Int }\n"
-        "impl ToInt for Char { to_int(c) = $c }\n"
-        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
-        "  to_int((a, b)) = to_int(a) + to_int(b)\n"
+        "interface ToI { to_i : T -> Int }\n"
+        "impl ToI for Char { to_i(c) = $c }\n"
+        "impl ToI for (A ~ ToI, B ~ ToI) {\n"
+        "  to_i((a, b)) = to_i(a) + to_i(b)\n"
         "}"
       },
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "main() = Foo.to_int(('a', 'b'))"
+        "main() = Foo.to_i(('a', 'b'))"
       }
     ], "bar"))
   , ?_assertEqual($a + $b, Many([
-      {"foo", "module Foo interface ToInt { to_int : T -> Int }"},
+      {"foo", "module Foo interface ToI { to_i : T -> Int }"},
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "impl Foo.ToInt for Char { to_int(c) = $c }\n"
-        "impl Foo.ToInt for (A ~ Foo.ToInt, B ~ Foo.ToInt) {\n"
-        "  to_int((a, b)) = Foo.to_int(a) + Foo.to_int(b)\n"
+        "impl Foo.ToI for Char { to_i(c) = $c }\n"
+        "impl Foo.ToI for (A ~ Foo.ToI, B ~ Foo.ToI) {\n"
+        "  to_i((a, b)) = Foo.to_i(a) + Foo.to_i(b)\n"
         "}\n"
-        "main() = Foo.to_int(('a', 'b'))"
+        "main() = Foo.to_i(('a', 'b'))"
       }
     ], "bar"))
   , ?_assertEqual($a + $b, Many([
       {"foo",
         "module Foo\n"
-        "interface ToInt { to_int : T -> Int }\n"
-        "impl ToInt for Char { to_int(c) = $c }"
+        "interface ToI { to_i : T -> Int }\n"
+        "impl ToI for Char { to_i(c) = $c }"
       },
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "impl Foo.ToInt for (A ~ Foo.ToInt, B ~ Foo.ToInt) {\n"
-        "  to_int((a, b)) = Foo.to_int(a) + Foo.to_int(b)\n"
+        "impl Foo.ToI for (A ~ Foo.ToI, B ~ Foo.ToI) {\n"
+        "  to_i((a, b)) = Foo.to_i(a) + Foo.to_i(b)\n"
         "}\n"
-        "main() = Foo.to_int(('a', 'b'))"
+        "main() = Foo.to_i(('a', 'b'))"
       }
     ], "bar"))
   , ?_assertEqual($a + $b, Many([
       {"foo",
         "module Foo\n"
-        "interface ToInt { to_int : T -> Int }\n"
-        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
-        "  to_int((a, b)) = to_int(a) + to_int(b)\n"
+        "interface ToI { to_i : T -> Int }\n"
+        "impl ToI for (A ~ ToI, B ~ ToI) {\n"
+        "  to_i((a, b)) = to_i(a) + to_i(b)\n"
         "}"
       },
       {"bar",
         "module Bar\n"
         "import \"./foo\"\n"
-        "impl Foo.ToInt for Char { to_int(c) = $c }\n"
-        "main() = Foo.to_int(('a', 'b'))"
+        "impl Foo.ToI for Char { to_i(c) = $c }\n"
+        "main() = Foo.to_i(('a', 'b'))"
       }
     ], "bar"))
   , ?_assertEqual($a + $b, Many([
-      {"foo", "module Foo interface ToInt { to_int : T -> Int }"},
+      {"foo", "module Foo interface ToI { to_i : T -> Int }"},
       {"bar",
         "module Bar\n"
-        "import \"./foo\" (ToInt)\n"
-        "impl ToInt for Char { to_int(c) = $c }\n"
-        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
-        "  to_int((a, b)) = Foo.to_int(a) + Foo.to_int(b)\n"
+        "import \"./foo\" (ToI)\n"
+        "impl ToI for Char { to_i(c) = $c }\n"
+        "impl ToI for (A ~ ToI, B ~ ToI) {\n"
+        "  to_i((a, b)) = Foo.to_i(a) + Foo.to_i(b)\n"
         "}\n"
-        "main() = Foo.to_int(('a', 'b'))"
+        "main() = Foo.to_i(('a', 'b'))"
       }
     ], "bar"))
   , ?_assertEqual($a + $b, Many([
-      {"foo", "module Foo interface ToInt { to_int : T -> Int }"},
+      {"foo", "module Foo interface ToI { to_i : T -> Int }"},
       {"bar",
         "module Bar\n"
-        "import \"./foo\" (ToInt, to_int)\n"
-        "impl ToInt for Char { to_int(c) = $c }\n"
-        "impl ToInt for (A ~ ToInt, B ~ ToInt) {\n"
-        "  to_int((a, b)) = to_int(a) + to_int(b)\n"
+        "import \"./foo\" (ToI, to_i)\n"
+        "impl ToI for Char { to_i(c) = $c }\n"
+        "impl ToI for (A ~ ToI, B ~ ToI) {\n"
+        "  to_i((a, b)) = to_i(a) + to_i(b)\n"
         "}\n"
-        "main() = to_int(('a', 'b'))"
+        "main() = to_i(('a', 'b'))"
       }
     ], "bar"))
   ].

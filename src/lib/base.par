@@ -7,34 +7,12 @@ enum Option<T> {
 }
 
 
-//-- Interfaces
+//-- Interfaces/Implementations
 interface Sized {
   length : T -> Int
   empty? : T -> Bool
 }
 
-interface Mappable {
-  map : (A -> B) -> T<A> -> T<B>
-}
-
-interface Collection extends Mappable {
-  fold : (A -> F -> F) -> F -> T<A> -> F
-  filter : (A -> Bool) -> T<A> -> T<A>
-  find : (A -> Bool) -> T<A> -> Option<A>
-
-  filter_map : (A -> Option<B>) -> T<A> -> T<B>
-  map_fold : (A -> F -> (B, F)) -> F -> T<A> -> (T<B>, F)
-
-  put : A -> T<A> -> T<A>
-  delete : A -> T<A> -> T<A>
-
-  contains? : A -> T<A> -> Bool
-  all? : (A -> Bool) -> T<A> -> Bool
-  any? : (A -> Bool) -> T<A> -> Bool
-}
-
-
-//-- Implementations
 impl Sized for String {
   length = @erlang:size/1
   empty?(s) = s == ""
@@ -53,6 +31,10 @@ impl Sized for Set<A> {
 impl Sized for Map<A, B> {
   length = @erlang:map_size/1
   empty?(m) = m == {}
+}
+
+interface Mappable {
+  map : (A -> B) -> T<A> -> T<B>
 }
 
 impl Mappable for Option {
@@ -77,6 +59,22 @@ impl Mappable for Map {
     let (new_k, new_v) = f((k, v))
     @maps:put(new_k, new_v, new_m)
   , {}, m)
+}
+
+interface Collection extends Mappable {
+  fold : (A -> F -> F) -> F -> T<A> -> F
+  filter : (A -> Bool) -> T<A> -> T<A>
+  find : (A -> Bool) -> T<A> -> Option<A>
+
+  filter_map : (A -> Option<B>) -> T<A> -> T<B>
+  map_fold : (A -> F -> (B, F)) -> F -> T<A> -> (T<B>, F)
+
+  put : A -> T<A> -> T<A>
+  delete : A -> T<A> -> T<A>
+
+  contains? : A -> T<A> -> Bool
+  all? : (A -> Bool) -> T<A> -> Bool
+  any? : (A -> Bool) -> T<A> -> Bool
 }
 
 impl Collection for List {
@@ -171,10 +169,10 @@ impl Collection for Map {
   filter(f, m) = @maps:filter(|k, v| f((k, v)), m)
   find(f, m) = to_list(m) |> find(f)
 
-  filter_map(f, m) = to_list(m) |> filter_map(f) |> @maps:from_list/1
+  filter_map(f, m) = to_list(m) |> filter_map(f) |> to_map
   map_fold(f, init, m) =
     let (pairs, memo) = to_list(m) |> map_fold(f, init)
-    (@maps:from_list(pairs), memo)
+    (to_map(pairs), memo)
 
   put((k, v), m) = @maps:put(k, v, m)
   delete((k, v), m) = if contains?((k, v), m) then @maps:remove(k, m) else m
@@ -238,12 +236,52 @@ export trunc = @erlang:trunc/1
 
 
 //-- Conversions
-interface ToList {
-  to_list : T<A> -> [A]
+interface ToInt {
+  to_int : T -> Int
 }
 
-interface ToMap {
-  to_map : T<K, V> -> Map<K, V>
+impl ToInt for Float {
+  to_int = trunc
+}
+
+impl ToInt for Char {
+  to_int(c) = assume c
+}
+
+impl ToInt for String {
+  to_int = @erlang:binary_to_integer/1
+}
+
+interface ToFloat {
+  to_float : T -> Float
+}
+
+impl ToFloat for Int {
+  to_float = @erlang:float/1
+}
+
+// TODO support for this
+//impl ToFloat for String {
+//  to_float(s) = match @binary:"match"(".", s) {
+//    @nomatch => to_float(to_int(s))
+//    _ => to_float(s)
+//  }
+//}
+
+interface ToAtom {
+  to_atom : T -> Atom
+}
+
+impl ToAtom for Char {
+  to_atom(c) = to_atom(@unicode:characters_to_binary([c]) : String)
+}
+
+impl ToAtom for String {
+  to_atom(s) = @erlang:binary_to_atom(s, @utf8)
+}
+
+interface ToList {
+  to_list : T<A> -> [A]
 }
 
 impl ToList for Set {
@@ -254,12 +292,31 @@ impl ToList for Map {
   to_list(m) = @maps:to_list(m)
 }
 
-// TODO fix type system error
-//impl ToMap for List {
-//  to_map(l) = @maps:from_list(l)
-//}
+interface ToSet {
+  to_set : T<A> -> Set<A>
+}
 
-to_float(i) = @erlang:float(i)
+impl ToSet for List {
+  to_set(l) = map(|a| (a, true), l) |> @maps:from_list/1
+}
+
+impl ToSet for Map {
+  to_set(m) = assume map(|(k, v)| ((k, v), true), m)
+}
+
+interface ToMap {
+  to_map : T<K, V> -> Map<K, V>
+}
+
+impl ToMap for List {
+  to_map(l) = @maps:from_list(l)
+}
+
+impl ToMap for Set {
+  to_map(s) = @maps:keys(s) |> @maps:from_list/1
+}
+
+// TODO: ToStr
 
 
 //-- Misc
