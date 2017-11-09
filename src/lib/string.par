@@ -1,0 +1,4 @@
+module String
+
+chars : String -> [Char]
+export chars = @erlang:binary_to_list/1

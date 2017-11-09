@@ -107,34 +107,6 @@ impl Collection for List {
   }
   all? = @lists:all/2
   any? = @lists:any/2
-
-  //TODO move into list module
-  //max_in(l) = match l {
-  //  [] => None
-  //  _ => Some(@lists:max(l))
-  //}
-  //min_in(l) = match l {
-  //  [] => None
-  //  _ => Some(@lists:min(l))
-  //}
-  //max_by(f, l) = match l {
-  //  [] => None
-  //  [h | t] =>
-  //    let (max, _) = fold(|x, (max, max_key)|
-  //      let x_key = f(x)
-  //      if x_key > max_key then (x, x_key) else (max, max_key)
-  //    , (h, f(h)), t)
-  //    Some(max)
-  //}
-  //min_by(f, l) = match l {
-  //  [] => None
-  //  [h | t] =>
-  //    let (min, _) = fold(|x, (min, min_key)|
-  //      let x_key = f(x)
-  //      if x_key < min_key then (x, x_key) else (min, min_key)
-  //    , (h, f(h)), t)
-  //    Some(min)
-  //}
 }
 
 impl Collection for Set {
@@ -240,12 +212,17 @@ interface ToInt {
   to_int : T -> Int
 }
 
+// TODO: exceptions for conversions?
 impl ToInt for Float {
   to_int = trunc
 }
 
 impl ToInt for Char {
   to_int(c) = assume c
+}
+
+impl ToInt for [Char] {
+  to_int = @erlang:list_to_integer/1
 }
 
 impl ToInt for String {
@@ -260,20 +237,33 @@ impl ToFloat for Int {
   to_float = @erlang:float/1
 }
 
-// TODO support for this
-//impl ToFloat for String {
-//  to_float(s) = match @binary:"match"(".", s) {
-//    @nomatch => to_float(to_int(s))
-//    _ => to_float(s)
-//  }
-//}
+// TODO support integer parsing for both of these to_float versions
+impl ToFloat for [Char] {
+  to_float = @erlang:list_to_float/1
+}
+
+impl ToFloat for String {
+  to_float = @erlang:binary_to_float/1
+}
+
+interface ToChar {
+  to_char : T -> Char
+}
+
+impl ToChar for Int {
+  to_char(i) = assume i
+}
 
 interface ToAtom {
   to_atom : T -> Atom
 }
 
 impl ToAtom for Char {
-  to_atom(c) = to_atom(@unicode:characters_to_binary([c]) : String)
+  to_atom(c) = to_atom([c])
+}
+
+impl ToAtom for [Char] {
+  to_atom = @erlang:list_to_atom/1
 }
 
 impl ToAtom for String {
@@ -317,6 +307,7 @@ impl ToMap for Set {
 }
 
 // TODO: ToStr
+// TODO: Concatable, Separable interfaces
 
 
 //-- Misc

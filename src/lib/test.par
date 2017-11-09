@@ -1,7 +1,21 @@
 module Test
 
+import Base (Option, variants Option)
+
 exception Fail(String)
 
 // EUnit treats an array of tests as a test.
 group : [Test] -> Test
 export group(tests) = assume tests
+
+capture : (() -> A) -> Option<Exception>
+export capture(cb) =
+  try
+    cb()
+    None
+  {
+    e => Some(e)
+  }
+
+ok : Assertion
+export ok = assume @ok

@@ -178,9 +178,9 @@
 '_@separate'(Left, Right) ->
   if
     erlang:is_list(Left) ->
-      Set = gb_sets:from_list(Right),
+      Map = maps:from_list([{Elem, true} || Elem <- Right]),
       lists:filter(fun(Elem) ->
-        not gb_sets:is_element(Elem, Set)
+        not maps:is_key(Elem, Map)
       end, Left);
     erlang:is_map(Left) -> maps:without(maps:keys(Right), Left)
   end.

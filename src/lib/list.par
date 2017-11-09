@@ -1,0 +1,199 @@
+module List
+
+import Base (Option, variants Option, fold, length, contains?, put)
+import Map
+
+exception BadIndex(Int)
+exception MismatchedLengths(Int, Int)
+
+max_in : [A ~ Ord] -> Option<A ~ Ord>
+export max_in(l) = match l {
+  [] => None
+  _ => Some(@lists:max(l))
+}
+
+min_in : [A ~ Ord] -> Option<A ~ Ord>
+export min_in(l) = match l {
+  [] => None
+  _ => Some(@lists:min(l))
+}
+
+max_by : (A -> B ~ Ord) -> [A] -> Option<A>
+export max_by(f, l) = match l {
+  [] => None
+  [h | t] =>
+    let (max, _) = fold(|x, (max, max_key)|
+      let x_key = f(x)
+      if x_key > max_key then (x, x_key) else (max, max_key)
+    , (h, f(h)), t)
+    Some(max)
+}
+
+min_by : (A -> B ~ Ord) -> [A] -> Option<A>
+export min_by(f, l) = match l {
+  [] => None
+  [h | t] =>
+    let (min, _) = fold(|x, (min, min_key)|
+      let x_key = f(x)
+      if x_key < min_key then (x, x_key) else (min, min_key)
+    , (h, f(h)), t)
+    Some(min)
+}
+
+take_while : (A -> Bool) -> [A] -> [A]
+export take_while = @lists:takewhile/2
+
+drop_while : (A -> Bool) -> [A] -> [A]
+export drop_while = @lists:dropwhile/2
+
+split_while : (A -> Bool) -> [A] -> ([A], [A])
+export split_while = @lists:splitwith/2
+
+repeat : Int -> A -> [A]
+export repeat = @lists:duplicate/2
+
+flat_map : (A -> [B]) -> [A] -> [B]
+export flat_map = @lists:flatmap/2
+
+foldr : (A -> F -> F) -> F -> [A] -> F
+export foldr = @lists:foldr/3
+
+map_foldr : (A -> F -> (B, F)) -> F -> [A] -> ([B], F)
+export map_foldr = @lists:mapfoldr/3
+
+partition : (A -> Bool) -> [A] -> ([A], [A])
+export partition = @lists:partition/2
+
+reverse : [A] -> [A]
+export reverse = @lists:reverse/1
+
+seq : Int -> Int -> [Int]
+export seq(start, end) =
+  if start <= end then
+    [start | seq(start + 1, end)]
+  else
+    []
+
+sum : [A ~ Num] -> A ~ Num
+export sum = @lists:sum/1
+
+sort : [A ~ Ord] -> [A ~ Ord]
+export sort = @lists:sort/1
+
+sort_by : (A -> B ~ Ord) -> [A] -> [A]
+export sort_by(f, l) = @lists:sort(|a, b| f(a) < f(b), l)
+
+sort_cmp : (A -> A -> Bool) -> [A] -> [A]
+export sort_cmp = @lists:sort/2
+
+nth : Int -> [A] -> A
+export nth(i, l) =
+  let wrapped_i = if i < 0 then length(l) + i else i
+  if wrapped_i < 0 then raise BadIndex(i) else nth_r(0, wrapped_i, l)
+
+nth_r : Int -> Int -> [A] -> A
+nth_r(i, n, l) = match l {
+  [h | t] => if i == n then h else nth_r(i + 1, n, t)
+  [] => raise BadIndex(i)
+}
+
+slice : Int -> Int -> [A] -> [A]
+export slice(i, num, l) =
+  if num <= 0 then
+    []
+  else
+    let wrapped_i = if i < 0 then length(l) + i else i
+    if wrapped_i < 0 then raise BadIndex(i) else slice_r(0, wrapped_i, num, l)
+
+range : Int -> Int -> [A] -> [A]
+export range(s, e, l) =
+  let len = if s < 0 || e < 0 then length(l) else 0
+  let wrapped_s = if s < 0 then len + s else s
+  let wrapped_e = if e < 0 then len + e else e
+
+  if wrapped_s > wrapped_e then
+    []
+  else if wrapped_s < 0 then
+    raise BadIndex(s)
+  else if wrapped_e < 0 then
+    raise BadIndex(e)
+  else
+    slice_r(0, wrapped_s, wrapped_e - wrapped_s + 1, l)
+
+slice_r : Int -> Int -> Int -> [A] -> [A]
+slice_r(i, s, num, l) =
+  if num <= 0 then
+    []
+  else
+    match l {
+      [h | t] =>
+        if i >= s then
+          [h | slice_r(i + 1, s, num - 1, t)]
+        else
+          slice_r(i + 1, s, num, t)
+      [] => raise BadIndex(i)
+    }
+
+join : String -> [String] -> String
+export join(s, l) = @erlang:iolist_to_binary(intersperse(s, l))
+
+intersperse : A -> [A] -> [A]
+intersperse(a, l) = match l {
+  [] => []
+  [h] => [h]
+  [h | t] => [h, a | intersperse(a, t)]
+}
+
+zip : [A] -> [B] -> [(A, B)]
+export zip(l1, l2) = zip_r(0, l1, l2)
+
+zip_r : Int -> [A] -> [B] -> [(A, B)]
+zip_r(i, l1, l2) = match (l1, l2) {
+  ([h1 | t1], [h2 | t2]) => [(h1, h2) | zip_r(i + 1, t1, t2)]
+  ([], []) => []
+  _ => raise MismatchedLengths(i + length(l1), i + length(l2))
+}
+
+unzip : [(A, B)] -> ([A], [B])
+export unzip = @lists:unzip/1
+
+group_by : (A -> B) -> [A] -> Map<B, [A]>
+export group_by(f, l) =
+  foldr(|a, m| Map.upsert(f(a), |group| [a | group], [a], m), {}, l)
+
+unique : [A] -> [A]
+export unique(l) =
+  let (unique_l_rev, _) = fold(|a, (new_l, s)|
+    if contains?(a, s) then
+      (new_l, s)
+    else
+      ([a | new_l], put(a, s))
+  , ([], #[]), l)
+
+  reverse(unique_l_rev)
+
+unique_by : (A -> B) -> [A] -> [A]
+export unique_by(f, l) =
+  let (unique_l_rev, _) = fold(|a, (new_l, s)|
+    let key = f(a)
+    if contains?(key, s) then
+      (new_l, s)
+    else
+      ([a | new_l], put(key, s))
+  , ([], #[]), l)
+
+  reverse(unique_l_rev)
+
+with_index : [A] -> [(A, Int)]
+export with_index(l) = with_index_r(0, l)
+
+with_index_r : Int -> [A] -> [(A, Int)]
+with_index_r(i, l) = match l {
+  [h | t] => [(h, i) | with_index_r(i + 1, t)]
+  [] => []
+}
+
+each : (A -> B) -> [A] -> ()
+export each(f, l) =
+  @lists:foreach(f, l)
+  ()

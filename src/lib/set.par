@@ -1,0 +1,18 @@
+module Set
+
+import Base (all?, contains?)
+
+intersect : Set<A> -> Set<A> -> Set<A>
+export intersect(a, b) = @maps:with(@maps:keys(b), a)
+
+union : Set<A> -> Set<A> -> Set<A>
+export union(a, b) = @maps:merge(a, b)
+
+subtract : Set<A> -> Set<A> -> Set<A>
+export subtract(a, b) = @maps:without(@maps:keys(b), a)
+
+subset? : Set<A> -> Set<A> -> Bool
+export subset?(a, b) = all?(|e| contains?(e, b), a)
+
+disjoint? : Set<A> -> Set<A> -> Bool
+export disjoint?(a, b) = intersect(a, b) == assume {}

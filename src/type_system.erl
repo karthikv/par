@@ -133,6 +133,10 @@ stdlib_dir() -> filename:join(code:lib_dir(par, src), "lib").
 stdlib_modules() ->
   #{
     "Base" => "base.par",
+    "List" => "list.par",
+    "Set" => "set.par",
+    "Map" => "map.par",
+    "String" => "string.par",
     "Test" => "test.par"
   }.
 
@@ -259,7 +263,11 @@ add_stdlib_imports({module, _, _, RawImports, _}=Ast) ->
   RawStdlibImports = [
     {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "Base"}, [
       {all, ?BUILTIN_LOC}
-    ]}
+    ]},
+    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "List"}, []},
+    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "Set"}, []},
+    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "Map"}, []},
+    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "String"}, []}
   ],
   StdlibImports = lists:filter(fun({import, _, {con_token, _, Con}, _}) ->
     not ordsets:is_element(Con, ImportedSet)

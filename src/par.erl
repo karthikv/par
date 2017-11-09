@@ -7,16 +7,23 @@
 %   - Map/Set operations?
 %   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Fork eunite and fix macro display
+% - Catch keyword for try?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
+% - Assume Num is a closed typeclass so we can omit sig in to_float(3 : Int)
 % - Think about bug with passing curried function to native
 % - Syntax: List, Set, Map, Record
 %   - New: [a, b], #[a, b], #{a => b, c => d}, {a = b, c = d}
 %   - Put: [a, b | c], #[a, b | c], #{a => b, c => d | m}, {a = b, c = d | r}
+% - Finalize questions surrounding syntax:
+%   - Lowercase for TVs? If not, how to prevent confusion w/ Con?
+%   - Record update syntax? Consistency w/ other data structures?
+%   - Use | to separate cases for match/try?
+%   - Use -> instead of => for match/try?
 % - [1 week] REPL
 %   - See if interpreter is even necessary
 %   - Finish implementation of import, interfaces, records
@@ -67,7 +74,6 @@
 % - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
 % - Put solver record into CG to avoid duplication of fields like nested_ivs?
-% - [1 day] TV vs. Con parsing
 % - Implementations for builtin typeclasses?
 %   - Should we also exclude concatable, separable, etc. from sets?
 % - [2 days] Better pattern matching
@@ -77,11 +83,6 @@
 %   - Allow when clause and or?
 % - Eq/Proper typeclass for non-functions?
 %   - Make pattern matching with var_value use proper type class
-% - Force discard for block exprs that don't return unit?
-% - Syntax changes?
-%   - Use | to separate cases for match/try?
-%   - Use -> instead of => for match/try?
-%   - Lowercase for type variables?
 % - Accessing tag of enum?
 % - Dot operator for composition?
 % - _atom field for a module
@@ -91,7 +92,7 @@
 % - Allow T only on rhs of iface type sig?
 % - Operator |< to prepend an argument?
 % - Force all block expressions except last to be type ()?
-% - List indexing?
+%   - Enforce discarding?
 
 main(Args) ->
   {ok, Dir} = file:get_cwd(),

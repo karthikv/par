@@ -4,7 +4,11 @@
 -include("../src/common.hrl").
 
 stdlib_test_() ->
-  Result = type_system:infer_file("test/lib/base_test.par"),
+  [test_stdlib_path(Path) ||
+   Path <- filelib:wildcard("test/lib/**/*.par")].
+
+test_stdlib_path(Path) ->
+  Result = type_system:infer_file(Path),
   {ok, Comps, C} = type_system_test:check_ok(Result, user),
   Compiled = code_gen:compile_comps(Comps, C),
 

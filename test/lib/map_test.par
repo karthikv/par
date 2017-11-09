@@ -1,0 +1,125 @@
+module MapTest
+
+import Map (*)
+import Test (group, capture)
+
+lookup_test : Test
+lookup_test = group([
+  test assert lookup(@hi, { @hi => 'h' }) == Some('h')
+  test assert lookup("foo", { "bar" => 3.7, "baz" => 1 }) == None
+  test assert lookup(true, {}) == None
+])
+
+get_test : Test
+get_test = group([
+  test assert get(@hi, { @hi => 'h' }) == 'h'
+  test assert capture(|-| get("foo", { "bar" => 3.7, "baz" => 1 })) ==
+    Some(BadKey)
+  test assert capture(|-| get(true, {})) == Some(BadKey)
+])
+
+get_or_test : Test
+get_or_test = group([
+  test assert get_or(@hi, 'i', { @hi => 'h' }) == 'h'
+  test assert get_or("foo", 5.02, { "bar" => 3.7, "baz" => 1 }) == 5.02
+  test assert get_or(true, [false], {}) == [false]
+])
+
+key_test : Test
+key_test = group([
+  test assert key?(@hi, { @hi => 'h' })
+  test assert !key?("foo", { "bar" => 3.7, "baz" => 1 })
+  test assert !key?(true, {})
+])
+
+keys_test : Test
+keys_test = group([
+  test assert keys({ @hi => 'h' }) == [@hi]
+  test
+    let ks = keys({ "bar" => 3.7, "baz" => 1 })
+    // order is undefined
+    assert ks == ["bar", "baz"] || ks == ["baz", "bar"]
+  test assert keys({}) == []
+])
+
+values_test : Test
+values_test = group([
+  test assert values({ @hi => 'h' }) == ['h']
+  test
+    let vs = values({ "bar" => 3.7, "baz" => 1 })
+    // order is undefined
+    assert vs == [3.7, 1] || vs == [1, 3.7]
+  test assert values({}) == []
+])
+
+remove_test : Test
+remove_test = group([
+  test assert remove(@hi, { @hi => 'h' }) == {}
+  test assert remove("foo", { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 3.7, "baz" => 1 }
+  test assert remove("bar", { "bar" => 3.7, "baz" => 1 }) == { "baz" => 1 }
+  test assert remove(true, {}) == {}
+])
+
+update_test : Test
+update_test = group([
+  test assert update(@hi, |ch| to_int(ch) + 1 |> to_char, { @hi => 'h' }) ==
+    { @hi => 'i' }
+  test
+    let cb() = update("foo", |a| a * 2, { "bar" => 3.7, "baz" => 1 })
+    assert capture(cb) == Some(BadKey)
+  test assert update("bar", |a| a * 2, { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 7.4, "baz" => 1 }
+  test assert capture(|-| update(true, |v| v, {})) == Some(BadKey)
+])
+
+upsert_test : Test
+upsert_test = group([
+  test
+    let cb = |ch| to_int(ch) + 1 |> to_char
+    assert upsert(@hi, cb, 'a', { @hi => 'h' }) == { @hi => 'i' }
+  test assert upsert("foo", |a| a * 2, 0, { "bar" => 3.7, "baz" => 1 }) ==
+    { "foo" => 0, "bar" => 3.7, "baz" => 1 }
+  test assert upsert("bar", |a| a * 2, 0, { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 7.4, "baz" => 1 }
+  test assert upsert(true, |v| v, false, {}) == { true => false }
+])
+
+merge_test : Test
+merge_test = group([
+  test assert merge({ @hi => 'i', @hey => 'y' }, { @hi => 'h' }) ==
+    { @hi => 'h', @hey => 'y' }
+  test assert merge({ @hi => 'h' }, { @hi => 'i', @hey => 'y' }) ==
+    { @hi => 'i', @hey => 'y' }
+  test assert merge({ "foo" => 7.5 }, { "bar" => 3.7, "baz" => 1 }) ==
+    { "foo" => 7.5, "bar" => 3.7, "baz" => 1 }
+  test assert merge({ true => @true, false => @false }, {}) ==
+    { true => @true, false => @false }
+  test assert merge({}, {}) == {}
+])
+
+with_test : Test
+with_test = group([
+  test assert with([@hi], { @hi => 'h' }) == { @hi => 'h' }
+  test assert with([], { @hi => 'h' }) == {}
+  test assert with(["foo"], { "bar" => 3.7, "baz" => 1 }) == {}
+  test assert with(["foo", "bar"], { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 3.7 }
+  test assert with(["baz", "foo", "bar"], { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 3.7, "baz" => 1 }
+  test assert with([true], {}) == {}
+  test assert with([], {}) == {}
+])
+
+without_test : Test
+without_test = group([
+  test assert without([@hi], { @hi => 'h' }) == {}
+  test assert without([], { @hi => 'h' }) == { @hi => 'h' }
+  test assert without(["foo"], { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 3.7, "baz" => 1 }
+  test assert without(["foo", "bar"], { "bar" => 3.7, "baz" => 1 }) ==
+    { "baz" => 1 }
+  test assert without(["baz", "foo", "bar"], { "bar" => 3.7, "baz" => 1 }) == {}
+  test assert without([true], {}) == {}
+  test assert without([], {}) == {}
+])
