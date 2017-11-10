@@ -42,11 +42,11 @@ enum Node {
   FieldFn(Loc, Node) @field_fn
   Field(Loc, Node, Node) @field
 
-  AnonRecord(Loc, [Node]) @anon_record
+  AnonRecord(Loc, Ref, [Node]) @anon_record
   Record(Loc, Node, [Node]) @record
   Init(Loc, Node, Node) @init
 
-  AnonRecordExt(Loc, Node, [Node]) @anon_record_ext
+  AnonRecordExt(Loc, Ref, Node, [Node]) @anon_record_ext
   RecordExt(Loc, Node, Node, [Node]) @record_ext
   Ext(Loc, Node, Node) @ext
 
@@ -557,8 +557,8 @@ expr_r(expr_s, state, stack, tokens) = match state {
             // the locations of LBrace and RBrace don't matter here
             expr([Lexer.LBrace(s) | inner] ++ [Lexer.RBrace(s)])
             |> pmap(|(node, [])| match node {
-              AnonRecord(_, fields) => (Record(l, con_node, fields), rest)
-              AnonRecordExt(_, base, fields) =>
+              AnonRecord(_, _, fields) => (Record(l, con_node, fields), rest)
+              AnonRecordExt(_, _, base, fields) =>
                 (RecordExt(l, con_node, base, fields), rest)
 
               // could potentially parse a valid map, but this is actually
@@ -589,7 +589,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
           let parse_anon_record(_) =
             many_delim_comma_or_nl(init, inner)
             |> pmap_or(|v| v, [])
-            |> pmap(|fields| AnonRecord(l, fields))
+            |> pmap(|fields| AnonRecord(l, make_ref(), fields))
 
           let parsed_expr = expr(inner) |> pbind(|v| match v {
             (_, [Lexer.FatArrow(_) | _]) =>
@@ -600,7 +600,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
             (base, [Lexer.Bar(_) | t]) =>
               many_delim_comma_or_nl(init_or_ext(true), t)
               |> pmap_or(|v| v, [])
-              |> pmap(|fields| AnonRecordExt(l, base, fields))
+              |> pmap(|fields| AnonRecordExt(l, make_ref(), base, fields))
 
             // If we use head_loc(t) here, we'll incorrectly report an EOF
             // error in the case of { expr }; avoid this by using node_loc
@@ -1574,8 +1574,3 @@ chars = @erlang:binary_to_list/1
 
 make_ref : () -> Ref
 make_ref = @erlang:make_ref/0
-
-print : String -> A -> A
-print(prefix, a) =
-  @io:format(prefix ++ ": ~p~n", [a])
-  a

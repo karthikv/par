@@ -36,13 +36,14 @@
 %   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   impl_refs - a Ref => ImplKey map for implementations of interfaces
-%   sig_ifaces - a map of V => I for TV names in a sig to ensure consistency
+%   sig_vs - a map of V => I for TV names in a sig to ensure consistency
 %   fn_refs - a Ref => T mapping for fns
 %   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated vars
 %   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
 %   errs - an array of error messages, each of the form {Msg, Loc}
 %   num_params - the number of type params for the TV being processed
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
+%   record_refs - a Ref => T mapping of types for anonymous records
 %   module - the current module
 %   imported - a set containing {Module1, Module2} pairs, meaning Module2 has
 %              been imported by Module1
@@ -92,6 +93,7 @@
   num_params,
   errs = [],
   gen_vs = #{},
+  record_refs = #{},
   module,
   imported = ordsets:new(),
   pid

@@ -59,6 +59,7 @@
   schemes = #{},
   bound_vs,
   inst_refs = #{},
+  record_refs = #{},
   iv_origins = #{},
   aliases,
   ifaces,
@@ -306,7 +307,7 @@ parse_prg(Prg, Path) ->
     {ok, Tokens} ->
       case 'Parser':parse(Tokens) of
         #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, PrgLines};
-        #{value := {some, Ast}} -> {ok, Ast, PrgLines}
+        #{value := {'Some', Ast}} -> {ok, Ast, PrgLines}
       end
   end.
 
@@ -386,11 +387,16 @@ infer_comps(RawComps) ->
         utils:args_ivs(subs_s(T, FinalS), BoundVs)
       end, C2#ctx.fn_refs),
 
+      SubbedRecordRefs = maps:map(fun(_, T) ->
+        subs_s(T, FinalS)
+      end, C2#ctx.record_refs),
+
       FinalC = C2#ctx{
         g_env=FinalGEnv,
         inst_refs=SubbedInstRefs,
         fn_refs=SubbedFnRefs,
-        nested_ivs=NestedIVs
+        nested_ivs=NestedIVs,
+        record_refs=SubbedRecordRefs
       },
       {ok, Comps, FinalC};
 
@@ -923,8 +929,8 @@ infer({enum, _, EnumTE, Options}, C) ->
     {OptionT, ArgTs, FoldC1} = infer_option(Option, RawT, FVs, SigVs, FoldC),
 
     Key = case KeyNode of
-      none -> list_to_atom(Con);
-      {some, {atom, _, Key_}} -> Key_
+      'None' -> list_to_atom(Con);
+      {'Some', {atom, _, Key_}} -> Key_
     end,
 
     NewGenOptions = case ordsets:size(fvs(OptionT)) == 0 of
@@ -935,7 +941,7 @@ infer({enum, _, EnumTE, Options}, C) ->
     end,
 
     {NewKeys, FoldC2} = case KeyNode of
-      none ->
+      'None' ->
         case maps:find(Key, Keys) of
           % We've already added an ERR_REDEF for the option. There's no need to
           % add an ERR_DUP_KEY as well.
@@ -952,7 +958,7 @@ infer({enum, _, EnumTE, Options}, C) ->
           error -> {Keys#{Key => {default, Con, Loc}}, FoldC1}
         end;
 
-      {some, {atom, KeyLoc, _}} ->
+      {'Some', {atom, KeyLoc, _}} ->
         case maps:find(Key, Keys) of
           {ok, {_, OtherCon, OtherLoc}} ->
             CaseC = add_ctx_err(
@@ -1231,7 +1237,7 @@ infer({hole, _}, C) -> {{hole, true}, C};
 % Underscores in patterns are used to match anything.
 infer({'_', _}, C) -> {tv_server:fresh(C#ctx.pid), C};
 
-infer({anon_record, _, Inits}, C) ->
+infer({anon_record, _, Ref, Inits}, #ctx{record_refs=RecordRefs}=C) ->
   {FieldMap, C1} = lists:foldl(fun(Init, {Map, FoldC}) ->
     {init, _, {var, Loc, Name}, Expr} = Init,
 
@@ -1254,9 +1260,14 @@ infer({anon_record, _, Inits}, C) ->
     end
   end, {#{}, C}, Inits),
 
-  {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
+  RecordT = {record, tv_server:next_name(C1#ctx.pid), FieldMap},
+  C2 = case Ref of
+    none -> C1;
+    _ -> C1#ctx{record_refs=RecordRefs#{Ref => RecordT}}
+  end,
+  {RecordT, C2};
 
-infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
+infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {Inits, ExtInits} = lists:foldl(fun(InitOrExt, Memo) ->
     {FoldInits, FoldExtInits} = Memo,
@@ -1269,7 +1280,7 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
   C3 = if
     length(Inits) == 0 -> C1;
     true ->
-      {{record, A, FieldMap}, C2} = infer({anon_record, Loc, Inits}, C1),
+      {{record, A, FieldMap}, C2} = infer({anon_record, Loc, none, Inits}, C1),
       add_cst(
         ExprT,
         {record_ext, A, tv_server:fresh(C2#ctx.pid), FieldMap},
@@ -1282,7 +1293,7 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
   if
     length(ExtInits) == 0 -> {ExprT, C3};
     true ->
-      {{record, ExtA, Ext}, C4} = infer({anon_record, Loc, ExtInits}, C3),
+      {{record, ExtA, Ext}, C4} = infer({anon_record, Loc, none, ExtInits}, C3),
       % ExprT needs to have every field in ext, but the types can be different
       % because it's a record extension.
       RelaxedExt = maps:map(fun(_, _) -> tv_server:fresh(C4#ctx.pid) end, Ext),
@@ -1295,7 +1306,13 @@ infer({anon_record_ext, Loc, Expr, AllInits}, C) ->
         C4
       ),
 
-      {{record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext}, C5}
+      RecordT = {record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext},
+      RecordRefs = C5#ctx.record_refs,
+      C6 = case Ref of
+        none -> C5;
+        _ -> C5#ctx{record_refs=RecordRefs#{Ref => RecordT}}
+      end,
+      {RecordT, C6}
   end;
 
 infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
@@ -1313,7 +1330,7 @@ infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
           unalias_except_struct({gen, {con, Con}, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
       From = ?FROM_RECORD_CREATE(Con),
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -1322,11 +1339,11 @@ infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
       {TV, C3};
 
     {ok, #type_binding{is_iface=true}} ->
-      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record, Loc, Inits}, C),
+      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
@@ -1343,7 +1360,7 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
           unalias_except_struct({gen, {con, Con}, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
       From = ?FROM_RECORD_UPDATE,
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -1352,11 +1369,11 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
       {TV, C3};
 
     {ok, #type_binding{is_iface=true}} ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
@@ -1565,7 +1582,8 @@ infer({binary_op, _, '|>', Left, Right}, C) ->
   % get better error messages, add the right constraint first, so it's possible
   % for the left constraint to fail. This is the main reason |> is in a separate
   % function clause than the rest of the binary operators below.
-  C3 = add_cst({lam, ArgTV, TV}, RightT, ?LOC(Right), ?FROM_OP_RHS('|>'), C2),
+  AppT = {lam, C#ctx.l_env, ?LOC(Left), ArgTV, TV},
+  C3 = add_cst(AppT, RightT, ?LOC(Right), ?FROM_OP_RHS('|>'), C2),
   C4 = add_cst(ArgTV, LeftT, ?LOC(Left), ?FROM_OP_LHS('|>'), C3),
   {TV, C4};
 

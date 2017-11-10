@@ -25,8 +25,8 @@ init({global, _, {var, _, Name}, Expr, _}, ID) ->
 init({enum, _, _, OptionTEs}, ID) ->
   lists:foreach(fun({option, _, {con_token, _, Con}, ArgsTE, KeyNode}) ->
     Key = case KeyNode of
-      none -> list_to_atom(Con);
-      {some, {atom, _, Key_}} -> Key_
+      'None' -> list_to_atom(Con);
+      {'Some', {atom, _, Key_}} -> Key_
     end,
 
     V = if
@@ -118,7 +118,7 @@ eval({N, _, Name}, ID) when N == var; N == con_token ->
 
 eval({var_ref, Loc, _, Name}, ID) -> eval({var, Loc, Name}, ID);
 
-eval({anon_record, _, Inits}, ID) ->
+eval({anon_record, _, _, Inits}, ID) ->
   Pairs = lists:map(fun({init, _, {var, _, Name}, Expr}) ->
     V = case Expr of
       {fn, _, _, _, _} ->
@@ -135,17 +135,17 @@ eval({anon_record, _, Inits}, ID) ->
 
   maps:from_list(Pairs);
 
-eval({anon_record_ext, Loc, Expr, AllInits}, C) ->
+eval({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
   Record = eval(Expr, C),
   Inits = lists:map(fun(InitOrExt) ->
     setelement(1, InitOrExt, init)
   end, AllInits),
-  maps:merge(Record, eval({anon_record, Loc, Inits}, C));
+  maps:merge(Record, eval({anon_record, Loc, Ref, Inits}, C));
 
-eval({record, Loc, _, Inits}, ID) -> eval({anon_record, Loc, Inits}, ID);
+eval({record, Loc, _, Inits}, ID) -> eval({anon_record, Loc, none, Inits}, ID);
 
 eval({record_ext, Loc, _, Expr, AllInits}, ID) ->
-  eval({anon_record_ext, Loc, Expr, AllInits}, ID);
+  eval({anon_record_ext, Loc, none, Expr, AllInits}, ID);
 
 eval({field_fn, _, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),
@@ -241,7 +241,9 @@ eval({unary_op, _, Op, Expr}, ID) ->
 
   case Op of
     '!' -> not V;
-    '#' -> maps:from_list(lists:map(fun(E) -> {E, true} end, V));
+    '#' ->
+      Pairs = lists:map(fun(E) -> {E, true} end, V),
+      maps:from_list([{'_@type', 'Set'} | Pairs]);
     % $ is used to convert Char to Int, but the underlying rep is the same
     '$' -> V;
     '-' -> -V;

@@ -301,7 +301,7 @@ tokenize_str_r(loc, chs, accum) = match chs {
     }
     tokenize_str_r(next_loc, t, [unesc(h) | accum])
 
-  ['"' | t] => (LitStr(inc(loc, 1), to_str(reverse(accum))), t)
+  ['"' | t] => (LitStr(inc(loc, 1), char_to_str(reverse(accum))), t)
 
   ['\n' | t] =>
     let token = Unexpected(
@@ -444,16 +444,11 @@ unesc(ch) = match ch {
 flip : (A -> B -> C) -> B -> A -> C
 flip(f, b, a) = f(a, b)
 
-to_str : [Char] -> String
-to_str = @erlang:list_to_binary/1
+char_to_str : [Char] -> String
+char_to_str = @erlang:list_to_binary/1
 
 chars : String -> [Char]
 chars = @erlang:binary_to_list/1
 
 reverse : [A] -> [A]
 reverse = @lists:reverse/1
-
-print : A -> A
-print(a) =
-  @io:format("~p~n", [a])
-  a

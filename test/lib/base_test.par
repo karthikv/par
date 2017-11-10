@@ -355,3 +355,43 @@ to_map_test = group([
     { @hey => true, @hi => false }
   test assert to_map(#[]) == {}
 ])
+
+struct Foo {
+  foo : Int
+  bar : String
+}
+
+to_str_test : Test
+to_str_test = group([
+  test assert to_str(1) == "1"
+  test assert to_str(7.89) == "7.89"
+  test assert to_str(true) == "true"
+  test assert to_str(@hey) == "hey"
+  test assert to_str('c') == "99"
+  test assert to_str("hi") == "hi"
+  test assert to_str((7.5, @hi)) == "(7.5, hi)"
+  test assert to_str([true, false]) == "[true, false]"
+  test
+    let str = to_str(#[2, 88.03])
+    // order is undefined
+    assert str == "#[2, 88.03]" || str == "#[88.03, 2]"
+  test
+    let str = to_str({ @hey => "hi", @later => "bye" })
+    // order is undefined
+    assert str == "{ hey => \"hi\", later => \"bye\" }" ||
+      str == "{ later => \"bye\", hey => \"hi\" }"
+  test assert to_str(Some(true)) == "Some(true)"
+  test assert to_str(None) == "None"
+  test
+    let str = to_str({ a = 8.7, foo = @hello })
+    @io:format("~p~n", [str])
+    print(str)
+    // order is undefined
+    assert str == "{ a = 8.7, foo = hello }" ||
+      str == "{ foo = hello, a = 8.7 }"
+  test
+    let str = to_str(Foo { foo = 77, bar = "Bar" })
+    // order is undefined
+    assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
+      str == "Foo { bar = \"Bar\", foo = 77 }"
+])

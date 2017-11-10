@@ -146,6 +146,7 @@ l(Offset, Len) -> l(0, Offset, Len).
 l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
 l(StartLine, StartOffset, EndLine, EndOffset) ->
   #{
+    '_@type' => 'Loc',
     % lines are 1-indexed, and the first line is the prefix
     start_line => 2 + StartLine,
     % columns are 1-indexed
@@ -519,8 +520,8 @@ expr_test_() ->
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A ~ Num>" = ok_expr(
-      "let f = @gb_sets:add_element/2\n"
-      "#[3] ++ f(2)(#[1])"
+      "let f = @maps:put/3\n"
+      "#[3] ++ f(2)(true)(#[1])"
     ))
   , ?_test("A" = ok_expr("@io:printable_range()"))
   , ?_test("Atom" = ok_expr(
@@ -1503,10 +1504,11 @@ interface_test_() ->
       "foo = to_i({ foo = \"hi\", bar = true, target = -3 })",
       "foo"
     ))
+  % subtract 1 from map_size to account for tag
   , ?_test("Int" = ok_prg(
       IfaceToI ++
       "impl ToI for Set<A> {\n"
-      "  to_i(s) = @gb_sets:size(@erlang:element(2, s))\n"
+      "  to_i(s) = @erlang:map_size(s) - 1\n"
       "}\n"
       "foo = to_i(#['a', 'b'])",
       "foo"
@@ -1686,6 +1688,12 @@ interface_test_() ->
       "impl ToI for Int { to_i(i) = i }\n"
       "foo = to_i(@erlang:round(5.3))",
       {?ERR_MUST_SOLVE_ARG("A ~ ToI", "A ~ ToI"), l(2, 11, 18)}
+    ))
+  , ?_test(bad_prg(
+      IfaceToI ++
+      "impl ToI for Int { to_i(i) = i }\n"
+      "foo = @erlang:round(5.3) |> to_i",
+      {?ERR_MUST_SOLVE_ARG("A ~ ToI", "A ~ ToI"), l(2, 6, 18)}
     ))
   , ?_test(bad_prg(
       IfaceToI ++
@@ -1952,11 +1960,12 @@ interface_test_() ->
       "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
       "impl Collection for List { len = @erlang:length/1 }\n"
       "impl Mappable for List { map = @lists:map/2 }\n"
-      "impl Collection for Set { len = @gb_sets:size/1 }\n"
+      "impl Collection for Set { len(s) = @erlang:map_size(s) - 1 }\n"
       "impl Mappable for Set {\n"
-      "  map(f, s) = @gb_sets:fold(|e, new_s|\n"
-      "    @gb_sets:add_element(f(e), new_s)\n"
-      "  , #[], s)\n"
+      "  map(f, s) =\n"
+      "    let elems = @maps:keys(@maps:remove(@\"_@type\", s))\n"
+      "    let pairs = @lists:map(|e| (f(e), true), elems)\n"
+      "    @maps:from_list([(@\"_@type\", @Set) | pairs])\n"
       "}\n"
       "foo =\n"
       "  let l = [1, 2]\n"

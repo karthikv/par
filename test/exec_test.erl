@@ -70,9 +70,9 @@ test_expr(Expr) ->
       #{<<"hello">> => <<"world">>, <<"some">> => <<"thing">>},
       Expr("{\"hello\" => \"world\", \"some\" => \"thing\"}")
     )
-  , ?_assertEqual(#{}, Expr("#[]"))
+  , ?_assertEqual(#{'_@type' => 'Set'}, Expr("#[]"))
   , ?_assertEqual(
-      #{2 => true, 4 => true, 6 => true, 8 => true},
+      #{'_@type' => 'Set', 2 => true, 4 => true, 6 => true, 8 => true},
       Expr("#[2, 4, 2, 6, 4, 8, 6]")
     )
 
@@ -200,7 +200,7 @@ test_expr(Expr) ->
       Expr("{\"a\" => 1} ++ {\"b\" => 2.0}")
     )
   , ?_assertEqual(
-      #{1 => true, 2 => true, 3 => true},
+      #{'_@type' => 'Set', 1 => true, 2 => true, 3 => true},
       Expr("#[1] ++ #[2, 3]")
     )
   , ?_assertEqual(
@@ -441,24 +441,32 @@ test_exception(Expr, Run, Many) ->
 
 code_gen_record_test_() ->
   test_record(fun expr_code_gen/1, fun run_code_gen/1).
-interpreter_record_test_() ->
-  test_record(fun expr_interpreter/1, fun run_interpreter/1).
+%% interpreter_record_test_() ->
+%%   test_record(fun expr_interpreter/1, fun run_interpreter/1).
 test_record(Expr, Run) ->
-  [ ?_assertEqual(#{bar => 3}, Expr("{ bar = 3 }"))
+  [ ?_assertEqual(#{'_@type' => '_@Record', bar => 3}, Expr("{ bar = 3 }"))
   , ?_assertEqual(
-      #{bar => 3, baz => true},
+      #{'_@type' => '_@Record', bar => 3, baz => true},
       Expr("{ bar = 3, baz = true }")
     )
   , ?_test(8 = Expr("{ bar = |x| x + 5 }.bar(3)"))
   , ?_test(5 = Expr("{ abs(x) = if x > 0 then x else abs(-x) }.abs(-5)"))
-  , ?_assertEqual(#{bar => 4.0}, Expr("{ { bar = 3 } | bar = 4.0 }"))
-  , ?_assertEqual(#{bar => true}, Expr("{ { bar = 3 } | bar := true }"))
-  , ?_assertEqual(#{bar => true, baz => hey}, Expr(
-      "{ { bar = 3, baz = @hi } | bar := true, baz = @hey }"
-    ))
-  , ?_assertEqual(#{bar => true, baz => 3.0}, Expr(
-      "{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }"
-    ))
+  , ?_assertEqual(
+      #{'_@type' => '_@Record', bar => 4.0},
+      Expr("{ { bar = 3 } | bar = 4.0 }")
+    )
+  , ?_assertEqual(
+      #{'_@type' => '_@Record', bar => true},
+      Expr("{ { bar = 3 } | bar := true }")
+    )
+  , ?_assertEqual(
+      #{'_@type' => '_@Record', bar => true, baz => hey},
+      Expr("{ { bar = 3, baz = @hi } | bar := true, baz = @hey }")
+    )
+  , ?_assertEqual(
+      #{'_@type' => '_@Record', bar => true, baz => 3.0},
+      Expr("{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }")
+    )
 
   , ?_test(false = Expr("{ bar = 3 } == { bar = 5 }"))
   , ?_test(true = Expr("{ bar = 3 } == { bar = 3 }"))
@@ -479,27 +487,27 @@ test_record(Expr, Run) ->
     ))
 
   % named struct
-  , ?_assertEqual(#{bar => 3}, Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => 3}, Run(
       "struct Foo { bar : Int }\n"
       "main() = Foo(3)"
     ))
-  , ?_assertEqual(#{bar => 3}, Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => 3}, Run(
       "struct Foo { bar : Int }\n"
       "main() = Foo { bar = 3 }"
     ))
-  , ?_assertEqual(#{bar => 3, baz => [<<"hello">>]}, (Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => 3, baz => [<<"hello">>]}, (Run(
       "struct Foo { bar : Int, baz : [String] }\n"
       "main() = Foo(3)"
     ))([<<"hello">>]))
-  , ?_assertEqual(#{baz => [first, second], bar => 15}, Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', baz => [first, second], bar => 15}, Run(
       "struct Foo { bar : Int, baz : [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
     ))
-  , ?_assertEqual(#{bar => hi, baz => true}, (Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => hi, baz => true}, (Run(
       "struct Foo<X, Y> { bar : X, baz : Y }\n"
       "main() = Foo(@hi)"
     ))(true))
-  , ?_assertEqual(#{bar => hi}, Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => hi}, Run(
       "struct Foo<X> { bar : X }\n"
       "main() = Foo { bar = @hi }"
     ))
@@ -509,7 +517,9 @@ test_record(Expr, Run) ->
       "main() = true"
     ))
   , ?_assertEqual(
-      #{bar => hi, baz => [#{bar => hello, baz => []}]},
+      #{'_@type' => 'Foo', bar => hi, baz => [
+        #{'_@type' => 'Foo', bar => hello, baz => []}
+      ]},
       Run(
         "struct Foo { bar : Atom, baz : [Foo] }\n"
         "main() = Foo { bar = @hi, baz = [Foo { bar = @hello, baz = [] }] }"
@@ -518,22 +528,22 @@ test_record(Expr, Run) ->
 
 
   % named struct updates
-  , ?_assertEqual(#{bar => 7}, Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => 7}, Run(
       "struct Foo { bar : Int }\n"
       "f(x) = { x : Foo | bar = 7 }\n"
       "main() = f({ bar = 3 })"
     ))
-  , ?_assertEqual(#{bar => true}, Run(
+  , ?_assertEqual(#{'_@type' => '_@Record', bar => true}, Run(
       "struct Foo { bar : Int }\n"
       "foo = Foo { bar = 3 }\n"
       "main() = { foo | bar := true }"
     ))
-  , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
+  , ?_assertEqual(#{'_@type' => '_@Record', bar => true, baz => [<<"hi">>]}, Run(
       "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
       "main() = { foo | bar := true }"
     ))
-  , ?_assertEqual(#{bar => true, baz => [<<"hi">>]}, Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => true, baz => [<<"hi">>]}, Run(
       "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
       "main() = Foo { foo | bar := true }"
@@ -639,10 +649,11 @@ test_interface(Run) ->
       "}\n"
       "main() = to_i({ foo = \"hi\", bar = true, target = -3 })"
     ))
+  % subtract 1 from map_size to account for tag
   , ?_test(2 = Run(
       IfaceToI ++
       "impl ToI for Set<A> {\n"
-      "  to_i(s) = @erlang:map_size(s)\n"
+      "  to_i(s) = @erlang:map_size(s) - 1\n"
       "}\n"
       "main() = to_i(#['a', 'b'])"
     ))
@@ -684,7 +695,9 @@ test_interface(Run) ->
   , ?_test(0 = Run(
       IfaceImpl ++
       "first : Set<A> -> A\n"
-      "first(set) = @erlang:hd(@maps:keys(set))\n"
+      "first(set) =\n"
+      "  let elems = @maps:keys(@maps:remove(@\"_@type\", set))\n"
+      "  @erlang:hd(elems)\n"
       "foo(set) = first(set, false)\n"
       "main() =\n"
       "  let set = #[to_i]\n"
@@ -746,7 +759,9 @@ test_interface(Run) ->
       "struct Foo<A> { a : A, other_a : A }\n"
       "enum Bar<A, B> { Cat(A), Dog(B) }\n"
       "first : Set<A> -> A\n"
-      "first(set) = @erlang:hd(@maps:keys(set))\n"
+      "first(set) =\n"
+      "  let elems = @maps:keys(@maps:remove(@\"_@type\", set))\n"
+      "  @erlang:hd(elems)\n"
       "key : Map<K, V> -> K\n"
       "key(map) = @erlang:hd(@maps:keys(map))\n"
       "bar(foo) =\n"
@@ -1040,17 +1055,23 @@ test_interface(Run) ->
       "impl ToI for [A ~ ToI] { to_i([a]) = to_i(a) }\n"
       "main() = to_i([\"378\"])"
     ))
+  % subtract 1 from map_size to account for tag
   , ?_assertEqual(
-      {2, 1, [false, true], #{#{greeting => <<"hi">>} => true}},
+      {2, 1, [false, true], #{
+        '_@type' => 'Set',
+        #{'_@type' => '_@Record', greeting => <<"hi">>} => true
+      }},
       Run(
         "interface Collection extends Mappable { len : T<A> -> Int }\n"
         "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
         "impl Collection for List { len = @erlang:length/1 }\n"
         "impl Mappable for List { map = @lists:map/2 }\n"
-        "impl Collection for Set { len = @erlang:map_size/1 }\n"
+        "impl Collection for Set { len(s) = @erlang:map_size(s) - 1 }\n"
         "impl Mappable for Set {\n"
-        "  map(f, s) = @lists:map(|e| (f(e), true), @maps:keys(s))\n"
-        "    |> @maps:from_list/1\n"
+        "  map(f, s) =\n"
+        "    let elems = @maps:keys(@maps:remove(@\"_@type\", s))\n"
+        "    let pairs = @lists:map(|e| (f(e), true), elems)\n"
+        "    @maps:from_list([(@\"_@type\", @Set) | pairs])\n"
         "}\n"
         "main() =\n"
         "  let l = [1, 2]\n"
@@ -1063,21 +1084,27 @@ test_interface(Run) ->
 code_gen_gen_tv_test_() -> test_gen_tv(fun run_code_gen/1).
 interpreter_gen_tv_test_() -> test_gen_tv(fun run_interpreter/1).
 test_gen_tv(Run) ->
-  [ ?_assertEqual({[1, 2, 3], #{hey => true, hi => true}}, Run(
-      "foo : T<A> -> T<A>\n"
-      "foo(x) = x\n"
-      "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
-    ))
+  [ ?_assertEqual(
+      {[1, 2, 3], #{'_@type' => 'Set', hey => true, hi => true}},
+      Run(
+        "foo : T<A> -> T<A>\n"
+        "foo(x) = x\n"
+        "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
+      )
+    )
   , ?_test([1] = Run(
       "foo : T<Int> -> T<Int>\n"
       "foo(x) = x\n"
       "main() = foo([1])"
     ))
-  , ?_assertEqual({[1, 2, 3], #{hey => true, hi => true}}, Run(
-      "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
-      "foo(x) = x\n"
-      "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
-    ))
+  , ?_assertEqual(
+      {[1, 2, 3], #{'_@type' => 'Set', hey => true, hi => true}},
+      Run(
+        "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
+        "foo(x) = x\n"
+        "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
+      )
+    )
   , ?_test($a = Run(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
@@ -1376,7 +1403,7 @@ test_import(Many) ->
       }
     ], "bar"))
   , ?_assertEqual(
-      #{a => 3},
+      #{'_@type' => 'Baz', a => 3},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -1389,7 +1416,7 @@ test_import(Many) ->
       ], "bar")
     )
   , ?_assertEqual(
-      #{a => 3},
+      #{'_@type' => 'Baz', a => 3},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -1400,7 +1427,7 @@ test_import(Many) ->
       ], "bar")
     )
   , ?_assertEqual(
-      #{a => 5},
+      #{'_@type' => 'Baz', a => 5},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -1431,7 +1458,7 @@ test_import(Many) ->
       }
     ], "bar"))
   , ?_assertEqual(
-      {'Baz', #{a => 3}},
+      {'Baz', #{'_@type' => 'Baz', a => 3}},
       Many([
         {"foo", "module Foo struct Baz { a : Int }"},
         {"bar",
@@ -1472,7 +1499,7 @@ test_import(Many) ->
         "main() = x ++ twice(@b)"
       }
     ], "a/bar"))
-  , ?_assertEqual(#{a => 3}, Many([
+  , ?_assertEqual(#{'_@type' => 'Baz', a => 3}, Many([
       {"foo", "module Foo struct Baz { a : Int }"},
       {"bar",
         "module Bar\n"
@@ -1480,16 +1507,19 @@ test_import(Many) ->
         "main() = Baz(3)"
       }
     ], "bar"))
-  , ?_assertEqual({#{a => 3}, #{a => 4}}, Many([
-      {"foo", "module Foo struct Baz { a : Int }"},
-      {"bar",
-        "module Bar\n"
-        "import \"./foo\" (Baz)\n"
-        "x = Baz { a = 3 }\n"
-        "y = Baz { { a = 3 } | a = 4 }\n"
-        "main() = (x, y)"
-      }
-    ], "bar"))
+  , ?_assertEqual(
+      {#{'_@type' => 'Baz', a => 3}, #{'_@type' => 'Baz', a => 4}},
+      Many([
+        {"foo", "module Foo struct Baz { a : Int }"},
+        {"bar",
+          "module Bar\n"
+          "import \"./foo\" (Baz)\n"
+          "x = Baz { a = 3 }\n"
+          "y = Baz { { a = 3 } | a = 4 }\n"
+          "main() = (x, y)"
+        }
+      ], "bar")
+    )
   , ?_test({'Foo', 3} = Many([
       {"foo", "module Foo enum Baz { Foo(Int) }"},
       {"bar",
@@ -1528,7 +1558,7 @@ test_import(Many) ->
         "main() = f(Three)"
       }
     ], "bar"))
-  , ?_assertEqual(#{start_line => 18}, Many([
+  , ?_assertEqual(#{'_@type' => 'Loc', start_line => 18}, Many([
       {"foo", "module Foo struct Loc { start_line : Int }"},
       {"bar",
         "module Bar\n"
@@ -1538,7 +1568,7 @@ test_import(Many) ->
         "main() = f({ start_line = 17 })"
       }
     ], "bar"))
-  , ?_assertEqual({'Baz', #{start_line => 3}}, Many([
+  , ?_assertEqual({'Baz', #{'_@type' => 'Loc', start_line => 3}}, Many([
       {"foo", "module Foo struct Loc { start_line : Int }"},
       {"bar",
         "module Bar\n"
@@ -1548,7 +1578,8 @@ test_import(Many) ->
       }
     ], "bar"))
   , ?_assertEqual(
-      {{'Hello', h}, 'Hi', #{first => $f, second => <<"s">>}, false},
+      {{'Hello', h}, 'Hi', #{'_@type' => 'Baz', first => $f, second => <<"s">>},
+       false},
       Many([
         {"foo",
           "module Foo\n"

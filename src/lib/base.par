@@ -2,8 +2,8 @@ module Base
 
 //-- Types
 enum Option<T> {
-  Some(T) @some
-  None @none
+  Some(T)
+  None
 }
 
 
@@ -24,8 +24,9 @@ impl Sized for [A] {
 }
 
 impl Sized for Set<A> {
-  length = @erlang:map_size/1
-  empty?(s) = s == assume {}
+  // subtract 1 to get rid of tag
+  length(s) = @erlang:map_size(s) - 1
+  empty?(s) = length(s) == 0
 }
 
 impl Sized for Map<A, B> {
@@ -49,9 +50,7 @@ impl Mappable for List {
 }
 
 impl Mappable for Set {
-  map(f, s) =
-    @lists:map(|a| (f(a), true), @maps:keys(s))
-    |> @maps:from_list/1
+  map(f, s) = map(f, to_list(s)) |> to_set
 }
 
 impl Mappable for Map {
@@ -111,22 +110,13 @@ impl Collection for List {
 
 impl Collection for Set {
   fold(f, init, s) = to_list(s) |> fold(f, init)
-  filter(f, s) = @maps:filter(|k, _| f(k), s)
+  filter(f, s) = @maps:filter(|k, _| assume k == @"_@type" || f(k), s)
   find(f, s) = to_list(s) |> find(f)
 
-  filter_map(f, s) =
-    to_list(s)
-    |> filter_map(|a| match f(a) {
-      Some(b) => Some((b, true))
-      None => None
-    })
-    |> @maps:from_list/1
+  filter_map(f, s) = to_list(s) |> filter_map(|a| f(a)) |> to_set
   map_fold(f, init, s) =
-    let (pairs, memo) = to_list(s) |> map_fold(|a, memo|
-      let (b, new_memo) = f(a, memo)
-      ((b, true), new_memo)
-    , init)
-    (@maps:from_list(pairs), memo)
+    let (l, memo) = to_list(s) |> map_fold(|a, memo| f(a, memo), init)
+    (to_set(l), memo)
 
   put(a, s) = @maps:put(a, true, s)
   delete = @maps:remove/2
@@ -275,7 +265,7 @@ interface ToList {
 }
 
 impl ToList for Set {
-  to_list(s) = @maps:keys(s)
+  to_list(s) = @maps:keys(@maps:remove(@"_@type", s))
 }
 
 impl ToList for Map {
@@ -287,11 +277,13 @@ interface ToSet {
 }
 
 impl ToSet for List {
-  to_set(l) = map(|a| (a, true), l) |> @maps:from_list/1
+  to_set(l) =
+    let pairs = map(|a| (a, true), l)
+    @maps:from_list([assume (@"_@type", @Set) | pairs])
 }
 
 impl ToSet for Map {
-  to_set(m) = assume map(|(k, v)| ((k, v), true), m)
+  to_set(m) = to_list(m) |> to_set
 }
 
 interface ToMap {
@@ -303,11 +295,17 @@ impl ToMap for List {
 }
 
 impl ToMap for Set {
-  to_map(s) = @maps:keys(s) |> @maps:from_list/1
+  to_map(s) = to_list(s) |> to_map
 }
 
-// TODO: ToStr
+to_str : A -> String
+export to_str = @par_native:to_str/1
+
 // TODO: Concatable, Separable interfaces
 
 
 //-- Misc
+print : A -> ()
+export print(a) =
+  @io:format("~s~n", [to_str(a)])
+  ()

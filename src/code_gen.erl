@@ -57,8 +57,8 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
           Atom = list_to_atom(Con),
           Arity = length(ArgTEs),
           Key = case KeyNode of
-            none -> Atom;
-            {some, {atom, _, Key_}} -> Key_
+            'None' -> Atom;
+            {'Some', {atom, _, Key_}} -> Key_
           end,
 
           case Arity of
@@ -229,8 +229,8 @@ rep({enum, _, _, OptionTEs}, _) ->
 
     ConAtom = list_to_atom(Con),
     {KeyLine, Key} = case KeyNode of
-      none -> {Line, ConAtom};
-      {some, {atom, KeyLoc, Key_}} -> {?START_LINE(KeyLoc), Key_}
+      'None' -> {Line, ConAtom};
+      {'Some', {atom, KeyLoc, Key_}} -> {?START_LINE(KeyLoc), Key_}
     end,
 
     Body = [{tuple, Line, [{atom, KeyLine, Key} | ArgsRep]}],
@@ -270,7 +270,9 @@ rep({struct, Loc, StructTE, FieldTEs}, CG) ->
   Assocs = lists:map(fun({sig, SigLoc, {var, FieldLoc, FieldName}=Var, _}) ->
     {assoc, SigLoc, {atom, FieldLoc, list_to_atom(FieldName)}, Var}
   end, FieldTEs),
-  Body = [rep({map, Loc, Assocs}, CG1)],
+  Tag = list_to_atom(utils:unqualify(Con)),
+  TagAssoc = {assoc, Loc, {atom, Loc, '_@type'}, {atom, Loc, Tag}},
+  Body = [rep({map, Loc, [TagAssoc | Assocs]}, CG1)],
 
   Clause = {clause, Line, ArgsRep, [], Body},
   {function, Line, list_to_atom(Con), length(FieldTEs), [Clause]};
@@ -364,7 +366,7 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
       end, {[], CG}, IVs)
   end,
 
-  RecordRep = rep({anon_record, Loc, Inits}, CG1#cg{in_impl=true}),
+  RecordRep = rep({anon_record, Loc, none, Inits}, CG1#cg{in_impl=true}),
   Body = case maps:find(Ref, InstRefs) of
     error -> [RecordRep];
     {ok, {T, SubbedVs}} ->
@@ -475,8 +477,8 @@ rep({var_ref, Loc, Ref, Name}, CG) ->
   Rep = rep({var, Loc, Name}, CG),
   rewrite_ref(Rep, Ref, Loc, CG);
 
-rep({anon_record, Loc, Inits}, CG) ->
-  PairsRep = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
+rep({anon_record, Loc, Ref, Inits}, #cg{ctx=C}=CG) ->
+  PairReps = lists:map(fun({init, _, {var, VarLoc, Name}, Expr}) ->
     Line = ?START_LINE(VarLoc),
 
     ExprRep = case Expr of
@@ -507,20 +509,48 @@ rep({anon_record, Loc, Inits}, CG) ->
     {map_field_assoc, Line, eabs(list_to_atom(Name), Line), ExprRep}
   end, Inits),
 
-  {map, ?START_LINE(Loc), PairsRep};
+  Tag = case maps:find(Ref, C#ctx.record_refs) of
+    {ok, {con, FullCon}} -> list_to_atom(utils:unqualify(FullCon));
+    {ok, {gen, {con, FullCon}, _}} -> list_to_atom(utils:unqualify(FullCon));
+    {ok, _} -> '_@Record';
+    % Will happen either for anon_record_ext when the type doesn't change, or
+    % when none is explicitly passed as the ref for impl records. In both
+    % cases, we don't want a tag.
+    error -> none
+  end,
 
-rep({anon_record_ext, Loc, Expr, AllInits}, CG) ->
+  Line = ?START_LINE(Loc),
+  AssocReps = case Tag of
+    none -> PairReps;
+    _ ->
+      TagRep = eabs(Tag, Line),
+      TagAssocRep = {map_field_assoc, Line, eabs('_@type', Line), TagRep},
+      [TagAssocRep | PairReps]
+  end,
+  {map, Line, AssocReps};
+
+rep({anon_record_ext, Loc, Ref, Expr, AllInits}, CG) ->
   ExprRep = rep(Expr, CG),
   Inits = lists:map(fun(InitOrExt) ->
     setelement(1, InitOrExt, init)
   end, AllInits),
-  ExtRep = rep({anon_record, Loc, Inits}, CG),
+
+  ExtRep = rep({anon_record, Loc, Ref, Inits}, CG),
   call(maps, merge, [ExprRep, ExtRep], ?START_LINE(Loc));
 
-rep({record, Loc, _, Inits}, CG) -> rep({anon_record, Loc, Inits}, CG);
+rep({record, Loc, {con_token, _, RawCon}, Inits}, CG) ->
+  #cg{ctx=#ctx{record_refs=RecordRefs}=C} = CG,
+  Ref = make_ref(),
+  C1 = C#ctx{record_refs=RecordRefs#{Ref => {con, RawCon}}},
+  CG1 = CG#cg{ctx=C1},
+  rep({anon_record, Loc, Ref, Inits}, CG1);
 
-rep({record_ext, Loc, _, Expr, AllInits}, CG) ->
-  rep({anon_record_ext, Loc, Expr, AllInits}, CG);
+rep({record_ext, Loc, {con_token, _, RawCon}, Expr, AllInits}, CG) ->
+  #cg{ctx=#ctx{record_refs=RecordRefs}=C} = CG,
+  Ref = make_ref(),
+  C1 = C#ctx{record_refs=RecordRefs#{Ref => {con, RawCon}}},
+  CG1 = CG#cg{ctx=C1},
+  rep({anon_record_ext, Loc, Ref, Expr, AllInits}, CG1);
 
 rep({field_fn, _, {var, Loc, Name}}, _) ->
   Line = ?START_LINE(Loc),
@@ -566,7 +596,7 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
     {var_ref, _, Ref, _} ->
       case maps:find(Ref, CG#cg.ctx#ctx.inst_refs) of
         {ok, {{lam, _, _}=T, SubbedVs}} ->
-          {_, AllImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
+          {Ag, AllImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
           LeftBindMaps = lists:sublist(
             BindMaps,
             NumArgs + 1,
@@ -897,7 +927,11 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
       TupleRep = {tuple, Line, [ElemRep, eabs(true, Line)]},
       Clause = {clause, Line, [ElemRep], [], [TupleRep]},
       Fun = {'fun', Line, {clauses, [Clause]}},
-      call(maps, from_list, [call(lists, map, [Fun, ExprRep], Line)], Line);
+
+      MapCall = call(lists, map, [Fun, ExprRep], Line),
+      Tag = eabs({'_@type', 'Set'}, Line),
+      call(maps, from_list, [{cons, Line, Tag, MapCall}], Line);
+
     % $ is used to convert Char to Int, but the underlying rep is the same
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
@@ -1290,7 +1324,8 @@ rewrite({gen, {con, "Set"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
       Clause = {clause, Line, [ElemRep], [], Body},
       FunRep = {'fun', Line, {clauses, [Clause]}},
 
-      KeysCall = call(maps, keys, [VarRep], Line),
+      RemoveCall = call(maps, remove, [eabs('_@type', Line), VarRep], Line),
+      KeysCall = call(maps, keys, [RemoveCall], Line),
       MapCall = call(lists, map, [FunRep, KeysCall], Line),
       FromListCall = call(maps, from_list, [MapCall], Line),
       ResultRep = {var, Line, unique("List")},

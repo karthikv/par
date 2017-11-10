@@ -10,7 +10,7 @@ load() -> par_native:init('Parser').
 
 ok_prg(Prg) ->
   {ok, Tokens} = 'Lexer':tokenize(Prg),
-  #{value := {some, Ast}, errs := []} = 'Parser':parse(Tokens),
+  #{value := {'Some', Ast}, errs := []} = 'Parser':parse(Tokens),
   rewrite_refs(Ast).
 
 ok_prefix(Prefix, Prg) ->
@@ -40,6 +40,7 @@ l(Offset, Len) -> l(0, Offset, Len).
 l(Line, Offset, Len) -> l(Line, Offset, Line, Offset + Len).
 l(StartLine, StartOffset, EndLine, EndOffset) ->
   #{
+    '_@type' => 'Loc',
     % lines are 1-indexed, and the first line is the prefix
     start_line => 2 + StartLine,
     % columns are 1-indexed
@@ -58,6 +59,10 @@ rewrite_refs({impl, Loc, Ref, ConToken, TE, Inits}) when is_reference(Ref) ->
    rewrite_refs(Inits)};
 rewrite_refs({expr_sig, Loc, Ref, Expr, Sig}) when is_reference(Ref) ->
   {expr_sig, Loc, ref, rewrite_refs(Expr), rewrite_refs(Sig)};
+rewrite_refs({anon_record, Loc, Ref, Inits}) when is_reference(Ref) ->
+  {anon_record, Loc, ref, rewrite_refs(Inits)};
+rewrite_refs({anon_record_ext, Loc, Ref, Expr, Inits}) when is_reference(Ref) ->
+  {anon_record_ext, Loc, ref, rewrite_refs(Expr), rewrite_refs(Inits)};
 rewrite_refs(V) when is_tuple(V) ->
   list_to_tuple(rewrite_refs(tuple_to_list(V)));
 rewrite_refs(V) -> V.
@@ -211,27 +216,27 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {anon_record, l(0, 9), [
+      {anon_record, l(0, 9), ref, [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}}
       ]},
       ok_expr("{ a = 3 }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 12), [
+      {anon_record, l(0, 12), ref, [
         {init, l(2, 8), {var, l(2, 1), "f"},
           {fn, l(2, 8), ref, [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}}
       ]},
       ok_expr("{ f(x) = 3 }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 21), [
+      {anon_record, l(0, 21), ref, [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(9, 10), {var, l(9, 3), "bar"}, {bool, l(15, 4), true}}
       ]},
       ok_expr("{ a = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 24), [
+      {anon_record, l(0, 24), ref, [
         {init, l(2, 8), {var, l(2, 1), "f"},
           {fn, l(2, 8), ref, [{var, l(4, 1), "x"}], {int, l(9, 1), 3}}},
         {init, l(12, 10), {var, l(12, 3), "bar"}, {bool, l(18, 4), true}}
@@ -239,7 +244,7 @@ expr_test_() ->
       ok_expr("{ f(x) = 3, bar = true }")
     )
   , ?_assertEqual(
-      {anon_record, l(0, 0, 1, 14), [
+      {anon_record, l(0, 0, 1, 14), ref, [
         {init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 3}},
         {init, l(1, 2, 10), {var, l(1, 2, 3), "bar"}, {bool, l(1, 8, 4), true}}
       ]},
@@ -293,8 +298,8 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {anon_record_ext, l(0, 21),
-        {anon_record, l(2, 9), [
+      {anon_record_ext, l(0, 21), ref,
+        {anon_record, l(2, 9), ref, [
           {init, l(4, 5), {var, l(4, 1), "a"}, {int, l(8, 1), 3}}
         ]},
         [{init, l(14, 5), {var, l(14, 1), "a"}, {int, l(18, 1), 4}}]
@@ -302,14 +307,14 @@ expr_test_() ->
       ok_expr("{ { a = 3 } | a = 4 }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 27), {var_ref, l(2, 1), ref, "a"}, [
+      {anon_record_ext, l(0, 27), ref, {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
         {ext, l(16, 9), {var, l(16, 1), "c"}, {bool, l(21, 4), true}}
       ]},
       ok_expr("{ a | bar = @a, c := true }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 34), {var_ref, l(2, 1), ref, "a"}, [
+      {anon_record_ext, l(0, 34), ref, {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 1), "f"},
           {fn, l(6, 8), ref, [], {atom, l(12, 2), a}}},
         {ext, l(16, 16), {var, l(16, 1), "c"},
@@ -325,7 +330,7 @@ expr_test_() ->
       ok_expr("{ a | f() = @a, c(x, y) := x + y }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 0, 1, 17), {var_ref, l(2, 1), ref, "a"}, [
+      {anon_record_ext, l(0, 0, 1, 17), ref, {var_ref, l(2, 1), ref, "a"}, [
         {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
         {ext, l(1, 6, 9), {var, l(1, 6, 1), "c"}, {bool, l(1, 11, 4), true}}
       ]},
@@ -377,7 +382,7 @@ expr_test_() ->
   , ?_assertEqual(
       {app, l(0, 24),
         {field, l(0, 21),
-          {anon_record, l(0, 17), [
+          {anon_record, l(0, 17), ref, [
             {init, l(2, 13),
               {var, l(2, 3), "bar"},
               {fn, l(8, 7), ref, [{var, l(9, 1), "x"}], {atom, l(12, 3), hi}}
@@ -1571,11 +1576,11 @@ def_test_() ->
 
   , ?_assertEqual(
       {enum, l(0, 0, 3, 1), {con_token, l(5, 7), "SumType"}, [
-        {option, l(1, 2, 3), {con_token, l(1, 2, 3), "Foo"}, [], none},
+        {option, l(1, 2, 3), {con_token, l(1, 2, 3), "Foo"}, [], 'None'},
         {option, l(1, 7, 16),
           {con_token, l(1, 7, 3), "Bar"},
           [{con_token, l(1, 11, 6), "String"}],
-          {some, {atom, l(1, 19, 4), bar}}
+          {'Some', {atom, l(1, 19, 4), bar}}
         },
         {option, l(2, 2, 17),
           {con_token, l(2, 2, 3), "Baz"},
@@ -1584,7 +1589,7 @@ def_test_() ->
              {con_token, l(2, 11, 7), "List"},
              [{con_token, l(2, 12, 5), "Float"}]
            }],
-          none
+          'None'
         }
       ]},
       ok_def(
@@ -1602,12 +1607,12 @@ def_test_() ->
           {option, l(1, 2, 8),
             {con_token, l(1, 2, 3), "Foo"},
             [],
-            {some, {atom, l(1, 6, 4), foo}}
+            {'Some', {atom, l(1, 6, 4), foo}}
           },
           {option, l(2, 2, 6),
             {con_token, l(2, 2, 3), "Bar"},
             [{tv_te, l(2, 6, 1), "A", []}],
-            none
+            'None'
           },
           {option, l(3, 2, 17),
             {con_token, l(3, 2, 3), "Baz"},
@@ -1616,7 +1621,7 @@ def_test_() ->
                {con_token, l(3, 11, 7), "List"},
                [{con_token, l(3, 12, 5), "Float"}]
              }],
-            none
+            'None'
           }
         ]
       },
@@ -1637,12 +1642,12 @@ def_test_() ->
           {option, l(1, 2, 3),
             {con_token, l(1, 2, 3), "Foo"},
             [],
-            none
+            'None'
           },
           {option, l(2, 2, 6),
             {con_token, l(2, 2, 3), "Bar"},
             [{tv_te, l(2, 6, 1), "A", []}],
-            none
+            'None'
           },
           {option, l(3, 2, 18),
             {con_token, l(3, 2, 3), "Baz"},
@@ -1651,7 +1656,7 @@ def_test_() ->
                {con_token, l(3, 11, 3), "List"},
                [{tv_te, l(3, 12, 1), "B", []}]
              }],
-            {some, {atom, l(3, 16, 4), baz}}
+            {'Some', {atom, l(3, 16, 4), baz}}
           }
         ]
       },

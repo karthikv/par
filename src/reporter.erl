@@ -48,22 +48,22 @@ format({parser_errors, Errs, Path, PrgLines}) ->
 
   SortedErrs = lists:sort(fun({MaybeLoc1, _}, {MaybeLoc2, _}) ->
     Loc1 = case MaybeLoc1 of
-      none -> EndLoc;
-      {some, Loc1_} -> Loc1_
+      'None' -> EndLoc;
+      {'Some', Loc1_} -> Loc1_
     end,
     Loc2 = case MaybeLoc2 of
-      none -> EndLoc;
-      {some, Loc2_} -> Loc2_
+      'None' -> EndLoc;
+      {'Some', Loc2_} -> Loc2_
     end,
     loc_lte(Loc1, Loc2)
   end, Errs),
 
   StrErrs = lists:map(fun({MaybeLoc, Msg}) ->
     case MaybeLoc of
-      none ->
+      'None' ->
         Suffixed = binary_to_list(Msg) ++ " before end-of-file.",
         [wrap(Suffixed, ?LINE_WIDTH), $\n, $\n];
-      {some, Loc} ->
+      {'Some', Loc} ->
         Code = extract_code(Loc, PrgLines),
         [wrap(Msg, ?LINE_WIDTH), $:, $\n, $\n, Code, $\n]
     end
