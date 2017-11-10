@@ -120,7 +120,7 @@
 -endif.
 
 % this also initializes the lexer by dependency
-load() -> 'Parser':'_@init'(ordsets:new()).
+load() -> par_native:init('Parser').
 
 infer_file(Path) ->
   case parse_file(Path, #{}) of
