@@ -162,7 +162,7 @@ eval({app, _, Expr, Args}, ID) ->
     0 -> [{}];
     _ -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
   end,
-  code_gen_utils:'_@curry'(Fun, Vs, ?LINE);
+  par_native:curry(Fun, Vs, ?LINE);
 
 eval({native, _, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
@@ -221,7 +221,7 @@ eval({binary_op, _, Op, Left, Right}, ID) ->
       case Op of
         '==' -> LeftV == RightV;
         '!=' -> LeftV /= RightV;
-        '|>' -> code_gen_utils:'_@curry'(RightV, [LeftV], ?LINE);
+        '|>' -> par_native:curry(RightV, [LeftV], ?LINE);
         '>' -> LeftV > RightV;
         '<' -> LeftV < RightV;
         '>=' -> LeftV >= RightV;
@@ -231,8 +231,8 @@ eval({binary_op, _, Op, Left, Right}, ID) ->
         '*' -> LeftV * RightV;
         '/' -> LeftV / RightV;
         '%' -> LeftV rem RightV;
-        '++' -> code_gen_utils:'_@concat'(LeftV, RightV);
-        '--' -> code_gen_utils:'_@separate'(LeftV, RightV)
+        '++' -> par_native:concat(LeftV, RightV);
+        '--' -> par_native:separate(LeftV, RightV)
       end
   end;
 

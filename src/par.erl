@@ -8,6 +8,7 @@
 %   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Fork eunite and fix macro display
 % - Catch keyword for try?
+% - Change from unit to {con, "()"} for consistency?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bug with global manager init ordering
@@ -150,7 +151,7 @@ main(Args) ->
               end, [], utils:test_names(Module, C#ctx.g_env)),
 
               code:add_patha(OutDir),
-              Mod:'_@init'(ordsets:new()),
+              par_native:init(Mod),
               eunit:test(TestSet, [no_tty, {report, {unite_compact, []}}]),
               eunit:stop();
 

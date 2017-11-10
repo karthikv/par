@@ -19,7 +19,7 @@ test_stdlib_path(Path) ->
 
   #comp{module=Module} = hd(Comps),
   {Mod, _} = hd(Compiled),
-  Mod:'_@init'(ordsets:new()),
+  par_native:init(Mod),
 
   ordsets:fold(fun(TestName, FoldTestSet) ->
     [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]

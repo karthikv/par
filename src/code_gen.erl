@@ -1,9 +1,8 @@
 -module(code_gen).
--export([compile_comps/2, counter_run/1, excluder_run/1]).
+-export([compile_comps/2, counter_run/1]).
 
 -include("common.hrl").
 -define(COUNTER_NAME, code_gen_counter).
--define(EXCLUDER_NAME, code_gen_excluder).
 -define(INIT_FN_ATOM, '_@init').
 
 -record(cg, {env, in_impl = false, ctx, prg_lines}).
@@ -186,40 +185,22 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
 compile_ast(Comp, Exports, CG) ->
   #comp{module=Module, ast=Ast, path=Path} = Comp,
   counter_spawn(),
-  excluder_spawn(ordsets:from_list([
-    '_@gm_find',
-    '_@gm_set',
-    '_@curry',
-    '_@wrap_with_impls',
-    '_@wrap_with_impls_r',
-    '_@concat',
-    '_@separate'
-  ])),
 
   {module, _, _, _, Defs} = Ast,
   ModuleCG = set_module(Module, CG),
   Reps = lists:flatten(lists:map(fun(Node) -> rep(Node, ModuleCG) end, Defs)),
-
-  % remove everything except necessary functions
-  Excluded = excluder_all(),
-  Utils = lists:filter(fun
-    ({function, _, Atom, _, _}) -> not ordsets:is_element(Atom, Excluded);
-    (_) -> false
-  end, code_gen_utils_parsed:forms()),
-
   {function, _, InitAtom, InitArity, _}=InitRep = rep_init_fn(Comp),
 
-  LibForms = [
-    {attribute, 1, file, {"[par-compiler]", 1}},
+  Forms = [
+    {attribute, 1, file, {Path, 1}},
     {attribute, 1, module, list_to_atom(Module)},
     {attribute, 1, compile, [no_auto_import]},
     {attribute, 1, export, [{InitAtom, InitArity} | Exports]},
     InitRep |
-    Utils
+    Reps
   ],
-  CodeForms = [{attribute, 1, file, {Path, 1}} | Reps],
 
-  {ok, Mod, Binary} = compile:forms(LibForms ++ CodeForms, debug_info),
+  {ok, Mod, Binary} = compile:forms(Forms, debug_info),
   {Mod, Binary}.
 
 rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
@@ -610,6 +591,8 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
   end,
 
   Line = ?START_LINE(Loc),
+  LineRep = eabs(Line, Line),
+
   case ImplReps of
     none ->
       ExprRep = rep(Expr, CG),
@@ -626,12 +609,8 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
 
   if
     Arity == unknown ->
-      excluder_remove('_@curry'),
-      {call, Line, {atom, Line, '_@curry'}, [
-        ExprRep,
-        rep_list(ArgsRep, Line),
-        {integer, Line, Line}
-      ]};
+      CurryArgs = [ExprRep, rep_list(ArgsRep, Line), LineRep],
+      call(par_native, curry, CurryArgs, Line);
 
     NumArgs < Arity ->
       ArgsListRep = rep_list(ArgsRep, Line),
@@ -659,9 +638,7 @@ rep({app, Loc, Expr, RawArgs}, CG) ->
         true ->
           RestArgsRep = lists:sublist(ArgsRep, Arity + 1, NumArgs),
           RestArgsListRep = rep_list(RestArgsRep, Line),
-          excluder_remove('_@curry'),
-          {call, Line, {atom, Line, '_@curry'},
-            [Call, RestArgsListRep, {integer, Line, Line}]}
+          call(par_native, curry, [Call, RestArgsListRep, LineRep], Line)
       end
   end;
 
@@ -688,9 +665,10 @@ rep({variant, _, Field, Args}, CG) ->
 
 rep({native, _, {atom, Loc, Mod}, {var, _, Name}, Arity}, _) ->
   Line = ?START_LINE(Loc),
-  Atom = list_to_atom(Name),
-  {'fun', Line,
-    {function, {atom, Line, Mod}, {atom, Line, Atom}, {integer, Line, Arity}}};
+  AtomRep = eabs(list_to_atom(Name), Line),
+  ModRep = eabs(Mod, Line),
+  ArityRep = eabs(Arity, Line),
+  {'fun', Line, {function, ModRep, AtomRep, ArityRep}};
 
 rep({'if', Loc, Cond, Then, Else}, CG) ->
   Line = ?START_LINE(Loc),
@@ -782,12 +760,8 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
   RightRep = rep(Right, CG),
 
   if
-    Op == '++' ->
-      excluder_remove('_@concat'),
-      {call, Line, {atom, Line, '_@concat'}, [LeftRep, RightRep]};
-    Op == '--' ->
-      excluder_remove('_@separate'),
-      {call, Line, {atom, Line, '_@separate'}, [LeftRep, RightRep]};
+    Op == '++' -> call(par_native, concat, [LeftRep, RightRep], Line);
+    Op == '--' -> call(par_native, separate, [LeftRep, RightRep], Line);
     Op == '|>' ->
       case Right of
         {app, Expr, Args} -> rep({app, Loc, Expr, [Left | Args]}, CG);
@@ -977,7 +951,6 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   MatchAddCall = {match, 1, InitSetVar,
     call(ordsets, add_element, [ModuleRep, ArgVar], 1)},
 
-  StartGm = {call, 1, {atom, 1, '_@gm_spawn'}, [{atom, 1, gm(Module)}]},
   InitCalls = lists:map(fun({DepModule, _}) ->
     call(list_to_atom(DepModule), ?INIT_FN_ATOM, [InitSetVar], 1)
   end, Deps),
@@ -992,8 +965,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   end, GlobalVarNames),
 
   Body = lists:append([
-    [MatchAddCall, StartGm],
-    InitCalls,
+    [MatchAddCall | InitCalls],
     GlobalCalls,
     [{atom, 1, ok}]
   ]),
@@ -1048,14 +1020,11 @@ rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
   {PatternReps, CG1}.
 
 rep_gm_cache(Atom, Rep, Line, CG) ->
-  Gm = gm(module(CG)),
-  excluder_remove('_@gm_find'),
-  excluder_remove('_@gm_set'),
+  AtomRep = eabs(Atom, Line),
+  ModRep = eabs(list_to_atom(module(CG)), Line),
 
-  FindCall = {call, Line, {atom, Line, '_@gm_find'},
-    [{atom, Line, Gm}, {atom, Line, Atom}]},
-  SetCall = {call, Line, {atom, Line, '_@gm_set'},
-    [{atom, Line, Gm}, {atom, Line, Atom}, Rep]},
+  FindCall = call(par_native, gm_find, [ModRep, AtomRep], Line),
+  SetCall = call(par_native, gm_set, [ModRep, AtomRep, Rep], Line),
 
   Var = {var, Line, unique("Value")},
   {'case', Line, FindCall, [
@@ -1257,10 +1226,6 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
         {cons, Line, TupleRep, FoldListRep}
       end, {nil, Line}, FinalBindMap),
 
-      ResultRep = {var, Line, unique("Lam")},
-      excluder_remove('_@wrap_with_impls'),
-      excluder_remove('_@wrap_with_impls_r'),
-
       CallArgsRep = [
         VarRep,
         eabs(PatternReps, Line),
@@ -1268,7 +1233,9 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
         BindListRep,
         eabs(Line, Line)
       ],
-      Call = {call, Line, {atom, Line, '_@wrap_with_impls'}, CallArgsRep},
+      Call = call(par_native, wrap_with_impls, CallArgsRep, Line),
+
+      ResultRep = {var, Line, unique("Lam")},
       {[{match, Line, ResultRep, Call}], ResultRep}
   end;
 
@@ -1465,7 +1432,6 @@ option_key(Module, Name, #cg{env=Env}=CG) ->
   end.
 
 eabs(Lit, Line) -> erl_parse:abstract(Lit, Line).
-gm(Module) -> list_to_atom(Module ++ "_gm").
 
 env_set(Name, Value, #cg{env=Env, ctx=#ctx{module=Module}}=CG) ->
   Env1 = Env#{{Module, Name} => Value},
@@ -1549,48 +1515,4 @@ counter_next() ->
     {next_ok, Next} -> Next
   after 1000 ->
     error("couldn't get next count")
-  end.
-
-excluder_spawn(Excluded) ->
-  case whereis(?EXCLUDER_NAME) of
-    undefined ->
-      Pid = spawn_link(?MODULE, excluder_run, [Excluded]),
-      register(?EXCLUDER_NAME, Pid);
-
-    Pid ->
-      Pid ! {self(), reset, Excluded},
-      receive
-        reset_ok -> true
-      after 1000 ->
-        error("couldn't reset excluder")
-      end
-  end.
-
-excluder_run(Excluded) ->
-  receive
-    {Pid, reset, NewExcluded} ->
-      Pid ! reset_ok,
-      excluder_run(NewExcluded);
-    {Pid, remove, Element} ->
-      Pid ! remove_ok,
-      excluder_run(ordsets:del_element(Element, Excluded));
-    {Pid, all} ->
-      Pid ! {all_ok, Excluded},
-      excluder_run(Excluded)
-  end.
-
-excluder_remove(Element) ->
-  ?EXCLUDER_NAME ! {self(), remove, Element},
-  receive
-    remove_ok -> ok
-  after 1000 ->
-    error("couldn't remove element from excluder")
-  end.
-
-excluder_all() ->
-  ?EXCLUDER_NAME ! {self(), all},
-  receive
-    {all_ok, Excluded} -> Excluded
-  after 1000 ->
-    error("couldn't get all excluded elements")
   end.

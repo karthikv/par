@@ -1,87 +1,87 @@
--module(code_gen_utils).
+-module(par_native).
 -export([
-  '_@gm_spawn'/1,
-  '_@gm_run'/1,
-  '_@gm_find'/2,
-  '_@gm_set'/3,
-  '_@curry'/3,
-  '_@wrap_with_impls'/5,
-  '_@concat'/2,
-  '_@separate'/2
+  init/1,
+  gm_spawn/0,
+  gm_run/1,
+  gm_find/2,
+  gm_set/3,
+  curry/3,
+  wrap_with_impls/5,
+  concat/2,
+  separate/2
 ]).
--compile(no_auto_import).
 
-'_@gm_spawn'(Gm) ->
-  case erlang:whereis(Gm) of
+init(Mod) ->
+  gm_spawn(),
+  Mod:'_@init'(ordsets:new()).
+
+gm_spawn() ->
+  case whereis(par_gm) of
     undefined ->
-      Pid = erlang:spawn(fun() -> '_@gm_run'(#{}) end),
-      erlang:register(Gm, Pid);
+      Pid = spawn(fun() -> gm_run(#{}) end),
+      register(par_gm, Pid);
 
     Pid ->
-      Pid ! {erlang:self(), reset},
+      Pid ! {self(), reset},
       receive
         reset_ok -> true;
-        Unexpected ->
-          erlang:error({"unexpected reset response", Gm, Unexpected})
-      after 1000 ->
-        erlang:error({"couldn't reset globals", Gm})
+        Unexpected -> error({"unexpected reset response", Unexpected})
+      after 1000 -> error("couldn't reset globals")
       end
   end.
 
-'_@gm_run'(Globals) ->
+gm_run(Globals) ->
   receive
     {Pid, reset} ->
       Pid ! reset_ok,
-      '_@gm_run'(#{});
-    {Pid, get, Atom} ->
-      Pid ! {get_ok, maps:get(Atom, Globals)},
-      '_@gm_run'(Globals);
-    {Pid, find, Atom} ->
-      Pid ! {find_ok, maps:find(Atom, Globals)},
-      '_@gm_run'(Globals);
-    {Pid, set, Atom, Value} ->
+      gm_run(#{});
+    {Pid, get, Key} ->
+      Pid ! {get_ok, maps:get(Key, Globals)},
+      gm_run(Globals);
+    {Pid, find, Key} ->
+      Pid ! {find_ok, maps:find(Key, Globals)},
+      gm_run(Globals);
+    {Pid, set, Key, Value} ->
       Pid ! set_ok,
-      '_@gm_run'(Globals#{Atom => Value});
+      gm_run(Globals#{Key => Value});
     Unexpected ->
       io:format("unexpected gm message ~p~n", [Unexpected]),
-      '_@gm_run'(Globals)
+      gm_run(Globals)
   end.
 
-'_@gm_find'(Gm, Atom) ->
-  Gm ! {erlang:self(), find, Atom},
+gm_find(Mod, Atom) ->
+  Key = {Mod, Atom},
+  par_gm ! {self(), find, Key},
   receive
     {find_ok, Result} -> Result;
-    Unexpected ->
-      erlang:error({"unexpected find response", Gm, Atom, Unexpected})
-  after 1000 ->
-    erlang:error({"couldn't find global", Gm, Atom})
+    Unexpected -> error({"unexpected find response", Key, Unexpected})
+  after 1000 -> error({"couldn't find global", Key})
   end.
 
-'_@gm_set'(Gm, Atom, Value) ->
-  Gm ! {erlang:self(), set, Atom, Value},
+gm_set(Mod, Atom, Value) ->
+  Key = {Mod, Atom},
+  par_gm ! {self(), set, Key, Value},
   receive
     set_ok -> Value;
-    Unexpected ->
-      erlang:error({"unexpected set response", Gm, Atom, Value, Unexpected})
-  after 1000 ->
-    erlang:error({"couldn't set global", Gm, Atom, Value})
+    Unexpected -> error({"unexpected set response", Key, Value, Unexpected})
+  after 1000 -> error({"couldn't set global", Key, Value})
   end.
 
-'_@curry'(Fun, RawArgs, Line) ->
+curry(Fun, RawArgs, Line) ->
   {arity, Arity} = erlang:fun_info(Fun, arity),
 
   Args = case Arity of
     0 ->
-      {} = erlang:hd(RawArgs),
-      erlang:tl(RawArgs);
+      {} = hd(RawArgs),
+      tl(RawArgs);
     _ -> RawArgs
   end,
-  NumArgs = erlang:length(Args),
+  NumArgs = length(Args),
 
   if
     NumArgs < Arity ->
       NewArgsRep = lists:map(fun(Num) ->
-        {var, Line, erlang:list_to_atom(lists:concat(["_@Arg", Num]))}
+        {var, Line, list_to_atom(lists:concat(["_@Arg", Num]))}
       end, lists:seq(NumArgs + 1, Arity)),
       NewArgsListRep = lists:foldr(fun(FoldArgRep, FoldListRep) ->
         {cons, Line, FoldArgRep, FoldListRep}
@@ -103,14 +103,14 @@
       {value, Value, _} = erl_eval:expr(Expr, Bindings),
       Value;
 
-    NumArgs == Arity -> erlang:apply(Fun, Args);
+    NumArgs == Arity -> apply(Fun, Args);
 
     NumArgs > Arity ->
       {ImmArgs, RestArgs} = lists:split(Arity, Args),
-       '_@curry'(erlang:apply(Fun, ImmArgs), RestArgs, Line)
+      curry(apply(Fun, ImmArgs), RestArgs, Line)
   end.
 
-'_@wrap_with_impls'(Fun, PatternReps, ImplReps, BindList, Line) ->
+wrap_with_impls(Fun, PatternReps, ImplReps, BindList, Line) ->
   Bindings = lists:foldl(fun({Atom, Value}, FoldBindings) ->
     erl_eval:add_binding(Atom, Value, FoldBindings)
   end, erl_eval:new_bindings(), BindList),
@@ -126,11 +126,11 @@
     end
   end, lists:zip(PatternReps, ImplReps)),
 
-  '_@wrap_with_impls_r'(Fun, PatternReps, ArgsWithImplsRep, Bindings, Line).
+  wrap_with_impls_r(Fun, PatternReps, ArgsWithImplsRep, Bindings, Line).
 
-'_@wrap_with_impls_r'(Fun, PatternReps, ArgsWithImplsRep, Bindings, Line) ->
+wrap_with_impls_r(Fun, PatternReps, ArgsWithImplsRep, Bindings, Line) ->
   {arity, Arity} = erlang:fun_info(Fun, arity),
-  FullArity = erlang:length(PatternReps),
+  FullArity = length(PatternReps),
 
   FunAtom = '_@Fun',
   FunVarRep = {var, Line, FunAtom},
@@ -142,7 +142,7 @@
 
     FullArity > Arity ->
       BindingsToAdd = [
-        {'_@Recur', fun '_@wrap_with_impls_r'/5},
+        {'_@Recur', fun wrap_with_impls_r/5},
         {'_@PatternReps', lists:sublist(PatternReps, Arity + 1, FullArity)},
         {'_@ArgsWithImplsRep', lists:sublist(ArgsWithImplsRep, Arity + 1, FullArity)},
         {'_@Bindings', Bindings},
@@ -154,8 +154,8 @@
         {Var, erl_eval:add_binding(Atom, Value, FoldBindings)}
       end, Bindings1, BindingsToAdd),
 
-      RecurVarRep = erlang:hd(BindingReps),
-      RecurArgsRep = [Call | erlang:tl(BindingReps)],
+      RecurVarRep = hd(BindingReps),
+      RecurArgsRep = [Call | tl(BindingReps)],
       RecurCall = {call, Line, RecurVarRep, RecurArgsRep},
       {[RecurCall], Bindings2}
 
@@ -168,19 +168,19 @@
   {value, Value, _} = erl_eval:expr(Expr, FinalBindings),
   Value.
 
-'_@concat'(Left, Right) ->
+concat(Left, Right) ->
   if
-    erlang:is_binary(Left) -> <<Left/binary, Right/binary>>;
-    erlang:is_list(Left) -> Left ++ Right;
-    erlang:is_map(Left) -> maps:merge(Left, Right)
+    is_binary(Left) -> <<Left/binary, Right/binary>>;
+    is_list(Left) -> Left ++ Right;
+    is_map(Left) -> maps:merge(Left, Right)
   end.
 
-'_@separate'(Left, Right) ->
+separate(Left, Right) ->
   if
-    erlang:is_list(Left) ->
+    is_list(Left) ->
       Map = maps:from_list([{Elem, true} || Elem <- Right]),
       lists:filter(fun(Elem) ->
         not maps:is_key(Elem, Map)
       end, Left);
-    erlang:is_map(Left) -> maps:without(maps:keys(Right), Left)
+    is_map(Left) -> maps:without(maps:keys(Right), Left)
   end.

@@ -14,7 +14,7 @@ run_code_gen(Prg) ->
   utils:remove_mod(Mod),
   code:load_binary(Mod, "", Binary),
 
-  Mod:'_@init'(ordsets:new()),
+  par_native:init(Mod),
   Mod:main().
 
 run_interpreter(Prg) ->
@@ -42,7 +42,7 @@ many_code_gen(PathPrgs, TargetPath) ->
 
   #comp{module=Module} = hd(Comps),
   Mod = list_to_atom(Module),
-  Mod:'_@init'(ordsets:new()),
+  par_native:init(Mod),
 
   V = Mod:main(),
   code:del_path(?TMP_MANY_DIR),
