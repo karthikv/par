@@ -1,6 +1,6 @@
 module Set
 
-import Base (all?, contains?, empty?, to_list)
+import Base (*)
 
 intersect : Set<A> -> Set<A> -> Set<A>
 export intersect(a, b) = @maps:with(@maps:keys(b), a)

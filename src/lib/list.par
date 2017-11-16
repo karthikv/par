@@ -1,9 +1,8 @@
 module List
 
-import Base (Option, variants Option, fold, length, contains?, put)
+import Base (*)
 import Map
 
-exception BadIndex(Int)
 exception MismatchedLengths(Int, Int)
 
 max_in : [A ~ Ord] -> Option<A ~ Ord>
@@ -97,6 +96,24 @@ nth_r(i, n, l) = match l {
   [] => raise BadIndex(i)
 }
 
+split_at : Int -> [A] -> ([A], [A])
+export split_at(i, l) =
+  let wrapped_i = if i < 0 then length(l) + i else i
+  if wrapped_i < 0 then
+    raise BadIndex(i)
+  else
+    split_at_r(0, wrapped_i, [], l)
+
+split_at_r : Int -> Int -> [A] -> [A] -> ([A], [A])
+split_at_r(i, n, before, l) =
+  if l == [] then
+    raise BadIndex(i)
+  else if i == n then
+    (reverse(before), l)
+  else
+    let [h | t] = l
+    split_at_r(i + 1, n, [h | before], t)
+
 slice : Int -> Int -> [A] -> [A]
 export slice(i, num, l) =
   if num <= 0 then
@@ -106,36 +123,36 @@ export slice(i, num, l) =
     if wrapped_i < 0 then raise BadIndex(i) else slice_r(0, wrapped_i, num, l)
 
 range : Int -> Int -> [A] -> [A]
-export range(s, e, l) =
-  let len = if s < 0 || e < 0 then length(l) else 0
-  let wrapped_s = if s < 0 then len + s else s
-  let wrapped_e = if e < 0 then len + e else e
+export range(start, end, l) =
+  let len = if start < 0 || end < 0 then length(l) else 0
+  let wrapped_start = if start < 0 then len + start else start
+  let wrapped_end = if end < 0 then len + end else end
 
-  if wrapped_s > wrapped_e then
+  if wrapped_start > wrapped_end then
     []
-  else if wrapped_s < 0 then
-    raise BadIndex(s)
-  else if wrapped_e < 0 then
-    raise BadIndex(e)
+  else if wrapped_start < 0 then
+    raise BadIndex(start)
+  else if wrapped_end < 0 then
+    raise BadIndex(end)
   else
-    slice_r(0, wrapped_s, wrapped_e - wrapped_s + 1, l)
+    slice_r(0, wrapped_start, wrapped_end - wrapped_start + 1, l)
 
 slice_r : Int -> Int -> Int -> [A] -> [A]
-slice_r(i, s, num, l) =
+slice_r(i, start, num, l) =
   if num <= 0 then
     []
   else
     match l {
       [h | t] =>
-        if i >= s then
-          [h | slice_r(i + 1, s, num - 1, t)]
+        if i >= start then
+          [h | slice_r(i + 1, start, num - 1, t)]
         else
-          slice_r(i + 1, s, num, t)
+          slice_r(i + 1, start, num, t)
       [] => raise BadIndex(i)
     }
 
 join : String -> [String] -> String
-export join(s, l) = @erlang:iolist_to_binary(intersperse(s, l))
+export join(start, l) = @erlang:iolist_to_binary(intersperse(start, l))
 
 intersperse : A -> [A] -> [A]
 intersperse(a, l) = match l {

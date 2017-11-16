@@ -171,13 +171,17 @@ nth_test = group([
   test assert capture(|-| nth(0, [])) == Some(BadIndex(0))
 ])
 
-
-// slice raises only if tries to access a bad index
-// if num < 0, and the index is invalid, no error.
-
-
-// range raises only if it tries to access a bad index
-// if start > end, no error
+split_at_test : Test
+split_at_test = group([
+  test assert split_at(0, ["cow", "dog", "cat"]) == ([], ["cow", "dog", "cat"])
+  test assert split_at(-1, ["cow", "dog", "cat"]) == (["cow", "dog"], ["cat"])
+  test assert split_at(1, ["cow", "dog", "cat"]) == (["cow"], ["dog", "cat"])
+  test assert capture(|-| split_at(3, ["cow", "dog", "cat"])) == Some(BadIndex(3))
+  test assert split_at(2, [42.3, .428, 13.3]) == ([42.3, .428], [13.3])
+  test assert split_at(-3, [42.3, .428, 13.3]) == ([], [42.3, .428, 13.3])
+  test assert capture(|-| split_at(-4, [42.3, .428, 13.3])) == Some(BadIndex(-4))
+  test assert capture(|-| split_at(0, [])) == Some(BadIndex(0))
+])
 
 slice_test : Test
 slice_test = group([

@@ -14,7 +14,7 @@ interface Sized {
 }
 
 impl Sized for String {
-  length = @erlang:size/1
+  length = @string:length/1
   empty?(s) = s == ""
 }
 
@@ -148,6 +148,11 @@ impl Collection for Map {
 }
 
 
+//-- Exceptions
+// used in List and String modules
+exception BadIndex(Int)
+
+
 //-- Collections
 first : (A, B) -> A
 export first((a, _)) = a
@@ -167,22 +172,10 @@ abs : A ~ Num -> A ~ Num
 export abs = @erlang:abs/1
 
 ceil : Float -> Int
-export ceil(a) =
-  let truncated = trunc(a)
-  // truncated > a when a is negative
-  if to_float(truncated) < a then
-    truncated + 1
-  else
-    truncated
+export ceil = @erlang:ceil/1
 
 floor : Float -> Int
-export floor(a) =
-  let truncated = trunc(a)
-  // truncated > a when a is negative
-  if to_float(truncated) > a then
-    truncated - 1
-  else
-    truncated
+export floor = @erlang:floor/1
 
 max : A ~ Ord -> A ~ Ord -> A ~ Ord
 export max(a, b) = if a > b then a else b

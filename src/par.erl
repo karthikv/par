@@ -11,7 +11,6 @@
 % - Change from unit to {con, "()"} for consistency?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
-% - Bug with global manager init ordering
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
@@ -96,6 +95,14 @@
 %   - Enforce discarding?
 
 main(Args) ->
+  Release = erlang:system_info(otp_release),
+  case string:to_integer(Release) of
+    {OTP, []} when OTP >= 20 -> ok;
+    _ ->
+      ?ERR("Par requires Erlang/OTP 20 or higher, but you have ~s", [Release]),
+      halt(1)
+  end,
+
   {ok, Dir} = file:get_cwd(),
   OptSpecs = [
     {out_dir, $o, "output directory", {string, Dir},

@@ -65,6 +65,7 @@
     "Exception" => ?BUILTIN_TYPE(false, 0),
     "Test" => ?BUILTIN_TYPE(false, 0),
     "Assertion" => ?BUILTIN_TYPE(false, 0),
+    "Native" => ?BUILTIN_TYPE(false, 0),
     "List" => ?BUILTIN_TYPE(false, 1),
     "Set" => ?BUILTIN_TYPE(false, 1),
     "Map" => ?BUILTIN_TYPE(false, 2),

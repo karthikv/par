@@ -172,7 +172,7 @@ parse_file(RawPath, Parsed) ->
           {errors, [{read_error, Path, Reason}], Parsed#{Path => skip}};
 
         {ok, Binary} ->
-          Prg = binary_to_list(Binary),
+          Prg = utils:codepoints(Binary),
 
           case parse_prg(Prg, Path) of
             {ok, RawAst, PrgLines} ->
@@ -199,7 +199,7 @@ parse_file(RawPath, Parsed) ->
 
                 {DepLoc, DepPath} = case From of
                   {str, DepLoc_, DepPath_} ->
-                    {DepLoc_, filename:join(Dir, binary_to_list(DepPath_))};
+                    {DepLoc_, filename:join(Dir, utils:codepoints(DepPath_))};
                   {con_token, DepLoc_, StdlibModule} ->
                     case maps:find(StdlibModule, stdlib_modules()) of
                       {ok, DepPath_} ->
@@ -3083,12 +3083,12 @@ add_sub(V, RawSub, S) ->
 
   BoundVs = S1#solver.bound_vs,
   S2 = case {Sub, ordsets:is_element(V, BoundVs)} of
-    % no change in fvs
-    {{set_ifaces, _}, _} -> S1;
-    % when subbing a tv not in env or an anchor
+    % No need to update FVs if V isn't in env.
     {_, false} -> S1;
     {_, true} ->
-      NewBoundVs = ordsets:union(fvs(Sub), ordsets:del_element(V, BoundVs)),
+      % Is and Rigid don't matter here, since we're just computing FVs.
+      NewFVs = fvs(subs_s({tv, V, none, false}, S1)),
+      NewBoundVs = ordsets:union(NewFVs, ordsets:del_element(V, BoundVs)),
       S1#solver{bound_vs=NewBoundVs}
   end,
   {true, S2}.

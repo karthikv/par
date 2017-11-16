@@ -445,7 +445,7 @@ flip : (A -> B -> C) -> B -> A -> C
 flip(f, b, a) = f(a, b)
 
 char_to_str : [Char] -> String
-char_to_str = @erlang:list_to_binary/1
+char_to_str = @unicode:characters_to_binary/1
 
 chars : String -> [Char]
 chars = @erlang:binary_to_list/1

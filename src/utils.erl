@@ -19,6 +19,7 @@
   absolute/1,
   pretty_csts/1,
   pretty/1,
+  codepoints/1,
   remove_mod/1
 ]).
 -include("common.hrl").
@@ -339,6 +340,12 @@ pretty_field_map(FieldMap) ->
     [?FMT("~s : ~s", [Name, pretty(T)]) | Strs]
   end, [], FieldMap),
   string:join(lists:sort(FieldStrs), ", ").
+
+codepoints(Str) ->
+  case string:next_codepoint(Str) of
+    [H | T] -> [H | codepoints(T)];
+    [] -> []
+  end.
 
 remove_mod(Mod) ->
   code:purge(Mod),

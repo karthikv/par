@@ -53,7 +53,7 @@ check(Name, Str) ->
       ?assertEqual(ok, file:write_file(Path, Str));
     error ->
       case file:read_file(Path) of
-        {ok, Binary} -> ?assertEqual(binary_to_list(Binary), Str);
+        {ok, Binary} -> ?assertEqual(utils:codepoints(Binary), Str);
         _ ->
           io:format("~s", [Str]),
           ?assert(false)

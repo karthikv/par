@@ -1,8 +1,10 @@
 module Map
 
-import Base (Option, variants Option)
+import Base (*)
 
 exception BadKey
+
+// TODO: move lookup/get/etc. to base
 
 lookup : K -> Map<K, V> -> Option<V>
 export lookup(k, m) = match @maps:find(k, m) {
@@ -16,9 +18,6 @@ export get(k, m) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => raise BadKey
 }
-
-//TODO: solve why this is failing
-//foo(x) = match foo(y) { _ => true }
 
 get_or : K -> V -> Map<K, V> -> V
 export get_or(k, default, m) = match @maps:find(k, m) {
