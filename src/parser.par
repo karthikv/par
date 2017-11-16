@@ -197,7 +197,7 @@ imports(tokens) = match tokens {
 
 import_ident : [Token] -> Parsed<(Node, [Token])>
 import_ident(tokens) =
-  let variants = chars("variants")
+  let variants = String.chars("variants")
   match tokens {
     [Lexer.Var(s, &variants), Lexer.Con(e, name) | t] =>
       parsed((Variants(range(s, e), name), t))
@@ -420,7 +420,7 @@ tv_node(tokens) = match tokens {
 iface : Loc -> [Token] -> Parsed<(Node, [Token])>
 iface(s, tokens) = match tokens {
   [Lexer.Con(con_l, name) | t] =>
-    let extends = chars("extends")
+    let extends = String.chars("extends")
     let parsed_parents =
       if let [Lexer.Var(_, &extends) | t] = t then
         many_delim_cb(|node, rest| match rest {
@@ -457,7 +457,7 @@ qualified_con(tokens) = match tokens {
 }
 
 implementation(s, tokens) =
-  let for = chars("for")
+  let for = String.chars("for")
   match tokens {
     [Lexer.Con(con_s, mod) | t] =>
       let (con_node, t) = try_qualify_con(con_s, mod, t)
@@ -717,7 +717,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
   AcceptOp =>
     let shunt(bopa, t) =
       let op = BinaryOp(bopa)
-      let next_prec = get(Bin(bopa), opa_prec)
+      let next_prec = Map.get(Bin(bopa), opa_prec)
       expr_r(expr_s, Start, [op | reduce(next_prec, stack)], t)
 
     let head_end_line(stack) =
@@ -756,7 +756,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
         )
       [Lexer.Colon(_) | t] =>
         type_expr(t) |> pbind(|(node, rest)|
-          let next_prec = get(Bin(Colon), opa_prec)
+          let next_prec = Map.get(Bin(Colon), opa_prec)
           let op = BinaryOp(Colon)
           let new_stack = [Node(node), op | reduce(next_prec, stack)]
           expr_r(expr_s, AcceptOp, new_stack, rest)
@@ -914,7 +914,7 @@ type_expr_r(lhs, tokens) = match lhs {
               parsed([param])
           )
           |> pmap_or(|v| v, [])
-          |> pmap(|params| Gen(l, Con(l, chars("List")), params))
+          |> pmap(|params| Gen(l, Con(l, String.chars("List")), params))
           |> pbind(recurse(rest))
         )
 
@@ -978,7 +978,7 @@ ifaces_r(l, tokens, ifaces) = match tokens {
   [Lexer.Tilde(_) | t] =>
     head_loc(t) |> one_err("Expected capitalized name of interface")
 
-  _ => parsed((l, reverse(ifaces), tokens))
+  _ => parsed((l, List.reverse(ifaces), tokens))
 }
 
 field_sig : [Token] -> Parsed<(Node, [Token])>
@@ -1160,7 +1160,7 @@ reduce : Int -> [NodeOp] -> [NodeOp]
 reduce(next_prec, stack) =
   match last_op(stack) {
     Some(BinaryOp(bopa)) =>
-      if next_prec <= get(Bin(bopa), opa_prec) then
+      if next_prec <= Map.get(Bin(bopa), opa_prec) then
         let [Node(right), BinaryOp(&bopa), Node(left) | t] = stack
         let l = range(node_loc(left), node_loc(right))
         let node =
@@ -1174,7 +1174,7 @@ reduce(next_prec, stack) =
         stack
 
     Some(UnaryOp(s, uopa)) =>
-      if next_prec <= get(Un(uopa), opa_prec) then
+      if next_prec <= Map.get(Un(uopa), opa_prec) then
         let [Node(right), UnaryOp(&s, &uopa) | t] = stack
         let l = range(s, node_loc(right))
         reduce(next_prec, [Node(UnaryExpr(l, uopa, right)) | t])
@@ -1194,8 +1194,9 @@ last_op(stack) = match stack {
 
 opa_prec : Map<OpAtom, Int>
 opa_prec =
-  let pairs = map_index(|opas, i| map(|opa| (opa, i), opas), opa_prec_list)
-  @maps:from_list(@lists:append(pairs))
+  List.with_index(opa_prec_list)
+  |> List.flat_map(|(opas, i)| map(|opa| (opa, i), opas))
+  |> to_map
 
 opa_prec_list : [[OpAtom]]
 opa_prec_list = [
@@ -1451,7 +1452,7 @@ enclosed_r(inner, depth, open_tag, close_tag, close_str, s, tokens) =
       // just find the nearest close token, ignoring any nesting.
       if token_tag(h) == close_tag then
         if depth == 1 then
-          parsed((range(s, token_loc(h)), reverse(inner), t))
+          parsed((range(s, token_loc(h)), List.reverse(inner), t))
         else
           enclosed_r([h | inner], depth - 1, open_tag, close_tag, close_str, s, t)
       else if token_tag(h) == open_tag then
@@ -1555,22 +1556,6 @@ add_err(p, str, mloc) = { p | value := None, errs = [(mloc, str) | p.errs] }
 
 one_err : String -> Option<Loc> -> Parsed<A>
 one_err(str, mloc) = Parsed { value = None, errs = [(mloc, str)] }
-
-
-//--- "Standard library" functions
-get : K -> Map<K, V> -> V
-get = @maps:get/2
-
-map_index : (A -> Int -> B) -> [A] -> [B]
-map_index(f, l) =
-  let (mapped, _) = @lists:mapfoldl(|a, i| (f(a, i), i + 1), 0, l)
-  mapped
-
-reverse : [A] -> [A]
-reverse = @lists:reverse/1
-
-chars : String -> [Char]
-chars = @erlang:binary_to_list/1
 
 make_ref : () -> Ref
 make_ref = @erlang:make_ref/0

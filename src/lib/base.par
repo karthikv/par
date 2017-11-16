@@ -302,3 +302,5 @@ print : A -> ()
 export print(a) =
   @io:format("~s~n", [to_str(a)])
   ()
+
+// TODO: add flip

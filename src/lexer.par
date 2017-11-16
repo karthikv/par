@@ -1,5 +1,8 @@
 module Lexer
 
+import String (chars, from_chars)
+import List (reverse)
+
 struct Loc {
   start_line : Int
   start_col : Int
@@ -301,7 +304,7 @@ tokenize_str_r(loc, chs, accum) = match chs {
     }
     tokenize_str_r(next_loc, t, [unesc(h) | accum])
 
-  ['"' | t] => (LitStr(inc(loc, 1), char_to_str(reverse(accum))), t)
+  ['"' | t] => (LitStr(inc(loc, 1), from_chars(reverse(accum))), t)
 
   ['\n' | t] =>
     let token = Unexpected(
@@ -443,12 +446,3 @@ unesc(ch) = match ch {
 
 flip : (A -> B -> C) -> B -> A -> C
 flip(f, b, a) = f(a, b)
-
-char_to_str : [Char] -> String
-char_to_str = @unicode:characters_to_binary/1
-
-chars : String -> [Char]
-chars = @erlang:binary_to_list/1
-
-reverse : [A] -> [A]
-reverse = @lists:reverse/1
