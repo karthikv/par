@@ -3,7 +3,6 @@ set -euo pipefail
 IFS=$'\n\t'
 
 bin/par -o ebin src/parser.par
-erlc -o ebin src/par_native.erl
 
 if [ $# -eq 0 ]; then
   rebar3 eunit

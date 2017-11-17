@@ -443,6 +443,3 @@ unesc(ch) = match ch {
   'd' => '\d'
   _ => ch
 }
-
-flip : (A -> B -> C) -> B -> A -> C
-flip(f, b, a) = f(a, b)

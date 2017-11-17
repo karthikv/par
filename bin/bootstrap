@@ -20,7 +20,6 @@ if [ "$1" == "start" ]; then
   else
     echo "Compiling new par..."
     bin/par -o ebin src/parser.par
-    erlc -o ebin src/par_native.erl
     rebar3 as escript escriptize
 
     mv "$PAR_PATH" "$OLD_PAR_PATH"
@@ -38,7 +37,6 @@ elif [ "$1" == "stop" ]; then
 elif [ "$1" == "finish" ]; then
   if [ -f $OLD_PAR_PATH ]; then
     bin/par -o ebin src/parser.par
-    erlc -o ebin src/par_native.erl
     set +e
     rebar3 eunit
     succeeded=$?
