@@ -1487,7 +1487,7 @@ arity({var_ref, _, _, Name}, CG) ->
   Arity;
 arity({field_fn, _, _}, _) -> 1;
 arity({field, _, _, _}, _) -> unknown;
-% TODO: field for module access!!
+% TODO: arity of field for module access
 arity({app, _, Expr, Args}, CG) ->
   case arity(Expr, CG) of
     unknown -> unknown;
@@ -1529,8 +1529,8 @@ counter_spawn() ->
       Pid ! {self(), reset},
       receive
         reset_ok -> true
-      after 1000 ->
-        error("couldn't reset count")
+      after
+        1000 -> error("couldn't reset count")
       end
   end.
 
@@ -1548,6 +1548,6 @@ counter_next() ->
   ?COUNTER_NAME ! {self(), next},
   receive
     {next_ok, Next} -> Next
-  after 1000 ->
-    error("couldn't get next count")
+  after
+    1000 -> error("couldn't get next count")
   end.

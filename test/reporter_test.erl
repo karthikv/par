@@ -1,8 +1,7 @@
 -module(reporter_test).
 
 -include_lib("eunit/include/eunit.hrl").
-
--define(TMP_MANY_DIR, "/tmp/reporter-test-many").
+-include("../src/common.hrl").
 
 check_has_errors({ok, _, _}) ->
   io:format("Expected errors, but got valid program~n"),
@@ -32,20 +31,36 @@ check_has_errors(_) -> ok.
 -define(
   golden_many_(Name, PathPrgs, TargetPath),
   {?LINE, fun() ->
-    Errors = type_system_test:infer_many(
-      ?TMP_MANY_DIR,
-      PathPrgs,
-      TargetPath
-    ),
+    Dir = utils:temp_dir(),
+    Errors = type_system_test:infer_many(Dir, PathPrgs, TargetPath),
     check_has_errors(Errors),
-    Str = lists:flatten(reporter:format(Errors)),
+
+    NormErrors = norm_dir(Errors, Dir),
+    Str = lists:flatten(reporter:format(NormErrors)),
     check(Name, Str)
   end}
 ).
 
+norm_dir([Err | Errs], Dir) -> [norm_dir(Err, Dir) | norm_dir(Errs, Dir)];
+norm_dir([], _) -> [];
+norm_dir({read_error, Path, Reason}, Dir) ->
+  {read_error, replace_dir(Path, Dir), Reason};
+norm_dir({import_error, Loc, PathOrCon, Reason, Comp}, Dir) ->
+  {import_error, Loc, replace_dir(PathOrCon, Dir), Reason,
+   replace_dir(Comp, Dir)};
+norm_dir({lexer_errors, Errs, Path, PrgLines}, Dir) ->
+  {lexer_errors, Errs, replace_dir(Path, Dir), PrgLines};
+norm_dir({parser_errors, Errs, Path, PrgLines}, Dir) ->
+  {parser_errors, Errs, replace_dir(Path, Dir), PrgLines};
+norm_dir({errors, Errs, Comps}, Dir) ->
+  {errors, Errs, [replace_dir(Comp, Dir) || Comp <- Comps]}.
+
+replace_dir(#comp{path=Path}=C, Dir) -> C#comp{path=replace_dir(Path, Dir)};
+replace_dir(Path, Dir) -> string:replace(Path, Dir, "dir", all).
+
 check(Name, Str) ->
-  {ok, Dir} = file:get_cwd(),
-  Path = filename:join([Dir, "test", "golden", "reporter-" ++ Name]),
+  {ok, Cwd} = file:get_cwd(),
+  Path = filename:join([Cwd, "test", "golden", "reporter-" ++ Name]),
 
   case init:get_argument(update) of
     {ok, _} ->

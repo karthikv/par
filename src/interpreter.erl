@@ -377,11 +377,9 @@ env_spawn() ->
     Pid ->
       Pid ! {self(), reset},
       receive
-        reset_ok -> 1;
-        Unexpected ->
-          error({"unexpected reset response", Unexpected})
-      after 1000 ->
-        error("couldn't reset env")
+        reset_ok -> 1
+      after
+        1000 -> error("couldn't reset env")
       end
   end.
 
@@ -400,20 +398,15 @@ env_run(NextID, Env) ->
     {Pid, set, Name, V, ID} ->
       #{ID := {Bindings, ParentID}} = Env,
       Pid ! set_ok,
-      env_run(NextID, Env#{ID := {Bindings#{Name => V}, ParentID}});
-    Unexpected ->
-      io:format("unexpected env message ~p~n", [Unexpected]),
-      env_run(NextID, Env)
+      env_run(NextID, Env#{ID := {Bindings#{Name => V}, ParentID}})
   end.
 
 env_child(ParentID) ->
   ?ENV_NAME ! {self(), child, ParentID},
   receive
-    {child_ok, NextID} -> NextID;
-    Unexpected ->
-      error({"unexpected child response", Unexpected})
-  after 1000 ->
-    error({"couldn't make child env", ParentID})
+    {child_ok, NextID} -> NextID
+  after
+    1000 -> error({"couldn't make child env", ParentID})
   end.
 
 env_get(Name, ID) ->
@@ -421,21 +414,17 @@ env_get(Name, ID) ->
   receive
     {find_ok, {ok, V}, _} -> V;
     {find_ok, error, undefined} -> error({badkey, Name});
-    {find_ok, error, ParentID} -> env_get(Name, ParentID);
-    Unexpected ->
-      error({"unexpected find response", Name, ID, Unexpected})
-  after 1000 ->
-    error({"couldn't get env", Name, ID})
+    {find_ok, error, ParentID} -> env_get(Name, ParentID)
+  after
+    1000 -> error({"couldn't get env", Name, ID})
   end.
 
 env_set(Name, V, ID) ->
   ?ENV_NAME ! {self(), set, Name, V, ID},
   receive
-    set_ok -> ok;
-    Unexpected ->
-      error({"unexpected set response", Name, V, ID, Unexpected})
-  after 1000 ->
-    error({"couldn't set env", Name, V, ID})
+    set_ok -> ok
+  after
+    1000 -> error({"couldn't set env", Name, V, ID})
   end.
 
 env_update(Name, V, ID) ->
@@ -443,9 +432,7 @@ env_update(Name, V, ID) ->
   receive
     {find_ok, {ok, _}, _} -> env_set(Name, V, ID);
     {find_ok, error, undefined} -> error({badkey, Name});
-    {find_ok, error, ParentID} -> env_update(Name, V, ParentID);
-    Unexpected ->
-      error({"unexpected find response", Name, V, ID, Unexpected})
-  after 1000 ->
-    error({"couldn't update env", Name, V, ID})
+    {find_ok, error, ParentID} -> env_update(Name, V, ParentID)
+  after
+    1000 -> error({"couldn't update env", Name, V, ID})
   end.

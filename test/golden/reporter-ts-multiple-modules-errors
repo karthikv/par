@@ -1,4 +1,4 @@
-*** module Bar *** (/tmp/reporter-test-many/bar.par)
+*** module Bar *** (dir/bar.par)
 
 Mismatched types [Char] and String from right-hand side of '++' operator:
 
@@ -10,7 +10,7 @@ Mismatched types Char and A ~ Num from match pattern:
 6: 1 => 3
    ^
 
-*** module Foo *** (/tmp/reporter-test-many/foo.par)
+*** module Foo *** (dir/foo.par)
 
 Mismatched types Bool and A ~ Num from function call:
 

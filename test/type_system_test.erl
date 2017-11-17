@@ -4,7 +4,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/common.hrl").
 
--define(MANY_DIR, "/tmp/type-system-test-many").
 -define(PRG_PREFIX, "module Mod\n").
 -define(EXPR_PREFIX, "module Mod expr =\n").
 
@@ -43,9 +42,6 @@ ok_expr(Expr) -> norm_prg(?EXPR_PREFIX, Expr, "expr").
 bad_expr(Expr, Err) -> bad_prg(?EXPR_PREFIX, Expr, Err).
 
 infer_many(Dir, PathPrgs, TargetPath) ->
-  ok = filelib:ensure_dir(Dir),
-  os:cmd(["rm -rf ",  Dir]),
-
   lists:foreach(fun({Path, Prg}) ->
     AbsPath = filename:join(Dir, Path ++ ".par"),
     ok = filelib:ensure_dir(AbsPath),
@@ -56,7 +52,11 @@ infer_many(Dir, PathPrgs, TargetPath) ->
   type_system:infer_file(AbsTargetPath).
 
 ok_many(PathPrgs, TargetPath, Name) ->
-  {ok, Comps, C} = check_ok(infer_many(?MANY_DIR, PathPrgs, TargetPath)),
+  {ok, Comps, C} = check_ok(infer_many(
+    utils:temp_dir(),
+    PathPrgs,
+    TargetPath
+  )),
   #ctx{g_env=GEnv} = C,
   #comp{module=Module} = hd(Comps),
   #binding{inst=T} = maps:get({Module, Name}, GEnv),
@@ -67,7 +67,7 @@ ok_many(PathPrgs, TargetPath, Name) ->
   utils:pretty(NormT).
 
 bad_many(PathPrgs, TargetPath, ExpErr) ->
-  check_errors(infer_many(?MANY_DIR, PathPrgs, TargetPath), [ExpErr]).
+  check_errors(infer_many(utils:temp_dir(), PathPrgs, TargetPath), [ExpErr]).
 
 check_ok(Result) -> check_ok(Result, standard_io).
 

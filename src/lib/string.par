@@ -19,11 +19,8 @@ enum RegexpOpt {
 exception BadRegexp({ reason : String, index : Int })
 
 // TODO: raw strings
-// TODO: /utf8 for binaries
 // TODO: improve speed of stdlib tests
 
-// TODO: make lexer/parse use this
-// TODO: rethink about this; it fails for chars represented by two codepoints
 chars : String -> [Char]
 export chars(s) = match @string:next_codepoint(s) {
   [h | t] => [h | chars(assume t)]
@@ -180,7 +177,6 @@ interface Pattern {
 
 impl Pattern for String {
   splitn(sub, n, s) =
-    // TODO: distinction between show and to_str
     if sub == "" then
       if n <= 0 then
         @string:to_graphemes(s) : [Char] |> map(|ch| from_chars([ch]))

@@ -1,4 +1,4 @@
-*** file /tmp/reporter-test-many/bar.par ***
+*** file dir/bar.par ***
 
 Unexpected character:
 
@@ -10,7 +10,7 @@ Can't have multiple dots in numeric literal:
 2: a = `14.153.0
         ^^^^^^^
 
-*** file /tmp/reporter-test-many/baz.par ***
+*** file dir/baz.par ***
 
 Expected comma ',' delimiter after expression:
 

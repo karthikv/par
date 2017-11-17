@@ -25,9 +25,9 @@ gm_spawn() ->
     Pid ->
       Pid ! {self(), reset},
       receive
-        reset_ok -> true;
-        Unexpected -> error({"unexpected reset response", Unexpected})
-      after 1000 -> error("couldn't reset globals")
+        reset_ok -> true
+      after
+        1000 -> error("couldn't reset globals")
       end
   end.
 
@@ -44,28 +44,25 @@ gm_run(Globals) ->
       gm_run(Globals);
     {Pid, set, Key, Value} ->
       Pid ! set_ok,
-      gm_run(Globals#{Key => Value});
-    Unexpected ->
-      io:format("unexpected gm message ~p~n", [Unexpected]),
-      gm_run(Globals)
+      gm_run(Globals#{Key => Value})
   end.
 
 gm_find(Mod, Atom) ->
   Key = {Mod, Atom},
   par_gm ! {self(), find, Key},
   receive
-    {find_ok, Result} -> Result;
-    Unexpected -> error({"unexpected find response", Key, Unexpected})
-  after 1000 -> error({"couldn't find global", Key})
+    {find_ok, Result} -> Result
+  after
+    1000 -> error({"couldn't find global", Key})
   end.
 
 gm_set(Mod, Atom, Value) ->
   Key = {Mod, Atom},
   par_gm ! {self(), set, Key, Value},
   receive
-    set_ok -> Value;
-    Unexpected -> error({"unexpected set response", Key, Value, Unexpected})
-  after 1000 -> error({"couldn't set global", Key, Value})
+    set_ok -> Value
+  after
+    1000 -> error({"couldn't set global", Key, Value})
   end.
 
 curry(Fun, RawArgs, Line) ->

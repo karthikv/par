@@ -303,4 +303,5 @@ export print(a) =
   @io:format("~s~n", [to_str(a)])
   ()
 
-// TODO: add flip
+flip : (A -> B -> C) -> B -> A -> C
+export flip(f, b, a) = f(a, b)

@@ -1,11 +1,11 @@
-*** file /tmp/reporter-test-many/bar.par ***
+*** file dir/bar.par ***
 
 Expected '(' or '=' to follow variable identifier in global definition:
 
 2: a b = 3
      ^
 
-*** file /tmp/reporter-test-many/baz.par ***
+*** file dir/baz.par ***
 
 Expected comma ',' delimiter after expression:
 

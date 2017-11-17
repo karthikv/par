@@ -4,8 +4,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/common.hrl").
 
--define(TMP_MANY_DIR, "/tmp/exec-test-many").
-
 run_code_gen(Prg) ->
   Result = type_system_test:infer_prefix(Prg),
   {ok, Comps, C} = type_system_test:check_ok(Result),
@@ -26,16 +24,17 @@ expr_code_gen(Expr) -> run_code_gen("main() =\n" ++ Expr).
 expr_interpreter(Expr) -> run_interpreter("main() =\n" ++ Expr).
 
 many_code_gen(PathPrgs, TargetPath) ->
+  Dir = utils:temp_dir(),
   Result = type_system_test:infer_many(
-    ?TMP_MANY_DIR,
+    Dir,
     PathPrgs,
     TargetPath
   ),
   {ok, Comps, C} = type_system_test:check_ok(Result),
 
-  code:add_patha(?TMP_MANY_DIR),
+  code:add_patha(Dir),
   lists:foreach(fun({Mod, Binary}) ->
-    Path = filename:join(?TMP_MANY_DIR, lists:concat([Mod, ".beam"])),
+    Path = filename:join(Dir, lists:concat([Mod, ".beam"])),
     file:write_file(Path, Binary),
     utils:remove_mod(Mod)
   end, code_gen:compile_comps(Comps, C)),
@@ -45,7 +44,7 @@ many_code_gen(PathPrgs, TargetPath) ->
   par_native:init(Mod),
 
   V = Mod:main(),
-  code:del_path(?TMP_MANY_DIR),
+  code:del_path(Dir),
   V.
 
 code_gen_expr_test_() -> test_expr(fun expr_code_gen/1).
@@ -311,12 +310,9 @@ test_global(Run) ->
       "main() = foo"
     ))
   % to ensure globals are only evaluated once
-  , ?_test({ok, <<"bar">>} = Run(
-      "foo = @file:write_file(\"/tmp/par-foo\", \"bar\")\n"
-      "bar =\n"
-      "  let result = @file:read_file(\"/tmp/par-foo\")\n"
-      "  @file:delete(\"/tmp/par-foo\")\n"
-      "  result\n"
+  , ?_test(baz = Run(
+      "foo = @erlang:put(@globals_once, @baz)\n"
+      "bar = @erlang:erase(@globals_once)\n"
       "main() = bar"
     ))
   % to ensure indirect global dependencies (foo -> f -> b) work
@@ -415,15 +411,13 @@ test_exception(Expr, Run, Many) ->
     ))
   , ?_test(<<"hello">> = Expr("ensure @world after \"hello\""))
   , ?_test(begin
-      Filename = "/tmp/par-exception-1",
       ?assertThrow('Mod.Bar', Run(
         "exception Bar\n"
-        "filename = \"" ++ Filename ++ "\"\n"
         "main() =\n"
-        "  @file:write_file(filename, \"contents\")\n"
-        "  ensure @file:delete(filename) after raise Bar"
+        "  @erlang:put(@ensure, @baz)\n"
+        "  ensure @erlang:erase(@ensure) after raise Bar"
       )),
-      {error, enoent} = file:read_file(Filename)
+      undefined = get(ensure)
     end)
   , ?_test(bar = Many([
       {"foo",
@@ -848,35 +842,30 @@ test_interface(Run) ->
       "  (foo : Bool -> (Bool, A ~ ToI) -> Int)(false, (false, [@a, @b]))\n"
       ")"
     ))
-  , ?_test({{ok, <<"combine">>}, false} = Run(
-      "filename = \"/tmp/par-combine-1\"\n"
+  , ?_test({foo, false} = Run(
       "interface Combine { combine : T -> T -> T }\n"
       "impl Combine for Bool {\n"
       "  combine(a) =\n"
-      "    @file:write_file(filename, \"combine\")\n"
+      "    @erlang:put(@combine1, @foo)\n"
       "    |b| a && b\n"
       "}\n"
       "main() =\n"
       "  let f = combine(true)\n"
-      "  let result = @file:read_file(filename)\n"
-      "  @file:delete(filename)\n"
+      "  let result = @erlang:erase(@combine1)\n"
       "  (result, f(false))"
     ))
   % We can only call combine() after we receive the second argument, which
   % determines the implementation, so the file isn't created.
-  , ?_test({error, enoent} = Run(
-      "filename = \"/tmp/par-combine-2\"\n"
+  , ?_test(undefined = Run(
       "interface Combine { combine : Int -> T -> T -> T }\n"
       "impl Combine for Bool {\n"
       "  combine(_) =\n"
-      "    @file:write_file(filename, \"combine\")\n"
+      "    @erlang:put(@combine2, @foo)\n"
       "    |a, b| a && b\n"
       "}\n"
       "main() =\n"
       "  combine(1)\n"
-      "  let result = @file:read_file(filename)\n"
-      "  @file:delete(filename)\n"
-      "  result"
+      "  @erlang:erase(@combine2)\n"
     ))
   , ?_test({1, 3} = Run(
       IfaceToI ++
@@ -1346,7 +1335,7 @@ test_assert(Expr) ->
   ].
 
 code_gen_import_test_() -> test_import(fun many_code_gen/2).
-% TODO: defer interpreter import until we work on REPL
+% interpreter_import_test_() -> test_import(fun many_interpreter/2).
 test_import(Many) ->
   [ ?_test(7 = Many([
       {"foo", "module Foo export x = 3"},

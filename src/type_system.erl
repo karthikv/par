@@ -948,7 +948,6 @@ infer({enum, _, EnumTE, Options}, C) ->
           {ok, {default, _, _}} -> {Keys, FoldC1};
 
           {ok, {custom, _, CustomLoc}} ->
-            % TODO: show actual code instead of just line for ERR_DUP_KEY
             CaseC = add_ctx_err(
               ?ERR_DUP_KEY(Key, Con, Loc),
               CustomLoc,
@@ -1247,7 +1246,6 @@ infer({anon_record, _, Ref, Inits}, #ctx{record_refs=RecordRefs}=C) ->
         CaseC = l_env_add(Name, #binding{tv=TV}, FoldC),
         {ExprT, CaseC1} = infer(Expr, CaseC),
 
-        % TODO: should this cst be unified first for better error messages?
         CaseC2 = add_cst(TV, ExprT, FnLoc, ?FROM_FIELD_DEF(Name), CaseC1),
         {TV, CaseC2#ctx{l_env=FoldC#ctx.l_env}};
 
@@ -1384,8 +1382,6 @@ infer({field_fn, _, {var, _, Name}}, C) ->
   RecordExtT = {record_ext, A, BaseTV, #{Name => FieldTV}},
   {{lam, RecordExtT, FieldTV}, C};
 
-% TODO: ensure this is parsed correctly or add error cases (e.g. when var is
-% a con_token, expr must be a con_token)
 infer({field, Loc, Expr, Prop}, C) ->
   case Expr of
     {con_token, ConLoc, Module} ->
@@ -1970,7 +1966,6 @@ infer_impl_inits(
           error ->
             add_ctx_err(?ERR_EXTRA_FIELD_IMPL(Name, IfaceCon), VarLoc, FoldC);
 
-          % TODO: incorporate _FieldLoc into sig error messages
           {ok, {_FieldLoc, RawFieldT}} ->
             % Remove ifaces on T so we can unify with a gen.
             NoIsOpts = #sub_opts{subs=#{"T" => {set_ifaces, none}}},
@@ -2516,7 +2511,6 @@ inst(GVs, T, Pid) ->
 
 unify(T1, T2, S) when T1 == T2 -> {true, S};
 
-% TODO: test and make {hole, true} work?
 % Always return false when there's a hole, as this indicates that we can't
 % unify successfully.
 unify({hole, false}, _, S) -> {false, S};
@@ -3182,7 +3176,6 @@ instance(T, I, V, S) ->
             nested_ivs=NestedIVs
           } = S,
 
-          % TODO: is there a case where this fails?
           Origins = maps:get({I, V}, IVOrigins),
 
           {NewInstRefs, NewNestedIVs} = ordsets:fold(fun({Ref, OrigV}, Memo) ->

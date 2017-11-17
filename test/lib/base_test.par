@@ -395,3 +395,11 @@ to_str_test = group([
     assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
       str == "Foo { bar = \"Bar\", foo = 77 }"
 ])
+
+flip_test : Test
+flip_test = group([
+  test assert flip(map, Some(3), |a| a + 1) == Some(4)
+  test assert flip(filter, #["cat", "dog", "mouse"], |a| a < "lion") ==
+    #["cat", "dog"]
+  test assert flip(all?, ['a', 'e', 'a'], |x| x == 'a' || x == 'e')
+])

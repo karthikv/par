@@ -52,6 +52,7 @@
 %   - Impl error due to iface type sig, where type sig can be in another module
 %   - Explanation for how to circumvent builtin redef error?
 %   - For rigid errors, use same TVs as are in signatures
+%   - Keep con/iface qualified if ambiguous, or always qualify
 % - Website + Documentation
 %
 % Defer

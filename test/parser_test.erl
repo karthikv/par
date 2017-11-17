@@ -760,7 +760,6 @@ expr_test_() ->
       },
       ok_expr("@io:printable_range/0((), 1, 2)")
     )
-  % TODO: error case w/ no arity
 
 
   , ?_assertEqual(

@@ -20,6 +20,7 @@
   pretty_csts/1,
   pretty/1,
   codepoints/1,
+  temp_dir/0,
   remove_mod/1
 ]).
 -include("common.hrl").
@@ -281,7 +282,6 @@ pretty({tv, RawV, Is, _}) ->
   if
     Is == none -> V;
     true ->
-      % TODO: keep qualified when ambiguous
       Unqualified = lists:map(fun(I) ->
         utils:unqualify(I)
       end, ordsets:to_list(Is)),
@@ -297,7 +297,6 @@ pretty({set_ifaces_rigid, Is}) ->
     utils:unqualify(I)
   end, ordsets:to_list(Is)),
   ?FMT("set_ifaces_rigid(~s)", [string:join(Unqualified, " ~ ")]);
-% TODO: keep qualified when ambiguous
 pretty({con, Con}) -> utils:unqualify(Con);
 pretty({gen, {con, "List"}, [ElemT]}) -> ?FMT("[~s]", [pretty(ElemT)]);
 pretty({gen, ConT, ParamTs}) ->
@@ -345,6 +344,21 @@ codepoints(Str) ->
   case string:next_codepoint(Str) of
     [H | T] -> [H | codepoints(T)];
     [] -> []
+  end.
+
+temp_dir() ->
+  Bytes = crypto:strong_rand_bytes(16),
+  Dir = filename:join(os:getenv("TEMP", "/tmp"), "par-" ++ hex_encode(Bytes)),
+  case file:make_dir(Dir) of
+    ok -> Dir;
+    {error, eexist} -> temp_dir()
+  end.
+
+hex_encode(<<>>) -> [];
+hex_encode(<<H, T/binary>>) ->
+  case integer_to_list(H, 16) of
+    [A, B] -> [A, B | hex_encode(T)];
+    [A] -> [$0, A | hex_encode(T)]
   end.
 
 remove_mod(Mod) ->
