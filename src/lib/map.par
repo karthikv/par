@@ -2,22 +2,7 @@ module Map
 
 import Base (*)
 
-exception BadKey
-
-// TODO: move lookup/get/etc. to base
-
-lookup : K -> Map<K, V> -> Option<V>
-export lookup(k, m) = match @maps:find(k, m) {
-  (@ok, v) => Some(v)
-  @error => None
-}
-
 // TODO: match generalization bug w/ dup errors
-get : K -> Map<K, V> -> V
-export get(k, m) = match @maps:find(k, m) {
-  (@ok, v) => v
-  @error => raise BadKey
-}
 
 get_or : K -> V -> Map<K, V> -> V
 export get_or(k, default, m) = match @maps:find(k, m) {
@@ -25,17 +10,11 @@ export get_or(k, default, m) = match @maps:find(k, m) {
   @error => default
 }
 
-key? : K -> Map<K, V> -> Bool
-export key? = @maps:is_key/2
-
 keys : Map<K, V> -> [K]
 export keys = @maps:keys/1
 
 values : Map<K, V> -> [V]
 export values = @maps:values/1
-
-remove : K -> Map<K, V> -> Map<K, V>
-export remove = @maps:remove/2
 
 update : K -> (V -> V) -> Map<K, V> -> Map<K, V>
 export update(k, f, m) = match @maps:find(k, m) {

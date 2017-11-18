@@ -305,6 +305,7 @@ parse_prg(Prg, Path) ->
   case 'Lexer':tokenize(Prg) of
     {errors, Errs} -> {lexer_errors, Errs, Path, PrgLines};
     {ok, Tokens} ->
+      %% io:format(user, "map ~p~n\n", [code:is_loaded('Map')]),
       case 'Parser':parse(Tokens) of
         #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, PrgLines};
         #{value := {'Some', Ast}} -> {ok, Ast, PrgLines}

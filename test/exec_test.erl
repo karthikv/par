@@ -32,18 +32,23 @@ many_code_gen(PathPrgs, TargetPath) ->
   ),
   {ok, Comps, C} = type_system_test:check_ok(Result),
 
-  code:add_patha(Dir),
+  Compiled = code_gen:compile_comps(Comps, C),
   lists:foreach(fun({Mod, Binary}) ->
     Path = filename:join(Dir, lists:concat([Mod, ".beam"])),
     file:write_file(Path, Binary),
     utils:remove_mod(Mod)
-  end, code_gen:compile_comps(Comps, C)),
+  end, Compiled),
 
   #comp{module=Module} = hd(Comps),
-  Mod = list_to_atom(Module),
-  par_native:init(Mod),
+  MainMod = list_to_atom(Module),
 
-  V = Mod:main(),
+  code:add_patha(Dir),
+  par_native:init(MainMod),
+  V = MainMod:main(),
+
+  % Must explicitly remove all modules. Some of these modules are from *new*
+  % stdlibs. We don't want the old parser/lexer to use new stdlibs.
+  [utils:remove_mod(Mod) || {Mod, _} <- Compiled],
   code:del_path(Dir),
   V.
 

@@ -1,6 +1,6 @@
 module BaseTest
 
-import Test (group)
+import Test (group, capture)
 
 //-- Interfaces/Implementations
 sized_string_test : Test
@@ -238,6 +238,37 @@ tail_test = group([
   test assert tail([@hi, @hey]) == [@hey]
 ])
 
+lookup_test : Test
+lookup_test = group([
+  test assert lookup(@hi, { @hi => 'h' }) == Some('h')
+  test assert lookup("foo", { "bar" => 3.7, "baz" => 1 }) == None
+  test assert lookup(true, {}) == None
+])
+
+get_test : Test
+get_test = group([
+  test assert get(@hi, { @hi => 'h' }) == 'h'
+  test assert capture(|-| get("foo", { "bar" => 3.7, "baz" => 1 })) ==
+    Some(BadKey)
+  test assert capture(|-| get(true, {})) == Some(BadKey)
+])
+
+key_test : Test
+key_test = group([
+  test assert key?(@hi, { @hi => 'h' })
+  test assert !key?("foo", { "bar" => 3.7, "baz" => 1 })
+  test assert !key?(true, {})
+])
+
+remove_test : Test
+remove_test = group([
+  test assert remove(@hi, { @hi => 'h' }) == {}
+  test assert remove("foo", { "bar" => 3.7, "baz" => 1 }) ==
+    { "bar" => 3.7, "baz" => 1 }
+  test assert remove("bar", { "bar" => 3.7, "baz" => 1 }) == { "baz" => 1 }
+  test assert remove(true, {}) == {}
+])
+
 
 //-- Math
 abs_test : Test
@@ -299,14 +330,23 @@ to_int_test = group([
   test assert to_int(3.7) == 3
   test assert to_int('a') == 97
   test assert to_int(['1', '3', '5']) == 135
+  test assert capture(|-| to_int(['0', '.', '8'])) == Some(CantParseInt("0.8"))
   test assert to_int("83") == 83
+  test assert capture(|-| to_int("2a")) == Some(CantParseInt("2a"))
 ])
 
 to_float_test : Test
 to_float_test = group([
   test assert to_float(3 : Int) == 3.0
+  test assert to_float(['5', '8']) == 58.0
   test assert to_float(['1', '.', '3', '5']) == 1.35
-  test assert to_float("83.0") == 83
+  test assert to_float(['.', '1']) == .1
+  test assert capture(|-| to_float(['1', '.', '3', '.'])) ==
+    Some(CantParseFloat("1.3."))
+  test assert to_float("2") == 2.0
+  test assert to_float("83.0") == 83.0
+  test assert to_float(".37") == .37
+  test assert capture(|-| to_float("4a")) == Some(CantParseFloat("4a"))
 ])
 
 to_char_test : Test

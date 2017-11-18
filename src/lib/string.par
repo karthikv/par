@@ -19,7 +19,6 @@ enum RegexpOpt {
 exception BadRegexp({ reason : String, index : Int })
 
 // TODO: raw strings
-// TODO: improve speed of stdlib tests
 
 chars : String -> [Char]
 export chars(s) = match @string:next_codepoint(s) {

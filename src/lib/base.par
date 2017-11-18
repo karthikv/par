@@ -149,8 +149,15 @@ impl Collection for Map {
 
 
 //-- Exceptions
-// used in List and String modules
+// Can't include the key here because it could be of any type.
+exception BadKey
+
+// This is here so it can be shared by the List and String modules.
 exception BadIndex(Int)
+
+// Used when converting a String or [Char] to an Int or Float.
+exception CantParseInt(String)
+exception CantParseFloat(String)
 
 
 //-- Collections
@@ -165,6 +172,24 @@ export head = @erlang:hd/1
 
 tail : [A] -> [A]
 export tail = @erlang:tl/1
+
+lookup : K -> Map<K, V> -> Option<V>
+export lookup(k, m) = match @maps:find(k, m) {
+  (@ok, v) => Some(v)
+  @error => None
+}
+
+get : K -> Map<K, V> -> V
+export get(k, m) = match @maps:find(k, m) {
+  (@ok, v) => v
+  @error => raise BadKey
+}
+
+key? : K -> Map<K, V> -> Bool
+export key? = @maps:is_key/2
+
+remove : K -> Map<K, V> -> Map<K, V>
+export remove = @maps:remove/2
 
 
 //-- Math
@@ -195,21 +220,26 @@ interface ToInt {
   to_int : T -> Int
 }
 
-// TODO: exceptions for conversions?
 impl ToInt for Float {
   to_int = trunc
 }
 
 impl ToInt for Char {
-  to_int(c) = assume c
+  to_int(c) = $c
 }
 
 impl ToInt for [Char] {
-  to_int = @erlang:list_to_integer/1
+  to_int(chs) = match @string:to_integer(chs) {
+    (i, []) => i
+    _ => raise CantParseInt(@unicode:characters_to_binary(chs))
+  }
 }
 
 impl ToInt for String {
-  to_int = @erlang:binary_to_integer/1
+  to_int(s) = match @string:to_integer(s) {
+    (i, "") => i
+    _ => raise CantParseInt(s)
+  }
 }
 
 interface ToFloat {
@@ -220,13 +250,37 @@ impl ToFloat for Int {
   to_float = @erlang:float/1
 }
 
-// TODO support integer parsing for both of these to_float versions
 impl ToFloat for [Char] {
-  to_float = @erlang:list_to_float/1
+  to_float(chs) =
+    let result = match chs {
+      ['.' | _] => @string:to_float(['0' | chs])
+      _ => @string:to_float(chs)
+    }
+    match result {
+      (f, []) => f
+      _ => match @string:to_integer(chs) {
+        (i, []) => to_float(i : Int)
+        _ => raise CantParseFloat(@unicode:characters_to_binary(chs))
+      }
+    }
 }
 
 impl ToFloat for String {
-  to_float = @erlang:binary_to_float/1
+  to_float(s) =
+    let result = match @string:next_grapheme(s) {
+      ['.' | _] => @string:to_float(['0', assume s])
+      _ => @string:to_float(s)
+    }
+    match result {
+      (f, "") => f
+      // If we prepend a 0 above, on a successful parse, we'll get back an empty
+      // list instead of an empty string.
+      (f, []) => f
+      _ => match @string:to_integer(s) {
+        (i, "") => to_float(i : Int)
+        _ => raise CantParseFloat(s)
+      }
+    }
 }
 
 interface ToChar {

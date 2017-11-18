@@ -3,33 +3,11 @@ module MapTest
 import Map (*)
 import Test (group, capture)
 
-lookup_test : Test
-lookup_test = group([
-  test assert lookup(@hi, { @hi => 'h' }) == Some('h')
-  test assert lookup("foo", { "bar" => 3.7, "baz" => 1 }) == None
-  test assert lookup(true, {}) == None
-])
-
-get_test : Test
-get_test = group([
-  test assert get(@hi, { @hi => 'h' }) == 'h'
-  test assert capture(|-| get("foo", { "bar" => 3.7, "baz" => 1 })) ==
-    Some(BadKey)
-  test assert capture(|-| get(true, {})) == Some(BadKey)
-])
-
 get_or_test : Test
 get_or_test = group([
   test assert get_or(@hi, 'i', { @hi => 'h' }) == 'h'
   test assert get_or("foo", 5.02, { "bar" => 3.7, "baz" => 1 }) == 5.02
   test assert get_or(true, [false], {}) == [false]
-])
-
-key_test : Test
-key_test = group([
-  test assert key?(@hi, { @hi => 'h' })
-  test assert !key?("foo", { "bar" => 3.7, "baz" => 1 })
-  test assert !key?(true, {})
 ])
 
 keys_test : Test
@@ -50,15 +28,6 @@ values_test = group([
     // order is undefined
     assert vs == [3.7, 1] || vs == [1, 3.7]
   test assert values({}) == []
-])
-
-remove_test : Test
-remove_test = group([
-  test assert remove(@hi, { @hi => 'h' }) == {}
-  test assert remove("foo", { "bar" => 3.7, "baz" => 1 }) ==
-    { "bar" => 3.7, "baz" => 1 }
-  test assert remove("bar", { "bar" => 3.7, "baz" => 1 }) == { "baz" => 1 }
-  test assert remove(true, {}) == {}
 ])
 
 update_test : Test

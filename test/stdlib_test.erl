@@ -4,12 +4,12 @@
 -include("../src/common.hrl").
 
 stdlib_test_() ->
-  % We use a setup/instantiator here to prevent eunit's lookahead from running
-  % test_stdlib_path (an expensive generator) multiple times.
-  Setup = fun() -> filelib:wildcard("test/lib/**/*.par") end,
-  {setup, Setup, fun test_stdlib_path/1}.
+  % If we don't use a setup/instantiator here, eunit's lookahead could make
+  % us compile the stdlib multiple times, which is expensive.
+  {setup, fun compile_stdlib/0, fun remove_stdlib/1, fun test_stdlib/1}.
 
-test_stdlib_path(Paths) ->
+compile_stdlib() ->
+  Paths = filelib:wildcard("test/lib/**/*.par"),
   {ok, Cwd} = file:get_cwd(),
   Dir = utils:temp_dir(),
 
@@ -32,8 +32,10 @@ test_stdlib_path(Paths) ->
 
   {ParentMod, _} = hd(Compiled),
   par_native:init(ParentMod),
+  {Paths, Compiled, C}.
 
-  lists:map(fun(Path) ->
+test_stdlib({Paths, _, C}) ->
+  Tests = lists:map(fun(Path) ->
     Root = filename:rootname(filename:basename(Path)),
     ModuleParts = lists:map(fun([H | T]) ->
       [string:uppercase([H]) | T]
@@ -44,4 +46,12 @@ test_stdlib_path(Paths) ->
     ordsets:fold(fun(TestName, FoldTestSet) ->
       [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
     end, [], utils:test_names(Module, C#ctx.g_env))
-  end, Paths).
+  end, Paths),
+
+  {inparallel, 48, Tests}.
+
+remove_stdlib({_, Compiled, _}) ->
+  % Must explicitly remove all modules. Some of these modules are from *new*
+  % stdlibs. We don't want the old parser/lexer to use new stdlibs.
+  [utils:remove_mod(Mod) || {Mod, _} <- Compiled],
+  ok.
