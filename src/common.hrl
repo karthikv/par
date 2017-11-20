@@ -141,6 +141,7 @@
 -define(FROM_ELSE_BODY, "else body").
 -define(FROM_LET, "let pattern").
 -define(FROM_IF_LET_PATTERN, "if-let pattern").
+-define(FROM_MATCH_HEAD, "match head").
 -define(FROM_MATCH_PATTERN, "match pattern").
 -define(FROM_MATCH_BODY, "match body").
 -define(FROM_UNARY_OP(Op), ?FMT("unary ~p operator", [Op])).

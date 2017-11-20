@@ -2,8 +2,6 @@ module Map
 
 import Base (*)
 
-// TODO: match generalization bug w/ dup errors
-
 get_or : K -> V -> Map<K, V> -> V
 export get_or(k, default, m) = match @maps:find(k, m) {
   (@ok, v) => v

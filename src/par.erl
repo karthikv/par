@@ -75,8 +75,10 @@
 % - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
 % - Put solver record into CG to avoid duplication of fields like nested_ivs?
+% - Move Concatable/Separable into stdlib
 % - Implementations for builtin typeclasses?
 %   - Should we also exclude concatable, separable, etc. from sets?
+% - Collection extends Sized?
 % - [2 days] Better pattern matching
 %   - Record/Struct types
 %   - Map types

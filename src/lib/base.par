@@ -348,8 +348,6 @@ impl ToMap for Set {
 to_str : A -> String
 export to_str = @par_native:to_str/1
 
-// TODO: Concatable, Separable interfaces
-
 
 //-- Misc
 print : A -> ()

@@ -1511,28 +1511,42 @@ infer({if_let, _, Pattern, Expr, Then, Else}, C) ->
   end;
 
 infer({match, _, Expr, Cases}, C) ->
-  TV = tv_server:fresh(C#ctx.pid),
+  {ExprTV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
+  {ExprT, C1} = infer(Expr, new_gnr(ExprTV, ID, C)),
+  C2 = add_cst(ExprTV, ExprT, ?LOC(Expr), ?FROM_MATCH_HEAD, C1),
+  C3 = finish_gnr(C2, add_gnr_dep(ID, C#ctx.gnr)),
 
-  C1 = lists:foldl(fun({'case', _, Pattern, Then}, FoldC) ->
-    {ExprT, FoldC1} = infer(Expr, new_gnr(FoldC)),
-    ID = FoldC1#ctx.gnr#gnr.id,
+  ResultTV = tv_server:fresh(C3#ctx.pid),
+  C4 = lists:foldl(fun({'case', _, Pattern, Then}, FoldC) ->
+    % Need a new gnr for pattern bindings (see with_pattern_env).
+    FoldC1 = FoldC#ctx{gnr=add_gnr_dep(ID, (new_gnr(FoldC))#ctx.gnr)},
+    PatternID = FoldC1#ctx.gnr#gnr.id,
     {PatternT, FoldC2} = infer(Pattern, with_pattern_env(Pattern, FoldC1)),
+
     FoldC3 = add_cst(
-      ExprT,
+      % The ref here doesn't matter, as it never needs to be used for rewriting.
+      % It's possible for a pattern to solve an IV with a var_value, but:
+      %
+      % a) Either that IV came from an inst of an already generalized fn, at
+      % which point it won't be used again.
+      %
+      % b) Or that IV didn't come from a generalized variable, at which point
+      % it'll be solved for a concrete type that doesn't need an impl.
+      {inst, make_ref(), ExprTV},
       PatternT,
       ?LOC(Pattern),
       ?FROM_MATCH_PATTERN,
       FoldC2
     ),
+    FoldC4 = finish_gnr(FoldC3, add_gnr_dep(PatternID, FoldC#ctx.gnr)),
 
-    FoldC4 = finish_gnr(FoldC3, add_gnr_dep(ID, FoldC#ctx.gnr)),
     {ThenT, FoldC5} = infer(Then, FoldC4),
     % revert env to before pattern was parsed
     FoldC6 = FoldC5#ctx{l_env=FoldC#ctx.l_env},
-    add_cst(TV, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
-  end, C, Cases),
+    add_cst(ResultTV, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
+  end, C3, Cases),
 
-  {TV, C1};
+  {ResultTV, C4};
 
 infer({'try', _, Expr, Cases}, C) ->
   {ExprT, C1} = infer(Expr, C),

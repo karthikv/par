@@ -2369,6 +2369,11 @@ pattern_test_() ->
         ?ERR_RIGID_BOUND("B", "A")
       )
     ))
+  % regression: match expr inferred multiple times
+  , ?_test(bad_expr(
+      "match x { @a => true, @b => false }",
+      {?ERR_NOT_DEF("x"), l(6, 1)}
+    ))
 
 
   , ?_test("()" = ok_expr("if let a = 3.0 then a"))
