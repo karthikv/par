@@ -80,6 +80,7 @@ expr_test_() ->
   [ ?golden_expr_("l-bad-char", "let a = ^3\na")
   , ?golden_expr_("l-unterminated-string-1", "(\"hello world, true)")
   , ?golden_expr_("l-unterminated-string-2", "\"hello, \nworld\"")
+  , ?golden_expr_("l-unterminated-raw-string", "`hello\n\nworld\n")
   , ?golden_expr_("l-bad-atom", "@+asdf")
   , ?golden_expr_("l-bad-var", "a?b + 3")
   , ?golden_expr_("l-multiple-dots", "3.07.8")
@@ -92,7 +93,7 @@ expr_test_() ->
       },
       {"bar",
         "module Bar\n"
-        "a = `something`"
+        "a = \\something"
       },
       {"baz",
         "module Baz\n"
@@ -211,7 +212,7 @@ expr_test_() ->
       },
       {"bar",
         "module Bar\n"
-        "a = `14.153.0"
+        "a = \\14.153.0"
       },
       {"baz",
         "module Baz\n"

@@ -2,13 +2,8 @@
 
 Unexpected character:
 
-2: a = `something`
+2: a = \something
        ^
-
-Unexpected character:
-
-2: a = `something`
-                 ^
 
 *** file dir/baz.par ***
 

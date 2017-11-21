@@ -2,12 +2,12 @@
 
 Unexpected character:
 
-2: a = `14.153.0
+2: a = \14.153.0
        ^
 
 Can't have multiple dots in numeric literal:
 
-2: a = `14.153.0
+2: a = \14.153.0
         ^^^^^^^
 
 *** file dir/baz.par ***

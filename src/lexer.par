@@ -345,9 +345,13 @@ tokenize_raw_str_r(loc, chs, accum) = match chs {
     tokenize_raw_str_r(next_loc, t, [h | accum])
 
   [] =>
-    // TODO: better positioning for error
+    let start_loc = {
+      loc |
+      end_line = loc.start_line
+      end_col = loc.start_col + 1
+    }
     let token = Unexpected(
-      loc,
+      start_loc,
       reverse(accum),
       "Unterminated raw string literal"
     )
