@@ -1,0 +1,29 @@
+module Char
+
+to_lower : Char -> Char
+export to_lower(ch) = match @string:lowercase([ch]) {
+  [lower] => lower
+  // Some codepoints, after case conversion, become multiple codepoints. We
+  // don't support this.
+  _ => ch
+}
+
+to_upper : Char -> Char
+export to_upper(ch) = match @string:uppercase([ch]) {
+  [upper] => upper
+  // Some codepoints, after case conversion, become multiple codepoints. We
+  // don't support this.
+  _ => ch
+}
+
+lower? : Char -> Bool
+export lower?(ch) = to_upper(ch) != ch
+
+upper? : Char -> Bool
+export upper?(ch) = to_lower(ch) != ch
+
+alpha? : Char -> Bool
+export alpha?(ch) = ($ch >= $'a' && $ch <= $'z') || ($ch >= $'A' && $ch <= $'Z')
+
+digit? : Char -> Bool
+export digit?(ch) = $ch >= $'0' && $ch <= $'9'

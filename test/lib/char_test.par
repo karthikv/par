@@ -1,0 +1,51 @@
+module CharTest
+
+import Char (*)
+import Test (group)
+
+to_lower_test : Test
+to_lower_test = group([
+  test assert to_lower('a') == 'a'
+  test assert to_lower('B') == 'b'
+  test assert to_lower('.') == '.'
+])
+
+to_upper_test : Test
+to_upper_test = group([
+  test assert to_upper('a') == 'A'
+  test assert to_upper('B') == 'B'
+  test assert to_upper('.') == '.'
+  test assert to_upper('ß') == 'ß'
+])
+
+lower_test : Test
+lower_test = group([
+  test assert lower?('a')
+  test assert !lower?('B')
+  test assert !lower?('.')
+  test assert !lower?('ß')
+])
+
+upper_test : Test
+upper_test = group([
+  test assert !upper?('a')
+  test assert upper?('B')
+  test assert !upper?('.')
+  test assert !upper?('ß')
+])
+
+alpha_test : Test
+alpha_test = group([
+  List.seq(0, 25) |> map(|i| test assert alpha?(to_char($'a' + i))) |> group
+  List.seq(0, 25) |> map(|i| test assert alpha?(to_char($'A' + i))) |> group
+  test assert !alpha?('7')
+  test assert !alpha?('.')
+])
+
+digit_test : Test
+digit_test = group([
+  List.seq(0, 9) |> map(|i| test assert digit?(to_char($'0' + i))) |> group
+  test assert !digit?('b')
+  test assert !digit?('M')
+  test assert !digit?('.')
+])

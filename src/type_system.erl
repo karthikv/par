@@ -138,6 +138,7 @@ stdlib_modules() ->
     "Set" => "set.par",
     "Map" => "map.par",
     "String" => "string.par",
+    "Char" => "char.par",
     "Test" => "test.par"
   }.
 
@@ -261,15 +262,13 @@ add_stdlib_imports({module, _, _, RawImports, _}=Ast) ->
   end, RawImports),
   ImportedSet = ordsets:from_list(Imported),
 
-  RawStdlibImports = [
-    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "Base"}, [
-      {all, ?BUILTIN_LOC}
-    ]},
-    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "List"}, []},
-    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "Set"}, []},
-    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "Map"}, []},
-    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, "String"}, []}
-  ],
+  RawStdlibImports = lists:map(fun(Name) ->
+    Idents = case Name of
+      "Base" -> [{all, ?BUILTIN_LOC}];
+      _ -> []
+    end,
+    {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, Name}, Idents}
+  end, maps:keys(stdlib_modules())),
   StdlibImports = lists:filter(fun({import, _, {con_token, _, Con}, _}) ->
     not ordsets:is_element(Con, ImportedSet)
   end, RawStdlibImports),
