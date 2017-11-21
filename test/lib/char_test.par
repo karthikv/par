@@ -49,3 +49,12 @@ digit_test = group([
   test assert !digit?('M')
   test assert !digit?('.')
 ])
+
+whitespace_test : Test
+whitespace_test = group([
+  test assert whitespace?('\t')
+  test assert whitespace?('\n')
+  test assert !whitespace?('.')
+  test assert !whitespace?('s')
+  test assert !whitespace?('9')
+])

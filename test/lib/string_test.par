@@ -161,8 +161,8 @@ re_test = group([
 matches_test : Test
 matches_test = group([
   test assert matches?(re("ba", []), "foo bar")
-  test assert matches?(re("\\w+", []), "foo bar")
-  test assert matches?(re("FO{2}\\s", [Caseless]), "foo bar")
+  test assert matches?(re(`\w+`, []), "foo bar")
+  test assert matches?(re(`FO{2}\s`, [Caseless]), "foo bar")
   test assert matches?(re("^bar$", [Multiline]), "foo\nbar")
   test assert matches?(re("f  o  \no", [Extended]), "foo bar")
   test assert matches?(re("", []), "foo bar")
@@ -171,15 +171,15 @@ matches_test = group([
   test assert !matches?(re("o{3}", []), "foo bar")
   test assert !matches?(re("^bar$", []), "foo\nbar")
   test assert !matches?(re("o  b  \na", [Extended]), "foo bar")
-  test assert !matches?(re("fo\\b", []), "foo bar")
+  test assert !matches?(re(`fo\b`, []), "foo bar")
 ])
 
 search_test : Test
 search_test = group([
   test assert search(re("ba", []), "foo bar") == ["ba"]
-  test assert search(re("\\w+", []), "foo bar") == ["foo"]
-  test assert search(re("foo (\\w{2})", []), "foo bar") == ["foo ba", "ba"]
-  test assert search(re("O\\s", [Caseless]), "foo bar") == ["o "]
+  test assert search(re(`\w+`, []), "foo bar") == ["foo"]
+  test assert search(re(`foo (\w{2})`, []), "foo bar") == ["foo ba", "ba"]
+  test assert search(re(`O\s`, [Caseless]), "foo bar") == ["o "]
   test assert search(re("^bar$", [Multiline]), "foo\nbar") == ["bar"]
   test assert search(re("f  o  \no", [Extended]), "foo bar") == ["foo"]
   test assert search(re("", []), "foo bar") == [""]
@@ -190,8 +190,8 @@ search_test = group([
 search_all_test : Test
 search_all_test = group([
   test assert search_all(re("ba", []), "foo bar") == [["ba"]]
-  test assert search_all(re("\\w+", []), "foo bar") == [["foo"], ["bar"]]
-  test assert search_all(re("\\w(\\w)", []), "foo bar") ==
+  test assert search_all(re(`\w+`, []), "foo bar") == [["foo"], ["bar"]]
+  test assert search_all(re(`\w(\w)`, []), "foo bar") ==
     [["fo", "o"], ["ba", "a"]]
   test assert search_all(re("O", [Caseless]), "foo bar") == [["o"], ["o"]]
   test assert search_all(re("^bar$", [Multiline]), "foo\nbar") == [["bar"]]
@@ -228,9 +228,9 @@ search_span_test : Test
 search_span_test = group([
   test assert search_span(re("ba", []), "foo bar") ==
     Some(("foo ", [], "r"))
-  test assert search_span(re("(\\w+)", []), "foo bar") ==
+  test assert search_span(re(`(\w+)`, []), "foo bar") ==
     Some(("", ["foo"], " bar"))
-  test assert search_span(re("\\w(\\w)", []), "foo bar") ==
+  test assert search_span(re(`\w(\w)`, []), "foo bar") ==
     Some(("", ["o"], "o bar"))
   test assert search_span(re("O", [Caseless]), "foo bar") ==
     Some(("f", [], "o bar"))
@@ -257,8 +257,8 @@ splitn_test = group([
   test assert splitn("R", 7, "foo bar") == ["foo bar"]
 
   test assert splitn(re("ba", []), 3, "foo bar") == ["foo ", "r"]
-  test assert splitn(re("(\\w+)", []), 2, "foo bar") == ["", "foo", " bar"]
-  test assert splitn(re("O\\s", [Caseless]), 2, "foo bar") == ["fo", "bar"]
+  test assert splitn(re(`(\w+)`, []), 2, "foo bar") == ["", "foo", " bar"]
+  test assert splitn(re(`O\s`, [Caseless]), 2, "foo bar") == ["fo", "bar"]
   test assert splitn(re("^bar$", [Multiline]), 1, "foo\nbar") == ["foo\nbar"]
   test assert splitn(re("f  o  \no", [Extended]), 0, "foo bar") == ["", " bar"]
   test assert splitn(re("", []), -1, "foo bar") ==
@@ -279,8 +279,8 @@ split_test = group([
   test assert split("R", "foo bar") == ["foo bar"]
 
   test assert split(re("ba", []), "foo bar") == ["foo ", "r"]
-  test assert split(re("(\\w+)", []), "foo bar") == ["", "foo", " ", "bar", ""]
-  test assert split(re("O\\s", [Caseless]), "foo bar") == ["fo", "bar"]
+  test assert split(re(`(\w+)`, []), "foo bar") == ["", "foo", " ", "bar", ""]
+  test assert split(re(`O\s`, [Caseless]), "foo bar") == ["fo", "bar"]
   test assert split(re("^bar$", [Multiline]), "foo\nbar") == ["foo\n", ""]
   test assert split(re("f  o  \no", [Extended]), "foo bar") == ["", " bar"]
   test assert split(re("", []), "foo bar") ==
@@ -300,9 +300,9 @@ replace_test = group([
   test assert replace("R", "def", "foo bar") == "foo bar"
 
   test assert replace(re("ba", []), "cat", "foo bar") == "foo catr"
-  test assert replace(re("\\w+", []), "baz", "foo bar") == "baz baz"
-  test assert replace(re("foo (\\w{2})", []), "\\1 ", "foo bar") == "ba r"
-  test assert replace(re("O\\s", [Caseless]), "i", "foo bar") == "foibar"
+  test assert replace(re(`\w+`, []), "baz", "foo bar") == "baz baz"
+  test assert replace(re(`foo (\w{2})`, []), `\1 `, "foo bar") == "ba r"
+  test assert replace(re(`O\s`, [Caseless]), "i", "foo bar") == "foibar"
   test assert replace(re("^bar$", [Multiline]), "a", "foo\nbar") == "foo\na"
   test assert replace(re("f  o  \no", [Extended]), "", "foo bar") == " bar"
   test assert replace(re("f  o  \no", [Extended]), "&&", "foo bar") ==
@@ -322,8 +322,8 @@ replace_one_test = group([
   test assert replace_one("R", "def", "foo bar") == "foo bar"
 
   test assert replace_one(re("ba", []), "cat", "foo bar") == "foo catr"
-  test assert replace_one(re("\\w+", []), "baz", "foo bar") == "baz bar"
-  test assert replace_one(re("foo (\\w{2})", []), "\\1 ", "foo bar") == "ba r"
+  test assert replace_one(re(`\w+`, []), "baz", "foo bar") == "baz bar"
+  test assert replace_one(re(`foo (\w{2})`, []), `\1 `, "foo bar") == "ba r"
   test assert replace_one(re("O", [Caseless]), "i", "foo bar") == "fio bar"
   test assert replace_one(re("^bar$", [Multiline]), "a", "foo\nbar") == "foo\na"
   test assert replace_one(re("f  o  \no", [Extended]), "", "foo bar") == " bar"

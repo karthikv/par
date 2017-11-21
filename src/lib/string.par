@@ -18,8 +18,6 @@ enum RegexpOpt {
 
 exception BadRegexp({ reason : String, index : Int })
 
-// TODO: raw strings
-
 chars : String -> [Char]
 export chars(s) = match @string:next_codepoint(s) {
   [h | t] => [h | chars(assume t)]

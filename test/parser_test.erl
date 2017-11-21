@@ -83,6 +83,15 @@ expr_test_() ->
       {str, l(0, 15), <<"some string\n">>},
       ok_expr("\"some string\\n\"")
     )
+  , ?_assertEqual({str, l(0, 2), <<"">>}, ok_expr("``"))
+  , ?_assertEqual(
+      {str, l(0, 0, 1, 1), <<"some string\n">>},
+      ok_expr("`some string\n`")
+    )
+  , ?_assertEqual(
+      {str, l(0, 9), <<"\\w+|\\s*">>},
+      ok_expr("`\\w+|\\s*`")
+    )
   , ?_assertEqual({atom, l(0, 2), h}, ok_expr("@h"))
   , ?_assertEqual({atom, l(0, 6), hello}, ok_expr("@hello"))
   , ?_assertEqual({atom, l(0, 7), 'empty?'}, ok_expr("@empty?"))

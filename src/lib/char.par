@@ -27,3 +27,14 @@ export alpha?(ch) = ($ch >= $'a' && $ch <= $'z') || ($ch >= $'A' && $ch <= $'Z')
 
 digit? : Char -> Bool
 export digit?(ch) = $ch >= $'0' && $ch <= $'9'
+
+whitespace? : Char -> Bool
+export whitespace?(ch) =
+  ch == '\t' ||
+  ch == '\n' ||
+  ch == '\v' ||
+  ch == '\f' ||
+  ch == '\r' ||
+  ch == ' ' ||
+  $ch == 133 ||
+  $ch == 160

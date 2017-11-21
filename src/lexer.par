@@ -184,6 +184,7 @@ tokenize_r(chs, line, col, tokens) =
       ['\'', ch, '\'' | t] => (LitChar(inc(loc, 3), ch), t)
 
       ['"' | t] => tokenize_str(loc, ['"' | t])
+      ['`' | t] => tokenize_raw_str(loc, ['`' | t])
 
       ['@', '"' | t] =>
         match tokenize_str(loc, ['"' | t]) {
@@ -324,6 +325,31 @@ tokenize_str_r(loc, chs, accum) = match chs {
       loc,
       reverse(accum),
       "Unterminated string literal"
+    )
+    (token, [])
+}
+
+tokenize_raw_str : Loc -> [Char] -> (Token, [Char])
+tokenize_raw_str(loc, chs) =
+  let ['`' | t] = chs
+  tokenize_raw_str_r(inc(loc, 1), t, [])
+
+tokenize_raw_str_r : Loc -> [Char] -> [Char] -> (Token, [Char])
+tokenize_raw_str_r(loc, chs, accum) = match chs {
+  ['`' | t] => (LitStr(inc(loc, 1), from_chars(reverse(accum))), t)
+  [h | t] =>
+    let next_loc = match h {
+      '\n' => next_line(loc)
+      _ => inc(loc, 1)
+    }
+    tokenize_raw_str_r(next_loc, t, [h | accum])
+
+  [] =>
+    // TODO: better positioning for error
+    let token = Unexpected(
+      loc,
+      reverse(accum),
+      "Unterminated raw string literal"
     )
     (token, [])
 }
