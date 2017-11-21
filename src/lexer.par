@@ -232,10 +232,10 @@ tokenize_r(chs, line, col, tokens) =
           }
         else if lower?(h) then
           let (chs, len, t) = until_not(word?, t) |> allow_qmark
-          let token = get(
+          let token = Map.get_or(
             [h | chs],
-            chs_to_token_fn,
             flip(Var, [h | chs]),
+            chs_to_token_fn,
             inc(loc, 1 + len)
           )
           (token, t)
@@ -375,9 +375,6 @@ chs_to_token_fn = {
   chars("true") => flip(LitBool, true)
   chars("false") => flip(LitBool, false)
 }
-
-get : A -> Map<A, B> -> B -> B
-get = @maps:get/3
 
 until_nl : [Char] -> ([Char], Int, [Char])
 until_nl(chs) = until_nl_r(chs, [], 0)

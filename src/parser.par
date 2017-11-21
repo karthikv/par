@@ -717,7 +717,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
   AcceptOp =>
     let shunt(bopa, t) =
       let op = BinaryOp(bopa)
-      let next_prec = Map.get(Bin(bopa), opa_prec)
+      let next_prec = get(Bin(bopa), opa_prec)
       expr_r(expr_s, Start, [op | reduce(next_prec, stack)], t)
 
     let head_end_line(stack) =
@@ -756,7 +756,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
         )
       [Lexer.Colon(_) | t] =>
         type_expr(t) |> pbind(|(node, rest)|
-          let next_prec = Map.get(Bin(Colon), opa_prec)
+          let next_prec = get(Bin(Colon), opa_prec)
           let op = BinaryOp(Colon)
           let new_stack = [Node(node), op | reduce(next_prec, stack)]
           expr_r(expr_s, AcceptOp, new_stack, rest)
@@ -1160,7 +1160,7 @@ reduce : Int -> [NodeOp] -> [NodeOp]
 reduce(next_prec, stack) =
   match last_op(stack) {
     Some(BinaryOp(bopa)) =>
-      if next_prec <= Map.get(Bin(bopa), opa_prec) then
+      if next_prec <= get(Bin(bopa), opa_prec) then
         let [Node(right), BinaryOp(&bopa), Node(left) | t] = stack
         let l = range(node_loc(left), node_loc(right))
         let node =
@@ -1174,7 +1174,7 @@ reduce(next_prec, stack) =
         stack
 
     Some(UnaryOp(s, uopa)) =>
-      if next_prec <= Map.get(Un(uopa), opa_prec) then
+      if next_prec <= get(Un(uopa), opa_prec) then
         let [Node(right), UnaryOp(&s, &uopa) | t] = stack
         let l = range(s, node_loc(right))
         reduce(next_prec, [Node(UnaryExpr(l, uopa, right)) | t])

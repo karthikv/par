@@ -3108,9 +3108,9 @@ add_err(S) ->
   #solver{t1=T1, t2=T2, from=From} = S,
   Msg = case {T1, T2} of
     {{lam, _, _, _, _}, {lam, _, _}} ->
-      ?ERR_ARITY(given_arity(T1), max_arity(T2));
+      ?ERR_ARITY(given_arity(subs_s(T1, S)), max_arity(subs_s(T2, S)));
     {{lam, _, _}, {lam, _, _, _, _}} ->
-      ?ERR_ARITY(given_arity(T2), max_arity(T1));
+      ?ERR_ARITY(given_arity(subs_s(T2, S)), max_arity(subs_s(T1, S)));
     _ -> ?ERR_TYPE_MISMATCH(T1, T2, From)
   end,
   add_err(Msg, S).
