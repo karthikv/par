@@ -1,6 +1,6 @@
 *** module Foo *** (dir/foo.par)
 
-Couldn't import dir/bar.par: file doesn't exist:
+Couldn't import dir/bar.par: no such file or directory:
 
 2: import "./bar"
           ^^^^^^^

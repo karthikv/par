@@ -353,7 +353,7 @@ tokenize_raw_str_r(loc, chs, accum) = match chs {
     let token = Unexpected(
       start_loc,
       reverse(accum),
-      "Unterminated raw string literal"
+      "Unterminated raw string literal that starts here"
     )
     (token, [])
 }

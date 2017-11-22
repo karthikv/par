@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
-Unterminated raw string literal:
+Unterminated raw string literal that starts here:
 
 3: `hello
    ^
