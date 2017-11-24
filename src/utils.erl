@@ -53,10 +53,11 @@ unqualify(Con) ->
 unalias(T, Aliases) ->
   subs(T, #sub_opts{subs=#{}, aliases=Aliases, unalias=true}).
 
-subs({lam, ArgT, ReturnT}, Opts) ->
-  {lam, subs(ArgT, Opts), subs(ReturnT, Opts)};
-subs({lam, LEnv, Loc, ArgT, ReturnT}, Opts) ->
-  {lam, LEnv, Loc, subs(ArgT, Opts), subs(ReturnT, Opts)};
+subs({lam, ArgTs, ReturnT}, Opts) ->
+  {lam, [subs(ArgT, Opts) || ArgT <- ArgTs], subs(ReturnT, Opts)};
+subs({lam, LEnv, Provided, ReturnT}, Opts) ->
+  SubbedProvided = [{Type, Loc, subs(T, Opts)} || {Type, Loc, T} <- Provided],
+  {lam, LEnv, SubbedProvided, subs(ReturnT, Opts)};
 subs({tuple, ElemTs}, Opts) ->
   {tuple, lists:map(fun(T) -> subs(T, Opts) end, ElemTs)};
 subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs, shallow=Shallow}=Opts) ->
@@ -151,7 +152,7 @@ consolidate({record_ext, A, BaseT, Ext}, Aliases) ->
 % The keys function, tuple, and record are in lowercase so they don't conflict
 % with the name of a Con.
 impl_key({lam, _, _}) -> "function";
-impl_key({lam, _, _, _, _}) -> "function";
+impl_key({lam, _, _, _}) -> "function";
 impl_key({tuple, Elems}) -> lists:concat([length(Elems), "-element tuple"]);
 impl_key({con, Con}) -> Con;
 impl_key({gen, {con, Con}, _}) -> Con;
@@ -196,8 +197,12 @@ tvs_list(T) -> tvs_list(T, []).
 
 % The order in which we recurse is important, as we want the TVs to be listed
 % from left-to-right.
-tvs_list({lam, ArgT, ReturnT}, L) -> tvs_list(ArgT, tvs_list(ReturnT, L));
-tvs_list({lam, _, _, ArgT, ReturnT}, L) -> tvs_list({lam, ArgT, ReturnT}, L);
+tvs_list({lam, ArgTs, ReturnT}, L) ->
+  lists:foldr(fun tvs_list/2, tvs_list(ReturnT, L), ArgTs);
+tvs_list({lam, _, Provided, ReturnT}, L) ->
+  lists:foldr(fun({_, _, T}, FoldL) ->
+    tvs_list(T, FoldL)
+  end, tvs_list(ReturnT, L), Provided);
 tvs_list({tuple, ElemTs}, L) -> lists:foldr(fun tvs_list/2, L, ElemTs);
 tvs_list({tv, _, _, _}=TV, L) -> [TV | L];
 tvs_list({con, _}, L) -> L;
@@ -215,11 +220,13 @@ tvs_list(unit, L) -> L.
 
 args_ivs(T) -> args_ivs(T, ordsets:new()).
 
-args_ivs({lam, ArgT, ReturnT}, InitSeenVs) ->
-  case ReturnT of
-    {lam, _, _} -> [ivs(ArgT, InitSeenVs) | args_ivs(ReturnT, InitSeenVs)];
-    % last argument; must include IVs of return type
-    _ -> [ivs({lam, ArgT, ReturnT}, InitSeenVs)]
+args_ivs({lam, ArgTs, ReturnT}, InitSeenVs) ->
+  case length(ArgTs) of
+    0 -> [ivs(ReturnT, InitSeenVs)];
+    Length ->
+      {ExceptLast, [LastT]} = lists:split(Length - 1, ArgTs),
+      LastIVs = ivs({tuple, [LastT, ReturnT]}, InitSeenVs),
+      [ivs(ArgT, InitSeenVs) || ArgT <- ExceptLast] ++ [LastIVs]
   end.
 
 family_is(I, _) when I == "Ord"; I == "Concatable"; I == "Separable" ->
@@ -261,17 +268,22 @@ pretty_csts([]) -> [];
 pretty_csts([{T1, T2, Module, Loc, From} | Rest]) ->
   [{pretty(T1), pretty(T2), Module, Loc, From} | pretty_csts(Rest)].
 
-pretty({lam, ArgT, ReturnT}) ->
-  Format = case ArgT of
-    {lam, _, _} -> "(~s) -> ~s";
-    {lam, _, _, _, _} -> "(~s) -> ~s";
-    _ -> "~s -> ~s"
-  end,
-  ?FMT(Format, [pretty(ArgT), pretty(ReturnT)]);
-pretty({lam, _, _, ArgT, ReturnT}) -> pretty({lam, ArgT, ReturnT});
+% TODO: use iolists for efficiency
+pretty({lam, ArgTs, ReturnT}) ->
+  case ArgTs of
+    [] -> ?FMT("() -> ~s", [pretty(ReturnT)]);
+    [ArgT] when element(1, ArgT) == lam; element(1, ArgT) == tuple ->
+      ?FMT("(~s) -> ~s", [pretty(ArgT), pretty(ReturnT)]);
+    [ArgT] -> ?FMT("~s -> ~s", [pretty(ArgT), pretty(ReturnT)]);
+    _ ->
+      PrettyArgTs = string:join([pretty(ArgT) || ArgT <- ArgTs], ", "),
+      ?FMT("(~s) -> ~s", [PrettyArgTs, pretty(ReturnT)])
+  end;
+pretty({lam, _, Provided, ReturnT}) ->
+  pretty({lam, [T || {_, _, T} <- Provided], ReturnT});
 pretty({tuple, ElemTs}) ->
-  PrettyElemTs = lists:map(fun(T) -> pretty(T) end, ElemTs),
-  ?FMT("(~s)", [string:join(PrettyElemTs, ", ")]);
+  PrettyElemTs = string:join([pretty(ElemT) || ElemT <- ElemTs], ", "),
+  ?FMT("(~s)", [PrettyElemTs]);
 pretty({tv, RawV, Is, _}) ->
   % all generated Vs are prefixed with *, but user-inputted ones in signatures
   % lack the leading *

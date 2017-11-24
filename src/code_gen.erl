@@ -110,13 +110,7 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
           {sig, _, {var, _, Name}, _} = Sig,
           Atom = list_to_atom(Name),
           ArgsIVs = utils:args_ivs(RawT),
-
-          % To disambiguate which impl we're using, we need all args up until
-          % the first one that contains the target type T, inclusive.
-          UntilTargetT = lists:takewhile(fun(IVs) ->
-            lists:all(fun({_, V}) -> V /= "T" end, IVs)
-          end, ArgsIVs),
-          Arity = length(UntilTargetT) + 1,
+          Arity = length(ArgsIVs),
 
           Value = {{global_fn, Atom}, Arity},
           {{Atom, Arity}, env_set(Name, Value, FoldCG)}
@@ -289,17 +283,7 @@ rep({interface, _, {con_token, _, RawCon}, _, Fields}, CG) ->
 
   lists:map(fun({Sig, RawT}) ->
     {sig, Loc, {var, _, Name}, _} = Sig,
-    AllArgsIVs = utils:args_ivs(RawT),
-
-    {ArgsIVsRev, _} = lists:foldl(fun(IVs, {FoldArgsIVs, Done}) ->
-      case Done of
-        true -> {FoldArgsIVs, Done};
-        false ->
-          NewDone = lists:any(fun({_, V}) -> V == "T" end, IVs),
-          {[IVs | FoldArgsIVs], NewDone}
-      end
-    end, {[], false}, AllArgsIVs),
-    ArgsIVs = lists:reverse(ArgsIVsRev),
+    ArgsIVs = utils:args_ivs(RawT),
     Arity = length(ArgsIVs),
 
     Args = lists:map(fun(Num) ->
@@ -582,95 +566,126 @@ rep({field, Loc, Expr, Prop}, CG) ->
       call(maps, get, [AtomRep, ExprRep], Line)
   end;
 
-rep({app, Loc, Expr, RawArgs}, CG) ->
-  Arity = arity(Expr, CG),
-  Args = case Arity of
-    0 ->
-      {unit, _} = hd(RawArgs),
-      tl(RawArgs);
-    _ -> RawArgs
-  end,
-  NumArgs = length(Args),
+rep({app, Loc, Expr, Args}, CG) ->
+  % TODO: re-enable
+  %% NumArgs = length(Args),
+  %%
+  %% ImplReps = case Expr of
+  %%   {var_ref, _, Ref, _} ->
+  %%     case maps:find(Ref, CG#cg.ctx#ctx.inst_refs) of
+  %%       {ok, {{lam, _, _}=T, SubbedVs}} ->
+  %%         % TODO: remove Ag
+  %%         {Ag, AllImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
+  %%         LeftBindMaps = lists:sublist(
+  %%           BindMaps,
+  %%           NumArgs + 1,
+  %%           length(BindMaps)
+  %%         ),
 
-  ImplReps = case Expr of
-    {var_ref, _, Ref, _} ->
-      case maps:find(Ref, CG#cg.ctx#ctx.inst_refs) of
-        {ok, {{lam, _, _}=T, SubbedVs}} ->
-          {Ag, AllImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
-          LeftBindMaps = lists:sublist(
-            BindMaps,
-            NumArgs + 1,
-            length(BindMaps)
-          ),
+  %%         % If there are no bindings for all remaining args, that means there
+  %%         % are no additional impls that are solved for. As a result, we can
+  %%         % directly pass impls through this application.
+  %%         case lists:all(fun(M) -> M == #{} end, LeftBindMaps) of
+  %%           true ->
+  %%             FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
+  %%             TargetImplReps = lists:sublist(AllImplReps, NumArgs),
+  %%             inline_bindmap(TargetImplReps, FinalBindMap);
+  %%           false -> none
+  %%         end;
 
-          % If there are no bindings for all remaining args, that means there
-          % are no additional impls that are solved for. As a result, we can
-          % directly pass impls through this application.
-          case lists:all(fun(M) -> M == #{} end, LeftBindMaps) of
-            true ->
-              FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
-              TargetImplReps = lists:sublist(AllImplReps, NumArgs),
-              inline_bindmap(TargetImplReps, FinalBindMap);
-            false -> none
-          end;
+  %%       error -> none
+  %%     end;
 
-        error -> none
-      end;
-
-    _ -> none
-  end,
+  %%   _ -> none
+  %% end,
 
   Line = ?START_LINE(Loc),
-  LineRep = eabs(Line, Line),
+  %% LineRep = eabs(Line, Line),
 
-  case ImplReps of
-    none ->
-      ExprRep = rep(Expr, CG),
-      ArgsRep = [rep(Arg, CG) || Arg <- Args];
+  %% case ImplReps of
+  %%   none ->
+  %%     ExprRep = rep(Expr, CG),
+  %%     ArgsRep = [rep(Arg, CG) || Arg <- Args];
 
-    _ ->
-      {var_ref, VarLoc, _, Name} = Expr,
-      ExprRep = rep({var, VarLoc, Name}, CG),
-      ArgsRep = lists:map(fun
-        ({Arg, []}) -> rep(Arg, CG);
-        ({Arg, ArgImplReps}) -> {tuple, Line, [rep(Arg, CG) | ArgImplReps]}
-      end, lists:zip(Args, ImplReps))
+  %%   _ ->
+  %%     {var_ref, VarLoc, _, Name} = Expr,
+  %%     ExprRep = rep({var, VarLoc, Name}, CG),
+  %%     ArgsRep = lists:map(fun
+  %%       ({Arg, []}) -> rep(Arg, CG);
+  %%       ({Arg, ArgImplReps}) -> {tuple, Line, [rep(Arg, CG) | ArgImplReps]}
+  %%     end, lists:zip(Args, ImplReps))
+  %% end,
+
+  {ArgsRep, NewArgsRep} = lists:mapfoldr(fun(Arg, FoldNewArgsRep) ->
+    case Arg of
+      {hole, HoleLoc} ->
+        VarRep = {var, ?START_LINE(HoleLoc), unique("Arg")},
+        {VarRep, [VarRep | FoldNewArgsRep]};
+
+      _ -> {rep(Arg, CG), FoldNewArgsRep}
+    end
+  end, [], Args),
+
+  FnRep = case rep(Expr, CG) of
+    {'fun', _, {function, Atom, _}} -> {atom, Line, Atom};
+    ExprRep -> ExprRep
   end,
 
-  if
-    Arity == unknown ->
-      CurryArgs = [ExprRep, rep_list(ArgsRep, Line), LineRep],
-      call(par_native, curry, CurryArgs, Line);
+  case NewArgsRep of
+    [] -> {call, Line, FnRep, ArgsRep};
+    _ ->
+      {PassedReps, Stmts} = lists:mapfoldr(fun({Arg, ArgRep}, FoldStmts) ->
+        case Arg of
+          {hole, _} -> {ArgRep, FoldStmts};
+          _ ->
+            ArgLine = element(2, ArgRep),
+            VarRep = {var, ArgLine, unique("Arg")},
+            Match = {match, ArgLine, VarRep, ArgRep},
+            {VarRep, [Match | FoldStmts]}
+        end
+      end, [], lists:zip(Args, ArgsRep)),
 
-    NumArgs < Arity ->
-      ArgsListRep = rep_list(ArgsRep, Line),
-      Seq = lists:seq(NumArgs + 1, Arity),
-      NewArgsRep = [{var, Line, unique("Arg")} || _ <- Seq],
-      NewArgsListRep = rep_list(NewArgsRep, Line),
-
-      Body = [{call, Line,
-        {remote, Line, {atom, Line, erlang}, {atom, Line, apply}},
-        [ExprRep, {op, Line, '++', ArgsListRep, NewArgsListRep}]}],
-      Clause = {clause, Line, NewArgsRep, [], Body},
-      {'fun', Line, {clauses, [Clause]}};
-
-    NumArgs >= Arity ->
-      ImmArgsRep = lists:sublist(ArgsRep, Arity),
-
-      Call = case ExprRep of
-        {'fun', _, {function, Atom, _}} ->
-          {call, Line, {atom, Line, Atom}, ImmArgsRep};
-        _ -> {call, Line, ExprRep, ImmArgsRep}
-      end,
-
-      if
-        NumArgs == Arity -> Call;
-        true ->
-          RestArgsRep = lists:sublist(ArgsRep, Arity + 1, NumArgs),
-          RestArgsListRep = rep_list(RestArgsRep, Line),
-          call(par_native, curry, [Call, RestArgsListRep, LineRep], Line)
-      end
+      Call = {call, Line, FnRep, PassedReps},
+      Clause = {clause, Line, NewArgsRep, [], [Call]},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+      {block, Line, Stmts ++ [FunRep]}
   end;
+
+  % TODO remove
+  %% if
+  %%   Arity == unknown ->
+  %%     CurryArgs = [ExprRep, rep_list(ArgsRep, Line), LineRep],
+  %%     call(par_native, curry, CurryArgs, Line);
+
+  %%   NumArgs < Arity ->
+  %%     ArgsListRep = rep_list(ArgsRep, Line),
+  %%     Seq = lists:seq(NumArgs + 1, Arity),
+  %%     NewArgsRep = [{var, Line, unique("Arg")} || _ <- Seq],
+  %%     NewArgsListRep = rep_list(NewArgsRep, Line),
+
+  %%     Body = [{call, Line,
+  %%       {remote, Line, {atom, Line, erlang}, {atom, Line, apply}},
+  %%       [ExprRep, {op, Line, '++', ArgsListRep, NewArgsListRep}]}],
+  %%     Clause = {clause, Line, NewArgsRep, [], Body},
+  %%     {'fun', Line, {clauses, [Clause]}};
+
+  %%   NumArgs >= Arity ->
+  %%     ImmArgsRep = lists:sublist(ArgsRep, Arity),
+
+  %%     Call = case ExprRep of
+  %%       {'fun', _, {function, Atom, _}} ->
+  %%         {call, Line, {atom, Line, Atom}, ImmArgsRep};
+  %%       _ -> {call, Line, ExprRep, ImmArgsRep}
+  %%     end,
+
+  %%     if
+  %%       NumArgs == Arity -> Call;
+  %%       true ->
+  %%         RestArgsRep = lists:sublist(ArgsRep, Arity + 1, NumArgs),
+  %%         RestArgsListRep = rep_list(RestArgsRep, Line),
+  %%         call(par_native, curry, [Call, RestArgsListRep, LineRep], Line)
+  %%     end
+  %% end;
 
 rep({variant, _, {con_token, Loc, Name}, Args}, CG) ->
   Key = option_key(Name, CG),
@@ -784,6 +799,13 @@ rep({'ensure', Loc, Expr, After}, CG) ->
 rep({block, Loc, Exprs}, CG) ->
   {block, ?START_LINE(Loc), lists:map(fun(E) -> rep(E, CG) end, Exprs)};
 
+rep({binary_op, _, '|>', Left, Right}, CG) ->
+  App = case Right of
+    {app, Loc, Expr, Args} -> {app, Loc, Expr, Args ++ [Left]};
+    _ -> {app, ?LOC(Right), Right, [Left]}
+  end,
+  rep(App, CG);
+
 rep({binary_op, Loc, Op, Left, Right}, CG) ->
   Line = ?START_LINE(Loc),
   LeftRep = rep(Left, CG),
@@ -792,11 +814,6 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
   if
     Op == '++' -> call(par_native, concat, [LeftRep, RightRep], Line);
     Op == '--' -> call(par_native, separate, [LeftRep, RightRep], Line);
-    Op == '|>' ->
-      case Right of
-        {app, Expr, Args} -> rep({app, Loc, Expr, [Left | Args]}, CG);
-        _ -> rep({app, Loc, Right, [Left]}, CG)
-      end;
     true ->
       Atom = case Op of
         '==' -> '==';

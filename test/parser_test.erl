@@ -715,7 +715,7 @@ expr_test_() ->
             {var, l(2, 1), "x"},
             {cons, l(5, 7), [{int, l(6, 1), 3}], {var, l(10, 1), "t"}}
           ],
-          {app, l(14, 3), {var_ref, l(14, 1), ref, "x"}, [{unit, l(15, 2)}]}
+          {app, l(14, 3), {var_ref, l(14, 1), ref, "x"}, []}
         },
         [{fn, l(19, 5), ref, [], {int, l(23, 1), 2}}]
       },
@@ -894,23 +894,53 @@ expr_test_() ->
       {expr_sig, l(0, 17), ref,
         {char, l(0, 3), $c},
         {lam_te, l(6, 11),
-          {con_token, l(6, 6), "String"},
+          [{con_token, l(6, 6), "String"}],
           {tv_te, l(16, 1), "A", []}
         }
       },
       ok_expr("'c' : String -> A")
+    )
+  , ?_assertEqual(
+      {expr_sig, l(0, 25), ref,
+        {char, l(0, 3), $c},
+        {lam_te, l(6, 19),
+          [{con_token, l(7, 6), "String"}, {con_token, l(15, 4), "Bool"}],
+          {tv_te, l(24, 1), "A", []}
+        }
+      },
+      ok_expr("'c' : (String, Bool) -> A")
+    )
+  , ?_assertEqual(
+      {expr_sig, l(0, 28), ref,
+        {char, l(0, 3), $c},
+        {lam_te, l(6, 22), [
+            {tuple_te, l(6, 15), [
+              {con_token, l(8, 3), "Int"},
+              {gen_te, l(13, 6),
+                {con_token, l(13, 3), "Set"},
+                [{tv_te, l(17, 1), "A", []}]
+              }
+            ]}
+          ],
+          {gen_te, l(25, 3),
+            {con_token, l(25, 3), "List"},
+            [{tv_te, l(26, 1), "A", []}]
+          }
+        }
+      },
+      ok_expr("'c' : ((Int, Set<A>)) -> [A]")
     )
   % -> is right associative
   , ?_assertEqual(
       {expr_sig, l(0, 37), ref,
         {char, l(0, 3), $c},
         {lam_te, l(6, 31),
-          {lam_te, l(6, 15),
-            {con_token, l(7, 3), "Int"},
+          [{lam_te, l(6, 15),
+            [{con_token, l(7, 3), "Int"}],
             {con_token, l(14, 6), "String"}
-          },
+          }],
           {lam_te, l(25, 12),
-            {tv_te, l(25, 7), "A", [{con_token, l(29, 3), "Num"}]},
+            [{tv_te, l(25, 7), "A", [{con_token, l(29, 3), "Num"}]}],
             {tv_te, l(36, 1), "B", []}
           }
         }
@@ -1070,9 +1100,7 @@ expr_test_() ->
           }
         ],
         {app, l(2, 0, 8), {var_ref, l(2, 0, 3), ref, "inc"}, [
-          {app, l(2, 4, 3), {var_ref, l(2, 4, 1), ref, "f"}, [
-            {unit, l(2, 5, 2)}
-          ]}
+          {app, l(2, 4, 3), {var_ref, l(2, 4, 1), ref, "f"}, []}
         ]}
       },
       ok_expr(
@@ -1502,7 +1530,7 @@ expr_test_() ->
 
   , ?_assertEqual(
       {ensure, l(0, 22),
-        {app, l(7, 5), {var_ref, l(7, 3), ref, "foo"}, [{unit, l(10, 2)}]},
+        {app, l(7, 5), {var_ref, l(7, 3), ref, "foo"}, []},
         {var_ref, l(19, 3), ref, "bar"}
       },
       ok_expr("ensure foo() after bar")
@@ -1574,7 +1602,7 @@ def_test_() ->
       {sig, l(0, 19),
         {var, l(0, 3), "foo"},
         {lam_te, l(6, 13),
-          {con_token, l(6, 3), "Int"},
+          [{con_token, l(6, 3), "Int"}],
           {con_token, l(13, 6), "String"}
         }
       },
@@ -1760,7 +1788,7 @@ def_test_() ->
         {sig, l(1, 16, 14),
           {var, l(1, 16, 3), "bar"},
           {lam_te, l(1, 22, 8),
-            {tv_te, l(1, 22, 1), "T", []},
+            [{tv_te, l(1, 22, 1), "T", []}],
             {con_token, l(1, 27, 3), "Int"}
           }
         }
@@ -1775,34 +1803,33 @@ def_test_() ->
       {interface, l(0, 0, 3, 1), {con_token, l(10, 8), "Mappable"}, [], [
         {sig, l(1, 2, 23),
           {var, l(1, 2, 3), "add"},
-          {lam_te, l(1, 8, 17),
-            {tv_te, l(1, 8, 1), "A", []},
-            {lam_te, l(1, 13, 12),
-              {gen_te, l(1, 13, 4),
-                {tv_te, l(1, 13, 4), "T", []},
-                [{tv_te, l(1, 15, 1), "A", []}]
-              },
-              {gen_te, l(1, 21, 4),
-                {tv_te, l(1, 21, 4), "T", []},
-                [{tv_te, l(1, 23, 1), "A", []}]
+          {lam_te, l(1, 8, 17), [
+              {tv_te, l(1, 9, 1), "A", []},
+              {gen_te, l(1, 12, 4),
+                {tv_te, l(1, 12, 4), "T", []},
+                [{tv_te, l(1, 14, 1), "A", []}]
               }
+            ],
+            {gen_te, l(1, 21, 4),
+              {tv_te, l(1, 21, 4), "T", []},
+              [{tv_te, l(1, 23, 1), "A", []}]
             }
           }
         },
         {sig, l(2, 2, 20),
           {var, l(2, 2, 6), "length"},
           {lam_te, l(2, 11, 11),
-            {gen_te, l(2, 11, 4),
+            [{gen_te, l(2, 11, 4),
               {tv_te, l(2, 11, 4), "T", []},
               [{tv_te, l(2, 13, 1), "B", []}]
-            },
+            }],
             {con_token, l(2, 19, 3), "Int"}
           }
         }
       ]},
       ok_def(
         "interface Mappable {\n"
-        "  add : A -> T<A> -> T<A>\n"
+        "  add : (A, T<A>) -> T<A>\n"
         "  length : T<B> -> Int\n"
         "}"
       )

@@ -84,13 +84,13 @@ test_expr(Expr) ->
   , ?_test({3.0, true} = (Expr("|x| x"))({3.0, true}))
   , ?_test(35.0 = (Expr("|x, y| x * y * 3.5"))(4, 2.5))
   , ?_test(true = Expr("(|x| x || true)(false)"))
-  , ?_test(<<"ab">> = Expr("(|a, b| a ++ b)(\"a\")(\"b\")"))
-  , ?_test(5 = Expr("(|x| |y| x + y)(2, 3)"))
+  , ?_test(<<"ab">> = Expr("(|a, b| a ++ b)(\"a\", _)(\"b\")"))
+  , ?_test(5 = Expr("(|x| |y| x + y)(2)(3)"))
   , ?_test([4, 1] = Expr("(|x| |-| x -- [3])([4, 3, 1])()"))
   % to test code_gen_utils:'_@curry' in the parital application case
-  , ?_test(2 = Expr(
+  , ?_test(4 = Expr(
       "let f = (|a| |b, c, d| a - b + c - d)(4)\n"
-      "let f = f(3)\n"
+      "let f = f(_, 3, _)\n"
       "f(2, 1)"
     ))
 
@@ -224,15 +224,9 @@ test_expr(Expr) ->
 
 
   , ?_test([4, 6] = Expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
-  , ?_test([6] = Expr("@lists:filter((|t, x| x > t)(5), [2, 4, 6])"))
+  , ?_test([6] = Expr("@lists:filter((|t, x| x > t)(5, _), [2, 4, 6])"))
   , ?_test([true] = Expr("@lists:map(@erlang:is_atom/1, [@a])"))
-  , ?_test(3 = Expr("@exec_test:returns_fun()(1)(2)"))
-  , ?_test(3 = Expr("@exec_test:returns_fun/0((), 1)(2)"))
-  , ?_test(3 = Expr("@exec_test:returns_fun/0((), 1, 2)"))
-  , ?_test(true = Expr(
-      "let foo(x) = x == ()\n"
-      "foo()"
-    ))
+  , ?_test(3 = Expr("@exec_test:returns_fun()(1, 2)"))
   , ?_test(true = Expr(
       "let foo(x) = x == ()\n"
       "foo(())"
@@ -245,7 +239,7 @@ test_expr(Expr) ->
     ))
   , ?_test(true = (Expr(
       "let f(x, y) = x == y\n"
-      "@hi |> f"
+      "@hi |> f(_)"
     ))(hi))
   ].
 
@@ -268,7 +262,7 @@ test_prg(Run) ->
       "cmp(f, g, x) = f(g(x))\n"
       "two(e) = [e, e]\n"
       "and_true(l) = l ++ [true]\n"
-      "main() = cmp(and_true)(two, false)"
+      "main() = cmp(and_true, _, _)(two, false)"
     ))
   , ?_test(50 = Run(
       "f(x) = g(x - 10.0)\n"
@@ -305,7 +299,7 @@ test_global(Run) ->
   , ?_test({{<<"hi">>, $d}, 3, 4} = Run(
       "bar(a, b, c) = (a('d'), b, c)\n"
       "baz(a, b) = (a, b)\n"
-      "foo = bar(baz(\"hi\"))\n"
+      "foo = bar(baz(\"hi\", _), _, _)\n"
       "main() = foo(3, 4)"
     ))
   % to ensure globals are evaluated strictly in order
@@ -342,8 +336,8 @@ test_enum(Run) ->
     ))
   , ?_test({'Bar', true, [<<"hello">>]} = (Run(
       "enum Foo { Bar(Bool, [String]) }\n"
-      "main() = Bar(true)"
-    ))([<<"hello">>]))
+      "main() = Bar(_, [\"hello\"])"
+    ))(true))
   , ?_test('Bar' = Run(
       "enum Foo<A> { Bar }\n"
       "main() = Bar"
@@ -385,7 +379,7 @@ test_exception(Expr, Run, Many) ->
     ))
   , ?_test({'Mod.Bar', true, [<<"hi">>, <<"hey">>]} = (Run(
       "exception Bar(Bool, [String])\n"
-      "main() = Bar(true)"
+      "main() = Bar(true, _)"
     ))([<<"hi">>, <<"hey">>]))
 
 
@@ -496,15 +490,15 @@ test_record(Expr, Run) ->
     ))
   , ?_assertEqual(#{'_@type' => 'Foo', bar => 3, baz => [<<"hello">>]}, (Run(
       "struct Foo { bar : Int, baz : [String] }\n"
-      "main() = Foo(3)"
+      "main() = Foo(3, _)"
     ))([<<"hello">>]))
   , ?_assertEqual(#{'_@type' => 'Foo', baz => [first, second], bar => 15}, Run(
       "struct Foo { bar : Int, baz : [Atom] }\n"
       "main() = Foo { baz = [@first, @second], bar = 15 }"
     ))
-  , ?_assertEqual(#{'_@type' => 'Foo', bar => hi, baz => true}, (Run(
+  , ?_assertEqual(#{'_@type' => 'Foo', bar => true, baz => hi}, (Run(
       "struct Foo<X, Y> { bar : X, baz : Y }\n"
-      "main() = Foo(@hi)"
+      "main() = Foo(_, @hi)"
     ))(true))
   , ?_assertEqual(#{'_@type' => 'Foo', bar => hi}, Run(
       "struct Foo<X> { bar : X }\n"
@@ -604,7 +598,7 @@ test_interface(Run) ->
   , ?_test(6 = Run(
       IfaceToI ++
       "impl ToI for [Int] {\n"
-      "  to_i = @lists:foldl/3(|memo, num| memo + num, 0)\n"
+      "  to_i = @lists:foldl/3(|memo, num| memo + num, 0, _)\n"
       "}\n"
       "main() = to_i([1, 2, 3])"
     ))
@@ -697,7 +691,7 @@ test_interface(Run) ->
       "first(set) =\n"
       "  let elems = @maps:keys(@maps:remove(@\"_@type\", set))\n"
       "  @erlang:hd(elems)\n"
-      "foo(set) = first(set, false)\n"
+      "foo(set) = first(set)(false)\n"
       "main() =\n"
       "  let set = #[to_i]\n"
       "  foo(set)"
@@ -706,7 +700,7 @@ test_interface(Run) ->
       IfaceImpl ++
       "key : Map<K, V> -> K\n"
       "key(map) = @erlang:hd(@maps:keys(map))\n"
-      "foo(map) = key(map, true)\n"
+      "foo(map) = key(map)(true)\n"
       "main() =\n"
       "  let map = { to_i => 1 }\n"
       "  foo(map)"
@@ -715,7 +709,7 @@ test_interface(Run) ->
       IfaceImpl ++
       "value : Map<K, V> -> V\n"
       "value(map) = @erlang:hd(@maps:values(map))\n"
-      "foo(map) = value(map, false)\n"
+      "foo(map) = value(map)(false)\n"
       "main() =\n"
       "  let map = { 1 => to_i }\n"
       "  foo(map)"
@@ -766,7 +760,7 @@ test_interface(Run) ->
       "bar(foo) =\n"
       "  let Cat(s) = foo.a\n"
       "  let Dog([m]) = foo.other_a\n"
-      "  first(s, true) + key(m)(true)\n"
+      "  first(s)(true) + key(m)(true)\n"
       "main() =\n"
       "  let foo = Foo {\n"
       "    a = Cat(#[to_i])\n"
@@ -779,7 +773,7 @@ test_interface(Run) ->
       "impl ToI for [Int] { to_i([i]) = i }\n"
       "hd : T<A> -> A\n"
       "hd(_) = @erlang:hd([to_i : Bool -> Int])\n"
-      "bar(l) = hd(l, false)\n"
+      "bar(l) = hd(l)(false)\n"
       "main() =\n"
       "  let foo = @io:printable_range() : T<A ~ ToI -> Int>\n"
       "  bar(foo)"
@@ -795,7 +789,7 @@ test_interface(Run) ->
   , ?_test(1 = Run(
       IfaceImpl ++
       "foo(b) = |c| if b == c then to_i(c) else -1\n"
-      "main() = foo(true, true)"
+      "main() = foo(true)(true)"
     ))
   % to test fns with multiple arguments having the same iv pair
   , ?_test(7 = Run(
@@ -829,7 +823,7 @@ test_interface(Run) ->
   , ?_test({2, 3} = Run(
       IfaceToI ++
       "impl ToI for [A] { to_i(l) = @erlang:length(l) }\n"
-      "interface Foo { foo : T -> (T, A ~ ToI) -> Int }\n"
+      "interface Foo { foo : (T, (T, A ~ ToI)) -> Int }\n"
       "impl Foo for Bool {\n"
       "  foo(a, (b, c)) = if b && a then 2 * to_i(c) else to_i(c)\n"
       "}\n"
@@ -838,13 +832,13 @@ test_interface(Run) ->
   , ?_test({1, 2} = Run(
       IfaceToI ++
       "impl ToI for [A] { to_i(l) = @erlang:length(l) }\n"
-      "interface Foo { foo : T -> (T, A ~ ToI) -> Int }\n"
+      "interface Foo { foo : (T, (T, A ~ ToI)) -> Int }\n"
       "impl Foo for Bool {\n"
       "  foo(a, (b, c)) = if b && a then 2 * to_i(c) else to_i(c)\n"
       "}\n"
       "main() = (\n"
-      "  (foo : T ~ Foo -> (T ~ Foo, [Int]) -> Int)(true, (false, [1])),\n"
-      "  (foo : Bool -> (Bool, A ~ ToI) -> Int)(false, (false, [@a, @b]))\n"
+      "  (foo : (T ~ Foo, (T ~ Foo, [Int])) -> Int)(true, (false, [1])),\n"
+      "  (foo : (Bool, (Bool, A ~ ToI)) -> Int)(false, (false, [@a, @b]))\n"
       ")"
     ))
   , ?_test({foo, false} = Run(
@@ -859,17 +853,15 @@ test_interface(Run) ->
       "  let result = @erlang:erase(@combine1)\n"
       "  (result, f(false))"
     ))
-  % We can only call combine() after we receive the second argument, which
-  % determines the implementation, so the file isn't created.
-  , ?_test(undefined = Run(
-      "interface Combine { combine : Int -> T -> T -> T }\n"
+  , ?_test(foo = Run(
+      "interface Combine { combine : Int -> (T, T) -> T }\n"
       "impl Combine for Bool {\n"
       "  combine(_) =\n"
       "    @erlang:put(@combine2, @foo)\n"
       "    |a, b| a && b\n"
       "}\n"
       "main() =\n"
-      "  combine(1)\n"
+      "  combine(1) : (Bool, Bool) -> Bool\n"
       "  @erlang:erase(@combine2)\n"
     ))
   , ?_test({1, 3} = Run(
@@ -933,16 +925,22 @@ test_interface(Run) ->
       "impl FromStr for Bool { from_str(s) = s == \"true\" }\n"
       "main() = (from_str(\"93\") : Int, from_str(\"true\") : Bool)\n"
     ))
+  % TODO fix
+  %% , ?_test(3 = Run(
+  %%     "interface Const { const : () -> T }\n"
+  %%     "impl Const for Int { const() = 3 }\n"
+  %%     "main() = const() : Int"
+  %%   ))
   , ?_test([false, false, true] = Run(
-      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
-      "list_map : (A -> B) -> [A] -> [B]\n"
+      "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
+      "list_map : (A -> B, [A]) -> [B]\n"
       "list_map = @lists:map/2\n"
       "impl Mappable for List { map = list_map }\n"
       "main() = map(|x| x == 3, [1, 2, 3])"
     ))
   , ?_assertEqual(#{a => $a}, Run(
-      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
-      "map_map : ((A, B) -> (C, D)) -> Map<A, B> -> Map<C, D>\n"
+      "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
+      "map_map : (((A, B)) -> (C, D), Map<A, B>) -> Map<C, D>\n"
       "map_map(f, m) =\n"
       "  let cb = |k, v, new_m|\n"
       "    let (new_k, new_v) = f((k, v))\n"
@@ -1057,7 +1055,7 @@ test_interface(Run) ->
       }},
       Run(
         "interface Collection extends Mappable { len : T<A> -> Int }\n"
-        "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+        "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
         "impl Collection for List { len = @erlang:length/1 }\n"
         "impl Mappable for List { map = @lists:map/2 }\n"
         "impl Collection for Set { len(s) = @erlang:map_size(s) - 1 }\n"
@@ -1120,7 +1118,7 @@ test_gen_tv(Run) ->
       "main() = bar([true], [false, false])"
     ))
   , ?_assertEqual(#{hello => 5.1}, Run(
-      "foo : A -> T<A> -> T<A>\n"
+      "foo : (A, T<A>) -> T<A>\n"
       "foo(_, x) = x\n"
       "main() = foo((@hi, 3.7), { @hello => 5.1 })"
     ))
@@ -1259,10 +1257,8 @@ test_pattern(Expr, Run) ->
     ))
   ].
 
-code_gen_assert_test_() ->
-  test_assert(fun expr_code_gen/1).
-%% interpreter_assert_test_() ->
-%%   test_assert(fun expr_interpreter/1).
+code_gen_assert_test_() -> test_assert(fun expr_code_gen/1).
+%% interpreter_assert_test_() -> test_assert(fun expr_interpreter/1).
 test_assert(Expr) ->
   [ ?_test(ok = Expr("assert true"))
   , ?_assertError(

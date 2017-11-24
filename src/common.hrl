@@ -183,11 +183,15 @@
   "types, but you don't know what those specific types are. You cannot "
   "assume ", TV1, " and ", TV2, " are the same type"
 ]).
--define(ERR_ARITY(Given, Max), ?FMT(
-  "You provided ~p argument(s), but this needs at most ~p argument(s)",
-  [Given, Max]
+-define(ERR_ARITY(Given, Exp), ?FMT(
+  "You provided ~p argument(s), but this function needs ~p argument(s)",
+  [Given, Exp]
 )).
--define(ERR_HOLE(T), ["I'm looking for a value of type ", T, " here"]).
+-define(ERR_HOLE(T), [
+  "I'm looking for a value of type ", T, " here. If you wanted to partially "
+  "apply a function, use an underscore as one of the arguments, such as in "
+  "max(_, 3)"
+]).
 
 
 -define(ERR_REDEF(Name, Loc), [
@@ -281,9 +285,9 @@
   "Module ~s is not defined or imported",
   [Module]
 )).
--define(ERR_TYPE_PARAMS(Con, Exp, Actual), ?FMT(
+-define(ERR_TYPE_PARAMS(Con, Exp, Given), ?FMT(
   "Type ~s accepts ~p type parameters, but you gave it ~p",
-  [utils:unqualify(Con), Exp, Actual]
+  [utils:unqualify(Con), Exp, Given]
 )).
 -define(ERR_DUP_KEY(Key, Con, Loc), [
   "The key ", atom_to_list(Key), " was already used for option ",

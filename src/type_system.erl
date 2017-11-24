@@ -20,7 +20,8 @@
 %   {con, C} - a concrete type C; e.g. Int
 %   {gen, G, T} - a generic type G<T>; e.g. List<String>
 %   {tuple, Ts} - a tuple type (T1, T2, ...); e.g. (Int, Bool)
-%   {lam, X, Y} - a lambda type X -> Y; e.g. Int -> Bool
+%   {lam, [ArgTs], ReturnT} - a lambda type (ArgT1, ArgT2, ...) -> ReturnT;
+%     e.g. (Int, String) -> Bool
 %   TV - see explanation above
 %
 % fresh - a function that generates a new TV.
@@ -133,13 +134,13 @@ stdlib_dir() -> filename:join(code:lib_dir(par, src), "lib").
 
 stdlib_modules() ->
   #{
-    "Base" => "base.par",
-    "List" => "list.par",
-    "Set" => "set.par",
-    "Map" => "map.par",
-    "String" => "string.par",
-    "Char" => "char.par",
-    "Test" => "test.par"
+    %% "Base" => "base.par",
+    %% "List" => "list.par",
+    %% "Set" => "set.par",
+    %% "Map" => "map.par",
+    %% "String" => "string.par",
+    %% "Char" => "char.par",
+    %% "Test" => "test.par"
   }.
 
 resolve_dep_path(RawPath) ->
@@ -550,10 +551,16 @@ define_type(Con, #type_binding{is_iface=IsIface, loc=Loc}=TB, C) ->
       C#ctx{types=Types#{Con => TB}, exports=NewExports}
   end.
 
-gen_t_num_params({lam_te, _, ArgTE, ReturnTE}) ->
-  case gen_t_num_params(ArgTE) of
+gen_t_num_params({lam_te, _, ArgTEs, ReturnTE}) ->
+  NumParams = lists:foldl(fun(ArgTE, FoldNumParams) ->
+    case FoldNumParams of
+      false -> gen_t_num_params(ArgTE);
+      _ -> FoldNumParams
+    end
+  end, false, ArgTEs),
+  case NumParams of
     false -> gen_t_num_params(ReturnTE);
-    NumParams -> NumParams
+    _ -> NumParams
   end;
 gen_t_num_params({tuple_te, _, ElemTEs}) ->
   lists:foldl(fun(ElemTE, FoldNumParams) ->
@@ -878,13 +885,7 @@ infer({fn, _, Ref, Args, Expr}, C) ->
   {ReturnT, C4} = infer(Expr, C3),
   C5 = add_cst(ReturnTV, ReturnT, ?LOC(Expr), "return type", C4),
 
-  T = if
-    length(Args) == 0 -> {lam, unit, ReturnT};
-    true -> lists:foldl(fun(ArgT, LastT) ->
-      {lam, ArgT, LastT}
-    end, ReturnT, ArgTsRev)
-  end,
-
+  T = {lam, lists:reverse(ArgTsRev), ReturnT},
   FnRefs = C5#ctx.fn_refs,
   % keep reference of original local env to find bound variables
   C6 = C5#ctx{fn_refs=FnRefs#{Ref => {T, C#ctx.l_env}}},
@@ -1009,12 +1010,11 @@ infer({struct, Loc, StructTE, Fields}, C) ->
     C
   ),
 
-  FnT = lists:foldr(fun({sig, _, {var, _, FieldName}, _}, LastT) ->
-    #{FieldName := FieldT} = RawFieldMap,
-    {lam, FieldT, LastT}
-  end, RawT, Fields),
+  RawFieldTs = lists:map(fun({sig, _, {var, _, FieldName}, _}) ->
+    maps:get(FieldName, RawFieldMap)
+  end, Fields),
+  {FnT, _} = norm_sig_type({lam, RawFieldTs, RawT}, false, C1#ctx.pid),
 
-  {NormFnT, _} = norm_sig_type(FnT, false, C1#ctx.pid),
   Vs = case RawT of
     {con, _} -> [];
     {gen, _, ParamTs} -> lists:map(fun({tv, V, none, _}) -> V end, ParamTs)
@@ -1023,7 +1023,7 @@ infer({struct, Loc, StructTE, Fields}, C) ->
 
   #binding{tv=TV, id=ID} = g_env_get(Name, C2),
   C3 = new_gnr(TV, ID, C2),
-  C4 = add_cst(TV, NormFnT, Loc, ?FROM_STRUCT_CTOR, C3),
+  C4 = add_cst(TV, FnT, Loc, ?FROM_STRUCT_CTOR, C3),
   C5 = finish_gnr(C4, C2#ctx.gnr),
 
   {none, C5};
@@ -1380,7 +1380,7 @@ infer({field_fn, _, {var, _, Name}}, C) ->
   BaseTV = tv_server:fresh(C#ctx.pid),
   A = tv_server:next_name(C#ctx.pid),
   RecordExtT = {record_ext, A, BaseTV, #{Name => FieldTV}},
-  {{lam, RecordExtT, FieldTV}, C};
+  {{lam, [RecordExtT], FieldTV}, C};
 
 infer({field, Loc, Expr, Prop}, C) ->
   case Expr of
@@ -1401,7 +1401,7 @@ infer({field, Loc, Expr, Prop}, C) ->
       {ExprT, C1} = infer(Expr, C),
       {var, PropLoc, Name} = Prop,
       FieldFn = {field_fn, PropLoc, Prop},
-      {{lam, RecordExtT, ResultT}, C2} = infer(FieldFn, C1),
+      {{lam, [RecordExtT], ResultT}, C2} = infer(FieldFn, C1),
 
       From = ?FROM_FIELD_ACCESS(Name),
       C3 = add_cst(ExprT, RecordExtT, Loc, From, C2),
@@ -1410,23 +1410,32 @@ infer({field, Loc, Expr, Prop}, C) ->
 
 infer({app, Loc, Expr, Args}, C) ->
   {ExprT, C1} = infer(Expr, C),
-  {ArgLocTsRev, C2} = lists:foldl(fun(Arg, {LocTs, FoldC}) ->
-    {T, FoldC1} = infer(Arg, FoldC),
-    {[{?LOC(Arg), T} | LocTs], FoldC1}
-  end, {[], C1}, Args),
+  {ProvidedRev, HoleTsRev, C2} = lists:foldl(fun(Arg, Memo) ->
+    {FoldProvided, FoldHoleTs, FoldC} = Memo,
+    {T, FoldC1} = case Arg of
+      {hole, _} -> {tv_server:fresh(FoldC#ctx.pid), FoldC};
+      _ -> infer(Arg, FoldC)
+    end,
+
+    ArgLoc = ?LOC(Arg),
+    {NewProvided, NewHoleTs} = case Arg of
+      {hole, _} -> {[{hole, ArgLoc, T} | FoldProvided], [T | FoldHoleTs]};
+      _ -> {[{arg, ArgLoc, T} | FoldProvided], FoldHoleTs}
+    end,
+    {NewProvided, NewHoleTs, FoldC1}
+  end, {[], [], C1}, Args),
 
   TV = tv_server:fresh(C2#ctx.pid),
-  T = if
-    length(ArgLocTsRev) == 0 -> {lam, unit, TV};
-    true ->
-      lists:foldl(fun({ArgLoc, ArgT}, LastT) ->
-        {lam, C2#ctx.l_env, ArgLoc, ArgT, LastT}
-      end, TV, ArgLocTsRev)
+  T = {lam, C2#ctx.l_env, lists:reverse(ProvidedRev), TV},
+
+  ResultT = case HoleTsRev of
+    [] -> TV;
+    _ -> {lam, lists:reverse(HoleTsRev), TV}
   end,
-
   C3 = add_cst(T, ExprT, Loc, ?FROM_APP, C2),
-  {TV, C3};
+  {ResultT, C3};
 
+% TODO: just make this a regular app!!
 infer({variant, Loc, Expr, Args}, C) ->
   {ConLoc, Con, {B, C1}} = case Expr of
     {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
@@ -1459,15 +1468,8 @@ infer({native, Loc, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
     false -> add_ctx_err(?ERR_NOT_DEF_NATIVE(Module, Name, Arity), Loc, C)
   end,
 
-  T = if
-    Arity == 0 -> {lam, unit, tv_server:fresh(C1#ctx.pid)};
-    true ->
-      lists:foldl(fun(_, LastT) ->
-        {lam, tv_server:fresh(C1#ctx.pid), LastT}
-      end, tv_server:fresh(C1#ctx.pid), lists:seq(1, Arity))
-  end,
-
-  {T, C1};
+  ArgTs = [tv_server:fresh(C1#ctx.pid) || _ <- lists:seq(1, Arity)],
+  {{lam, ArgTs, tv_server:fresh(C1#ctx.pid)}, C1};
 
 infer({'if', _, Expr, Then, Else}, C) ->
   {ExprT, C1} = infer(Expr, C),
@@ -1582,20 +1584,11 @@ infer({block, _, Exprs}, C) ->
   {T, C1};
 
 infer({binary_op, _, '|>', Left, Right}, C) ->
-  {LeftT, C1} = infer(Left, C),
-  {RightT, C2} = infer(Right, C1),
-
-  TV = tv_server:fresh(C2#ctx.pid),
-  ArgTV = tv_server:fresh(C2#ctx.pid),
-
-  % The left constraint will always unify successfully if processed first. To
-  % get better error messages, add the right constraint first, so it's possible
-  % for the left constraint to fail. This is the main reason |> is in a separate
-  % function clause than the rest of the binary operators below.
-  AppT = {lam, C#ctx.l_env, ?LOC(Left), ArgTV, TV},
-  C3 = add_cst(AppT, RightT, ?LOC(Right), ?FROM_OP_RHS('|>'), C2),
-  C4 = add_cst(ArgTV, LeftT, ?LOC(Left), ?FROM_OP_LHS('|>'), C3),
-  {TV, C4};
+  App = case Right of
+    {app, Loc, Expr, Args} -> {app, Loc, Expr, Args ++ [Left]};
+    _ -> {app, ?LOC(Right), Right, [Left]}
+  end,
+  infer(App, C);
 
 infer({binary_op, Loc, Op, Left, Right}, C) ->
   {LeftT, C1} = infer(Left, C),
@@ -1669,10 +1662,12 @@ infer_sig(RestrictVs, Unique, SigVs, Sig, C) ->
   C1 = C#ctx{sig_vs=SigVs},
   infer_sig_helper(RestrictVs, Unique, Sig, C1).
 
-infer_sig_helper(RestrictVs, Unique, {lam_te, _, ArgTE, ReturnTE}, C) ->
-  {ArgT, C1} = infer_sig_helper(RestrictVs, Unique, ArgTE, C),
+infer_sig_helper(RestrictVs, Unique, {lam_te, _, ArgTEs, ReturnTE}, C) ->
+  {ArgTs, C1} = lists:mapfoldl(fun(ArgTE, FoldC) ->
+    infer_sig_helper(RestrictVs, Unique, ArgTE, FoldC)
+  end, C, ArgTEs),
   {ReturnT, C2} = infer_sig_helper(RestrictVs, Unique, ReturnTE, C1),
-  {{lam, ArgT, ReturnT}, C2};
+  {{lam, ArgTs, ReturnT}, C2};
 infer_sig_helper(RestrictVs, Unique, {tuple_te, _, ElemTEs}, C) ->
   {ElemTs, C1} = lists:mapfoldl(fun(TE, FoldC) ->
     infer_sig_helper(RestrictVs, Unique, TE, FoldC)
@@ -1848,10 +1843,10 @@ infer_option(Option, T, FVs, SigVs, C) ->
     infer_sig({T, FVs}, false, FoldC#ctx.sig_vs, ArgTE, FoldC)
   end, C#ctx{sig_vs=SigVs}, ArgTEs),
 
-  RawOptionT = lists:foldr(fun(ArgT, LastT) ->
-    {lam, ArgT, LastT}
-  end, T, ArgTs),
-
+  RawOptionT = case length(ArgTs) of
+    0 -> T;
+    _ -> {lam, ArgTs, T}
+  end,
   % don't need to make any Vs rigid; inst still works correctly
   {OptionT, _} = norm_sig_type(RawOptionT, false, C1#ctx.pid),
   #binding{tv=TV, id=ID} = g_env_get(Con, C1),
@@ -2424,14 +2419,19 @@ unify_csts(#gnr{csts=Csts, l_env=LEnv}, S) ->
     FoldS4
   end, S#solver{bound_vs=BoundVs, l_env=LEnv}, Csts).
 
-resolve({lam, ArgT, ReturnT}, S) ->
-  {ResArgT, S1} = resolve(ArgT, S),
+resolve({lam, ArgTs, ReturnT}, S) ->
+  {ResArgTs, S1} = lists:mapfoldl(fun(ArgT, FoldS) ->
+    resolve(ArgT, FoldS)
+  end, S, ArgTs),
   {ResReturnT, S2} = resolve(ReturnT, S1),
-  {{lam, ResArgT, ResReturnT}, S2};
-resolve({lam, LEnv, Loc, ArgT, ReturnT}, S) ->
-  {ResArgT, S1} = resolve(ArgT, S),
+  {{lam, ResArgTs, ResReturnT}, S2};
+resolve({lam, LEnv, Provided, ReturnT}, S) ->
+  {ResProvided, S1} = lists:mapfoldl(fun({Type, Loc, ArgT}, FoldS) ->
+    {ResArgT, FoldS1} = resolve(ArgT, FoldS),
+    {{Type, Loc, ResArgT}, FoldS1}
+  end, S, Provided),
   {ResReturnT, S2} = resolve(ReturnT, S1),
-  {{lam, LEnv, Loc, ResArgT, ResReturnT}, S2};
+  {{lam, LEnv, ResProvided, ResReturnT}, S2};
 resolve({tuple, ElemTs}, S) ->
   {ResElemTs, S1} = lists:mapfoldl(fun(T, FoldS) ->
     resolve(T, FoldS)
@@ -2531,11 +2531,21 @@ unify({hole, false}, _, S) -> {false, S};
 unify({hole, true}, T, S) -> add_err(?ERR_HOLE(T), S);
 unify(T1, {hole, _}=T2, S) -> sub_unify(T2, T1, S);
 
-unify({lam, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
-  {ArgValid, S1} = sub_unify(ArgT1, ArgT2, S),
-  {ReturnValid, S2} = sub_unify(ReturnT1, ReturnT2, S1),
-  {ArgValid andalso ReturnValid, S2};
-unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
+unify({lam, ArgTs1, ReturnT1}, {lam, ArgTs2, ReturnT2}, S) ->
+  if
+    length(ArgTs1) /= length(ArgTs2) -> add_err(S);
+    true ->
+      {ArgsValid, S1} = lists:foldl(fun({T1, T2}, {FoldValid, FoldS}) ->
+        {ArgValid, FoldS1} = sub_unify(T1, T2, FoldS),
+        {FoldValid andalso ArgValid, FoldS1}
+      end, {true, S}, lists:zip(ArgTs1, ArgTs2)),
+      {ReturnValid, S2} = sub_unify(ReturnT1, ReturnT2, S1),
+      {ArgsValid andalso ReturnValid, S2}
+  end;
+unify({lam, _, Provided, _}, {lam, ArgTs, _}, S)
+    when length(Provided) /= length(ArgTs) ->
+  add_err(?ERR_ARITY(length(Provided), length(ArgTs)), S);
+unify({lam, LEnv, Provided, ReturnT1}, {lam, ArgTs, ReturnT2}, S) ->
   #solver{
     module=Module,
     loc=OrigLoc,
@@ -2546,15 +2556,25 @@ unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
     must_solve_vs=MustSolveVs
   } = S,
 
-  NewPassedVs = ordsets:fold(fun(V, FoldPassedVs) ->
-    [{V, ArgT2, Module, Loc, LEnv} | FoldPassedVs]
-  end, PassedVs, fvs(ArgT2)),
+  ProvidedArgTs = lists:zip(Provided, ArgTs),
+  {NewPassedVs, HasHole} = lists:foldl(fun
+    % The user isn't actually passing an argument if there's a hole.
+    ({{hole, _, _}, _}, {FoldPassedVs, _}) -> {FoldPassedVs, true};
+    ({{arg, Loc, _}, ArgT}, {FoldPassedVs, FoldHasHole}) ->
+      NewPassedVs = ordsets:fold(fun(V, NestedPassedVs) ->
+        [{V, ArgT, Module, Loc, LEnv} | NestedPassedVs]
+      end, FoldPassedVs, fvs(ArgT)),
+      {NewPassedVs, FoldHasHole}
+  end, {PassedVs, false}, ProvidedArgTs),
 
-  VsWithIs = lists:map(fun({_, V}) -> V end, utils:ivs(ArgT2)),
-  ReturnVsWithIs = case ReturnT2 of
+  VsWithIs = lists:flatmap(fun
+    ({{hole, _, _}, _}) -> [];
+    ({_, ArgT}) -> [V || {_, V} <- utils:ivs(ArgT)]
+  end, ProvidedArgTs),
+  ReturnVsWithIs = if
     % Args are still left; we shouldn't add any ReturnVs or MustSolveVs.
-    {lam, _, _} -> [];
-    _ -> lists:map(fun({_, V}) -> V end, utils:ivs(ReturnT2))
+    HasHole -> [];
+    true -> lists:map(fun({_, V}) -> V end, utils:ivs(ReturnT2))
   end,
 
   NewMustSolveVs = ordsets:union([
@@ -2568,31 +2588,26 @@ unify({lam, LEnv, Loc, ArgT1, ReturnT1}, {lam, ArgT2, ReturnT2}, S) ->
   end, ReturnVs, ReturnVsWithIs),
 
   S1 = S#solver{
-    loc=Loc,
-    t1=ArgT1,
-    t2=ArgT2,
     passed_vs=NewPassedVs,
     return_vs=NewReturnVs,
     must_solve_vs=NewMustSolveVs
   },
-  {ArgValid, S2} = sub_unify(ArgT1, ArgT2, S1),
-  S3 = S2#solver{loc=OrigLoc, t1=OrigT1, t2=OrigT2},
 
-  {ReturnValid, S4} = case ReturnT1 of
-    % We're continuing to unify arguments passed in a function application.
-    % Retain the same t1/t2 as before, so if an error occurs between a lam and
-    % a non-lam type, the entire lam types will be included in the error,
-    % thereby allowing the reporter to report too many arguments.
-    {lam, _, _, _, _} -> sub_unify(ReturnT1, ReturnT2, S3);
+  {ArgsValid, S2} = lists:foldl(fun({{_, Loc, GivenT}, ArgT}, Memo) ->
+    {FoldValid, FoldS} = Memo,
+    FoldS1 = FoldS#solver{loc=Loc, t1=GivenT, t2=ArgT},
+    {ArgValid, FoldS2} = sub_unify(GivenT, ArgT, FoldS1),
+    {FoldValid andalso ArgValid, FoldS2}
+  end, {true, S1}, ProvidedArgTs),
 
-    % We're done with the arguments of the function application. We shouldn't
-    % include the full lam types in errors between the return types (not only
-    % is it confusing to the user, but it'll also be misconstrued by the
-    % reporter as too many arguments), so set the return types to be t1/t2.
-    _ -> sub_unify(ReturnT1, ReturnT2, S3#solver{t1=ReturnT1, t2=ReturnT2})
-  end,
-  {ArgValid andalso ReturnValid, S4};
-unify({lam, _, _}=T1, {lam, _, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
+  % We're done with the arguments of the function application. We shouldn't
+  % include the full lam types in errors between the return types (not only
+  % is it confusing to the user, but it'll also be misreported as an arity
+  % error), so set the return types to be t1/t2.
+  S3 = S2#solver{loc=OrigLoc, t1=ReturnT1, t2=ReturnT2},
+  {ReturnValid, S4} = sub_unify(ReturnT1, ReturnT2, S3),
+  {ArgsValid andalso ReturnValid, S4#solver{t1=OrigT1, t2=OrigT2}};
+unify({lam, _, _}=T1, {lam, _, _, _}=T2, S) -> sub_unify(T2, T1, S);
 
 unify({tuple, ElemTs1}, {tuple, ElemTs2}, S) ->
   if
@@ -3078,7 +3093,8 @@ add_sub(V, RawSub, S) ->
     % We don't want to keep the locations of arguments if we're subbing for
     % a function application. This aids comprehension: we can only ever
     % unify a function application (a 4-tuple lam) with a regular 3-tuple lam.
-    {lam, _, _, _, _} -> remove_app_meta(RawSub);
+    {lam, _, Provided, ReturnT} ->
+      {lam, [T || {_, _, T} <- Provided], ReturnT};
     _ -> RawSub
   end,
 
@@ -3106,23 +3122,7 @@ add_sub_anchor(A1, A2, S) -> add_sub(A2, {anchor, A1}, S).
 
 add_err(S) ->
   #solver{t1=T1, t2=T2, from=From} = S,
-  Msg = case {T1, T2} of
-    {{lam, _, _, _, _}, {lam, _, _}} ->
-      ?ERR_ARITY(given_arity(subs_s(T1, S)), max_arity(subs_s(T2, S)));
-    {{lam, _, _}, {lam, _, _, _, _}} ->
-      ?ERR_ARITY(given_arity(subs_s(T2, S)), max_arity(subs_s(T1, S)));
-    _ -> ?ERR_TYPE_MISMATCH(T1, T2, From)
-  end,
-  add_err(Msg, S).
-
-given_arity(T) -> given_arity(T, 0).
-given_arity({lam, _, _, _, ReturnT}, Arity) -> given_arity(ReturnT, Arity + 1);
-given_arity(_, Arity) -> Arity.
-
-max_arity(T) -> max_arity(T, 0).
-max_arity({lam, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
-max_arity({lam, _, _, _, ReturnT}, Arity) -> max_arity(ReturnT, Arity + 1);
-max_arity(_, Arity) -> Arity.
+  add_err(?ERR_TYPE_MISMATCH(T1, T2, From), S).
 
 add_err(Msg, #solver{module=Module, loc=Loc, errs=Errs}=S) ->
   IsMismatch = hd(Msg) == ?MISMATCH_PREFIX,
@@ -3241,10 +3241,6 @@ add_subbed_vs(IVs, SubbedVs) ->
     % anyway because they're instantiated.
     FoldSubbedVs#{V => {tv, V, Is, false}}
   end, SubbedVs, IVs).
-
-remove_app_meta({lam, _, _, ArgT, ReturnT}) ->
-  {lam, ArgT, remove_app_meta(ReturnT)};
-remove_app_meta(T) -> T.
 
 subs_s(T, S) -> subs_s(T, S, #sub_opts{}).
 

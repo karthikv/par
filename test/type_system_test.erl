@@ -506,10 +506,10 @@ expr_test_() ->
   , ?_test("A -> A" = ok_expr("|x| x"))
   , ?_test("A ~ Num -> A ~ Num" = ok_expr("|x| x + 3"))
   , ?_test("Float -> Float" = ok_expr("|x| x + 3.0"))
-  , ?_test("(Float -> A) -> Float -> A" = ok_expr("|f, x| f(x - 3.0)"))
+  , ?_test("(Float -> A, Float) -> A" = ok_expr("|f, x| f(x - 3.0)"))
   , ?_test("Bool" = ok_expr("(|x| x || true)(false)"))
-  , ?_test("A ~ Num" = ok_expr("(|a, b| a + b)(3)(4)"))
-  , ?_test("A ~ Num -> A ~ Num -> A ~ Num" = ok_expr("|x, y| x + y"))
+  , ?_test("A ~ Num" = ok_expr("(|a, b| a + b)(3, _)(4)"))
+  , ?_test("(A ~ Num, A ~ Num) -> A ~ Num" = ok_expr("|x, y| x + y"))
   , ?_test("A ~ Num -> A ~ Num -> A ~ Num" = ok_expr("|x| |y| x + y"))
   , ?_test(bad_expr(
       "|x| x + true",
@@ -521,17 +521,22 @@ expr_test_() ->
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))
   , ?_test("Set<A ~ Num>" = ok_expr(
       "let f = @maps:put/3\n"
-      "#[3] ++ f(2)(true)(#[1])"
+      "#[3] ++ f(_, 2, _)(true, _)(#[1])"
     ))
   , ?_test("A" = ok_expr("@io:printable_range()"))
-  , ?_test("Atom" = ok_expr(
-      "let f() = @hi\n"
-      "f(())"
-    ))
-  , ?_test("A" = ok_expr("@io:printable_range/0((), 1, 2)"))
   , ?_test(bad_expr(
       "@io:printable_range/0(1, 2)",
-      {"()", "A ~ Num", l(22, 1), ?FROM_APP}
+      {?ERR_ARITY(2, 0), l(0, 27)}
+    ))
+  , ?_test(bad_expr(
+      "let f() = @hi\n"
+      "f(())",
+      {?ERR_ARITY(1, 0), l(1, 0, 5)}
+    ))
+  , ?_test(bad_expr(
+      "let f(x) = x == ()\n"
+      "f()",
+      {?ERR_ARITY(0, 1), l(1, 0, 3)}
     ))
 
 
@@ -542,32 +547,33 @@ expr_test_() ->
     ))
   , ?_test("Atom -> Bool" = ok_expr(
       "let f(x, y) = x == y\n"
-      "@hi |> f"
+      "@hi |> f(_)"
     ))
   , ?_test(bad_expr(
       "3 |> true",
-      {"Bool", "A ~ Num -> B", l(5, 4), ?FROM_OP_RHS('|>')}
+      {"Bool", "A ~ Num -> B", l(5, 4), ?FROM_APP}
     ))
   , ?_test(bad_expr(
       "\"hi\" |> |x| #x",
-      {"String", "[A]", l(0, 4), ?FROM_OP_LHS('|>')}
+      {"String", "[A]", l(0, 4), ?FROM_APP}
     ))
   , ?_test(bad_expr(
       "let inc(x) = x + 1\n"
       "5 |> |x| 2 * x |> inc * 7",
-      [{"A ~ Num -> B", "C ~ Num", l(1, 18, 7), ?FROM_OP_RHS('|>')},
+      [{"A ~ Num -> B", "C ~ Num", l(1, 18, 7), ?FROM_APP},
        {"A ~ Num -> A ~ Num", "B ~ Num", l(1, 18, 3), ?FROM_OP_LHS('*')}]
     ))
   , ?_test(bad_expr(
       "3 |> |x| [x] |> |x| x ++ [4] |> |x| 2 * x",
-      {"[A ~ Num]", "B ~ Num", l(20, 8), ?FROM_OP_LHS('|>')}
+      {"[A ~ Num]", "B ~ Num", l(20, 8), ?FROM_APP}
     ))
 
 
   % Ensure no duplicate errors for compound types w/ multiple mismatches.
   , ?_test(bad_expr(
       "(3, 'a') == (true, @hey)",
-      {"(A ~ Num, Char)", "(Bool, Atom)", l(12, 12), ?FROM_OP_RHS('==')}
+      {"(A ~ Num, Char)", "(Bool, Atom)", l(12, 12),
+       ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_expr(
       "{ a = 3.7, b = \"hi\" } == { a = false, b = @hey }",
@@ -580,11 +586,6 @@ expr_test_() ->
     ))
 
   , ?_test(bad_expr("3 + _", {?ERR_HOLE("A ~ Num"), l(4, 1)}))
-  , ?_test(bad_expr(
-      "let f(x) = x == @hey\n"
-      "f(_)",
-      {?ERR_HOLE("Atom"), l(1, 2, 1)}
-    ))
   % Hole should be ignored because it's not actually a valid argument.
   , ?_test(bad_expr(
       "let f(x) = x == @hey\n"
@@ -596,7 +597,7 @@ expr_test_() ->
 para_poly_test_() ->
   [ ?_test("A -> A" = ok_prg("id(a) = a", "id"))
   , ?_test("(A ~ Num -> B) -> B" = ok_prg("foo(f) = f(3)", "foo"))
-  , ?_test("(A -> B) -> (C -> A) -> C -> B" =
+  , ?_test("(A -> B, C -> A, C) -> B" =
              ok_prg("cmp(f, g, x) = f(g(x))", "cmp"))
   , ?_test(bad_prg(
       "add(x) = x + 3\n"
@@ -685,13 +686,13 @@ sig_test_() ->
       "expr = id(3)",
       "id"
     ))
-  , ?_test("A ~ Num -> A ~ Num -> A ~ Num" = ok_prg(
-      "add : A ~ Num -> A ~ Num -> A ~ Num\n"
+  , ?_test("(A ~ Num, A ~ Num) -> A ~ Num" = ok_prg(
+      "add : (A ~ Num, A ~ Num) -> A ~ Num\n"
       "add(x, y) = x + y",
       "add"
     ))
-  , ?_test("(A -> B) -> (C -> A) -> C -> B" = ok_prg(
-      "cmp : (B -> C) -> (A -> B) -> A -> C\n"
+  , ?_test("(A -> B, C -> A, C) -> B" = ok_prg(
+      "cmp : ((B -> C), (A -> B), A) -> C\n"
       "cmp(f, g, x) = f(g(x))",
       "cmp"
     ))
@@ -714,13 +715,13 @@ sig_test_() ->
       "push(x) = x ++ [1]",
       "push"
     ))
-  , ?_test("[A] -> [A] -> Bool" = ok_prg(
-      "empty : List<A> -> List<A> -> Bool\n"
+  , ?_test("([A], [A]) -> Bool" = ok_prg(
+      "empty : (List<A>, List<A>) -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
       "empty"
     ))
-  , ?_test("Map<A, B> -> Map<A, B> -> Map<A, B>" = ok_prg(
-      "pick : Map<K, V> -> Map<K, V> -> Map<K, V>\n"
+  , ?_test("(Map<A, B>, Map<A, B>) -> Map<A, B>" = ok_prg(
+      "pick : (Map<K, V>, Map<K, V>) -> Map<K, V>\n"
       "pick(m1, m2) = m1",
       "pick"
     ))
@@ -795,7 +796,7 @@ sig_test_() ->
       )
     ))
   , ?_test(bad_prg(
-      "empty : List<A> -> List<B> -> Bool\n"
+      "empty : (List<A>, List<B>) -> Bool\n"
       "empty(l1, l2) = l1 ++ l2 == []",
       rigid_err(
         "[A]",
@@ -821,12 +822,12 @@ sig_test_() ->
       {"Bool", "A ~ Num", l(1, 6, 20), ?FROM_APP}
     ))
   , ?_test(bad_prg(
-      "foo : A -> Bool\n"
-      "foo = (|a, b| a + b)(1)",
+      "foo : A -> B ~ Num\n"
+      "foo = (|a, b| a + b)(_, 1)",
       rigid_err(
-        "A -> Bool",
-        "B ~ Num -> B ~ Num",
-        l(1, 6, 17),
+        "A",
+        "B ~ Num",
+        l(1, 21, 1),
         ?FROM_APP,
         ?ERR_RIGID_TV("A", "B ~ Num")
       )
@@ -896,9 +897,9 @@ enum_test_() ->
       "expr = Baz(5)",
       "expr"
     ))
-  , ?_test("[String] -> Foo" = ok_prg(
+  , ?_test("Bool -> Foo" = ok_prg(
       "enum Foo { Bar(Bool, [String]) }\n"
-      "expr = Bar(true)",
+      "expr = Bar(_, [\"hi\"])",
       "expr"
     ))
   , ?_test("Foo<A>" = ok_prg(
@@ -946,7 +947,7 @@ exception_test_() ->
     ))
   , ?_test("[String] -> Exception" = ok_prg(
       "exception Bar(Bool, [String])\n"
-      "expr = Bar(true)",
+      "expr = Bar(true, _)",
       "expr"
     ))
   , ?_test(bad_prg("exception Bar(A)", {?ERR_TV_SCOPE("A"), l(14, 1)}))
@@ -1130,10 +1131,12 @@ record_test_() ->
 
 
   % iface <=> iface unification
-  , ?_test("{ A | bar : B ~ Num, foo : String } -> (B ~ Num, String)" = ok_prg(
-      "f(x) = (x.bar + 4, x.foo ++ \"hi\")",
-      "f"
-    ))
+  , ?_test(
+      "{ A | bar : B ~ Num, foo : String } -> (B ~ Num, String)" = ok_prg(
+        "f(x) = (x.bar + 4, x.foo ++ \"hi\")",
+        "f"
+      )
+    )
   , ?_test(bad_prg(
       "f(x) = (x.bar + 4, x.foo ++ \"hi\", x.foo && true)",
       {"String", "Bool", l(34, 5), ?FROM_OP_LHS('&&')}
@@ -1177,7 +1180,7 @@ record_test_() ->
     ))
   , ?_test("[String] -> Foo" = ok_prg(
       "struct Foo { bar : Int, baz : [String] }\n"
-      "expr = Foo(3)",
+      "expr = Foo(3, _)",
       "expr"
     ))
   , ?_test("Foo" = ok_prg(
@@ -1185,9 +1188,9 @@ record_test_() ->
       "expr = Foo { baz = [@first, @second], bar = 15 }",
       "expr"
     ))
-  , ?_test("A -> Foo<Atom, A>" = ok_prg(
+  , ?_test("A -> Foo<A, Atom>" = ok_prg(
       "struct Foo<X, Y> { bar : X, baz : Y }\n"
-      "expr = Foo(@hi)",
+      "expr = Foo(_, @hi)",
       "expr"
     ))
   , ?_test("Foo<Atom>" = ok_prg(
@@ -1273,7 +1276,7 @@ record_test_() ->
       "  (f.bar(\"hi\"), f.bar(true))",
       "expr"
     ))
-  , ?_test("{ A | foo : B -> C } -> { D | bar : B } -> C" = ok_prg(
+  , ?_test("({ A | foo : B -> C }, { D | bar : B }) -> C" = ok_prg(
       "f(x, y) = x.foo(y.bar)",
       "f"
     ))
@@ -1300,8 +1303,8 @@ record_test_() ->
       {?ERR_ARITY(2, 1), l(26, 11)}
     ))
   , ?_test(bad_prg(
-      "f(x) = (x.bar(2, 3), x.bar(1) && true)",
-      {"A ~ Num -> B", "Bool", l(21, 8), ?FROM_OP_LHS('&&')}
+      "f(x) = (x.bar(2, 3), x.bar(1, _) && true)",
+      {"A ~ Num -> B", "Bool", l(21, 11), ?FROM_OP_LHS('&&')}
     ))
   , ?_test(bad_prg(
       "f(x) =\n"
@@ -1453,7 +1456,7 @@ interface_test_() ->
   , ?_test("Int" = ok_prg(
       IfaceToI ++
       "impl ToI for [Int] {\n"
-      "  to_i = @lists:foldl/3(|memo, num| memo + num, 0)\n"
+      "  to_i = @lists:foldl/3(|memo, num| memo + num, 0, _)\n"
       "}\n"
       "foo = to_i([1, 2, 3])",
       "foo"
@@ -1576,6 +1579,12 @@ interface_test_() ->
       "expr = (from_str(\"93\") : Int, from_str(\"true\") : Bool)\n",
       "expr"
     ))
+  , ?_test("Int" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "expr = const() : Int",
+      "expr"
+    ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Bool }\n"
       "impl Foo for Atom { foo(a) = @hi }",
@@ -1587,7 +1596,7 @@ interface_test_() ->
       {"[A]", "Atom", l(1, 34, 2), ?FROM_OP_RHS('==')}
     ))
   , ?_test(bad_prg(
-      "interface Foo { foo : A -> T -> A }\n"
+      "interface Foo { foo : (A, T) -> A }\n"
       "impl Foo for A -> A {\n"
       "  foo(a, t) =\n"
       "    t(a)\n"
@@ -1642,6 +1651,23 @@ interface_test_() ->
     ))
 
 
+  , ?_test("A ~ ToI -> Int" = ok_prg(
+      IfaceToI ++
+      "foo = to_i(_)",
+      "foo"
+    ))
+  , ?_test("A -> (A, Int)" = ok_prg(
+      IfaceToI ++
+      "impl ToI for Atom { to_i(a) = 7 }\n"
+      "foo(a, b) = (a, to_i(b))\n"
+      "bar = foo(_, @hey)",
+      "bar"
+    ))
+  , ?_test("String -> A ~ FromStr" = ok_prg(
+      "interface FromStr { from_str : String -> T }\n"
+      "foo = from_str(_)",
+      "foo"
+    ))
   , ?_test("Set<A ~ ToI -> Int>" = ok_prg(
       IfaceToI ++
       "id(a) = a\n"
@@ -1650,7 +1676,7 @@ interface_test_() ->
       "  id(set)",
       "foo"
     ))
-  , ?_test("Bool -> A ~ ToI -> A ~ ToI" = ok_prg(
+  , ?_test("(Bool, A ~ ToI) -> A ~ ToI" = ok_prg(
       IfaceToI ++
       "foo(b, x) =\n"
       "  |y| (to_i(y), foo(b, y))\n"
@@ -1661,7 +1687,7 @@ interface_test_() ->
   % matter that we pass @io:printable_range(); the impl is the same. This
   % would *not* be the case if we provided a type signature to foo(), and
   % we'd get a must solve error (see below for test case).
-  , ?_test("Bool -> A ~ ToI -> Atom" = ok_prg(
+  , ?_test("(Bool, A ~ ToI) -> Atom" = ok_prg(
       IfaceToI ++
       "foo(b, x) =\n"
       "  |y| (to_i(y), foo(b, y))\n"
@@ -1697,6 +1723,13 @@ interface_test_() ->
     ))
   , ?_test(bad_prg(
       IfaceToI ++
+      "impl ToI for Atom { to_i(a) = 7 }\n"
+      "foo(a, b) = (a, to_i(b))\n"
+      "bar = foo(_, @io:printable_range())",
+      {?ERR_MUST_SOLVE_ARG("A ~ ToI", "A ~ ToI"), l(3, 13, 21)}
+    ))
+  , ?_test(bad_prg(
+      IfaceToI ++
       "impl ToI for Int { to_i(i) = i }\n"
       "foo = to_i(3)",
       {?ERR_MUST_SOLVE_ARG("A ~ ToI ~ Num", "A ~ ToI ~ Num"), l(2, 11, 1)}
@@ -1723,7 +1756,7 @@ interface_test_() ->
     ))
   , ?_test(bad_prg(
       IfaceToI ++
-      "foo : Bool -> A ~ ToI -> Atom\n"
+      "foo : (Bool, A ~ ToI) -> Atom\n"
       "foo(b, x) =\n"
       "  |y| (to_i(y), foo(b, y))\n"
       "  if b then @hi else foo(true, @io:printable_range())",
@@ -1738,6 +1771,11 @@ interface_test_() ->
       "interface FromStr { from_str : String -> T }\n"
       "foo = from_str(\"93\")",
       {?ERR_MUST_SOLVE_RETURN("A ~ FromStr", "A ~ FromStr"), l(1, 6, 14)}
+    ))
+  , ?_test(bad_prg(
+      "interface Const { const : () -> T }\n"
+      "foo = const()",
+      {?ERR_MUST_SOLVE_RETURN("A ~ Const", "A ~ Const"), l(1, 6, 7)}
     ))
   , ?_test(bad_prg(
       "interface FromStr { from_str : String -> [T] }\n"
@@ -1761,16 +1799,16 @@ interface_test_() ->
       "bar"
     ))
   , ?_test("[Bool]" = ok_prg(
-      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
-      "list_map : (A -> B) -> [A] -> [B]\n"
+      "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
+      "list_map : (A -> B, [A]) -> [B]\n"
       "list_map = @lists:map/2\n"
       "impl Mappable for List { map = list_map }\n"
       "foo = map(|x| x == 3, [1, 2, 3])",
       "foo"
     ))
   , ?_test("Map<Atom, Char>" = ok_prg(
-      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
-      "map_map : ((A, B) -> (C, D)) -> Map<A, B> -> Map<C, D>\n"
+      "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
+      "map_map : (((A, B)) -> (C, D), Map<A, B>) -> Map<C, D>\n"
       "map_map(f, m) =\n"
       "  let cb = |k, v, new_m|\n"
       "    let (new_k, new_v) = f((k, v))\n"
@@ -1901,9 +1939,9 @@ interface_test_() ->
       "impl ToI for Float { to_i(f) = @erlang:round(f) }",
       "to_i"
     ))
-  , ?_test("A ~ ToI -> B<C> ~ ToI -> Int" = ok_prg(
+  , ?_test("(A ~ ToI, B<C> ~ ToI) -> Int" = ok_prg(
       "interface ToI extends Num { to_i : T -> Int }\n"
-      "foo : A ~ ToI ~ Num -> B<C> ~ ToI ~ Num -> Int\n"
+      "foo : (A ~ ToI ~ Num, B<C> ~ ToI ~ Num) -> Int\n"
       "foo(a, _) = to_i(a)",
       "foo"
     ))
@@ -1957,7 +1995,7 @@ interface_test_() ->
     ))
   , ?_test("(Int, Int, [Bool], Set<{ greeting : String }>)" = ok_prg(
       "interface Collection extends Mappable { len : T<A> -> Int }\n"
-      "interface Mappable { map : (A -> B) -> T<A> -> T<B> }\n"
+      "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
       "impl Collection for List { len = @erlang:length/1 }\n"
       "impl Mappable for List { map = @lists:map/2 }\n"
       "impl Collection for Set { len(s) = @erlang:map_size(s) - 1 }\n"
@@ -2059,7 +2097,7 @@ gen_tv_test_() ->
       "bar = (foo([1, 2, 3]), foo(#[@hey, @hi]))",
       "bar"
     ))
-  , ?_test("A<B> ~ Concatable -> A<B> ~ Concatable -> Char" = ok_prg(
+  , ?_test("(A<B> ~ Concatable, A<B> ~ Concatable) -> Char" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar(y, z) =\n"
@@ -2069,7 +2107,7 @@ gen_tv_test_() ->
       "  'a'",
       "bar"
     ))
-  , ?_test("[A] -> [A] -> [A]" = ok_prg(
+  , ?_test("([A], [A]) -> [A]" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar(y, z) =\n"
@@ -2080,7 +2118,7 @@ gen_tv_test_() ->
       "bar"
     ))
   , ?_test("Map<Atom, Float>" = ok_prg(
-      "foo : A -> T<A> -> T<A>\n"
+      "foo : (A, T<A>) -> T<A>\n"
       "foo(_, x) = x\n"
       "bar = foo((@hi, 3.7), { @hello => 5.1 })",
       "bar"
@@ -2091,7 +2129,7 @@ gen_tv_test_() ->
       "bar = foo([(@hey, 'a')])",
       "bar"
     ))
-  , ?_test("A<B, C> -> A<B, C> -> Bool" = ok_prg(
+  , ?_test("(A<B, C>, A<B, C>) -> Bool" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar : T<B, C> -> T<B, C>\n"
@@ -2102,7 +2140,7 @@ gen_tv_test_() ->
       "  y == z",
       "baz"
     ))
-  , ?_test("Map<Char, Bool> -> Map<Char, Bool> -> Bool" = ok_prg(
+  , ?_test("(Map<Char, Bool>, Map<Char, Bool>) -> Bool" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar : T<B, C> -> T<B, C>\n"
@@ -2223,12 +2261,12 @@ pattern_test_() ->
       "let (x, y) = (3, [2])\n"
       "match [1] { &y => y ++ [1], x => x ++ [2] }"
     ))
-  , ?_test("(A, B) -> A" = ok_expr("|(a, _)| a"))
-  , ?_test("A ~ Num -> [B ~ Num] -> B ~ Num" = ok_prg(
+  , ?_test("((A, B)) -> A" = ok_expr("|(a, _)| a"))
+  , ?_test("(A ~ Num, [B ~ Num]) -> B ~ Num" = ok_prg(
       "f(3, [x | _]) = 3 + x",
       "f"
     ))
-  , ?_test("Foo<A> -> [Foo<Atom>] -> Atom" = ok_prg(
+  , ?_test("(Foo<A>, [Foo<Atom>]) -> Atom" = ok_prg(
       "enum Foo<A> { Bar(Atom), Baz(A) }\n"
       "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
       "f"
@@ -2334,7 +2372,7 @@ pattern_test_() ->
       "let (&a, b, &a) = (3, 7, 3)\n"
       "b"
     ))
-  , ?_test("(A, B) -> A" = ok_prg(
+  , ?_test("((A, B)) -> A" = ok_prg(
       "f(t) =\n"
       "  let (a, _) = t\n"
       "  a",

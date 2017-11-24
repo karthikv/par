@@ -156,13 +156,46 @@ eval({field, Loc, Expr, Var}, ID) ->
   Fun = eval({field_fn, Loc, Var}, ID),
   Fun(Record);
 
-eval({app, _, Expr, Args}, ID) ->
+eval({app, Loc, Expr, Args}, ID) ->
   Fun = eval(Expr, ID),
-  Vs = case length(Args) of
-    0 -> [{}];
-    _ -> lists:map(fun(Arg) -> eval(Arg, ID) end, Args)
-  end,
-  par_native:curry(Fun, Vs, ?LINE);
+  HasHole = lists:any(fun({hole, _}) -> true; (_) -> false end, Args),
+
+  if
+    HasHole ->
+      ArgsWithIndex = lists:zip(Args, lists:seq(1, length(Args))),
+      {ArgsRep, FinalMemo} = lists:mapfoldl(fun({Arg, Index}, Memo) ->
+        {FoldNewArgsRepRev, FoldBindings} = Memo,
+        Atom = list_to_atom(lists:concat(["Arg", Index])),
+        Line = ?START_LINE(?LOC(Arg)),
+        VarRep = {var, Line, Atom},
+
+        NewMemo = case Arg of
+          {hole, _} -> {[VarRep | FoldNewArgsRepRev], FoldBindings};
+          _ ->
+            V = eval(Arg, ID),
+            {FoldNewArgsRepRev, erl_eval:add_binding(Atom, V, FoldBindings)}
+        end,
+        {VarRep, NewMemo}
+      end, {[], erl_eval:new_bindings()}, ArgsWithIndex),
+
+      {NewArgsRepRev, Bindings} = FinalMemo,
+      NewArgsRep = lists:reverse(NewArgsRepRev),
+
+      FunAtom = 'Fun',
+      FinalBindings = erl_eval:add_binding(FunAtom, Fun, Bindings),
+
+      Line = ?START_LINE(Loc),
+      Call = {call, Line, {var, Line, FunAtom}, ArgsRep},
+      Clause = {clause, Line, NewArgsRep, [], [Call]},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
+
+      {value, Value, _} = erl_eval:expr(FunRep, FinalBindings),
+      Value;
+
+    true ->
+      Vs = [eval(Arg, ID) || Arg <- Args],
+      apply(Fun, Vs)
+  end;
 
 eval({native, _, {atom, _, Module}, {var, _, Name}, Arity}, _) ->
   Fn = list_to_atom(Name),
@@ -207,6 +240,13 @@ eval({'match', _, Expr, Cases}, ID) ->
 eval({block, _, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, {}, Exprs);
 
+eval({binary_op, _, '|>', Left, Right}, ID) ->
+  App = case Right of
+    {app, Loc, Expr, Args} -> {app, Loc, Expr, Args ++ [Left]};
+    _ -> {app, ?LOC(Right), Right, [Left]}
+  end,
+  eval(App, ID);
+
 eval({binary_op, _, Op, Left, Right}, ID) ->
   LeftV = eval(Left, ID),
   % can't eval right because of short-circuiting
@@ -221,7 +261,6 @@ eval({binary_op, _, Op, Left, Right}, ID) ->
       case Op of
         '==' -> LeftV == RightV;
         '!=' -> LeftV /= RightV;
-        '|>' -> par_native:curry(RightV, [LeftV], ?LINE);
         '>' -> LeftV > RightV;
         '<' -> LeftV < RightV;
         '>=' -> LeftV >= RightV;

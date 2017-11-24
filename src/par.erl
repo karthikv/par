@@ -14,6 +14,7 @@
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
+% - Avoid propagating sig error when wrong number of args
 % - Assume Num is a closed typeclass so we can omit sig in to_float(3 : Int)
 % - Think about bug with passing curried function to native
 % - Syntax: List, Set, Map, Record

@@ -57,8 +57,9 @@ enum Node {
   Con(Loc, [Char]) @con_token
   TV(Loc, [Char], [Node]) @tv_te
   Gen(Loc, Node, [Node]) @gen_te
-  LamTE(Loc, Node, Node) @lam_te
+  LamTE(Loc, [Node], Node) @lam_te
   TupleTE(Loc, [Node]) @tuple_te
+  ArgsTE(Loc, [Node]) @args_te
   RecordTE(Loc, [Node]) @record_te
   RecordExtTE(Loc, Node, [Node]) @record_ext_te
 
@@ -197,9 +198,9 @@ imports(tokens) = match tokens {
 
 import_ident : [Token] -> Parsed<(Node, [Token])>
 import_ident(tokens) =
-  let variants = String.chars("variants")
   match tokens {
-    [Lexer.Var(s, &variants), Lexer.Con(e, name) | t] =>
+    [Lexer.Var(s, ['v', 'a', 'r', 'i', 'a', 'n', 't', 's'])
+     Lexer.Con(e, name) | t] =>
       parsed((Variants(range(s, e), name), t))
     [Lexer.Var(l, name) | t] => parsed((Var(l, name), t))
     [Lexer.Con(l, name) | t] => parsed((Con(l, name), t))
@@ -420,9 +421,8 @@ tv_node(tokens) = match tokens {
 iface : Loc -> [Token] -> Parsed<(Node, [Token])>
 iface(s, tokens) = match tokens {
   [Lexer.Con(con_l, name) | t] =>
-    let extends = String.chars("extends")
     let parsed_parents =
-      if let [Lexer.Var(_, &extends) | t] = t then
+      if let [Lexer.Var(_, ['e', 'x', 't', 'e', 'n', 'd', 's']) | t] = t then
         many_delim_cb(|node, rest| match rest {
           [Lexer.LBrace(_) | _] => parsed((false, rest))
           [_ | _] => delim_comma_cb(node, rest)
@@ -457,13 +457,12 @@ qualified_con(tokens) = match tokens {
 }
 
 implementation(s, tokens) =
-  let for = String.chars("for")
   match tokens {
     [Lexer.Con(con_s, mod) | t] =>
       let (con_node, t) = try_qualify_con(con_s, mod, t)
 
       match t {
-        [Lexer.Var(_, &for) | t] =>
+        [Lexer.Var(_, ['f', 'o', 'r']) | t] =>
           type_expr(t) |> pbind(|(te, rest)|
             if let TV(l, _, _) = te then
               Some(l) |> one_err("Expected concrete type, not type variable")
@@ -785,7 +784,6 @@ expr_r(expr_s, state, stack, tokens) = match state {
           match tokens {
             [Lexer.Sub(_) | t] => shunt(Sub, t)
 
-            // TODO: flatten app?
             [Lexer.LParen(s), Lexer.RParen(e) | t] =>
               if s.start_line > head_end_line(stack) then
                 finish()
@@ -804,7 +802,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
                     n
 
                 let l = range(node_loc(node), e)
-                let app = App(l, node, [Unit(range(s, e))])
+                let app = App(l, node, [])
                 expr_r(expr_s, AcceptOp, [Node(app) | left], t)
             [Lexer.LParen(s) | t] =>
               if s.start_line > head_end_line(stack) then
@@ -914,14 +912,18 @@ type_expr_r(lhs, tokens) = match lhs {
               parsed([param])
           )
           |> pmap_or(|v| v, [])
-          |> pmap(|params| Gen(l, Con(l, String.chars("List")), params))
+          |> pmap(|params| Gen(l, Con(l, ['L', 'i', 's', 't']), params))
           |> pbind(recurse(rest))
         )
 
       [Lexer.LParen(s), Lexer.RParen(e) | t] => Unit(range(s, e)) |> recurse(t)
       [Lexer.LParen(s) | t] =>
-        parse_tuple(type_expr, TupleTE, s, t)
-        |> pbind(|(node, rest)| recurse(rest, node))
+        parse_tuple(type_expr, ArgsTE, s, t)
+        |> pbind(|(node, rest)| match (node, rest) {
+          (ArgsTE(_, _), [Lexer.Arrow(_) | _]) => recurse(rest, node)
+          (ArgsTE(l, args), _) => TupleTE(l, args) |> recurse(rest)
+          _ => recurse(rest, node)
+        })
 
       [Lexer.LBrace(s), Lexer.TV(tv_l, tv), Lexer.Bar(_) | t] =>
         enclosed_brace(s, t) |> pbind(|(l, inner, rest)|
@@ -946,7 +948,15 @@ type_expr_r(lhs, tokens) = match lhs {
   Some(left) => match tokens {
     [Lexer.Arrow(_) | t] =>
       type_expr(t) |> pmap(|(right, rest)|
-        (LamTE(range(node_loc(left), node_loc(right)), left, right), rest)
+        let l = range(node_loc(left), node_loc(right))
+        let args =
+          if let Unit(_) = left then
+            []
+          else if let ArgsTE(_, args) = left then
+            args
+          else
+            [left]
+        (LamTE(l, args, right), rest)
       )
 
     _ => parsed((left, tokens))
@@ -1246,31 +1256,6 @@ parse_list(f, s, tokens) =
       [] => parsed(List(l, elems))
     })
     |> pmap_or(|v| (v, rest), (List(l, []), rest))
-
-    //split_bar(inner)
-    //|> pbind(|(left, right)|
-    //  many_delim_comma_or_nl(f, left)
-    //  |> pmap(flatten_blocks)
-    //  |> pbind(|elems|
-    //    let errs = validate_elems(elems)
-    //    if errs == [] then
-    //      parsed((elems, right))
-    //    else
-    //      Parsed { value = None, errs = errs }
-    //  )
-    //)
-    //|> pbind(|(elems, right)|
-    //  if length(right) == 0 then
-    //    parsed(List(l, elems))
-    //  else
-    //    f(right) |> pbind(|(base, rest)|
-    //      if length(rest) > 0 then
-    //        head_loc(rest) |> one_err("Expected closing ']'")
-    //      else
-    //        parsed(Cons(l, elems, base))
-    //    )
-    //)
-    //|> pmap_or(|v| (v, rest), (List(l, []), rest))
   )
 
 flatten_blocks : [Node] -> [Node]
