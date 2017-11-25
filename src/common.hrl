@@ -188,9 +188,10 @@
   [Given, Exp]
 )).
 -define(ERR_HOLE(T), [
-  "I'm looking for a value of type ", T, " here. If you wanted to partially "
-  "apply a function, use an underscore as one of the arguments, such as in "
-  "max(_, 3)"
+  "Unexpected '_'. I'm looking for a value of type ", T, " here. '_' can be "
+  "used in a pattern if you don't need a reference to the value, as in let "
+  "[h | _] = foo(). It may also be used to partially apply a function, such "
+  "as in max(_, 3)"
 ]).
 
 

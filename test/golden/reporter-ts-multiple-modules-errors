@@ -17,7 +17,7 @@ Mismatched types Bool and A ~ Num from function call:
 4: b = Bar.d(true)
              ^^^^
 
-You provided 3 argument(s), but this needs at most 1 argument(s):
+You provided 3 argument(s), but this function needs 1 argument(s):
 
 5: c = Bar.d(1, 2, 3)
        ^^^^^^^^^^^^^^

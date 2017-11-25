@@ -1227,7 +1227,6 @@ infer({N, Loc, Name}, C) when N == var; N == con_token; N == var_value ->
 
 infer({var_ref, Loc, Ref, Name}, C) -> lookup_inst(Name, Loc, Ref, C);
 
-
 % Holes are underscores in exprs that the user can introduce to "ask" the type
 % system what type it needs.
 infer({hole, _}, C) -> {{hole, true}, C};

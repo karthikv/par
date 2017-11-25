@@ -1,6 +1,6 @@
 *** module Mod *** ([infer-prg])
 
-Mismatched types String -> A and String from right-hand side of '|>' operator:
+You provided 3 argument(s), but this function needs 2 argument(s):
 
 3: expr = "bye" |> f("hey", "hi")
                    ^^^^^^^^^^^^^^

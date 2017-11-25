@@ -1,6 +1,6 @@
 *** module Mod *** ([infer-prg])
 
-You provided 2 argument(s), but this needs at most 1 argument(s):
+You provided 2 argument(s), but this function needs 1 argument(s):
 
 3: expr = f(2, 3)
           ^^^^^^^
