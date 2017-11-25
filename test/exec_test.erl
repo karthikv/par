@@ -925,12 +925,39 @@ test_interface(Run) ->
       "impl FromStr for Bool { from_str(s) = s == \"true\" }\n"
       "main() = (from_str(\"93\") : Int, from_str(\"true\") : Bool)\n"
     ))
-  % TODO fix
-  %% , ?_test(3 = Run(
-  %%     "interface Const { const : () -> T }\n"
-  %%     "impl Const for Int { const() = 3 }\n"
-  %%     "main() = const() : Int"
-  %%   ))
+  , ?_test({false, 3} = Run(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "impl Const for Bool { const() = false }\n"
+      "main() = (const() : Bool, const() : Int)"
+    ))
+  , ?_test({3, false} = Run(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "impl Const for Bool { const() = false }\n"
+      "impl Const for (A ~ Const, B ~ Const) { const() = (const(), const()) }\n"
+      "main() = const() : (Int, Bool)"
+    ))
+  , ?_test({3, 3} = Run(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "impl Const for Bool { const() = false }\n"
+      "impl Const for (A ~ Const, B ~ Const) { const() = (const(), const()) }\n"
+      "foo = const : () -> (Int, B ~ Const)"
+      "main() = foo() : (Int, Int)"
+    ))
+  , ?_test(3 = Run(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "foo = const\n"
+      "main() = foo() : Int"
+    ))
+  , ?_test(3 = Run(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "foo([_]) = const\n"
+      "main() = foo([@hi])() : Int"
+    ))
   , ?_test([false, false, true] = Run(
       "interface Mappable { map : (A -> B, T<A>) -> T<B> }\n"
       "list_map : (A -> B, [A]) -> [B]\n"

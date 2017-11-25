@@ -1579,10 +1579,35 @@ interface_test_() ->
       "expr = (from_str(\"93\") : Int, from_str(\"true\") : Bool)\n",
       "expr"
     ))
+  , ?_test("(Bool, Int)" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "impl Const for Bool { const() = false }\n"
+      "expr = (const() : Bool, const() : Int)",
+      "expr"
+    ))
+  , ?_test("(Int, Bool)" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "impl Const for Bool { const() = false }\n"
+      "impl Const for (A ~ Const, B ~ Const) { const() = (const(), const()) }\n"
+      "expr = const() : (Int, Bool)",
+      "expr"
+    ))
+  , ?_test("(Int, Int)" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "impl Const for Int { const() = 3 }\n"
+      "impl Const for Bool { const() = false }\n"
+      "impl Const for (A ~ Const, B ~ Const) { const() = (const(), const()) }\n"
+      "foo = const : () -> (Int, B ~ Const)"
+      "expr = foo() : (Int, Int)",
+      "expr"
+    ))
   , ?_test("Int" = ok_prg(
       "interface Const { const : () -> T }\n"
       "impl Const for Int { const() = 3 }\n"
-      "expr = const() : Int",
+      "foo([_]) = const\n"
+      "expr = foo([@hi])() : Int",
       "expr"
     ))
   , ?_test(bad_prg(
@@ -1668,6 +1693,11 @@ interface_test_() ->
       "foo = from_str(_)",
       "foo"
     ))
+  , ?_test("() -> A ~ Const" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "foo = const",
+      "foo"
+    ))
   , ?_test("Set<A ~ ToI -> Int>" = ok_prg(
       IfaceToI ++
       "id(a) = a\n"
@@ -1707,6 +1737,21 @@ interface_test_() ->
   , ?_test("A ~ FromStr -> Bool" = ok_prg(
       "interface FromStr { from_str : String -> T }\n"
       "foo(x) = x == from_str(\"hi\")",
+      "foo"
+    ))
+  , ?_test("() -> A ~ Const" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "foo() = const()",
+      "foo"
+    ))
+  , ?_test("A -> (A, () -> B ~ Const)" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "foo(x) = (x, const)",
+      "foo"
+    ))
+  , ?_test("A ~ Const -> Bool" = ok_prg(
+      "interface Const { const : () -> T }\n"
+      "foo(x) = x == const()",
       "foo"
     ))
   , ?_test(bad_prg(
@@ -1773,11 +1818,6 @@ interface_test_() ->
       {?ERR_MUST_SOLVE_RETURN("A ~ FromStr", "A ~ FromStr"), l(1, 6, 14)}
     ))
   , ?_test(bad_prg(
-      "interface Const { const : () -> T }\n"
-      "foo = const()",
-      {?ERR_MUST_SOLVE_RETURN("A ~ Const", "A ~ Const"), l(1, 6, 7)}
-    ))
-  , ?_test(bad_prg(
       "interface FromStr { from_str : String -> [T] }\n"
       "foo = from_str(\"hello\")",
       {?ERR_MUST_SOLVE_RETURN("[A ~ FromStr]", "A ~ FromStr"), l(1, 6, 17)}
@@ -1786,6 +1826,16 @@ interface_test_() ->
       "interface FromStr { from_str : String -> T }\n"
       "foo = (|x| from_str(x))(\"hi\")",
       {?ERR_MUST_SOLVE_RETURN("A ~ FromStr", "A ~ FromStr"), l(1, 6, 23)}
+    ))
+  , ?_test(bad_prg(
+      "interface Const { const : () -> T }\n"
+      "foo = const()",
+      {?ERR_MUST_SOLVE_RETURN("A ~ Const", "A ~ Const"), l(1, 6, 7)}
+    ))
+  , ?_test(bad_prg(
+      "interface Const { const : () -> T }\n"
+      "foo = (|-| const())()",
+      {?ERR_MUST_SOLVE_RETURN("A ~ Const", "A ~ Const"), l(1, 6, 15)}
     ))
 
 

@@ -201,9 +201,12 @@ rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
   Line = ?START_LINE(Loc),
 
   case Expr of
-    {fn, _, _, Args, _} ->
+    {fn, _, _, _Args, _} ->
       {'fun', _, {clauses, Clauses}} = rep(Expr, CG),
-      {function, Line, list_to_atom(Name), length(Args), Clauses};
+      % We need to compute the arity here instead of using length(_Args). The
+      % latter could be 0, but if impls are required, the actual arity is 1.
+      [{clause, _, PatternReps, _, _} | _] = Clauses,
+      {function, Line, list_to_atom(Name), length(PatternReps), Clauses};
 
     _ ->
       {{global, Atom}, _} = env_get(Name, CG),
@@ -281,14 +284,12 @@ rep({interface, _, {con_token, _, RawCon}, _, Fields}, CG) ->
   Con = utils:qualify(RawCon, C),
   {_, FieldTs, _} = maps:get(Con, Ifaces),
 
-  lists:map(fun({Sig, RawT}) ->
+  lists:map(fun({Sig, {lam, ArgTs, _}=RawT}) ->
     {sig, Loc, {var, _, Name}, _} = Sig,
     ArgsIVs = utils:args_ivs(RawT),
-    Arity = length(ArgsIVs),
-
     Args = lists:map(fun(Num) ->
       {var, Loc, lists:concat(["Arg", Num])}
-    end, lists:seq(1, Arity)),
+    end, lists:seq(1, length(ArgTs))),
 
     RecordVar = {var, Loc, bound_impl_name(Con, "T")},
     Field = {field, Loc, RecordVar, {var, Loc, Name}},
@@ -383,15 +384,11 @@ rep({fn, Loc, Ref, Args, Expr}, CG) ->
     bind(Name, unknown, FoldCG)
   end, CG, Names),
 
-  % length(AllArgsIVs) can be greater than length(Args) if this fn returns
-  % another fn. We only need to process this fn's args here, so clamp.
-  AllArgsIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
-  ArgsIVs = lists:sublist(AllArgsIVs, length(Args)),
-
+  ArgsIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
   ArgsRep = lists:map(fun(Pattern) -> rep(Pattern, CG1) end, Args),
-  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, true, CG1),
 
   Line = ?START_LINE(Loc),
+  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, true, Line, CG1),
   Clause = {clause, Line, PatternReps, [], [rep(Expr, CG2)]},
   {'fun', Line, {clauses, [Clause]}};
 
@@ -569,29 +566,14 @@ rep({field, Loc, Expr, Prop}, CG) ->
 rep({app, Loc, Expr, Args}, CG) ->
   % TODO: re-enable
   %% NumArgs = length(Args),
-  %%
-  %% ImplReps = case Expr of
+
+  %% FinalImplReps = case Expr of
   %%   {var_ref, _, Ref, _} ->
   %%     case maps:find(Ref, CG#cg.ctx#ctx.inst_refs) of
   %%       {ok, {{lam, _, _}=T, SubbedVs}} ->
-  %%         % TODO: remove Ag
-  %%         {Ag, AllImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
-  %%         LeftBindMaps = lists:sublist(
-  %%           BindMaps,
-  %%           NumArgs + 1,
-  %%           length(BindMaps)
-  %%         ),
-
-  %%         % If there are no bindings for all remaining args, that means there
-  %%         % are no additional impls that are solved for. As a result, we can
-  %%         % directly pass impls through this application.
-  %%         case lists:all(fun(M) -> M == #{} end, LeftBindMaps) of
-  %%           true ->
-  %%             FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
-  %%             TargetImplReps = lists:sublist(AllImplReps, NumArgs),
-  %%             inline_bindmap(TargetImplReps, FinalBindMap);
-  %%           false -> none
-  %%         end;
+  %%         {_, ImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
+  %%         FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
+  %%         inline_bind_map(ImplReps, FinalBindMap);
 
   %%       error -> none
   %%     end;
@@ -1029,7 +1011,13 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   Clause = {clause, 1, [ArgVar], [], [Case]},
   {function, 1, ?INIT_FN_ATOM, 1, [Clause]}.
 
-rep_arg_iv_patterns(ArgsRep, ArgsIVs, Bind, CG) ->
+rep_arg_iv_patterns([], [[]], _, _, CG) -> {[], CG};
+rep_arg_iv_patterns(RawArgsRep, ArgsIVs, Bind, Line, CG) ->
+  ArgsRep = case RawArgsRep of
+    [] -> [eabs(impls, Line)];
+    _ -> RawArgsRep
+  end,
+
   {PatternReps, {_, CG1}} = lists:mapfoldl(fun({PatternRep, IVs}, OuterMemo) ->
     {SeenVs, OuterCG} = OuterMemo,
     PatternLine = element(2, PatternRep),
@@ -1204,13 +1192,17 @@ child_i(TargetI, Is, Ifaces) ->
     end
   end, none, Is).
 
-inline_bindmap([], _) -> [];
-inline_bindmap([H | T], BindMap) ->
-  [inline_bindmap(H, BindMap) | inline_bindmap(T, BindMap)];
-inline_bindmap({var, _, ImplAtom}, BindMap) -> maps:get(ImplAtom, BindMap);
-inline_bindmap({call, Line, FunRep, ArgsRep}, BindMap) ->
-  InlineArgsRep = [inline_bindmap(Arg, BindMap) || Arg <- ArgsRep],
-  {call, Line, inline_bindmap(FunRep, BindMap), InlineArgsRep}.
+inline_bind_map([], _) -> [];
+inline_bind_map([H | T], BindMap) ->
+  [inline_bind_map(H, BindMap) | inline_bind_map(T, BindMap)];
+inline_bind_map({var, _, ImplAtom}=VarRep, BindMap) ->
+  case maps:find(ImplAtom, BindMap) of
+    {ok, Rep} -> Rep;
+    error -> VarRep
+  end;
+inline_bind_map({call, Line, FunRep, ArgsRep}, BindMap) ->
+  InlineArgsRep = [inline_bind_map(Arg, BindMap) || Arg <- ArgsRep],
+  {call, Line, inline_bind_map(FunRep, BindMap), InlineArgsRep}.
 
 rep_arg_impls(LamT, Loc, SubbedVs, CG) ->
   % Must fold*l* b/c impls associated with multiple args are passed through the
@@ -1257,14 +1249,11 @@ rewrite_ref(Rep, Ref, Loc, CG) ->
     _ -> {block, Line, [Match | Stmts] ++ [ResultRep]}
   end.
 
-rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
+rewrite({lam, ArgTs, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
 
   {ArgsIVs, ImplReps, BindMaps} = rep_arg_impls(LamT, Loc, SubbedVs, CG),
   FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
-
-  ArgsRep = [{var, Line, unique("Arg")} || _ <- ArgsIVs],
-  {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, false, CG),
 
   case maps:size(FinalBindMap) of
     % If there aren't any bindings, we didn't solve for any impls (both bound
@@ -1272,22 +1261,32 @@ rewrite({lam, _, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
     0 -> {[], VarRep};
 
     _ ->
-      BindListRep = maps:fold(fun(Atom, ValueRep, FoldListRep) ->
-        TupleRep = {tuple, Line, [eabs(Atom, Line), ValueRep]},
-        {cons, Line, TupleRep, FoldListRep}
-      end, {nil, Line}, FinalBindMap),
+      ArgsRep = [{var, Line, unique("Arg")} || _ <- ArgTs],
+      {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, false, Line, CG),
 
-      CallArgsRep = [
-        VarRep,
-        eabs(PatternReps, Line),
-        eabs(ImplReps, Line),
-        BindListRep,
-        eabs(Line, Line)
-      ],
-      Call = call(par_native, wrap_with_impls, CallArgsRep, Line),
+      FinalImplReps = inline_bind_map(ImplReps, FinalBindMap),
+      PatternImpls = case PatternReps of
+        [] -> lists:zip([eabs(impls, Line)], FinalImplReps);
+        _ -> lists:zip(PatternReps, FinalImplReps)
+      end,
+
+      ArgsWithImplsRep = lists:map(fun({PatternRep, ArgImplReps}) ->
+        ArgRep = case PatternRep of
+          {tuple, _, [ArgRep_ | _]} -> ArgRep_;
+          _ -> PatternRep
+        end,
+        case ArgImplReps of
+          [] -> ArgRep;
+          _ -> {tuple, Line, [ArgRep | ArgImplReps]}
+        end
+      end, PatternImpls),
+
+      Call = {call, Line, VarRep, ArgsWithImplsRep},
+      Clause = {clause, Line, PatternReps, [], [Call]},
+      FunRep = {'fun', Line, {clauses, [Clause]}},
 
       ResultRep = {var, Line, unique("Lam")},
-      {[{match, Line, ResultRep, Call}], ResultRep}
+      {[{match, Line, ResultRep, FunRep}], ResultRep}
   end;
 
 rewrite({tuple, ElemTs}, VarRep, Loc, SubbedVs, CG) ->
@@ -1494,6 +1493,7 @@ env_get(Name, #cg{env=Env, ctx=#ctx{module=Module}}) ->
 module(CG) -> CG#cg.ctx#ctx.module.
 set_module(Module, CG) -> CG#cg{ctx=CG#cg.ctx#ctx{module=Module}}.
 
+% TODO remove
 arity({fn, _, _, Args, _}, _) -> length(Args);
 arity({expr_sig, _, _, Expr, _}, CG) -> arity(Expr, CG);
 arity({con_token, _, Name}, CG) ->

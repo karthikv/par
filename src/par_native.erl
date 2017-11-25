@@ -65,6 +65,7 @@ gm_set(Mod, Atom, Value) ->
     1000 -> error({"couldn't set global", Key, Value})
   end.
 
+% TODO: remove
 curry(Fun, RawArgs, Line) ->
   {arity, Arity} = erlang:fun_info(Fun, arity),
 
@@ -108,6 +109,7 @@ curry(Fun, RawArgs, Line) ->
       curry(apply(Fun, ImmArgs), RestArgs, Line)
   end.
 
+% TODO: remove
 wrap_with_impls(Fun, PatternReps, ImplReps, BindList, Line) ->
   Bindings = lists:foldl(fun({Atom, Value}, FoldBindings) ->
     erl_eval:add_binding(Atom, Value, FoldBindings)
