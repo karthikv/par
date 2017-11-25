@@ -194,6 +194,12 @@ compile_ast(Comp, Exports, CG) ->
     Reps
   ],
 
+  %% lists:foreach(fun
+  %%   (Fn) when element(1, Fn) == function ->
+  %%     io:format("~s~n", [erl_pp:function(Fn)]);
+  %%   (_) -> ok
+  %% end, Forms),
+
   {ok, Mod, Binary} = compile:forms(Forms, debug_info),
   {Mod, Binary}.
 
@@ -388,7 +394,7 @@ rep({fn, Loc, Ref, Args, Expr}, CG) ->
   ArgsRep = lists:map(fun(Pattern) -> rep(Pattern, CG1) end, Args),
 
   Line = ?START_LINE(Loc),
-  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, true, Line, CG1),
+  {PatternReps, CG2} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, Line, CG1),
   Clause = {clause, Line, PatternReps, [], [rep(Expr, CG2)]},
   {'fun', Line, {clauses, [Clause]}};
 
@@ -564,39 +570,7 @@ rep({field, Loc, Expr, Prop}, CG) ->
   end;
 
 rep({app, Loc, Expr, Args}, CG) ->
-  % TODO: re-enable
-  %% NumArgs = length(Args),
-
-  %% FinalImplReps = case Expr of
-  %%   {var_ref, _, Ref, _} ->
-  %%     case maps:find(Ref, CG#cg.ctx#ctx.inst_refs) of
-  %%       {ok, {{lam, _, _}=T, SubbedVs}} ->
-  %%         {_, ImplReps, BindMaps} = rep_arg_impls(T, Loc, SubbedVs, CG),
-  %%         FinalBindMap = lists:foldl(fun maps:merge/2, #{}, BindMaps),
-  %%         inline_bind_map(ImplReps, FinalBindMap);
-
-  %%       error -> none
-  %%     end;
-
-  %%   _ -> none
-  %% end,
-
   Line = ?START_LINE(Loc),
-  %% LineRep = eabs(Line, Line),
-
-  %% case ImplReps of
-  %%   none ->
-  %%     ExprRep = rep(Expr, CG),
-  %%     ArgsRep = [rep(Arg, CG) || Arg <- Args];
-
-  %%   _ ->
-  %%     {var_ref, VarLoc, _, Name} = Expr,
-  %%     ExprRep = rep({var, VarLoc, Name}, CG),
-  %%     ArgsRep = lists:map(fun
-  %%       ({Arg, []}) -> rep(Arg, CG);
-  %%       ({Arg, ArgImplReps}) -> {tuple, Line, [rep(Arg, CG) | ArgImplReps]}
-  %%     end, lists:zip(Args, ImplReps))
-  %% end,
 
   {ArgsRep, NewArgsRep} = lists:mapfoldr(fun(Arg, FoldNewArgsRep) ->
     case Arg of
@@ -614,7 +588,7 @@ rep({app, Loc, Expr, Args}, CG) ->
   end,
 
   case NewArgsRep of
-    [] -> {call, Line, FnRep, ArgsRep};
+    [] -> optimize_call({call, Line, FnRep, ArgsRep});
     _ ->
       {PassedReps, Stmts} = lists:mapfoldr(fun({Arg, ArgRep}, FoldStmts) ->
         case Arg of
@@ -627,47 +601,11 @@ rep({app, Loc, Expr, Args}, CG) ->
         end
       end, [], lists:zip(Args, ArgsRep)),
 
-      Call = {call, Line, FnRep, PassedReps},
+      Call = optimize_call({call, Line, FnRep, PassedReps}),
       Clause = {clause, Line, NewArgsRep, [], [Call]},
       FunRep = {'fun', Line, {clauses, [Clause]}},
       {block, Line, Stmts ++ [FunRep]}
   end;
-
-  % TODO remove
-  %% if
-  %%   Arity == unknown ->
-  %%     CurryArgs = [ExprRep, rep_list(ArgsRep, Line), LineRep],
-  %%     call(par_native, curry, CurryArgs, Line);
-
-  %%   NumArgs < Arity ->
-  %%     ArgsListRep = rep_list(ArgsRep, Line),
-  %%     Seq = lists:seq(NumArgs + 1, Arity),
-  %%     NewArgsRep = [{var, Line, unique("Arg")} || _ <- Seq],
-  %%     NewArgsListRep = rep_list(NewArgsRep, Line),
-
-  %%     Body = [{call, Line,
-  %%       {remote, Line, {atom, Line, erlang}, {atom, Line, apply}},
-  %%       [ExprRep, {op, Line, '++', ArgsListRep, NewArgsListRep}]}],
-  %%     Clause = {clause, Line, NewArgsRep, [], Body},
-  %%     {'fun', Line, {clauses, [Clause]}};
-
-  %%   NumArgs >= Arity ->
-  %%     ImmArgsRep = lists:sublist(ArgsRep, Arity),
-
-  %%     Call = case ExprRep of
-  %%       {'fun', _, {function, Atom, _}} ->
-  %%         {call, Line, {atom, Line, Atom}, ImmArgsRep};
-  %%       _ -> {call, Line, ExprRep, ImmArgsRep}
-  %%     end,
-
-  %%     if
-  %%       NumArgs == Arity -> Call;
-  %%       true ->
-  %%         RestArgsRep = lists:sublist(ArgsRep, Arity + 1, NumArgs),
-  %%         RestArgsListRep = rep_list(RestArgsRep, Line),
-  %%         call(par_native, curry, [Call, RestArgsListRep, LineRep], Line)
-  %%     end
-  %% end;
 
 rep({variant, _, {con_token, Loc, Name}, Args}, CG) ->
   Key = option_key(Name, CG),
@@ -1011,8 +949,8 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   Clause = {clause, 1, [ArgVar], [], [Case]},
   {function, 1, ?INIT_FN_ATOM, 1, [Clause]}.
 
-rep_arg_iv_patterns([], [[]], _, _, CG) -> {[], CG};
-rep_arg_iv_patterns(RawArgsRep, ArgsIVs, Bind, Line, CG) ->
+rep_arg_iv_patterns([], [[]], _, CG) -> {[], CG};
+rep_arg_iv_patterns(RawArgsRep, ArgsIVs, Line, CG) ->
   ArgsRep = case RawArgsRep of
     [] -> [eabs(impls, Line)];
     _ -> RawArgsRep
@@ -1031,17 +969,10 @@ rep_arg_iv_patterns(RawArgsRep, ArgsIVs, Bind, Line, CG) ->
             {NestedImplReps, NestedCG} = NestedMemo,
             ImplName = bound_impl_name(I, V),
 
-            case Bind of
-              true ->
-                NestedCG1 = bind(ImplName, badarity, NestedCG),
-                {ImplAtom, _} = env_get(ImplName, NestedCG1),
-                ImplRep = {var, PatternLine, ImplAtom},
-                {[ImplRep | NestedImplReps], NestedCG1};
-
-              false ->
-                ImplRep = {var, PatternLine, list_to_atom(ImplName)},
-                {[ImplRep | NestedImplReps], NestedCG}
-            end
+            NestedCG1 = bind(ImplName, badarity, NestedCG),
+            {ImplAtom, _} = env_get(ImplName, NestedCG1),
+            ImplRep = {var, PatternLine, ImplAtom},
+            {[ImplRep | NestedImplReps], NestedCG1}
           end, {FoldImplReps, FoldCG}, Is),
 
           {NewImplReps, ordsets:add_element(V, FoldSeenVs), NewCG}
@@ -1192,17 +1123,42 @@ child_i(TargetI, Is, Ifaces) ->
     end
   end, none, Is).
 
-inline_bind_map([], _) -> [];
-inline_bind_map([H | T], BindMap) ->
-  [inline_bind_map(H, BindMap) | inline_bind_map(T, BindMap)];
-inline_bind_map({var, _, ImplAtom}=VarRep, BindMap) ->
+% First, try to inline the call.
+optimize_call(
+  {call, Line,
+    {'fun', _, {clauses, [{clause, _, PatternReps, [], Body}]}},
+    ArgsRep
+  }
+) ->
+  Stmts = lists:map(fun({PatternRep, ArgRep}) ->
+    {match, element(2, PatternRep), PatternRep, ArgRep}
+  end, lists:zip(PatternReps, ArgsRep)),
+  {block, Line, Stmts ++ Body};
+% Next, avoid creating intermediate fun objects.
+optimize_call({call, Line, {'fun', FunLine, {function, Atom, _}}, ArgsRep}) ->
+  {call, Line, {atom, FunLine, Atom}, ArgsRep};
+optimize_call(
+  {call, Line,
+    {'fun', _, {function, {atom, _, Mod}, {atom, _, Fn}, _ }},
+    ArgsRep
+  }
+) -> call(Mod, Fn, ArgsRep, Line);
+optimize_call(Call) -> Call.
+
+inline_bind_map([], _, _) -> [];
+inline_bind_map([H | T], BindMap, CG) ->
+  [inline_bind_map(H, BindMap, CG) | inline_bind_map(T, BindMap, CG)];
+inline_bind_map({var, Line, ImplAtom}, BindMap, CG) ->
   case maps:find(ImplAtom, BindMap) of
     {ok, Rep} -> Rep;
-    error -> VarRep
+    error ->
+      {UniqImplAtom, _} = env_get(atom_to_list(ImplAtom), CG),
+      {var, Line, UniqImplAtom}
   end;
-inline_bind_map({call, Line, FunRep, ArgsRep}, BindMap) ->
-  InlineArgsRep = [inline_bind_map(Arg, BindMap) || Arg <- ArgsRep],
-  {call, Line, inline_bind_map(FunRep, BindMap), InlineArgsRep}.
+inline_bind_map({call, Line, FunRep, ArgsRep}, BindMap, CG) ->
+  InlineArgsRep = [inline_bind_map(Arg, BindMap, CG) || Arg <- ArgsRep],
+  Inlined = {call, Line, inline_bind_map(FunRep, BindMap, CG), InlineArgsRep},
+  optimize_call(Inlined).
 
 rep_arg_impls(LamT, Loc, SubbedVs, CG) ->
   % Must fold*l* b/c impls associated with multiple args are passed through the
@@ -1232,24 +1188,18 @@ rep_arg_impls(LamT, Loc, SubbedVs, CG) ->
   {ArgsIVs, ImplReps, BindMaps}.
 
 rewrite_ref(Rep, Ref, Loc, CG) ->
-  % rewrite() expects a single var rep as a parameter, whereas Rep might be
-  % a call or something more complex; store the result.
-  Line = ?START_LINE(Loc),
-  NewVar = {var, Line, unique("Var")},
-  Match = {match, Line, NewVar, Rep},
-
   InstRefs = CG#cg.ctx#ctx.inst_refs,
   {Stmts, ResultRep} = case maps:find(Ref, InstRefs) of
-    {ok, {T, SubbedVs}} -> rewrite(T, NewVar, Loc, SubbedVs, CG);
+    {ok, {T, SubbedVs}} -> rewrite(T, Rep, Loc, SubbedVs, CG);
     error -> {[], Rep}
   end,
 
   case Stmts of
-    [] -> Rep;
-    _ -> {block, Line, [Match | Stmts] ++ [ResultRep]}
+    [] -> ResultRep;
+    _ -> {block, ?START_LINE(Loc), Stmts ++ [ResultRep]}
   end.
 
-rewrite({lam, ArgTs, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
+rewrite({lam, ArgTs, _}=LamT, Rep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
 
   {ArgsIVs, ImplReps, BindMaps} = rep_arg_impls(LamT, Loc, SubbedVs, CG),
@@ -1258,13 +1208,13 @@ rewrite({lam, ArgTs, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
   case maps:size(FinalBindMap) of
     % If there aren't any bindings, we didn't solve for any impls (both bound
     % impls and solved impls create bindings), so don't rewrite.
-    0 -> {[], VarRep};
+    0 -> {[], Rep};
 
     _ ->
       ArgsRep = [{var, Line, unique("Arg")} || _ <- ArgTs],
-      {PatternReps, _} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, false, Line, CG),
+      {PatternReps, CG1} = rep_arg_iv_patterns(ArgsRep, ArgsIVs, Line, CG),
 
-      FinalImplReps = inline_bind_map(ImplReps, FinalBindMap),
+      FinalImplReps = inline_bind_map(ImplReps, FinalBindMap, CG1),
       PatternImpls = case PatternReps of
         [] -> lists:zip([eabs(impls, Line)], FinalImplReps);
         _ -> lists:zip(PatternReps, FinalImplReps)
@@ -1281,91 +1231,77 @@ rewrite({lam, ArgTs, _}=LamT, VarRep, Loc, SubbedVs, CG) ->
         end
       end, PatternImpls),
 
-      Call = {call, Line, VarRep, ArgsWithImplsRep},
+      Call = optimize_call({call, Line, Rep, ArgsWithImplsRep}),
       Clause = {clause, Line, PatternReps, [], [Call]},
       FunRep = {'fun', Line, {clauses, [Clause]}},
-
-      ResultRep = {var, Line, unique("Lam")},
-      {[{match, Line, ResultRep, FunRep}], ResultRep}
+      {[], FunRep}
   end;
 
-rewrite({tuple, ElemTs}, VarRep, Loc, SubbedVs, CG) ->
+rewrite({tuple, ElemTs}, Rep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   ElemReps = lists:map(fun(Index) ->
     {var, Line, unique(lists:concat(["Elem", Index]))}
   end, lists:seq(1, length(ElemTs))),
-  Match = {match, Line, {tuple, Line, ElemReps}, VarRep},
+  Match = {match, Line, {tuple, Line, ElemReps}, Rep},
 
   {NewElemReps, AllStmts} = lists:mapfoldr(fun({ElemT, ElemRep}, FoldStmts) ->
-    case rewrite(ElemT, ElemRep, Loc, SubbedVs, CG) of
-      {[], _} -> {ElemRep, FoldStmts};
-      {Stmts, NewElemRep} -> {NewElemRep, [Stmts | FoldStmts]}
-    end
+    {Stmts, NewElemRep} = rewrite(ElemT, ElemRep, Loc, SubbedVs, CG),
+    {NewElemRep, [Stmts | FoldStmts]}
   end, [], lists:zip(ElemTs, ElemReps)),
 
-  case lists:append(AllStmts) of
-    [] -> {[], VarRep};
-    Stmts ->
-      ResultRep = {var, Line, unique("Tuple")},
-      TupleRep = {tuple, Line, NewElemReps},
-      {[Match | Stmts] ++ [{match, Line, ResultRep, TupleRep}], ResultRep}
+  case NewElemReps of
+    ElemReps -> {[], Rep};
+    _ -> {[Match | lists:append(AllStmts)], {tuple, Line, NewElemReps}}
   end;
 
-rewrite({gen, {con, "List"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
+rewrite({gen, {con, "List"}, [ElemT]}, Rep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   ElemRep = {var, Line, unique("Elem")},
 
   case rewrite(ElemT, ElemRep, Loc, SubbedVs, CG) of
-    {[], _} -> {[], VarRep};
+    {_, ElemRep} -> {[], Rep};
 
     {Stmts, NewElemRep} ->
       Body = Stmts ++ [NewElemRep],
       Clause = {clause, Line, [ElemRep], [], Body},
       FunRep = {'fun', Line, {clauses, [Clause]}},
-
-      Call = call(lists, map, [FunRep, VarRep], Line),
-      ResultRep = {var, Line, unique("List")},
-      {[{match, Line, ResultRep, Call}], ResultRep}
+      {[], call(lists, map, [FunRep, Rep], Line)}
   end;
 
-rewrite({gen, {con, "Set"}, [ElemT]}, VarRep, Loc, SubbedVs, CG) ->
+rewrite({gen, {con, "Set"}, [ElemT]}, Rep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   ElemRep = {var, Line, unique("Elem")},
 
   case rewrite(ElemT, ElemRep, Loc, SubbedVs, CG) of
-    {[], _} -> {[], VarRep};
+    {_, ElemRep} -> {[], Rep};
 
     {Stmts, NewElemRep} ->
       Body = Stmts ++ [{tuple, Line, [NewElemRep, eabs(true, Line)]}],
       Clause = {clause, Line, [ElemRep], [], Body},
       FunRep = {'fun', Line, {clauses, [Clause]}},
 
-      RemoveCall = call(maps, remove, [eabs('_@type', Line), VarRep], Line),
+      RemoveCall = call(maps, remove, [eabs('_@type', Line), Rep], Line),
       KeysCall = call(maps, keys, [RemoveCall], Line),
       MapCall = call(lists, map, [FunRep, KeysCall], Line),
-      FromListCall = call(maps, from_list, [MapCall], Line),
-      ResultRep = {var, Line, unique("List")},
-      {[{match, Line, ResultRep, FromListCall}], ResultRep}
+      {[], call(maps, from_list, [MapCall], Line)}
   end;
 
-rewrite({gen, {con, "Map"}, [KeyT, ValueT]}, VarRep, Loc, SubbedVs, CG) ->
+rewrite({gen, {con, "Map"}, [KeyT, ValueT]}, Rep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
   KeyRep = {var, Line, unique("Key")},
   ValueRep = {var, Line, unique("Value")},
 
   {KeyStmts, NewKeyRep} = rewrite(KeyT, KeyRep, Loc, SubbedVs, CG),
   {ValueStmts, NewValueRep} = rewrite(ValueT, ValueRep, Loc, SubbedVs, CG),
-  ResultRep = {var, Line, unique("Map")},
 
-  case {KeyStmts, ValueStmts} of
-    {[], []} -> {[], VarRep};
+  case {NewKeyRep, NewValueRep} of
+    {KeyRep, ValueRep} -> {[], Rep};
 
-    {[], _} ->
+    {KeyRep, _} ->
       Body = ValueStmts ++ [NewValueRep],
       Clause = {clause, Line, [{var, Line, '_'}, ValueRep], [], Body},
       FunRep = {'fun', Line, {clauses, [Clause]}},
-      MapCall = call(maps, map, [FunRep, VarRep], Line),
-      {[{match, Line, ResultRep, MapCall}], ResultRep};
+      {[], call(maps, map, [FunRep, Rep], Line)};
 
     _ ->
       FoldMapRep = {var, Line, unique("FoldMap")},
@@ -1375,11 +1311,10 @@ rewrite({gen, {con, "Map"}, [KeyT, ValueT]}, VarRep, Loc, SubbedVs, CG) ->
       FunRep = {'fun', Line, {clauses, [Clause]}},
 
       NewMapRep = {map, Line, []},
-      FoldCall = call(maps, fold, [FunRep, NewMapRep, VarRep], Line),
-      {[{match, Line, ResultRep, FoldCall}], ResultRep}
+      {[], call(maps, fold, [FunRep, NewMapRep, Rep], Line)}
   end;
 
-rewrite({gen, {con, Con}, ParamTs}=GenT, VarRep, Loc, SubbedVs, CG) ->
+rewrite({gen, {con, Con}, ParamTs}=GenT, Rep, Loc, SubbedVs, CG) ->
   #ctx{aliases=Aliases, structs=Structs, enums=Enums} = CG#cg.ctx,
   IsStruct = maps:is_key(Con, Structs),
   IsEnum = maps:is_key(Con, Enums),
@@ -1387,12 +1322,15 @@ rewrite({gen, {con, Con}, ParamTs}=GenT, VarRep, Loc, SubbedVs, CG) ->
   if
     IsStruct ->
       {record, _, _}=RecordT = utils:unalias(GenT, CG#cg.ctx#ctx.aliases),
-      rewrite(RecordT, VarRep, Loc, SubbedVs, CG);
+      rewrite(RecordT, Rep, Loc, SubbedVs, CG);
 
     IsEnum ->
       {_, Vs, GenOptions} = maps:get(Con, Enums),
       Subs = maps:from_list(lists:zip(Vs, ParamTs)),
       Line = ?START_LINE(Loc),
+
+      VarRep = {var, Line, unique("Enum" ++ Con)},
+      MatchRep = {match, Line, VarRep, Rep},
 
       IsTupleCall = call(erlang, is_tuple, [VarRep], Line),
       ElementCall = call(erlang, element, [eabs(1, Line), VarRep], Line),
@@ -1401,13 +1339,13 @@ rewrite({gen, {con, Con}, ParamTs}=GenT, VarRep, Loc, SubbedVs, CG) ->
         {clause, Line, [], [[eabs(true, Line)]], [VarRep]}
       ]},
       KeyRep = {var, Line, unique("Key")},
-      Match = {match, Line, KeyRep, If},
+      MatchKey = {match, Line, KeyRep, If},
 
       LastClause = {clause, Line, [{var, Line, '_'}], [], [VarRep]},
       Clauses = lists:foldl(fun({Key, TupleT}, FoldClauses) ->
         SubbedT = utils:subs(TupleT, #sub_opts{subs=Subs, aliases=Aliases}),
         case rewrite(SubbedT, VarRep, Loc, SubbedVs, CG) of
-          {[], _} -> FoldClauses;
+          {_, VarRep} -> FoldClauses;
           {Stmts, NewTupleRep} ->
             Body = Stmts ++ [NewTupleRep],
             [{clause, Line, [eabs(Key, Line)], [], Body} | FoldClauses]
@@ -1415,24 +1353,20 @@ rewrite({gen, {con, Con}, ParamTs}=GenT, VarRep, Loc, SubbedVs, CG) ->
       end, [LastClause], GenOptions),
 
       case Clauses of
-        [LastClause] -> {[], VarRep};
-        _ ->
-          Case = {'case', Line, KeyRep, Clauses},
-          ResultRep = {var, Line, unique("Enum" ++ Con)},
-          ResultMatch = {match, Line, ResultRep, Case},
-          {[Match, ResultMatch], ResultRep}
+        [LastClause] -> {[], Rep};
+        _ -> {[MatchRep, MatchKey], {'case', Line, KeyRep, Clauses}}
       end
   end;
 
-rewrite({record, _, FieldMap}, VarRep, Loc, SubbedVs, CG) ->
+rewrite({record, _, FieldMap}, Rep, Loc, SubbedVs, CG) ->
   Line = ?START_LINE(Loc),
 
   {AllStmts, ExactReps, Updates} = maps:fold(fun(Name, FieldT, Memo) ->
     {FoldStmts, FoldExactReps, FoldUpdates} = Memo,
-    FieldRep = {var, Line, unique("Field_" ++ Name)},
+    FieldRep = {var, Line, unique("Field" ++ Name)},
 
     case rewrite(FieldT, FieldRep, Loc, SubbedVs, CG) of
-      {[], _} -> {FoldStmts, FoldExactReps, FoldUpdates};
+      {_, FieldRep} -> {FoldStmts, FoldExactReps, FoldUpdates};
       {Stmts, NewFieldRep} ->
         AtomRep = eabs(list_to_atom(Name), Line),
         ExactRep = {map_field_exact, Line, AtomRep, FieldRep},
@@ -1444,35 +1378,36 @@ rewrite({record, _, FieldMap}, VarRep, Loc, SubbedVs, CG) ->
     end
   end, {[], [], []}, FieldMap),
 
-  Match = {match, Line, {map, Line, ExactReps}, VarRep},
-  case lists:append(AllStmts) of
-    [] -> {[], VarRep};
-    Stmts ->
+  VarRep = {var, Line, unique("Record")},
+  MatchRep = {match, Line, VarRep, Rep},
+  MatchMap = {match, Line, {map, Line, ExactReps}, VarRep},
+
+  case Updates of
+    [] -> {[], Rep};
+    _ ->
+      Stmts = lists:append(AllStmts),
       UpdateReps = lists:map(fun({Name, NewFieldRep}) ->
         AtomRep = eabs(list_to_atom(Name), Line),
         {map_field_exact, Line, AtomRep, NewFieldRep}
       end, Updates),
-
-      ResultRep = {var, Line, unique("Record")},
-      ResultMatch = {match, Line, ResultRep, {map, Line, VarRep, UpdateReps}},
-      {[Match | Stmts] ++ [ResultMatch], ResultRep}
+      {[MatchRep, MatchMap | Stmts], {map, Line, VarRep, UpdateReps}}
   end;
 
 % BaseT (the third element) must be a TV at this point, since this program
 % passed type checking.
-rewrite({record_ext, A, {tv, _, _, _}, Ext}, VarRep, Loc, SubbedVs, CG) ->
-  rewrite({record, A, Ext}, VarRep, Loc, SubbedVs, CG);
+rewrite({record_ext, A, {tv, _, _, _}, Ext}, Rep, Loc, SubbedVs, CG) ->
+  rewrite({record, A, Ext}, Rep, Loc, SubbedVs, CG);
 
 % The only way to create a value of type T<A> that is instantiated and needs to
 % be rewritten is to call some native erlang function and cast the result.
 % The user shouldn't be doing this; it's dangerous and won't work, as no value
 % can represent any T<A>. We simply do nothing in this case, and let any
 % runtime exceptions take their course.
-rewrite({gen, _, _, _, _}, VarRep, _, _, _) -> {[], VarRep};
+rewrite({gen, _, _, _, _}, Rep, _, _, _) -> {[], Rep};
 
-rewrite({con, _}, VarRep, _, _, _) -> {[], VarRep};
-rewrite({tv, _, _, _}, VarRep, _, _, _) -> {[], VarRep};
-rewrite(unit, VarRep, _, _, _) -> {[], VarRep}.
+rewrite({con, _}, Rep, _, _, _) -> {[], Rep};
+rewrite({tv, _, _, _}, Rep, _, _, _) -> {[], Rep};
+rewrite(unit, Rep, _, _, _) -> {[], Rep}.
 
 option_key(Name, CG) -> option_key(module(CG), Name, CG).
 option_key(Module, Name, #cg{env=Env}=CG) ->
