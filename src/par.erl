@@ -7,7 +7,11 @@
 %   - Map/Set operations?
 %   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Fork eunite and fix macro display
+% - Define Concatable/Separable in Base? Rename union/substract to concat/sep?
+% - Default args?
+% - _ in expressions with operators
 % - Catch keyword for try?
+% - Allow running program via cli; require that main is defined
 % - Change from unit to {con, "()"} for consistency?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable

@@ -134,13 +134,13 @@ stdlib_dir() -> filename:join(code:lib_dir(par, src), "lib").
 
 stdlib_modules() ->
   #{
-    %% "Base" => "base.par",
-    %% "List" => "list.par",
-    %% "Set" => "set.par",
-    %% "Map" => "map.par",
-    %% "String" => "string.par",
-    %% "Char" => "char.par",
-    %% "Test" => "test.par"
+    "Base" => "base.par",
+    "List" => "list.par",
+    "Set" => "set.par",
+    "Map" => "map.par",
+    "String" => "string.par",
+    "Char" => "char.par",
+    "Test" => "test.par"
   }.
 
 resolve_dep_path(RawPath) ->
@@ -404,7 +404,6 @@ infer_comps(RawComps) ->
     {errors, Errs} -> {errors, Errs, Comps}
   end,
 
-  % TODO: how to require that main is defined?
   ok = tv_server:stop(Pid),
   Result.
 
@@ -1435,7 +1434,6 @@ infer({app, Loc, Expr, Args}, C) ->
   C3 = add_cst(T, ExprT, Loc, ?FROM_APP, C2),
   {ResultT, C3};
 
-% TODO: just make this a regular app!!
 infer({variant, Loc, Expr, Args}, C) ->
   {ConLoc, Con, {B, C1}} = case Expr of
     {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->

@@ -50,7 +50,7 @@ export rstrip(s) = @string:trim(s, @trailing)
 strip : String -> String
 export strip(s) = @string:trim(s, @both)
 
-slice : Int -> Int -> String -> String
+slice : (Int, Int, String) -> String
 export slice(i, num, s) =
   if num <= 0 then
     ""
@@ -61,7 +61,7 @@ export slice(i, num, s) =
     else
       slice_r(0, wrapped_i, num, s) |> @erlang:iolist_to_binary/1
 
-range : Int -> Int -> String -> String
+range : (Int, Int, String) -> String
 export range(start, end, s) =
   let len = if start < 0 || end < 0 then length(s) else 0
   let wrapped_start = if start < 0 then len + start else start
@@ -77,7 +77,7 @@ export range(start, end, s) =
     slice_r(0, wrapped_start, wrapped_end - wrapped_start + 1, s)
     |> @erlang:iolist_to_binary/1
 
-slice_r : Int -> Int -> Int -> String -> [Char]
+slice_r : (Int, Int, Int, String) -> [Char]
 slice_r(i, start, num, s) =
   if num <= 0 then
     []
@@ -100,16 +100,16 @@ newline_pattern = @binary:compile_pattern(["\n", "\r\n"])
 reverse : String -> String
 export reverse(s) = @string:reverse(s) |> @erlang:iolist_to_binary/1
 
-starts_with? : String -> String -> Bool
+starts_with? : (String, String) -> Bool
 export starts_with?(prefix, s) = @string:prefix(s, prefix) != @nomatch
 
-ends_with? : String -> String -> Bool
+ends_with? : (String, String) -> Bool
 export ends_with?(suffix, s) = @string:find(s, suffix, @trailing) == suffix
 
-substr? : String -> String -> Bool
+substr? : (String, String) -> Bool
 export substr?(sub, s) = @string:find(s, sub) != @nomatch
 
-re : String -> [RegexpOpt] -> Regexp
+re : (String, [RegexpOpt]) -> Regexp
 export re(s, opts) =
   let opts = [assume @unicode, assume (@newline, @anycrlf) | opts]
   match @re:compile(s, opts) {
@@ -118,23 +118,23 @@ export re(s, opts) =
     (@ok, re) => Regexp { re = re, str = s }
   }
 
-matches? : Regexp -> String -> Bool
+matches? : (Regexp, String) -> Bool
 export matches?(r, s) = @re:run(s, r.re) != @nomatch
 
-search : Regexp -> String -> [String]
+search : (Regexp, String) -> [String]
 export search(r, s) = match @re:run(s, r.re, [(@capture, @all, @binary)]) {
   @nomatch => []
   (@match, results) => results
 }
 
-search_all : Regexp -> String -> [[String]]
+search_all : (Regexp, String) -> [[String]]
 export search_all(r, s) =
   match @re:run(s, r.re, [@global, assume (@capture, @all, @binary)]) {
     @nomatch => []
     (@match, results) => results
   }
 
-span : String -> String -> Option<(String, String)>
+span : (String, String) -> Option<(String, String)>
 export span(sub, s) =
   if sub == "" then
     None
@@ -144,7 +144,7 @@ export span(sub, s) =
       [_] => None
     }
 
-rspan : String -> String -> Option<(String, String)>
+rspan : (String, String) -> Option<(String, String)>
 export rspan(sub, s) =
   if sub == "" then
     None
@@ -154,7 +154,7 @@ export rspan(sub, s) =
       [_] => None
     }
 
-search_span : Regexp -> String -> Option<(String, [String], String)>
+search_span : (Regexp, String) -> Option<(String, [String], String)>
 export search_span(r, s) =
   if r.str == "" then
     None
@@ -167,9 +167,9 @@ export search_span(r, s) =
     }
 
 interface Pattern {
-  splitn : T -> Int -> String -> [String]
-  replace : T -> String -> String -> String
-  replace_one : T -> String -> String -> String
+  splitn : (T, Int, String) -> [String]
+  replace : (T, String, String) -> String
+  replace_one : (T, String, String) -> String
 }
 
 impl Pattern for String {
@@ -196,7 +196,7 @@ impl Pattern for String {
       @string:replace(s, sub, rep) |> @erlang:iolist_to_binary/1
 }
 
-splitn_graphemes : Int -> String -> [String]
+splitn_graphemes : (Int, String) -> [String]
 splitn_graphemes(n, s) =
   if n <= 1 then
     [s]
@@ -206,7 +206,7 @@ splitn_graphemes(n, s) =
       [] => [s]
     }
 
-splitn_r : String -> Int -> String -> [String]
+splitn_r : (String, Int, String) -> [String]
 splitn_r(sub, n, s) =
   if n <= 1 then
     [s]
@@ -229,5 +229,5 @@ impl Pattern for Regexp {
   replace_one(r, rep, s) = @re:replace(s, r.re, rep, [(@return, @binary)])
 }
 
-split : T ~ Pattern -> String -> [String]
+split : (T ~ Pattern, String) -> [String]
 export split(r, s) = splitn(r, -1, s)

@@ -2,17 +2,17 @@ module Set
 
 import Base (*)
 
-intersect : Set<A> -> Set<A> -> Set<A>
+intersect : (Set<A>, Set<A>) -> Set<A>
 export intersect(a, b) = @maps:with(@maps:keys(b), a)
 
-union : Set<A> -> Set<A> -> Set<A>
+union : (Set<A>, Set<A>) -> Set<A>
 export union(a, b) = @maps:merge(a, b)
 
-subtract : Set<A> -> Set<A> -> Set<A>
+subtract : (Set<A>, Set<A>) -> Set<A>
 export subtract(a, b) = @maps:without(to_list(b), a)
 
-subset? : Set<A> -> Set<A> -> Bool
+subset? : (Set<A>, Set<A>) -> Bool
 export subset?(a, b) = all?(|e| contains?(e, b), a)
 
-disjoint? : Set<A> -> Set<A> -> Bool
+disjoint? : (Set<A>, Set<A>) -> Bool
 export disjoint?(a, b) = empty?(intersect(a, b))

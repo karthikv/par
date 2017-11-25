@@ -35,7 +35,7 @@ impl Sized for Map<A, B> {
 }
 
 interface Mappable {
-  map : (A -> B) -> T<A> -> T<B>
+  map : (A -> B, T<A>) -> T<B>
 }
 
 impl Mappable for Option {
@@ -61,19 +61,19 @@ impl Mappable for Map {
 }
 
 interface Collection extends Mappable {
-  fold : (A -> F -> F) -> F -> T<A> -> F
-  filter : (A -> Bool) -> T<A> -> T<A>
-  find : (A -> Bool) -> T<A> -> Option<A>
+  fold : ((A, F) -> F, F, T<A>) -> F
+  filter : (A -> Bool, T<A>) -> T<A>
+  find : (A -> Bool, T<A>) -> Option<A>
 
-  filter_map : (A -> Option<B>) -> T<A> -> T<B>
-  map_fold : (A -> F -> (B, F)) -> F -> T<A> -> (T<B>, F)
+  filter_map : (A -> Option<B>, T<A>) -> T<B>
+  map_fold : ((A, F) -> (B, F), F, T<A>) -> (T<B>, F)
 
-  put : A -> T<A> -> T<A>
-  delete : A -> T<A> -> T<A>
+  put : (A, T<A>) -> T<A>
+  delete : (A, T<A>) -> T<A>
 
-  contains? : A -> T<A> -> Bool
-  all? : (A -> Bool) -> T<A> -> Bool
-  any? : (A -> Bool) -> T<A> -> Bool
+  contains? : (A, T<A>) -> Bool
+  all? : (A -> Bool, T<A>) -> Bool
+  any? : (A -> Bool, T<A>) -> Bool
 }
 
 impl Collection for List {
@@ -161,10 +161,10 @@ exception CantParseFloat(String)
 
 
 //-- Collections
-first : (A, B) -> A
+first : ((A, B)) -> A
 export first((a, _)) = a
 
-second : (A, B) -> B
+second : ((A, B)) -> B
 export second((_, b)) = b
 
 head : [A] -> A
@@ -173,22 +173,22 @@ export head = @erlang:hd/1
 tail : [A] -> [A]
 export tail = @erlang:tl/1
 
-lookup : K -> Map<K, V> -> Option<V>
+lookup : (K, Map<K, V>) -> Option<V>
 export lookup(k, m) = match @maps:find(k, m) {
   (@ok, v) => Some(v)
   @error => None
 }
 
-get : K -> Map<K, V> -> V
+get : (K, Map<K, V>) -> V
 export get(k, m) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => raise BadKey
 }
 
-key? : K -> Map<K, V> -> Bool
+key? : (K, Map<K, V>) -> Bool
 export key? = @maps:is_key/2
 
-remove : K -> Map<K, V> -> Map<K, V>
+remove : (K, Map<K, V>) -> Map<K, V>
 export remove = @maps:remove/2
 
 
@@ -202,10 +202,10 @@ export ceil = @erlang:ceil/1
 floor : Float -> Int
 export floor = @erlang:floor/1
 
-max : A ~ Ord -> A ~ Ord -> A ~ Ord
+max : (A ~ Ord, A ~ Ord) -> A ~ Ord
 export max(a, b) = if a > b then a else b
 
-min : A ~ Ord -> A ~ Ord -> A ~ Ord
+min : (A ~ Ord, A ~ Ord) -> A ~ Ord
 export min(a, b) = if a < b then a else b
 
 round : Float -> Int
@@ -354,6 +354,3 @@ print : A -> ()
 export print(a) =
   @io:format("~s~n", [to_str(a)])
   ()
-
-flip : (A -> B -> C) -> B -> A -> C
-export flip(f, b, a) = f(a, b)
