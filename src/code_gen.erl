@@ -30,9 +30,7 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
       {global, _, {var, _, Name}, {fn, _, _, Args, _}, Exported} ->
         Atom = list_to_atom(Name),
         Arity = length(Args),
-        Value = {{global_fn, Atom}, Arity},
-
-        ModuleCG1 = env_set(Name, Value, ModuleCG),
+        ModuleCG1 = env_set(Name, {global_fn, Atom, Arity}, ModuleCG),
         if
           Exported or ((Name == "main") and (Arity == 0)) ->
             {[{Atom, Arity}], ModuleCG1};
@@ -41,9 +39,7 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
 
       {global, _, {var, _, Name}, _, Exported} ->
         Atom = list_to_atom(Name),
-        Value = {{global, Atom}, unknown},
-
-        ModuleCG1 = env_set(Name, Value, ModuleCG),
+        ModuleCG1 = env_set(Name, {global, Atom}, ModuleCG),
         IsTest = ordsets:is_element(Name, TestNames),
         if
           Exported orelse IsTest -> {[{Atom, 0}], ModuleCG1};
@@ -62,11 +58,9 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
           end,
 
           case Arity of
-            0 ->
-              Value = {{option, Key}, badarity},
-              {[], env_set(Con, Value, FoldCG)};
+            0 -> {[], env_set(Con, {option, Key}, FoldCG)};
             _ ->
-              Value = {{option, Key, Atom}, Arity},
+              Value = {option, Key, Atom, Arity},
               {[{Atom, Arity}], env_set(Con, Value, FoldCG)}
           end
         end, ModuleCG, OptionTEs),
@@ -81,25 +75,21 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
         Key = list_to_atom(lists:concat([Module, '.', Con])),
 
         case Arity of
-          0 ->
-            Value = {{option, Key}, badarity},
-            {[], env_set(Con, Value, ModuleCG)};
+          0 -> {[], env_set(Con, {option, Key}, ModuleCG)};
           _ ->
-            Value = {{option, Key, Atom}, Arity},
+            Value = {option, Key, Atom, Arity},
             {[{Atom, Arity}], env_set(Con, Value, ModuleCG)}
         end;
 
       {struct, _, {con_token, _, Con}, FieldTEs} ->
         Atom = list_to_atom(Con),
         Arity = length(FieldTEs),
-        Value = {{global_fn, Atom}, Arity},
-        {[{Atom, Arity}], env_set(Con, Value, ModuleCG)};
+        {[{Atom, Arity}], env_set(Con, {global_fn, Atom, Arity}, ModuleCG)};
 
       {struct, _, {gen_te, _, {con_token, _, Con}, _}, FieldTEs} ->
         Atom = list_to_atom(Con),
         Arity = length(FieldTEs),
-        Value = {{global_fn, Atom}, Arity},
-        {[{Atom, Arity}], env_set(Con, Value, ModuleCG)};
+        {[{Atom, Arity}], env_set(Con, {global_fn, Atom, Arity}, ModuleCG)};
 
       {interface, _, {con_token, _, RawCon}, _, Fields} ->
         #cg{ctx=#ctx{ifaces=Ifaces}=C} = ModuleCG,
@@ -111,9 +101,7 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
           Atom = list_to_atom(Name),
           ArgsIVs = utils:args_ivs(RawT),
           Arity = length(ArgsIVs),
-
-          Value = {{global_fn, Atom}, Arity},
-          {{Atom, Arity}, env_set(Name, Value, FoldCG)}
+          {{Atom, Arity}, env_set(Name, {global_fn, Atom, Arity}, FoldCG)}
         end, ModuleCG, lists:zip(Fields, FieldTs));
 
       {impl, _, Ref, {con_token, _, RawCon}, _, _} ->
@@ -127,10 +115,9 @@ populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
         Arity = length(utils:ivs(InstT)),
 
         Value = case Arity of
-          0 -> {{global, Atom}, badarity};
-          _ -> {{global_fn, Atom}, Arity}
+          0 -> {global, Atom};
+          _ -> {global_fn, Atom, Arity}
         end,
-
         ModuleCG1 = env_set(Name, Value, ModuleCG),
         {[{Atom, Arity}], ModuleCG1};
 
@@ -151,16 +138,13 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
 
     lists:foldl(fun(Ident, NestedCG) ->
       case Ident of
-        {var, _, Name} ->
-          {_, Arity} = maps:get({DepModule, Name}, NestedCG#cg.env),
-          env_set(Name, {{external, DepModule}, Arity}, NestedCG);
+        {var, _, Name} -> env_set(Name, {external, DepModule}, NestedCG);
 
         {con_token, _, Name} ->
           % Name may refer to a type or a variant. We don't need to import
           % types, so only import the variant if it exists.
           case maps:find({DepModule, Name}, NestedCG#cg.env) of
-            {ok, {_, Arity}} ->
-              env_set(Name, {{external, DepModule}, Arity}, NestedCG);
+            {ok, _} -> env_set(Name, {external, DepModule}, NestedCG);
             error -> NestedCG
           end;
 
@@ -169,8 +153,7 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
           {OptionNames, _, _} = maps:get(Con, Enums),
 
           lists:foldl(fun(OptionName, FoldCG) ->
-            {_, Arity} = maps:get({DepModule, OptionName}, FoldCG#cg.env),
-            env_set(OptionName, {{external, DepModule}, Arity}, FoldCG)
+            env_set(OptionName, {external, DepModule}, FoldCG)
           end, NestedCG, OptionNames)
       end
     end, ModuleCG, Expanded)
@@ -215,7 +198,7 @@ rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
       {function, Line, list_to_atom(Name), length(PatternReps), Clauses};
 
     _ ->
-      {{global, Atom}, _} = env_get(Name, CG),
+      {global, Atom} = env_get(Name, CG),
       Body = [rep_gm_cache(Atom, rep(Expr, CG), Line, CG)],
       Clause = {clause, Line, [], [], Body},
       {function, Line, list_to_atom(Name), 0, [Clause]}
@@ -266,7 +249,7 @@ rep({struct, Loc, StructTE, FieldTEs}, CG) ->
 
   {ArgsRep, CG1} = lists:mapfoldl(fun(Sig, FoldCG) ->
     {sig, _, {var, _, FieldName}=Var, _} = Sig,
-    FoldCG1 = bind(FieldName, unknown, FoldCG),
+    FoldCG1 = bind(FieldName, FoldCG),
     {rep(Var, FoldCG1), FoldCG1}
   end, CG, FieldTEs),
 
@@ -350,8 +333,8 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
       lists:foldl(fun({Is, V}, {FoldArgsRep, FoldCG}) ->
         ordsets:fold(fun(I, {NestedArgsRep, NestedCG}) ->
           ImplName = bound_impl_name(I, V),
-          NewCG = bind(ImplName, badarity, NestedCG),
-          {ImplAtom, _} = env_get(ImplName, NewCG),
+          NewCG = bind(ImplName, NestedCG),
+          ImplAtom = env_get(ImplName, NewCG),
           {[{var, Line, ImplAtom} | NestedArgsRep], NewCG}
         end, {FoldArgsRep, FoldCG}, Is)
       end, {[], CG}, IVs)
@@ -386,9 +369,7 @@ rep({sig, _, _, _}, _) -> [];
 
 rep({fn, Loc, Ref, Args, Expr}, CG) ->
   Names = ordsets:union(lists:map(fun type_system:pattern_names/1, Args)),
-  CG1 = ordsets:fold(fun(Name, FoldCG) ->
-    bind(Name, unknown, FoldCG)
-  end, CG, Names),
+  CG1 = ordsets:fold(fun(Name, FoldCG) -> bind(Name, FoldCG) end, CG, Names),
 
   ArgsIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
   ArgsRep = lists:map(fun(Pattern) -> rep(Pattern, CG1) end, Args),
@@ -440,24 +421,24 @@ rep({N, Loc, Name}, CG) when N == var; N == con_token; N == var_value ->
   Line = ?START_LINE(Loc),
   case env_get(Name, CG) of
     % global variable handled by the global manager
-    {{global, Atom}, _} -> {call, Line, {atom, Line, Atom}, []};
-    {{option, Key}, _} -> {atom, Line, Key};
-    {{option, _, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
-    {{global_fn, Atom}, Arity} -> {'fun', Line, {function, Atom, Arity}};
-    {{external, Module}, _} ->
+    {global, Atom} -> {call, Line, {atom, Line, Atom}, []};
+    {option, Key} -> {atom, Line, Key};
+    {option, _, Atom, Arity} -> {'fun', Line, {function, Atom, Arity}};
+    {global_fn, Atom, Arity} -> {'fun', Line, {function, Atom, Arity}};
+    {external, Module} ->
       Mod = list_to_atom(Module),
       case maps:get({Module, Name}, CG#cg.env) of
         % global variable handled by the global manager
-        {{global, Atom}, _} -> call(Mod, Atom, [], Line);
-        {{option, Key}, _} -> {atom, Line, Key};
-        {{option, _, Atom}, Arity} ->
+        {global, Atom} -> call(Mod, Atom, [], Line);
+        {option, Key} -> {atom, Line, Key};
+        {option, _, Atom, Arity} ->
           Fn = {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)},
           {'fun', Line, Fn};
-        {{global_fn, Atom}, Arity} ->
+        {global_fn, Atom, Arity} ->
           Fn = {function, eabs(Mod, Line), eabs(Atom, Line), eabs(Arity, Line)},
           {'fun', Line, Fn}
       end;
-    {Atom, _} when is_atom(Atom) -> {var, Line, Atom}
+    Atom when is_atom(Atom) -> {var, Line, Atom}
   end;
 
 rep({var_ref, Loc, Ref, Name}, CG) ->
@@ -469,14 +450,14 @@ rep({anon_record, Loc, Ref, Inits}, #cg{ctx=C}=CG) ->
     Line = ?START_LINE(VarLoc),
 
     ExprRep = case Expr of
-      {fn, _, _, Args, _} ->
+      {fn, _, _, _, _} ->
         case CG#cg.in_impl of
           false ->
             % We're unsure whether the named fun is going to be used (i.e.
             % whether the named fun is recursive), so we give it a name prefixed
             % with an underscore to prevent unused errors.
             Atom = unique([$_ | Name]),
-            CG1 = env_set(Name, {Atom, length(Args)}, CG),
+            CG1 = env_set(Name, Atom, CG),
 
             {'fun', FunLine, {clauses, Clauses}} = rep(Expr, CG1),
             {named_fun, FunLine, Atom, Clauses};
@@ -558,8 +539,7 @@ rep({field, Loc, Expr, Prop}, CG) ->
         {con_token, _, Name_} -> Name_
       end,
 
-      {_, Arity} = maps:get({Module, Name}, CG#cg.env),
-      CG1 = env_set(Name, {{external, Module}, Arity}, CG),
+      CG1 = env_set(Name, {external, Module}, CG),
       rep(Prop, CG1);
 
     _ ->
@@ -678,9 +658,8 @@ rep({if_let, Loc, Pattern, Expr, Then, Else}, CG) ->
 rep({match, Loc, Expr, Cases}, CG) ->
   ExprRep = rep(Expr, CG),
   CaseClauses = lists:map(fun({'case', _, Pattern, Then}) ->
-    % TODO: use arity(Expr) in case of simple pattern?
     CG1 = ordsets:fold(fun(Name, FoldCG) ->
-      bind(Name, unknown, FoldCG)
+      bind(Name, FoldCG)
     end, CG, type_system:pattern_names(Pattern)),
 
     PatternRep = rep(Pattern, CG1),
@@ -693,9 +672,8 @@ rep({match, Loc, Expr, Cases}, CG) ->
 rep({'try', Loc, Expr, Cases}, CG) ->
   ExprRep = rep(Expr, CG),
   CatchClauses = lists:map(fun({'case', _, Pattern, Then}) ->
-    % TODO: use arity(Expr) in case of simple pattern?
     CG1 = ordsets:fold(fun(Name, FoldCG) ->
-      bind(Name, unknown, FoldCG)
+      bind(Name, FoldCG)
     end, CG, type_system:pattern_names(Pattern)),
 
     Line = ?START_LINE(element(2, Pattern)),
@@ -889,15 +867,15 @@ rep_list(Reps, Line) ->
   end, {nil, Line}, Reps).
 
 % recursive definitions allowed for simple pattern functions
-rep_pattern({var, _, Name}=Pattern, {fn, _, _, Args, _}=Expr, CG) ->
-  CG1 = bind(Name, length(Args), CG),
+rep_pattern({var, _, Name}=Pattern, {fn, _, _, _, _}=Expr, CG) ->
+  CG1 = bind(Name, CG),
   PatternRep = rep(Pattern, CG1),
 
   % We're unsure whether the named fun is going to be used (i.e. whether the
   % named fun is recursive), so we give it a name prefixed with an underscore
   % to prevent unused errors.
   Atom = unique([$_ | Name]),
-  CG2 = env_set(Name, {Atom, length(Args)}, CG1),
+  CG2 = env_set(Name, Atom, CG1),
 
   {'fun', FunLine, {clauses, Clauses}} = rep(Expr, CG2),
   NamedFun = {named_fun, FunLine, Atom, Clauses},
@@ -906,9 +884,8 @@ rep_pattern({var, _, Name}=Pattern, {fn, _, _, Args, _}=Expr, CG) ->
   {PatternRep, NamedFun, CG1};
 
 rep_pattern(Pattern, Expr, CG) ->
-  % TODO arity(Expr) for simple patterns
   CG1 = ordsets:fold(fun(Name, FoldCG) ->
-    bind(Name, unknown, FoldCG)
+    bind(Name, FoldCG)
   end, CG, type_system:pattern_names(Pattern)),
   {rep(Pattern, CG1), rep(Expr, CG), CG1}.
 
@@ -969,8 +946,8 @@ rep_arg_iv_patterns(RawArgsRep, ArgsIVs, Line, CG) ->
             {NestedImplReps, NestedCG} = NestedMemo,
             ImplName = bound_impl_name(I, V),
 
-            NestedCG1 = bind(ImplName, badarity, NestedCG),
-            {ImplAtom, _} = env_get(ImplName, NestedCG1),
+            NestedCG1 = bind(ImplName, NestedCG),
+            ImplAtom = env_get(ImplName, NestedCG1),
             ImplRep = {var, PatternLine, ImplAtom},
             {[ImplRep | NestedImplReps], NestedCG1}
           end, {FoldImplReps, FoldCG}, Is),
@@ -1068,9 +1045,7 @@ rep_impls(IVs, Loc, BindMap, SubbedVs, CG) ->
 
           ImplVarCG = case ImplModule of
             Module -> CG;
-            _ ->
-              {_, Arity} = maps:get({ImplModule, ImplName}, CG#cg.env),
-              env_set(ImplName, {{external, ImplModule}, Arity}, CG)
+            _ -> env_set(ImplName, {external, ImplModule}, CG)
           end,
           NestedBindMap1 = NestedBindMap#{
             ImplAtom => rep({var, Loc, ImplName}, ImplVarCG)
@@ -1152,7 +1127,7 @@ inline_bind_map({var, Line, ImplAtom}, BindMap, CG) ->
   case maps:find(ImplAtom, BindMap) of
     {ok, Rep} -> Rep;
     error ->
-      {UniqImplAtom, _} = env_get(atom_to_list(ImplAtom), CG),
+      UniqImplAtom = env_get(atom_to_list(ImplAtom), CG),
       {var, Line, UniqImplAtom}
   end;
 inline_bind_map({call, Line, FunRep, ArgsRep}, BindMap, CG) ->
@@ -1412,9 +1387,9 @@ rewrite(unit, Rep, _, _, _) -> {[], Rep}.
 option_key(Name, CG) -> option_key(module(CG), Name, CG).
 option_key(Module, Name, #cg{env=Env}=CG) ->
   case maps:get({Module, Name}, Env) of
-    {{external, OtherModule}, _} -> option_key(OtherModule, Name, CG);
-    {{option, Key}, _} -> Key;
-    {{option, Key, _}, _} -> Key
+    {external, OtherModule} -> option_key(OtherModule, Name, CG);
+    {option, Key} -> Key;
+    {option, Key, _, _} -> Key
   end.
 
 eabs(Lit, Line) -> erl_parse:abstract(Lit, Line).
@@ -1428,45 +1403,12 @@ env_get(Name, #cg{env=Env, ctx=#ctx{module=Module}}) ->
 module(CG) -> CG#cg.ctx#ctx.module.
 set_module(Module, CG) -> CG#cg{ctx=CG#cg.ctx#ctx{module=Module}}.
 
-% TODO remove
-arity({fn, _, _, Args, _}, _) -> length(Args);
-arity({expr_sig, _, _, Expr, _}, CG) -> arity(Expr, CG);
-arity({con_token, _, Name}, CG) ->
-  {_, Arity} = env_get(Name, CG),
-  Arity;
-arity({var_ref, _, _, Name}, CG) ->
-  {_, Arity} = env_get(Name, CG),
-  Arity;
-arity({field_fn, _, _}, _) -> 1;
-arity({field, _, _, _}, _) -> unknown;
-% TODO: arity of field for module access
-arity({app, _, Expr, Args}, CG) ->
-  case arity(Expr, CG) of
-    unknown -> unknown;
-    FnArity ->
-      Arity = FnArity - length(Args),
-      if
-        Arity =< 0 -> unknown;
-        true -> Arity
-      end
-  end;
-arity({native, _, _, _, Arity}, _) -> Arity;
-arity({N, _, _, _, _}, _) when N == 'if'; N == if_let -> unknown;
-arity({'let', _, _, Then}, CG) -> arity(Then, CG);
-arity({match, _, _, _}, _) -> unknown;
-arity({'try', _, _, _}, _) -> unknown;
-arity({ensure, _, _, After}, CG) -> arity(After, CG);
-arity({block, _, Exprs}, CG) -> arity(lists:last(Exprs), CG);
-arity({binary_op, Loc, '|>', Left, Right}, CG) ->
-  arity({app, Loc, Right, [Left]}, CG);
-arity(_, _) -> unknown.
-
 call(Mod, Fn, ArgsRep, Line) ->
   {call, Line, {remote, Line, {atom, Line, Mod}, {atom, Line, Fn}}, ArgsRep}.
 
-bind([H | T]=Name, Arity, CG) ->
+bind([H | T]=Name, CG) ->
   CapName = string:to_upper([H]) ++ T,
-  env_set(Name, {unique(CapName), Arity}, CG).
+  env_set(Name, unique(CapName), CG).
 
 unique(Prefix) -> list_to_atom(unique_name(Prefix)).
 unique_name(Prefix) -> lists:concat([Prefix, '@', counter_next()]).
