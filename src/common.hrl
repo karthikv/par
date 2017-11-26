@@ -55,6 +55,7 @@
   l_env = #{},
   exports = #{},
   types = #{
+    "()" => ?BUILTIN_TYPE(false, 0),
     "Int" => ?BUILTIN_TYPE(false, 0),
     "Float" => ?BUILTIN_TYPE(false, 0),
     "Bool" => ?BUILTIN_TYPE(false, 0),

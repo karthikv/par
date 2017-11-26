@@ -1381,8 +1381,7 @@ rewrite({record_ext, A, {tv, _, _, _}, Ext}, Rep, Loc, SubbedVs, CG) ->
 rewrite({gen, _, _, _, _}, Rep, _, _, _) -> {[], Rep};
 
 rewrite({con, _}, Rep, _, _, _) -> {[], Rep};
-rewrite({tv, _, _, _}, Rep, _, _, _) -> {[], Rep};
-rewrite(unit, Rep, _, _, _) -> {[], Rep}.
+rewrite({tv, _, _, _}, Rep, _, _, _) -> {[], Rep}.
 
 option_key(Name, CG) -> option_key(module(CG), Name, CG).
 option_key(Module, Name, #cg{env=Env}=CG) ->

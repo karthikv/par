@@ -917,7 +917,8 @@ type_expr_r(lhs, tokens) = match lhs {
           |> pbind(recurse(rest, _))
         )
 
-      [Lexer.LParen(s), Lexer.RParen(e) | t] => Unit(range(s, e)) |> recurse(t)
+      [Lexer.LParen(s), Lexer.RParen(e) | t] =>
+        Con(range(s, e), ['(', ')']) |> recurse(t)
       [Lexer.LParen(s) | t] =>
         parse_tuple(type_expr, ArgsTE, s, t)
         |> pbind(|(node, rest)| match (node, rest) {
@@ -951,7 +952,7 @@ type_expr_r(lhs, tokens) = match lhs {
       type_expr(t) |> pmap(|(right, rest)|
         let l = range(node_loc(left), node_loc(right))
         let args =
-          if let Unit(_) = left then
+          if let Con(_, ['(', ')']) = left then
             []
           else if let ArgsTE(_, args) = left then
             args

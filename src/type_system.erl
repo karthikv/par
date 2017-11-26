@@ -588,8 +588,7 @@ gen_t_num_params({record_ext_te, Loc, BaseTE, Fields}) ->
   case gen_t_num_params(BaseTE) of
     false -> gen_t_num_params({record_te, Loc, Fields});
     NumParams -> NumParams
-  end;
-gen_t_num_params({unit, _}) -> false.
+  end.
 
 infer_defs(Comps, C) ->
   {GEnvs, C1} = lists:mapfoldl(fun(#comp{module=Module, deps=Deps}, FoldC) ->
@@ -1107,7 +1106,7 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
           case no_ctx_errs(ValidatedC, C) of
             false -> {none, ValidatedC};
             true ->
-              ParamTs = lists:map(fun(_) -> unit end, lists:seq(1, NumParams)),
+              ParamTs = [{con, "()"} || _ <- lists:seq(1, NumParams)],
               GenT = {gen, {con, Con}, ParamTs},
               {gen, ConT, _} = unalias_except_struct(
                 GenT,
@@ -1179,7 +1178,7 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
       end
   end;
 
-infer({unit, _}, C) -> {unit, C};
+infer({unit, _}, C) -> {{con, "()"}, C};
 infer({int, _, _}, C) -> {tv_server:fresh("Num", C#ctx.pid), C};
 infer({float, _, _}, C) -> {{con, "Float"}, C};
 infer({bool, _, _}, C) -> {{con, "Bool"}, C};
@@ -1474,7 +1473,7 @@ infer({'if', _, Expr, Then, Else}, C) ->
   {ThenT, C3} = infer(Then, C2),
 
   case Else of
-    {unit, _} -> {unit, C3};
+    {unit, _} -> {{con, "()"}, C3};
     _ ->
       {ElseT, C4} = infer(Else, C3),
       TV = tv_server:fresh(C#ctx.pid),
@@ -1498,7 +1497,7 @@ infer({if_let, _, Pattern, Expr, Then, Else}, C) ->
   C3 = C2#ctx{l_env=C#ctx.l_env},
 
   case Else of
-    {unit, _} -> {unit, C3};
+    {unit, _} -> {{con, "()"}, C3};
     _ ->
       % must use original env without pattern bindings
       {ElseT, C4} = infer(Else, C3),
@@ -1577,7 +1576,7 @@ infer({ensure, _, Expr, After}, C) ->
 infer({block, _, Exprs}, C) ->
   {T, C1} = lists:foldl(fun(Expr, {_, FoldC}) ->
     infer(Expr, FoldC)
-  end, {unit, C}, Exprs),
+  end, {{con, "()"}, C}, Exprs),
   {T, C1};
 
 infer({binary_op, _, '|>', Left, Right}, C) ->
@@ -1635,7 +1634,7 @@ infer({unary_op, Loc, Op, Expr}, C) ->
       NumT = tv_server:fresh("Num", C1#ctx.pid),
       {NumT, NumT};
     Op == 'raise' -> {{con, "Exception"}, tv_server:fresh(C1#ctx.pid)};
-    Op == 'discard' -> {ExprT, unit};
+    Op == 'discard' -> {ExprT, {con, "()"}};
     Op == 'assume' -> {ExprT, tv_server:fresh(C1#ctx.pid)};
 
     Op == 'test' -> {{con, "Assertion"}, {con, "Test"}};
@@ -1831,8 +1830,7 @@ infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, BaseTE, Fields}, C) ->
     {record_te, Loc, Fields},
     C1
   ),
-  {{record_ext, A, BaseT, FieldMap}, C2};
-infer_sig_helper(_, _, {unit, _}, C) -> {unit, C}.
+  {{record_ext, A, BaseT, FieldMap}, C2}.
 
 infer_option(Option, T, FVs, SigVs, C) ->
   {option, Loc, {con_token, _, Con}, ArgTEs, _} = Option,
@@ -2011,8 +2009,9 @@ infer_impl_inits(
 
                 ParamTs = if
                   IfaceNumParams > 1 andalso NumParams == 1 ->
-                    [{tuple, [unit || _ <- lists:seq(1, IfaceNumParams)]}];
-                  true -> [unit || _ <- lists:seq(1, NumParams)]
+                    Seq = lists:seq(1, IfaceNumParams),
+                    [{tuple, [{con, "()"} || _ <- Seq]}];
+                  true -> [{con, "()"} || _ <- lists:seq(1, NumParams)]
                 end,
 
                 GenT = {gen, ImplT, ParamTs},
@@ -2232,7 +2231,7 @@ solve(Gs, S) ->
     Errs ->
       SubbedErrs = lists:map(fun({Msg, Module, Loc}) ->
         NewMsg = lists:map(fun
-          (ErrT) when is_tuple(ErrT) orelse ErrT == unit ->
+          (ErrT) when is_tuple(ErrT) ->
             subs_s(ErrT, FinalS, #sub_opts{for_err=true});
           (Part) -> Part
         end, Msg),
@@ -2510,8 +2509,7 @@ resolve({record_ext, A, BaseT, Ext}, S) ->
     {{Name, ResT}, FoldS1}
   end, S1, Pairs),
   {{record_ext, A, ResBaseT, maps:from_list(ResPairs)}, S2};
-resolve({hole, Report}, S) -> {{hole, Report}, S};
-resolve(unit, S) -> {unit, S}.
+resolve({hole, Report}, S) -> {{hole, Report}, S}.
 
 inst(GVs, T, Pid) ->
   Subs = ordsets:fold(fun(V, FoldSubs) ->

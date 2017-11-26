@@ -772,7 +772,7 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {expr_sig, l(0, 7), ref, {unit, l(0, 2)}, {unit, l(5, 2)}},
+      {expr_sig, l(0, 7), ref, {unit, l(0, 2)}, {con_token, l(5, 2), "()"}},
       ok_expr("() : ()")
     )
   , ?_assertEqual(
@@ -899,6 +899,13 @@ expr_test_() ->
         }
       },
       ok_expr("'c' : String -> A")
+    )
+  , ?_assertEqual(
+      {expr_sig, l(0, 13), ref,
+        {char, l(0, 3), $c},
+        {lam_te, l(6, 7), [], {tv_te, l(12, 1), "A", []}}
+      },
+      ok_expr("'c' : () -> A")
     )
   , ?_assertEqual(
       {expr_sig, l(0, 25), ref,

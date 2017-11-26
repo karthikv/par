@@ -12,7 +12,6 @@
 % - Default args?
 % - Catch keyword for try?
 % - Allow running program via cli; require that main is defined
-% - Change from unit to {con, "()"} for consistency?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
