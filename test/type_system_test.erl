@@ -973,23 +973,23 @@ exception_test_() ->
       "expr = raise bar",
       "expr"
     ))
-  , ?_test("A ~ Num" = ok_expr("try 1 { _ => 2 }"))
+  , ?_test("A ~ Num" = ok_expr("try 1 catch { _ => 2 }"))
   , ?_test("Atom" = ok_prg(
       "exception Bar\n"
-      "expr = try raise Bar { Bar => @hey }\n",
+      "expr = try raise Bar catch { Bar => @hey }\n",
       "expr"
     ))
   , ?_test("Char" = ok_prg(
       "exception Bar\n"
       "exception Baz\n"
-      "expr = try raise Bar { Baz => 'a' }\n",
+      "expr = try raise Bar catch { Baz => 'a' }\n",
       "expr"
     ))
   , ?_test("Float" = ok_prg(
       "exception Bar([Float], Float)\n"
       "bar(b) = if b then raise Bar([1.7], 2.5) else 5.8\n"
       "baz(x, b) = x + bar(b)\n"
-      "foo = try baz(7, true) { Bar([a], b) => a + b }",
+      "foo = try baz(7, true) catch { Bar([a], b) => a + b }",
       "foo"
     ))
   , ?_test("String" = ok_expr("ensure @world after \"hello\""))
@@ -1013,7 +1013,7 @@ exception_test_() ->
         "module Bar\n"
         "import \"./foo\"\n"
         "exception Baz\n"
-        "expr = try raise Baz { Foo.Baz => @foo, Baz => @bar }\n"
+        "expr = try raise Baz catch { Foo.Baz => @foo, Baz => @bar }\n"
       }
     ], "bar", "expr"))
   , ?_test(bad_expr(
@@ -1021,17 +1021,17 @@ exception_test_() ->
       {"Atom", "Exception", l(6, 4), ?FROM_UNARY_OP('raise')}
     ))
   , ?_test(bad_expr(
-      "try () { () => () }",
-      {"()", "Exception", l(9, 2), ?FROM_MATCH_PATTERN}
+      "try () catch { () => () }",
+      {"()", "Exception", l(15, 2), ?FROM_MATCH_PATTERN}
     ))
   , ?_test(bad_expr(
-      "try 'a' { _ => () }",
-      {"()", "Char", l(15, 2), ?FROM_MATCH_BODY}
+      "try 'a' catch { _ => () }",
+      {"()", "Char", l(21, 2), ?FROM_MATCH_BODY}
     ))
   , ?_test(bad_prg(
       "exception Bar\n"
-      "expr = try 'a' { Bar => 'b', _ => @c }",
-      {"Atom", "Char", l(1, 34, 2), ?FROM_MATCH_BODY}
+      "expr = try 'a' catch { Bar => 'b', _ => @c }",
+      {"Atom", "Char", l(1, 40, 2), ?FROM_MATCH_BODY}
     ))
   ].
 

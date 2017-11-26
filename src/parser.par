@@ -678,12 +678,12 @@ expr_r(expr_s, state, stack, tokens) = match state {
       [Lexer.Let(s) | t] => let_expr(s, [Lexer.Let(s) | t]) |> PushParsed
 
       [Lexer.Match(s) | t] =>
-        expr_cases(s, t)
+        expr_cases(false, s, t)
         |> pmap(|(l, node, cases, rest)| (Match(l, node, cases), rest))
         |> PushParsed
 
       [Lexer.Try(s) | t] =>
-        expr_cases(s, t)
+        expr_cases(true, s, t)
         |> pmap(|(l, node, cases, rest)| (Try(l, node, cases), rest))
         |> PushParsed
 
@@ -863,18 +863,29 @@ assoc(tokens) = expr(tokens) |> pbind(|v| match v {
   (_, t) => head_loc(t) |> one_err("Expected fat arrow '=>'")
 })
 
-expr_cases : (Loc, [Token]) -> Parsed<(Loc, Node, [Node], [Token])>
-expr_cases(s, tokens) =
-  expr(tokens) |> pbind(|v| match v {
-    (node, [Lexer.LBrace(brace_s) | t]) =>
-      enclosed_brace(brace_s, t) |> pbind(|(l, inner, rest)|
-        many_delim_comma_or_nl(case, inner)
-        |> pmap_or(|v| v, [])
-        |> pmap(|cases| (range(s, l), node, cases, rest))
-      )
+expr_cases : (Bool, Loc, [Token]) -> Parsed<(Loc, Node, [Node], [Token])>
+expr_cases(try_expr?, s, tokens) =
+  expr(tokens) |> pbind(|(node, rest)|
+    let parsed_rest =
+      if try_expr? then
+        if let [Lexer.Catch(_) | t] = rest then
+          parsed(t)
+        else
+          head_loc(rest) |> one_err("Expected 'catch' keyword")
+      else
+        parsed(rest)
 
-    (_, t) => head_loc(t) |> one_err("Expected open brace '{'")
-  })
+    parsed_rest |> pbind(|rest|
+      if let [Lexer.LBrace(brace_s) | t] = rest then
+        enclosed_brace(brace_s, t) |> pbind(|(l, inner, rest)|
+          many_delim_comma_or_nl(case, inner)
+          |> pmap_or(|v| v, [])
+          |> pmap(|cases| (range(s, l), node, cases, rest))
+        )
+      else
+        head_loc(rest) |> one_err("Expected open brace '{'")
+    )
+  )
 
 type_expr : [Token] -> Parsed<(Node, [Token])>
 type_expr(tokens) = type_expr_r(None, tokens)

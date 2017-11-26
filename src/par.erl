@@ -4,13 +4,10 @@
 
 % TODO:
 % - [2 weeks] Stdlib
-%   - Map/Set operations?
-%   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Fork eunite and fix macro display
-% - Fix bug in separate for sets
 % - Move Concatable/Separable into stdlib. Rename union/subtract to concat/sep?
+%   - Fix bug in separate for sets
 % - Default args?
-% - Catch keyword for try?
 % - Allow running program via cli; require that main is defined
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
@@ -23,25 +20,21 @@
 % - Website + Documentation
 %
 % Defer
-% - Using EUnit from par
 % - if-let condition and other condition (or maybe when statement?)
 % - Hex escaped characters \xff or \x{...} in strings
 % - Update naming conventions
 % - Concurrency
-% - Move gm_start into on_load?
 % - Use NOTP for faster load time?
 % - [1 week] Exhaustive pattern matching errors
 % - [1 day] Test more parser error messages
 % - [2 weeks] Editor tooling for vim, atom, emacs, sublime
 %   - Fix syntax highlighting for comments in enum for vim
 % - Type aliases
-% - Use tuple for struct representation rather than map
-% - Optimize simple app case for interfaces to not rewrite
+% - Use tuple for struct representation rather than map?
 % - Prevent passing iface fn to native fn; e.g. @lists:map(to_int, l)?
-% - Rename ifaces to is unless referring to actual {interface, ...}
+% - Rename ifaces to Is unless referring to actual {interface, ...}
 % - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
-% - Put solver record into CG to avoid duplication of fields like nested_ivs?
 % - Implementations for builtin typeclasses?
 %   - Should we also exclude concatable, separable, etc. from sets?
 % - Collection extends Sized?
@@ -91,12 +84,8 @@
 % - Syntax: List, Set, Map, Record
 %   - New: [a, b], #[a, b], {a => b, c => d}, {a = b, c = d}
 %   - Put: [a, b | c], #[a, b | c], {a => b, c => d | m}, {a = b, c = d | r}
-%
-% Uncertain
-% - Allow T only on rhs of iface type sig?
 % - Operator |< to prepend an argument?
 % - Force all block expressions except last to be type ()?
-%   - Enforce discarding?
 
 main(Args) ->
   Release = erlang:system_info(otp_release),

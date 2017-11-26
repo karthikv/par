@@ -1293,13 +1293,13 @@ expr_test_() ->
       ok_expr("match Bar { Bar => Bar }")
     )
   , ?_assertEqual(
-      {'try', l(0, 22), {con_token, l(4, 3), "Bar"}, [
-        {'case', l(10, 10),
-          {variant, l(10, 3), {con_token, l(10, 3), "Bar"}, []},
-          {con_token, l(17, 3), "Bar"}
+      {'try', l(0, 28), {con_token, l(4, 3), "Bar"}, [
+        {'case', l(16, 10),
+          {variant, l(16, 3), {con_token, l(16, 3), "Bar"}, []},
+          {con_token, l(23, 3), "Bar"}
         }
       ]},
-      ok_expr("try Bar { Bar => Bar }")
+      ok_expr("try Bar catch { Bar => Bar }")
     )
 
 
@@ -1360,10 +1360,10 @@ expr_test_() ->
       ok_expr("match Bar { _ => Bar }")
     )
   , ?_assertEqual(
-      {'try', l(0, 20), {con_token, l(4, 3), "Bar"}, [
-        {'case', l(10, 8), {'_', l(10, 1)}, {con_token, l(15, 3), "Bar"}}
+      {'try', l(0, 26), {con_token, l(4, 3), "Bar"}, [
+        {'case', l(16, 8), {'_', l(16, 1)}, {con_token, l(21, 3), "Bar"}}
       ]},
-      ok_expr("try Bar { _ => Bar }")
+      ok_expr("try Bar catch { _ => Bar }")
     )
 
 

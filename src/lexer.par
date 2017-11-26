@@ -72,6 +72,7 @@ enum Token {
   Let(Loc) @let
   Match(Loc) @match
   Try(Loc) @try
+  Catch(Loc) @catch
   Raise(Loc) @raise
   Ensure(Loc) @ensure
   After(Loc) @after
@@ -392,6 +393,7 @@ chs_to_token_fn = {
   chars("let") => Let
   chars("match") => Match
   chars("try") => Try
+  chars("catch") => Catch
   chars("raise") => Raise
   chars("ensure") => Ensure
   chars("after") => After

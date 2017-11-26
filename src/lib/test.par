@@ -13,7 +13,7 @@ export capture(cb) =
   try
     cb()
     None
-  {
+  catch {
     e => Some(e)
   }
 

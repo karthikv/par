@@ -392,21 +392,21 @@ test_exception(Expr, Run, Many) ->
       "bar = Bar(3)\n"
       "main() = raise bar"
     ))
-  , ?_test(1 = Expr("try 1 { _ => 2 }"))
+  , ?_test(1 = Expr("try 1 catch { _ => 2 }"))
   , ?_test(hey = Run(
       "exception Bar\n"
-      "main() = try raise Bar { Bar => @hey }\n"
+      "main() = try raise Bar catch { Bar => @hey }\n"
     ))
   , ?_assertThrow('Mod.Bar', Run(
       "exception Bar\n"
       "exception Baz\n"
-      "main() = try raise Bar { Baz => 'a' }\n"
+      "main() = try raise Bar catch { Baz => 'a' }\n"
     ))
   , ?_test(4.2 = Run(
       "exception Bar([Float], Float)\n"
       "bar(b) = if b then raise Bar([1.7], 2.5) else 5.8\n"
       "baz(x, b) = x + bar(b)\n"
-      "main() = try baz(7, true) { Bar([a], b) => a + b }"
+      "main() = try baz(7, true) catch { Bar([a], b) => a + b }"
     ))
   , ?_test(<<"hello">> = Expr("ensure @world after \"hello\""))
   , ?_test(begin
@@ -427,7 +427,7 @@ test_exception(Expr, Run, Many) ->
         "module Bar\n"
         "import \"./foo\"\n"
         "exception Baz\n"
-        "main() = try raise Baz { Foo.Baz => @foo, Baz => @bar }\n"
+        "main() = try raise Baz catch { Foo.Baz => @foo, Baz => @bar }\n"
       }
     ], "bar"))
   ].
