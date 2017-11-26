@@ -7,10 +7,9 @@
 %   - Map/Set operations?
 %   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Fork eunite and fix macro display
-% - Define Concatable/Separable in Base? Rename union/substract to concat/sep?
-% - Make comma/newline parsing consistent
+% - Fix bug in separate for sets
+% - Move Concatable/Separable into stdlib. Rename union/subtract to concat/sep?
 % - Default args?
-% - _ in expressions with operators
 % - Catch keyword for try?
 % - Allow running program via cli; require that main is defined
 % - Change from unit to {con, "()"} for consistency?
@@ -20,16 +19,45 @@
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
 % - Avoid propagating sig error when wrong number of args
-% - Assume Num is a closed typeclass so we can omit sig in to_float(3 : Int)
-% - Think about bug with passing curried function to native
-% - Syntax: List, Set, Map, Record
-%   - New: [a, b], #[a, b], #{a => b, c => d}, {a = b, c = d}
-%   - Put: [a, b | c], #[a, b | c], #{a => b, c => d | m}, {a = b, c = d | r}
-% - Finalize questions surrounding syntax:
-%   - Lowercase for TVs? If not, how to prevent confusion w/ Con?
-%   - Record update syntax? Consistency w/ other data structures?
-%   - Use | to separate cases for match/try?
-%   - Use -> instead of => for match/try?
+% - Record update syntax should move bar to other side
+% - Confusion between Con and TV
+% - Website + Documentation
+%
+% Defer
+% - Using EUnit from par
+% - if-let condition and other condition (or maybe when statement?)
+% - Hex escaped characters \xff or \x{...} in strings
+% - Update naming conventions
+% - Concurrency
+% - Move gm_start into on_load?
+% - Use NOTP for faster load time?
+% - [1 week] Exhaustive pattern matching errors
+% - [1 day] Test more parser error messages
+% - [2 weeks] Editor tooling for vim, atom, emacs, sublime
+%   - Fix syntax highlighting for comments in enum for vim
+% - Type aliases
+% - Use tuple for struct representation rather than map
+% - Optimize simple app case for interfaces to not rewrite
+% - Prevent passing iface fn to native fn; e.g. @lists:map(to_int, l)?
+% - Rename ifaces to is unless referring to actual {interface, ...}
+% - Rename -Var to -VarRep when necessary
+% - Rename var to id and var_ref to var?
+% - Put solver record into CG to avoid duplication of fields like nested_ivs?
+% - Implementations for builtin typeclasses?
+%   - Should we also exclude concatable, separable, etc. from sets?
+% - Collection extends Sized?
+% - [2 days] Better pattern matching
+%   - Record/Struct types
+%   - Map types
+%   - '=' sign
+%   - Allow when clause and or?
+% - Eq/Proper typeclass for non-functions?
+%   - Make pattern matching with var_value use proper type class
+% - Accessing tag of enum?
+% - Dot operator for composition?
+% - _atom field for a module
+% - Enforce newline between defs?
+% - _ in expressions with operators
 % - [1 week] REPL
 %   - See if interpreter is even necessary
 %   - Finish implementation of import, interfaces, records
@@ -59,43 +87,11 @@
 %   - Explanation for how to circumvent builtin redef error?
 %   - For rigid errors, use same TVs as are in signatures
 %   - Keep con/iface qualified if ambiguous, or always qualify
-% - Website + Documentation
-%
-% Defer
-% - Using EUnit from par
-% - if-let condition and other condition (or maybe when statement?)
-% - Hex escaped characters \xff or \x{...} in strings
-% - Update naming conventions
-% - Concurrency
-% - Move gm_start into on_load?
-% - Use NOTP for faster load time?
-% - [1 week] Exhaustive pattern matching errors
-% - [1 day] Test more parser error messages
-% - [2 weeks] Editor tooling for vim, atom, emacs, sublime
-%   - Fix syntax highlighting for comments in enum for vim
-% - Type aliases
-% - Use tuple for struct representation rather than map
-% - Optimize simple app case for interfaces to not rewrite
-% - Prevent passing iface fn to native fn; e.g. @lists:map(to_int, l)?
-% - Rename ifaces to is unless referring to actual {interface, ...}
-% - Rename -Var to -VarRep when necessary
-% - Rename var to id and var_ref to var?
-% - Put solver record into CG to avoid duplication of fields like nested_ivs?
-% - Move Concatable/Separable into stdlib
-% - Implementations for builtin typeclasses?
-%   - Should we also exclude concatable, separable, etc. from sets?
-% - Collection extends Sized?
-% - [2 days] Better pattern matching
-%   - Record/Struct types
-%   - Map types
-%   - '=' sign
-%   - Allow when clause and or?
-% - Eq/Proper typeclass for non-functions?
-%   - Make pattern matching with var_value use proper type class
-% - Accessing tag of enum?
-% - Dot operator for composition?
-% - _atom field for a module
-% - Enforce newline between defs?
+% - Assume Num is a closed typeclass so we can omit sig in to_float(3 : Int)
+% - Check and make comma/newline parsing consistent
+% - Syntax: List, Set, Map, Record
+%   - New: [a, b], #[a, b], {a => b, c => d}, {a = b, c = d}
+%   - Put: [a, b | c], #[a, b | c], {a => b, c => d | m}, {a = b, c = d | r}
 %
 % Uncertain
 % - Allow T only on rhs of iface type sig?
