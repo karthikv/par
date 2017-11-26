@@ -142,7 +142,7 @@ parse : [Token] -> Parsed<Node>
 export parse(tokens) = match tokens {
   [Lexer.Module(s), Lexer.Con(e, con) | t] =>
     imports(t) |> pbind(|(imports, rest)|
-      many(def, rest) |> pmap(Module(range(s, e), Con(e, con), imports))
+      many(def, rest) |> pmap(Module(range(s, e), Con(e, con), imports, _))
     )
 
   [Lexer.Module(_) | t] =>
@@ -251,9 +251,9 @@ def(tokens) = match tokens {
 }
 
 init : [Token] -> Parsed<(Node, [Token])>
-init = init_or_ext(false)
+init = init_or_ext(false, _)
 
-init_or_ext : Bool -> [Token] -> Parsed<(Node, [Token])>
+init_or_ext : (Bool, [Token]) -> Parsed<(Node, [Token])>
 init_or_ext(allow_ext?, tokens) = match tokens {
   [Lexer.Var(s, name), Lexer.LParen(_), Lexer.RParen(_), Lexer.Assign(_) | t] =>
     expr(t) |> pmap(|(node, rest)|
@@ -326,7 +326,7 @@ init_or_ext(allow_ext?, tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected variable identifier")
 }
 
-enumeration : Loc -> [Token] -> Parsed<(Node, [Token])>
+enumeration : (Loc, [Token]) -> Parsed<(Node, [Token])>
 enumeration(s, tokens) =
   new_type_braces(s, tokens) |> pbind(|(l, node, inner, rest)|
     many_delim_comma_or_nl(option, inner)
@@ -359,7 +359,7 @@ option(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected capitalized name of option")
 }
 
-exc : Loc -> [Token] -> Parsed<(Node, [Token])>
+exc : (Loc, [Token]) -> Parsed<(Node, [Token])>
 exc(s, tokens) = match tokens {
   [Lexer.Con(con_s, name), Lexer.LParen(paren_s) | t] =>
     parse_args(type_expr, paren_s, t) |> pmap(|(args_l, args, rest)|
@@ -372,7 +372,7 @@ exc(s, tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected capitalized name of exception")
 }
 
-structure : Loc -> [Token] -> Parsed<(Node, [Token])>
+structure : (Loc, [Token]) -> Parsed<(Node, [Token])>
 structure(s, tokens) =
   new_type_braces(s, tokens) |> pbind(|(l, node, inner, rest)|
     many_delim_comma_or_nl(field_sig, inner)
@@ -380,7 +380,7 @@ structure(s, tokens) =
     |> pmap(|field_sigs| (Struct(l, node, field_sigs), rest))
   )
 
-new_type_braces : Loc -> [Token] -> Parsed<(Loc, Node, [Token], [Token])>
+new_type_braces : (Loc, [Token]) -> Parsed<(Loc, Node, [Token], [Token])>
 new_type_braces(s, tokens) = match tokens {
   [Lexer.Con(con_l, con), Lexer.Lt(_) | t] =>
     enclosed_tag(con_l, t) |> pbind(|v| match v {
@@ -418,7 +418,7 @@ tv_node(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected type variable")
 }
 
-iface : Loc -> [Token] -> Parsed<(Node, [Token])>
+iface : (Loc, [Token]) -> Parsed<(Node, [Token])>
 iface(s, tokens) = match tokens {
   [Lexer.Con(con_l, name) | t] =>
     let parsed_parents =
@@ -456,6 +456,7 @@ qualified_con(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected capitalized name")
 }
 
+implementation : (Loc, [Token]) -> Parsed<(Node, [Token])>
 implementation(s, tokens) =
   match tokens {
     [Lexer.Con(con_s, mod) | t] =>
@@ -496,7 +497,7 @@ implementation(s, tokens) =
 expr : [Token] -> Parsed<(Node, [Token])>
 expr(tokens) = expr_r(head_loc(tokens), Start, [], tokens)
 
-expr_r : Option<Loc> -> State -> [NodeOp] -> [Token] -> Parsed<(Node, [Token])>
+expr_r : (Option<Loc>, State, [NodeOp], [Token]) -> Parsed<(Node, [Token])>
 expr_r(expr_s, state, stack, tokens) = match state {
   Start =>
     let transition = match tokens {
@@ -597,7 +598,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
               |> pmap(|pairs| Map(l, pairs))
 
             (base, [Lexer.Bar(_) | t]) =>
-              many_delim_comma_or_nl(init_or_ext(true), t)
+              many_delim_comma_or_nl(init_or_ext(true, _), t)
               |> pmap_or(|v| v, [])
               |> pmap(|fields| AnonRecordExt(l, make_ref(), base, fields))
 
@@ -862,7 +863,7 @@ assoc(tokens) = expr(tokens) |> pbind(|v| match v {
   (_, t) => head_loc(t) |> one_err("Expected fat arrow '=>'")
 })
 
-expr_cases : Loc -> [Token] -> Parsed<(Loc, Node, [Node], [Token])>
+expr_cases : (Loc, [Token]) -> Parsed<(Loc, Node, [Node], [Token])>
 expr_cases(s, tokens) =
   expr(tokens) |> pbind(|v| match v {
     (node, [Lexer.LBrace(brace_s) | t]) =>
@@ -878,7 +879,7 @@ expr_cases(s, tokens) =
 type_expr : [Token] -> Parsed<(Node, [Token])>
 type_expr(tokens) = type_expr_r(None, tokens)
 
-type_expr_r : Option<Node> -> [Token] -> Parsed<(Node, [Token])>
+type_expr_r : (Option<Node>, [Token]) -> Parsed<(Node, [Token])>
 type_expr_r(lhs, tokens) = match lhs {
   None =>
     let recurse(t, node) = type_expr_r(Some(node), t)
@@ -913,7 +914,7 @@ type_expr_r(lhs, tokens) = match lhs {
           )
           |> pmap_or(|v| v, [])
           |> pmap(|params| Gen(l, Con(l, ['L', 'i', 's', 't']), params))
-          |> pbind(recurse(rest))
+          |> pbind(recurse(rest, _))
         )
 
       [Lexer.LParen(s), Lexer.RParen(e) | t] => Unit(range(s, e)) |> recurse(t)
@@ -932,14 +933,14 @@ type_expr_r(lhs, tokens) = match lhs {
           |> pmap(|field_sigs|
             RecordExtTE(l, TV(tv_l, tv, []), field_sigs)
           )
-          |> pbind(recurse(rest))
+          |> pbind(recurse(rest, _))
         )
       [Lexer.LBrace(s) | t] =>
         enclosed_brace(s, t) |> pbind(|(l, inner, rest)|
           many_delim_comma_or_nl(field_sig, inner)
           |> pmap_or(|v| v, [])
           |> pmap(|field_sigs| RecordTE(l, field_sigs))
-          |> pbind(recurse(rest))
+          |> pbind(recurse(rest, _))
         )
 
       _ => head_loc(tokens) |> one_err("Expected a type expression")
@@ -963,7 +964,7 @@ type_expr_r(lhs, tokens) = match lhs {
   }
 }
 
-type_params : Loc -> [Token] -> Parsed<(Loc, [Node], [Token])>
+type_params : (Loc, [Token]) -> Parsed<(Loc, [Node], [Token])>
 type_params(l, tokens) = match tokens {
   [Lexer.Lt(s) | t] =>
     enclosed_tag(s, t) |> pbind(|(params_l, inner, rest)|
@@ -975,10 +976,10 @@ type_params(l, tokens) = match tokens {
   _ => parsed((l, [], tokens))
 }
 
-ifaces : Loc -> [Token] -> Parsed<(Loc, [Node], [Token])>
+ifaces : (Loc, [Token]) -> Parsed<(Loc, [Node], [Token])>
 ifaces(l, tokens) = ifaces_r(l, tokens, [])
 
-ifaces_r : Loc -> [Token] -> [Node] -> Parsed<(Loc, [Node], [Token])>
+ifaces_r : (Loc, [Token], [Node]) -> Parsed<(Loc, [Node], [Token])>
 ifaces_r(l, tokens, ifaces) = match tokens {
   [Lexer.Tilde(_), Lexer.Con(con_s, mod) | t] =>
     let (con_node, t) = try_qualify_con(con_s, mod, t)
@@ -1039,7 +1040,7 @@ then_else(tokens) = match tokens {
   _ => head_loc(tokens) |> one_err("Expected keyword 'then'")
 }
 
-let_expr : Loc -> [Token] -> Parsed<(Node, [Token])>
+let_expr : (Loc, [Token]) -> Parsed<(Node, [Token])>
 let_expr(ref_l, tokens) = match tokens {
   [Lexer.Let(s) | t] =>
     binding(t) |> pbind(|(node, rest)|
@@ -1166,7 +1167,7 @@ case(tokens) = pattern(tokens) |> pbind(|v| match v {
 
 
 //--- Helpers
-reduce : Int -> [NodeOp] -> [NodeOp]
+reduce : (Int, [NodeOp]) -> [NodeOp]
 reduce(next_prec, stack) =
   match last_op(stack) {
     Some(BinaryOp(bopa)) =>
@@ -1220,14 +1221,14 @@ opa_prec_list = [
   [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Raise), Un(Discard), Un(Assume)]
 ]
 
-try_qualify_con : Loc -> [Char] -> [Token] -> (Node, [Token])
+try_qualify_con : (Loc, [Char], [Token]) -> (Node, [Token])
 try_qualify_con(s, mod, tokens) =
   if let [Lexer.Dot(_), Lexer.Con(e, con) | t] = tokens then
     (Con(range(s, e), mod ++ ['.' | con]), t)
   else
     (Con(s, mod), tokens)
 
-parse_list : ([Token] -> Parsed<(Node, [Token])>) -> Loc -> [Token] ->
+parse_list : ([Token] -> Parsed<(Node, [Token])>, Loc, [Token]) ->
   Parsed<(Node, [Token])>
 parse_list(f, s, tokens) =
   enclosed_bracket(s, tokens) |> pbind(|(l, inner, rest)|
@@ -1278,8 +1279,12 @@ validate_elems(elems) =
     (Some(l), str)
   , let_elems)
 
-parse_tuple : ([Token] -> Parsed<(Node, [Token])>) ->
-  (Loc -> [Node] -> Node) -> Loc -> [Token] -> Parsed<(Node, [Token])>
+parse_tuple : (
+  [Token] -> Parsed<(Node, [Token])>,
+  (Loc, [Node]) -> Node,
+  Loc,
+  [Token]
+) -> Parsed<(Node, [Token])>
 parse_tuple(f, wrap, s, tokens) =
   enclosed_paren(s, tokens) |> pbind(|(l, inner, rest)|
     f(inner) |> pbind(|(node, t)| match t {
@@ -1306,7 +1311,7 @@ parse_tuple(f, wrap, s, tokens) =
     })
   )
 
-parse_args : ([Token] -> Parsed<(Node, [Token])>) -> Loc -> [Token] ->
+parse_args : ([Token] -> Parsed<(Node, [Token])>, Loc, [Token]) ->
   Parsed<(Loc, [Node], [Token])>
 parse_args(f, s, tokens) =
   enclosed_paren(s, tokens) |> pbind(|(l, inner, rest)|
@@ -1315,7 +1320,7 @@ parse_args(f, s, tokens) =
     |> pmap(|args| (l, args, rest))
   )
 
-many : ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<[T]>
+many : ([Token] -> Parsed<(T, [Token])>, [Token]) -> Parsed<[T]>
 many(f, tokens) =
   let p = f(tokens)
   match p.value {
@@ -1334,8 +1339,11 @@ many(f, tokens) =
     None => { p | value := None }
   }
 
-many_delim_cb : (T -> [Token] -> Parsed<(Bool, [Token])>) ->
-  ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<([T], [Token])>
+many_delim_cb : (
+  (T, [Token]) -> Parsed<(Bool, [Token])>,
+  [Token] -> Parsed<(T, [Token])>,
+  [Token]
+) -> Parsed<([T], [Token])>
 many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|(item, rest)|
   cb(item, rest) |> pbind(|(continue?, rest)|
     if !continue? then
@@ -1355,7 +1363,7 @@ fake_loc = Loc {
   end_col = -1
 }
 
-delim_cb : Atom -> String -> T -> [Token] -> Parsed<(Bool, [Token])>
+delim_cb : (Atom, String, T, [Token]) -> Parsed<(Bool, [Token])>
 delim_cb(delim_tag, delim_str, _, tokens) =
   if let [] = tokens then
     parsed((false, []))
@@ -1368,17 +1376,23 @@ delim_cb(delim_tag, delim_str, _, tokens) =
         "Expected " ++ delim_str ++ " delimiter after expression"
       )
 
-delim_comma_cb = delim_cb(token_tag(Lexer.Comma(fake_loc)), "comma ','")
+delim_comma_cb : (T, [Token]) -> Parsed<(Bool, [Token])>
+delim_comma_cb =
+  let tag = token_tag(Lexer.Comma(fake_loc))
+  delim_cb(tag, "comma ','", _, _)
 
-many_delim : (T -> [Token] -> Parsed<(Bool, [Token])>) ->
-  ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<[T]>
+many_delim : (
+  (T, [Token]) -> Parsed<(Bool, [Token])>,
+  [Token] -> Parsed<(T, [Token])>,
+  [Token]
+) -> Parsed<[T]>
 many_delim(cb, f, tokens) =
   many_delim_cb(cb, f, tokens) |> pmap(|(items, [])| items)
 
-many_delim_comma : ([Token] -> Parsed<(T, [Token])>) -> [Token] -> Parsed<[T]>
-many_delim_comma = many_delim(delim_comma_cb)
+many_delim_comma : ([Token] -> Parsed<(T, [Token])>, [Token]) -> Parsed<[T]>
+many_delim_comma = many_delim(delim_comma_cb, _, _)
 
-delim_or_nl_cb : Atom -> String -> Node -> [Token] -> Parsed<(Bool, [Token])>
+delim_or_nl_cb : (Atom, String, Node, [Token]) -> Parsed<(Bool, [Token])>
 delim_or_nl_cb(delim_tag, delim_str, node, tokens) =
   if let [] = tokens then
     parsed((false, []))
@@ -1412,22 +1426,23 @@ delim_or_nl_cb(delim_tag, delim_str, node, tokens) =
         " or by aligning them on separate lines"
       )
 
-delim_comma_or_nl_cb : Node -> [Token] -> Parsed<(Bool, [Token])>
+delim_comma_or_nl_cb : (Node, [Token]) -> Parsed<(Bool, [Token])>
 delim_comma_or_nl_cb = delim_or_nl_cb(
   token_tag(Lexer.Comma(fake_loc)),
-  "comma ','"
+  "comma ','",
+  _,
+  _,
 )
 
-many_delim_comma_or_nl : ([Token] -> Parsed<(Node, [Token])>) -> [Token] ->
+many_delim_comma_or_nl : ([Token] -> Parsed<(Node, [Token])>, [Token]) ->
   Parsed<[Node]>
 many_delim_comma_or_nl(f, tokens) =
   many_delim_cb(delim_comma_or_nl_cb, f, tokens) |> pmap(|(items, [])| items)
 
-enclosed : Atom -> Atom -> String -> Loc -> [Token] ->
-  Parsed<(Loc, [Token], [Token])>
-enclosed = enclosed_r([], 1)
+enclosed : (Atom, Atom, String, Loc, [Token]) -> Parsed<(Loc, [Token], [Token])>
+enclosed = enclosed_r([], 1, _, _, _, _, _)
 
-enclosed_r : [Token] -> Int -> Atom -> Atom -> String -> Loc -> [Token] ->
+enclosed_r : ([Token], Int, Atom, Atom, String, Loc, [Token]) ->
   Parsed<(Loc, [Token], [Token])>
 enclosed_r(inner, depth, open_tag, close_tag, close_str, s, tokens) =
   match tokens {
@@ -1448,32 +1463,40 @@ enclosed_r(inner, depth, open_tag, close_tag, close_str, s, tokens) =
     [] => Some(s) |> one_err("Couldn't find matching " ++ close_str)
   }
 
-enclosed_bracket : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
+enclosed_bracket : (Loc, [Token]) -> Parsed<(Loc, [Token], [Token])>
 enclosed_bracket = enclosed(
   token_tag(Lexer.LBracket(fake_loc)),
   token_tag(Lexer.RBracket(fake_loc)),
-  "closing bracket ']'"
+  "closing bracket ']'",
+  _,
+  _,
 )
 
-enclosed_paren : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
+enclosed_paren : (Loc, [Token]) -> Parsed<(Loc, [Token], [Token])>
 enclosed_paren = enclosed(
   token_tag(Lexer.LParen(fake_loc)),
   token_tag(Lexer.RParen(fake_loc)),
-  "closing paren ')'"
+  "closing paren ')'",
+  _,
+  _,
 )
 
-enclosed_brace : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
+enclosed_brace : (Loc, [Token]) -> Parsed<(Loc, [Token], [Token])>
 enclosed_brace = enclosed(
   token_tag(Lexer.LBrace(fake_loc)),
   token_tag(Lexer.RBrace(fake_loc)),
-  "closing brace '}'"
+  "closing brace '}'",
+  _,
+  _,
 )
 
-enclosed_tag : Loc -> [Token] -> Parsed<(Loc, [Token], [Token])>
+enclosed_tag : (Loc, [Token]) -> Parsed<(Loc, [Token], [Token])>
 enclosed_tag = enclosed(
   token_tag(Lexer.Lt(fake_loc)),
   token_tag(Lexer.Gt(fake_loc)),
-  "closing greater than '>'"
+  "closing greater than '>'",
+  _,
+  _,
 )
 
 head_loc : [Token] -> Option<Loc>
@@ -1492,7 +1515,7 @@ token_loc(token) = @erlang:element(2, token)
 token_tag : Token -> Atom
 token_tag(v) = @erlang:element(1, v)
 
-range : Loc -> Loc -> Loc
+range : (Loc, Loc) -> Loc
 range(start, end) = Loc {
   start_line = start.start_line
   start_col = start.start_col
@@ -1500,7 +1523,7 @@ range(start, end) = Loc {
   end_col = end.end_col
 }
 
-pmap : (A -> B) -> Parsed<A> -> Parsed<B>
+pmap : (A -> B, Parsed<A>) -> Parsed<B>
 pmap(f, p) =
   let new_value = match p.value {
     Some(a) => Some(f(a))
@@ -1508,7 +1531,7 @@ pmap(f, p) =
   }
   { p | value := new_value }
 
-pmap_or : (A -> B) -> B -> Parsed<A> -> Parsed<B>
+pmap_or : (A -> B, B, Parsed<A>) -> Parsed<B>
 pmap_or(f, default, p) =
   let new_value = match p.value {
     Some(a) => Some(f(a))
@@ -1516,7 +1539,7 @@ pmap_or(f, default, p) =
   }
   { p | value := new_value }
 
-pbind : (A -> Parsed<B>) -> Parsed<A> -> Parsed<B>
+pbind : (A -> Parsed<B>, Parsed<A>) -> Parsed<B>
 pbind(f, p) = match p.value {
   Some(a) =>
     let new_r = f(a)
@@ -1524,7 +1547,7 @@ pbind(f, p) = match p.value {
   None => { p | value := None }
 }
 
-pbind_or : (A -> Parsed<B>) -> Parsed<B> -> Parsed<A> -> Parsed<B>
+pbind_or : (A -> Parsed<B>, Parsed<B>, Parsed<A>) -> Parsed<B>
 pbind_or(f, default, p) = match p.value {
   Some(_) => pbind(f, p)
   None => default
@@ -1533,13 +1556,13 @@ pbind_or(f, default, p) = match p.value {
 parsed : A -> Parsed<A>
 parsed(a) = Parsed { value = Some(a), errs = [] }
 
-parsed_err : A -> String -> Option<Loc> -> Parsed<A>
+parsed_err : (A, String, Option<Loc>) -> Parsed<A>
 parsed_err(a, str, mloc) = Parsed { value = Some(a), errs = [(mloc, str)] }
 
-add_err : Parsed<A> -> String -> Option<Loc> -> Parsed<B>
+add_err : (Parsed<A>, String, Option<Loc>) -> Parsed<B>
 add_err(p, str, mloc) = { p | value := None, errs = [(mloc, str) | p.errs] }
 
-one_err : String -> Option<Loc> -> Parsed<A>
+one_err : (String, Option<Loc>) -> Parsed<A>
 one_err(str, mloc) = Parsed { value = None, errs = [(mloc, str)] }
 
 make_ref : () -> Ref

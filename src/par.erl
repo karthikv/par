@@ -8,6 +8,7 @@
 %   - Ensure stdlib functions in lexer/parser are all eliminated
 % - Fork eunite and fix macro display
 % - Define Concatable/Separable in Base? Rename union/substract to concat/sep?
+% - Make comma/newline parsing consistent
 % - Default args?
 % - _ in expressions with operators
 % - Catch keyword for try?
