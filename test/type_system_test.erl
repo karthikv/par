@@ -516,6 +516,12 @@ expr_test_() ->
       {"Bool", "A ~ Num", l(8, 4), ?FROM_OP_RHS('+')}
     ))
   , ?_test(bad_expr("(|x| x)(1, 2)", {?ERR_ARITY(2, 1), l(0, 13)}))
+  % Make sure we still report errors stemming from the return type when there's
+  % an arity error.
+  , ?_test(bad_expr("(|x, y| x + y)(1) && false", [
+      {"A ~ Num", "Bool", l(0, 17), ?FROM_OP_LHS('&&')},
+      {?ERR_ARITY(1, 2), l(0, 17)}
+    ]))
 
 
   , ?_test("A" = ok_expr("@lists:filter(|x| x > 3, [2, 4, 6])"))

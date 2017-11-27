@@ -2539,9 +2539,13 @@ unify({lam, ArgTs1, ReturnT1}, {lam, ArgTs2, ReturnT2}, S) ->
       {ReturnValid, S2} = sub_unify(ReturnT1, ReturnT2, S1),
       {ArgsValid andalso ReturnValid, S2}
   end;
-unify({lam, _, Provided, _}, {lam, ArgTs, _}, S)
+unify({lam, _, Provided, ReturnT1}, {lam, ArgTs, ReturnT2}, S)
     when length(Provided) /= length(ArgTs) ->
-  add_err(?ERR_ARITY(length(Provided), length(ArgTs)), S);
+  % We can still unify return types to report further issues.
+  #solver{t1=OrigT1, t2=OrigT2} = S,
+  {_, S1} = sub_unify(ReturnT1, ReturnT2, S#solver{t1=ReturnT1, t2=ReturnT2}),
+  S2 = S1#solver{t1=OrigT1, t2=OrigT2},
+  add_err(?ERR_ARITY(length(Provided), length(ArgTs)), S2);
 unify({lam, LEnv, Provided, ReturnT1}, {lam, ArgTs, ReturnT2}, S) ->
   #solver{
     module=Module,
