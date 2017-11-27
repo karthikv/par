@@ -2808,6 +2808,15 @@ other_errors_test_() ->
   %%     "}",
   %%     {"Result<rigid(A)>", "Maybe<B>", l(4, 2, 7), ?FROM_MATCH_PATTERN}
   %%   ))
+
+  % Regression: invalid sig that makes hole causes global to never be
+  % generalized, thereby crashing Tarjan's.
+  , ?_test(bad_prg(
+      "bar : Foo\n"
+      "bar = 1\n"
+      "foo = bar + 1",
+      {?ERR_NOT_DEF_TYPE("Foo"), l(6, 3)}
+    ))
   ].
 
 import_test_() ->

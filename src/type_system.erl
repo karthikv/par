@@ -638,55 +638,65 @@ infer_defs(Comps, C) ->
               ModuleC1#ctx{g_env=NewGEnv}
           end,
 
-          {ExprCstLoc, ExprCstFrom, ExprT, ModuleC3} = case Sig of
-            none ->
-              {ExprT_, ModuleC3_} = infer(Expr, new_gnr(TV, ID, ModuleC2)),
-              {?LOC(Expr), ?FROM_GLOBAL_DEF(Name), ExprT_, ModuleC3_};
+          {SigT, ModuleC3} = case Sig of
+            none -> {none, ModuleC2};
+            % There's no active gnr right now, but inferring a signature
+            % doesn't add any constraints, so this is OK.
+            _ -> infer(Sig, ModuleC2)
+          end,
 
-            % We'll generalize immediately after the sig and expr csts are
-            % unified in a separate gnr.
-            _ ->
-              {ExprT_, ModuleC3_} = infer(Expr, new_gnr(ModuleC2)),
-              {?LOC(Sig), ?FROM_GLOBAL_SIG(Name), ExprT_, ModuleC3_}
+          if
+            % If SigT is none, there was no signature, and so we need to
+            % generalize after the expr constraint.
+            %
+            % If SigT is a hole, we couldn't determine a valid sig. If we try to
+            % generalize after unifying SigT, we'll get a rigid TV, which will
+            % propagate errors. Instead, ignore the sig and generalize after the
+            % expr constraint.
+            SigT == none; element(1, SigT) == hole ->
+              ValidSig = false,
+              {ExprT, ModuleC4} = infer(Expr, new_gnr(TV, ID, ModuleC3)),
+              ExprCstLoc = ?LOC(Expr),
+              ExprCstFrom = ?FROM_GLOBAL_DEF(Name);
+
+            % We'll generalize immediately after the sig is unified in a
+            % separate gnr. When the expr constraint gets unified later, we
+            % want the loc/from to be the sig, as that's where the real error
+            % is stemming from.
+            true ->
+              ValidSig = true,
+              {ExprT, ModuleC4} = infer(Expr, new_gnr(ModuleC3)),
+              ExprCstLoc = ?LOC(Sig),
+              ExprCstFrom = ?FROM_GLOBAL_SIG(Name)
           end,
 
           % Unify expr constraint first for better error messages.
-          ModuleC4 = append_csts(
-            [make_cst(TV, ExprT, ExprCstLoc, ExprCstFrom, ModuleC3)],
-            ModuleC3
+          ModuleC5 = append_csts(
+            [make_cst(TV, ExprT, ExprCstLoc, ExprCstFrom, ModuleC4)],
+            ModuleC4
           ),
-          ModuleC5 = finish_gnr(ModuleC4, ModuleC2#ctx.gnr),
-          ModuleC6 = ModuleC5#ctx{g_env=ModuleC#ctx.g_env},
+          ModuleC6 = finish_gnr(ModuleC5, ModuleC3#ctx.gnr),
+          ModuleC7 = ModuleC6#ctx{g_env=ModuleC#ctx.g_env},
 
-          case Sig of
-            none -> {none, ModuleC6};
-            _ ->
-              % There's no active gnr right now. Inferring a signature doesn't
-              % add any constraints, so this is OK.
-              {SigT, ModuleC7} = infer(Sig, ModuleC6),
-              case SigT of
-                % Couldn't determine a valid signature. If we try to generalize,
-                % we'll get a rigid TV, which will propagate errors. Instead,
-                % just stop here.
-                {hole, false} -> {none, ModuleC7};
+          if
+            ValidSig ->
+              SigCst = make_cst(
+                TV,
+                SigT,
+                ?LOC(Sig),
+                ?FROM_GLOBAL_SIG(Name),
+                ModuleC7
+              ),
 
-                _ ->
-                  SigCst = make_cst(
-                    TV,
-                    SigT,
-                    ?LOC(Sig),
-                    ?FROM_GLOBAL_SIG(Name),
-                    ModuleC7
-                  ),
+              ModuleC8 = infer_csts_first(
+                [SigCst],
+                ModuleC3#ctx.gnrs,
+                [TV, ID],
+                ModuleC7
+              ),
+              {none, ModuleC8};
 
-                  ModuleC8 = infer_csts_first(
-                    [SigCst],
-                    ModuleC2#ctx.gnrs,
-                    [TV, ID],
-                    ModuleC7
-                  ),
-                  {none, ModuleC8}
-              end
+            true -> {none, ModuleC7}
           end;
 
         _ when element(1, Node) == sig -> {Node, ModuleC1};

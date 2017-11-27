@@ -8,12 +8,15 @@
 % - Move Concatable/Separable into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
 % - Default args?
+% - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Allow running program via cli; require that main is defined
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
 %   finish. Error is "expected ... before end-of-file" even though it's not
 %   the end of file
+%   - "Expected closing '}'" messages might have wrong start location b/c
+%     we use the keyword location!
 % - Avoid propagating sig error when wrong number of args
 % - Record update syntax should move bar to other side
 % - Confusion between Con and TV
@@ -66,8 +69,6 @@
 %   - Import errors: import from same file twice
 %   - More descriptive error when there's a dup import from variant
 %   - Show both locations for redef + other relevant errors
-%   - "Expected closing '}'" messages might have wrong start location b/c
-%     we use the keyword location!
 %   - Better message for no impl of interface
 %   - Better message for no impl of anon record type when there's a struct
 %     type that matches
