@@ -2164,7 +2164,7 @@ solve(Gs, S) ->
   %%   lists:map(fun(G) -> G#gnr{csts=utils:pretty_csts(G#gnr.csts)} end, Gs)
   %% ),
 
-  T = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
+  #tarjan{solver=S1} = lists:foldl(fun(#gnr{id=ID}, FoldT) ->
     #{ID := #gnr{index=Index}} = FoldT#tarjan.map,
     if
       Index == undefined -> connect(ID, FoldT#tarjan{stack=[]});
@@ -2172,68 +2172,62 @@ solve(Gs, S) ->
     end
   end, #tarjan{map=Map, next_index=0, solver=S}, Gs),
 
-  #solver{
-    passed_vs=PassedVs,
-    return_vs=ReturnVs,
-    must_solve_vs=MustSolveVs,
-    err_vs=ErrVs
-  }=S1 = T#tarjan.solver,
+  % Ensure each V that must be solved is actually solved, but only *after* all
+  % other errors are accounted for. This is because errors create TVs when
+  % there would be concrete types, and these TVs can often propagate into must
+  % solve errors.
+  if
+    S1#solver.errs == [] ->
+      #solver{
+        passed_vs=PassedVs,
+        return_vs=ReturnVs,
+        must_solve_vs=MustSolveVs
+      } = S1,
 
-  SubbedMustSolveVs = ordsets:fold(fun(V, FoldMustSolveVs) ->
-    % Is and Rigid don't matter for subs.
-    case subs_s({tv, V, none, false}, S1) of
-      % Rigidity doesn't matter; if NewV is rigid, it should still be solved
-      % for by means of a bound impl.
-      {tv, NewV, _, _} -> ordsets:add_element(NewV, FoldMustSolveVs);
-      {gen, NewV, _, _, _} -> ordsets:add_element(NewV, FoldMustSolveVs);
-      _ -> FoldMustSolveVs
-    end
-  end, ordsets:new(), MustSolveVs),
+      SubbedMustSolveVs = ordsets:fold(fun(V, FoldMustSolveVs) ->
+        % Is and Rigid don't matter for subs.
+        case subs_s({tv, V, none, false}, S1) of
+          % Rigidity doesn't matter; if NewV is rigid, it should still be solved
+          % for by means of a bound impl.
+          {tv, NewV, _, _} -> ordsets:add_element(NewV, FoldMustSolveVs);
+          {gen, NewV, _, _, _} -> ordsets:add_element(NewV, FoldMustSolveVs);
+          _ -> FoldMustSolveVs
+        end
+      end, ordsets:new(), MustSolveVs),
 
-  SubbedErrVs = ordsets:fold(fun(ErrV, FoldErrVs) ->
-    % Is and Rigid don't matter for subs.
-    case subs_s({tv, ErrV, none, false}, S1) of
-      % Rigidity doesn't matter; we tried to unify ErrV/NewV with a concrete
-      % type at some point, so don't report ambiguity error until the user
-      % decides which it actually is.
-      {tv, NewV, _, _} -> ordsets:add_element(NewV, FoldErrVs);
-      {gen, NewV, _, _, _} -> ordsets:add_element(NewV, FoldErrVs);
-      _ -> FoldErrVs
-    end
-  end, ordsets:new(), ErrVs),
+      {ReportedVs, S2} = lists:foldl(fun(PassedV, {FoldReportedVs, FoldS}) ->
+        {OrigV, ArgT, Module, Loc, LEnv} = PassedV,
+        % Is and Rigid don't matter for subs.
+        SubbedT = subs_s({tv, OrigV, none, false}, FoldS),
+        BoundVs = bound_vs(LEnv, FoldS),
 
-  {ReportedVs, S2} = lists:foldl(fun(PassedV, {FoldReportedVs, FoldS}) ->
-    {OrigV, ArgT, Module, Loc, LEnv} = PassedV,
-    % Is and Rigid don't matter for subs.
-    SubbedT = subs_s({tv, OrigV, none, false}, FoldS),
-    BoundVs = bound_vs(LEnv, FoldS),
+        ordsets:fold(fun(V, {NestedReportedVs, NestedS}) ->
+          validate_solved(
+            {V, ArgT, Module, Loc, LEnv},
+            true,
+            SubbedMustSolveVs,
+            BoundVs,
+            NestedReportedVs,
+            NestedS
+          )
+        end, {FoldReportedVs, FoldS}, fvs(SubbedT))
+      end, {ordsets:new(), S1}, PassedVs),
 
-    ordsets:fold(fun(V, {NestedReportedVs, NestedS}) ->
-      validate_solved(
-        {V, ArgT, Module, Loc, LEnv},
-        true,
-        SubbedMustSolveVs,
-        SubbedErrVs,
-        BoundVs,
-        NestedReportedVs,
-        NestedS
-      )
-    end, {FoldReportedVs, FoldS}, fvs(SubbedT))
-  end, {ordsets:new(), S1}, PassedVs),
+      {_, FinalS} = lists:foldl(fun(ReturnV, {FoldReportedVs, FoldS}) ->
+        {_, _, _, _, LEnv} = ReturnV,
+        BoundVs = bound_vs(LEnv, FoldS),
+        validate_solved(
+          ReturnV,
+          false,
+          SubbedMustSolveVs,
+          BoundVs,
+          FoldReportedVs,
+          FoldS
+        )
+      end, {ReportedVs, S2}, ReturnVs);
 
-  {_, FinalS} = lists:foldl(fun(ReturnV, {FoldReportedVs, FoldS}) ->
-    {_, _, _, _, LEnv} = ReturnV,
-    BoundVs = bound_vs(LEnv, FoldS),
-    validate_solved(
-      ReturnV,
-      false,
-      SubbedMustSolveVs,
-      SubbedErrVs,
-      BoundVs,
-      FoldReportedVs,
-      FoldS
-    )
-  end, {ReportedVs, S2}, ReturnVs),
+    true -> FinalS = S1
+  end,
 
   case FinalS#solver.errs of
     [] -> {ok, FinalS};
@@ -2255,18 +2249,16 @@ validate_solved(
   {V, T, Module, Loc, _},
   IsArg,
   MustSolveVs,
-  ErrVs,
   BoundVs,
   ReportedVs,
   S
 ) ->
   MustSolveV = ordsets:is_element(V, MustSolveVs),
-  IsErrV = ordsets:is_element(V, ErrVs),
   Bound = ordsets:is_element(V, BoundVs),
   Reported = ordsets:is_element(V, ReportedVs),
 
   if
-    MustSolveV, not IsErrV, not Bound, not Reported ->
+    MustSolveV, not Bound, not Reported ->
       SubbedT = subs_s(T, S),
       GenTV = lists:foldl(fun({_, GenTV}, FoldGenTV) ->
         {gen, HiddenV, _, _, _} = GenTV,

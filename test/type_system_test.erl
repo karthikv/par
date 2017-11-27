@@ -1837,6 +1837,15 @@ interface_test_() ->
       "foo = (|-| const())()",
       {?ERR_MUST_SOLVE_RETURN("A ~ Const", "A ~ Const"), l(1, 6, 15)}
     ))
+  % Regression: passing too few arguments makes the return type a TV, which
+  % propagates and creates a must solve error.
+  , ?_test(bad_prg(
+      IfaceToI ++
+      "impl ToI for Int { to_i(i) = i }\n"
+      "foo(x, y) = x + y\n"
+      "bar = foo(1) |> to_i",
+      {?ERR_ARITY(1, 2), l(3, 6, 6)}
+    ))
 
 
   , ?_test("(A -> B) -> C<A> ~ Mappable -> C<B> ~ Mappable" = ok_prg(
