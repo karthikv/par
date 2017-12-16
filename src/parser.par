@@ -1373,19 +1373,19 @@ many : ([Token] -> Parsed<(T, [Token])>, [Token]) -> Parsed<[T]>
 many(f, tokens) =
   let p = f(tokens)
   match p.value {
-    Some((v, [])) => { p | value := Some([v]) }
+    Some((v, [])) => { value := Some([v]) | p }
     Some((v, t)) =>
       let new_r = many(f, t)
       match new_r.value {
         Some(vs) => {
-          new_r |
           value = Some([v | vs])
           errs = new_r.errs ++ p.errs
+          | new_r
         }
-        None => { new_r | errs = new_r.errs ++ p.errs }
+        None => { errs = new_r.errs ++ p.errs | new_r }
       }
 
-    None => { p | value := None }
+    None => { value := None | p }
   }
 
 many_delim_cb : (
@@ -1563,7 +1563,7 @@ pmap(f, p) =
     Some(a) => Some(f(a))
     None => None
   }
-  { p | value := new_value }
+  { value := new_value | p }
 
 pmap_or : (A -> B, B, Parsed<A>) -> Parsed<B>
 pmap_or(f, default, p) =
@@ -1571,14 +1571,14 @@ pmap_or(f, default, p) =
     Some(a) => Some(f(a))
     None => Some(default)
   }
-  { p | value := new_value }
+  { value := new_value | p }
 
 pbind : (A -> Parsed<B>, Parsed<A>) -> Parsed<B>
 pbind(f, p) = match p.value {
   Some(a) =>
     let new_r = f(a)
-    { new_r | errs = new_r.errs ++ p.errs }
-  None => { p | value := None }
+    { errs = new_r.errs ++ p.errs | new_r }
+  None => { value := None | p }
 }
 
 pbind_or : (A -> Parsed<B>, Parsed<B>, Parsed<A>) -> Parsed<B>
@@ -1594,7 +1594,7 @@ parsed_err : (A, String, Option<Loc>) -> Parsed<A>
 parsed_err(a, str, mloc) = Parsed { value = Some(a), errs = [(mloc, str)] }
 
 add_err : (Parsed<A>, String, Option<Loc>) -> Parsed<B>
-add_err(p, str, mloc) = { p | value := None, errs = [(mloc, str) | p.errs] }
+add_err(p, str, mloc) = { value := None, errs = [(mloc, str) | p.errs] | p }
 
 one_err : (String, Option<Loc>) -> Parsed<A>
 one_err(str, mloc) = Parsed { value = None, errs = [(mloc, str)] }

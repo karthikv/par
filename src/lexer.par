@@ -193,7 +193,7 @@ tokenize_r(chs, line, col, tokens) =
 
           // bad string literal; make the error start at the opening quote
           (Unexpected(loc, token, msg), t) =>
-            let new_loc = inc({ loc | start_col = loc.start_col + 1 }, 1)
+            let new_loc = inc({ start_col = loc.start_col + 1 | loc }, 1)
             (Unexpected(new_loc, token, msg), t)
         }
 
@@ -346,9 +346,9 @@ tokenize_raw_str_r(loc, chs, accum) = match chs {
 
   [] =>
     let start_loc = {
-      loc |
       end_line = loc.start_line
       end_col = loc.start_col + 1
+      | loc
     }
     let token = Unexpected(
       start_loc,
@@ -364,7 +364,7 @@ tokenize_whitespace(loc, chs) = tokenize_whitespace_r(loc, chs, [])
 tokenize_whitespace_r : (Loc, [Char], [Char]) -> (Token, [Char])
 tokenize_whitespace_r(loc, chs, accum) = match chs {
   ['\n' | t] => tokenize_whitespace_r(
-    { loc | end_line = loc.end_line + 1, end_col = 1 },
+    { end_line = loc.end_line + 1, end_col = 1 | loc },
     t,
     ['\n' | accum]
   )
@@ -453,10 +453,10 @@ word? : Char -> Bool
 word?(ch) = lower?(ch) || upper?(ch) || digit?(ch) || ch == '_'
 
 inc : (Loc, Int) -> Loc
-inc(loc, amount) = { loc | end_col = loc.end_col + amount }
+inc(loc, amount) = { end_col = loc.end_col + amount | loc }
 
 next_line : Loc -> Loc
-next_line(loc) = { loc | end_line = loc.end_line + 1, end_col = 1 }
+next_line(loc) = { end_line = loc.end_line + 1, end_col = 1 | loc }
 
 unesc : Char -> Char
 unesc(ch) = match ch {
