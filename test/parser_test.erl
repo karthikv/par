@@ -854,16 +854,16 @@ expr_test_() ->
       ok_expr("#[true] : Other.Bar<Bool>")
     )
   , ?_assertEqual(
-      {expr_sig, l(0, 37), ref,
+      {expr_sig, l(0, 33), ref,
         {map, l(0, 9), [
           {assoc, l(1, 7), {atom, l(1, 2), a}, {int, l(7, 1), 3}}
         ]},
-        {gen_te, l(12, 25), {con_token, l(12, 3), "Map"}, [
+        {gen_te, l(12, 21), {con_token, l(12, 3), "Map"}, [
           {con_token, l(16, 4), "Atom"},
-          {tv_te, l(22, 14), "A", [{con_token, l(26, 10), "Concatable"}]}
+          {tv_te, l(22, 10), "A", [{con_token, l(26, 6), "Concat"}]}
         ]}
       },
-      ok_expr("{@a => 3} : Map<Atom, A ~ Concatable>")
+      ok_expr("{@a => 3} : Map<Atom, A ~ Concat>")
     )
   , ?_assertEqual(
       {expr_sig, l(0, 9), ref,

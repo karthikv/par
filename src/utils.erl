@@ -175,7 +175,7 @@ ivs(T, InitSeenVs) ->
   end, {[], InitSeenVs}, ivs_list(T)),
   IVs.
 
-builtin_is() -> ordsets:from_list(["Num", "Ord", "Concatable", "Separable"]).
+builtin_is() -> ordsets:from_list(["Num", "Ord", "Concat", "Separate"]).
 
 all_ivs(T) ->
   {IVs, _} = lists:foldl(fun({_, V}=IV, {IVs, SeenVs}) ->
@@ -229,7 +229,7 @@ args_ivs({lam, ArgTs, ReturnT}, InitSeenVs) ->
       [ivs(ArgT, InitSeenVs) || ArgT <- ExceptLast] ++ [LastIVs]
   end.
 
-family_is(I, _) when I == "Ord"; I == "Concatable"; I == "Separable" ->
+family_is(I, _) when I == "Ord"; I == "Concat"; I == "Separate" ->
   ordsets:from_list([I]);
 family_is("Num", _) -> ordsets:from_list(["Num", "Ord"]);
 family_is(I, Ifaces) ->

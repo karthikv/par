@@ -5,7 +5,7 @@
 % TODO:
 % - [2 weeks] Stdlib
 % - Fork eunite and fix macro display
-% - Move Concatable/Separable into stdlib. Rename union/subtract to concat/sep?
+% - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
 % - Default args?
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
@@ -20,10 +20,8 @@
 %   - "Expected closing '}'" messages might have wrong start location b/c
 %     we use the keyword location!
 % - Avoid propagating sig error when wrong number of args
-% - Record update syntax should move bar to other side
 % - In partial app, evaluate function expr only once
 % - ^Mod.foo in pattern; update docs
-% - Rename Concatable/Separable to Concat/Separate
 % - Confusion between Con and TV
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
@@ -49,7 +47,7 @@
 % - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
 % - Implementations for builtin typeclasses?
-%   - Should we also exclude concatable, separable, etc. from sets?
+%   - Should we also exclude concat, separate, etc. from sets?
 % - Collection extends Sized?
 % - [2 days] Better pattern matching
 %   - Record/Struct types

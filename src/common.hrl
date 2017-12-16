@@ -74,8 +74,8 @@
     % ifaces
     "Num" => ?BUILTIN_TYPE(true, 0),
     "Ord" => ?BUILTIN_TYPE(true, 0),
-    "Concatable" => ?BUILTIN_TYPE(true, 0),
-    "Separable" => ?BUILTIN_TYPE(true, 0)
+    "Concat" => ?BUILTIN_TYPE(true, 0),
+    "Separate" => ?BUILTIN_TYPE(true, 0)
   },
   aliases = #{},
   structs = #{},
@@ -84,8 +84,8 @@
   impls = #{
     "Num" => #{},
     "Ord" => #{},
-    "Concatable" => #{},
-    "Separable" => #{}
+    "Concat" => #{},
+    "Separate" => #{}
   },
   impl_refs = #{},
   sig_vs = #{},

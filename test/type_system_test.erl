@@ -2040,7 +2040,7 @@ interface_test_() ->
     ))
   , ?_test("Int" = ok_prg(
       "interface Foo { foo : T -> String }\n"
-      "interface ToI extends Concatable, Foo { to_i : T -> Int }\n"
+      "interface ToI extends Concat, Foo { to_i : T -> Int }\n"
       "impl Foo for [A] { foo(_) = \"list\" }\n"
       "impl ToI for [Int] {\n"
       "  to_i(l) = match l { [h | t] => h + to_i(t), [] => 0 }\n"
@@ -2084,9 +2084,9 @@ interface_test_() ->
       {"A ~ Num", "Bool", l(1, 13, 4), ?FROM_PARENT_IFACES}
     ))
   , ?_test(bad_prg(
-      "interface ToI extends Concatable, Separable { to_i : T -> Int }\n"
+      "interface ToI extends Concat, Separate { to_i : T -> Int }\n"
       "impl ToI for String { to_i = @erlang:byte_size/1 }",
-      {"A ~ Concatable ~ Separable", "String", l(1, 13, 6), ?FROM_PARENT_IFACES}
+      {"A ~ Concat ~ Separate", "String", l(1, 13, 6), ?FROM_PARENT_IFACES}
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Int }\n"
@@ -2159,12 +2159,12 @@ gen_tv_test_() ->
       "bar"
     ))
   , ?_test("([A ~ Num], Set<Atom>)" = ok_prg(
-      "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
+      "foo : T<A> ~ Separate -> T<A> ~ Separate\n"
       "foo(x) = x\n"
       "bar = (foo([1, 2, 3]), foo(#[@hey, @hi]))",
       "bar"
     ))
-  , ?_test("(A<B> ~ Concatable, A<B> ~ Concatable) -> Char" = ok_prg(
+  , ?_test("(A<B> ~ Concat, A<B> ~ Concat) -> Char" = ok_prg(
       "foo : T<A> -> T<A>\n"
       "foo(x) = x\n"
       "bar(y, z) =\n"
@@ -2239,7 +2239,7 @@ gen_tv_test_() ->
       "  foo(z)\n"
       "  y ++ z\n"
       "  z ++ \"hi\"",
-      {"String", "A<B> ~ Concatable", l(6, 7, 4), ?FROM_OP_RHS('++')}
+      {"String", "A<B> ~ Concat", l(6, 7, 4), ?FROM_OP_RHS('++')}
     ))
   , ?_test(bad_prg(
       "foo : T<A> ~ Num -> Float\n"
@@ -2573,8 +2573,8 @@ other_errors_test_() ->
       {?ERR_REDEF_BUILTIN_IFACE("Num"), l(10, 3)}
     ))
   , ?_test(bad_prg(
-      "interface Separable { to_bool : T -> Bool }",
-      {?ERR_REDEF_BUILTIN_IFACE("Separable"), l(10, 9)}
+      "interface Separate { to_bool : T -> Bool }",
+      {?ERR_REDEF_BUILTIN_IFACE("Separate"), l(10, 8)}
     ))
   % iface from stdlib; must use many for stdlib to be included
   , ?_test(bad_many([
@@ -2668,15 +2668,15 @@ other_errors_test_() ->
       {?ERR_TV_IFACE("A", none, ordsets:from_list(["Num"])), l(1, 8, 7)}
     ))
   , ?_test(bad_prg(
-      "foo : A ~ Num -> A ~ Concatable\n"
+      "foo : A ~ Num -> A ~ Concat\n"
       "foo(a) = @io:printable_range()",
       {
         ?ERR_TV_IFACE(
           "A",
           ordsets:from_list(["Num"]),
-          ordsets:from_list(["Concatable"])
+          ordsets:from_list(["Concat"])
         ),
-        l(17, 14)
+        l(17, 10)
       }
     ))
   , ?_test(bad_prg(
@@ -2758,8 +2758,8 @@ other_errors_test_() ->
       {?ERR_IFACE_NOT_TYPE("Num"), l(10, 3)}
     ))
   , ?_test(bad_prg(
-      "foo = Separable { a = 3 }",
-      {?ERR_IFACE_NOT_TYPE("Separable"), l(6, 9)}
+      "foo = Separate { a = 3 }",
+      {?ERR_IFACE_NOT_TYPE("Separate"), l(6, 8)}
     ))
   , ?_test(bad_prg(
       "interface Foo { a : T -> Int }\n"

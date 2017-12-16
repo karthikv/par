@@ -1618,10 +1618,10 @@ infer({binary_op, Loc, Op, Left, Right}, C) ->
       ReturnTV = tv_server:fresh("Num", C2#ctx.pid),
       {{con, "Int"}, {con, "Int"}, ReturnTV};
     Op == '++' ->
-      OperandTV = tv_server:fresh("Concatable", C2#ctx.pid),
+      OperandTV = tv_server:fresh("Concat", C2#ctx.pid),
       {OperandTV, OperandTV, OperandTV};
     Op == '--' ->
-      OperandTV = tv_server:fresh("Separable", C2#ctx.pid),
+      OperandTV = tv_server:fresh("Separate", C2#ctx.pid),
       {OperandTV, OperandTV, OperandTV}
   end,
 
@@ -3169,12 +3169,12 @@ instance({con, "Int"}, "Ord", _, S) -> {true, S};
 instance({con, "Float"}, "Ord", _, S) -> {true, S};
 instance({con, "String"}, "Ord", _, S) -> {true, S};
 instance({con, "Char"}, "Ord", _, S) -> {true, S};
-instance({con, "String"}, "Concatable", _, S) -> {true, S};
-instance({gen, {con, "List"}, _}, "Concatable", _, S) -> {true, S};
-instance({gen, {con, "Map"}, _}, "Concatable", _, S) -> {true, S};
-instance({gen, {con, "Set"}, _}, "Concatable", _, S) -> {true, S};
-instance({gen, {con, "List"}, _}, "Separable", _, S) -> {true, S};
-instance({gen, {con, "Set"}, _}, "Separable", _, S) -> {true, S};
+instance({con, "String"}, "Concat", _, S) -> {true, S};
+instance({gen, {con, "List"}, _}, "Concat", _, S) -> {true, S};
+instance({gen, {con, "Map"}, _}, "Concat", _, S) -> {true, S};
+instance({gen, {con, "Set"}, _}, "Concat", _, S) -> {true, S};
+instance({gen, {con, "List"}, _}, "Separate", _, S) -> {true, S};
+instance({gen, {con, "Set"}, _}, "Separate", _, S) -> {true, S};
 instance(T, I, V, S) ->
   Key = utils:impl_key(T),
   case maps:find(Key, maps:get(I, S#solver.impls)) of

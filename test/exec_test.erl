@@ -1056,7 +1056,7 @@ test_interface(Run) ->
     ))
   , ?_test(68 = Run(
       "interface Foo { foo : T -> String }\n"
-      "interface ToI extends Concatable, Foo { to_i : T -> Int }\n"
+      "interface ToI extends Concat, Foo { to_i : T -> Int }\n"
       "impl Foo for [A] { foo(_) = \"list\" }\n"
       "impl ToI for [Int] {\n"
       "  to_i(l) = match l { [h | t] => h + to_i(t), [] => 0 }\n"
@@ -1119,7 +1119,7 @@ test_gen_tv(Run) ->
   , ?_assertEqual(
       {[1, 2, 3], #{'_@type' => 'Set', hey => true, hi => true}},
       Run(
-        "foo : T<A> ~ Separable -> T<A> ~ Separable\n"
+        "foo : T<A> ~ Separate -> T<A> ~ Separate\n"
         "foo(x) = x\n"
         "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
       )
