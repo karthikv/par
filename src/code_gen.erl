@@ -497,12 +497,11 @@ rep({anon_record, Loc, Ref, Inits}, #cg{ctx=C}=CG) ->
   end,
   {map, Line, AssocReps};
 
-rep({anon_record_ext, Loc, Ref, Expr, AllInits}, CG) ->
+rep({anon_record_ext, Loc, Ref, AllInits, Expr}, CG) ->
   ExprRep = rep(Expr, CG),
   Inits = lists:map(fun(InitOrExt) ->
     setelement(1, InitOrExt, init)
   end, AllInits),
-
   ExtRep = rep({anon_record, Loc, Ref, Inits}, CG),
   call(maps, merge, [ExprRep, ExtRep], ?START_LINE(Loc));
 
@@ -513,12 +512,12 @@ rep({record, Loc, {con_token, _, RawCon}, Inits}, CG) ->
   CG1 = CG#cg{ctx=C1},
   rep({anon_record, Loc, Ref, Inits}, CG1);
 
-rep({record_ext, Loc, {con_token, _, RawCon}, Expr, AllInits}, CG) ->
+rep({record_ext, Loc, {con_token, _, RawCon}, AllInits, Expr}, CG) ->
   #cg{ctx=#ctx{record_refs=RecordRefs}=C} = CG,
   Ref = make_ref(),
   C1 = C#ctx{record_refs=RecordRefs#{Ref => {con, RawCon}}},
   CG1 = CG#cg{ctx=C1},
-  rep({anon_record_ext, Loc, Ref, Expr, AllInits}, CG1);
+  rep({anon_record_ext, Loc, Ref, AllInits, Expr}, CG1);
 
 rep({field_fn, _, {var, Loc, Name}}, _) ->
   Line = ?START_LINE(Loc),
@@ -1368,9 +1367,9 @@ rewrite({record, _, FieldMap}, Rep, Loc, SubbedVs, CG) ->
       {[MatchRep, MatchMap | Stmts], {map, Line, VarRep, UpdateReps}}
   end;
 
-% BaseT (the third element) must be a TV at this point, since this program
+% BaseT (the fourth element) must be a TV at this point, since this program
 % passed type checking.
-rewrite({record_ext, A, {tv, _, _, _}, Ext}, Rep, Loc, SubbedVs, CG) ->
+rewrite({record_ext, A, Ext, {tv, _, _, _}}, Rep, Loc, SubbedVs, CG) ->
   rewrite({record, A, Ext}, Rep, Loc, SubbedVs, CG);
 
 % The only way to create a value of type T<A> that is instantiated and needs to

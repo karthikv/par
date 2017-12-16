@@ -349,10 +349,6 @@
   ]
 )).
 -define(ERR_MATCH_STRUCT, "Pattern matching against structs is not supported").
--define(ERR_OPTION_ARITY(Con, ExpArity, Arity), ?FMT(
-  "In a pattern, ~s must be given all ~p arguments, but it's only given ~p",
-  [Con, ExpArity, Arity]
-)).
 
 
 -define(LOC(Node), element(2, Node)).

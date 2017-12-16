@@ -9,7 +9,9 @@
 %   - Fix bug in separate for sets
 % - Default args?
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
+% - Prefix module names with 'Par.'
 % - Allow running program via cli; require that main is defined
+%   - Should build dir be configurable?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 % - Bad error message in enclosed_paren/brace when enclosed expression doesn't
@@ -19,8 +21,16 @@
 %     we use the keyword location!
 % - Avoid propagating sig error when wrong number of args
 % - Record update syntax should move bar to other side
+% - In partial app, evaluate function expr only once
+% - ^Mod.foo in pattern; update docs
+% - Rename Concatable/Separable to Concat/Separate
 % - Confusion between Con and TV
 % - Website + Documentation
+%   - Commands to run each program in tutorial and output
+%   - Ensure all code samples in tutorial work
+%   - Copyright and icons8 link
+%   - Keep mention of test framework on home page?
+%   - Docs for stdlib
 %
 % Defer
 % - if-let condition and other condition (or maybe when statement?)
@@ -97,9 +107,11 @@ main(Args) ->
       halt(1)
   end,
 
-  {ok, Dir} = file:get_cwd(),
+  {ok, Cwd} = file:get_cwd(),
+  DefaultOutDir = filename:join([Cwd, "_build", "par"]),
+
   OptSpecs = [
-    {out_dir, $o, "output directory", {string, Dir},
+    {out_dir, $o, "output directory", {string, DefaultOutDir},
       "Directory to output compiled .beam file(s)."
     },
     {test, $t, "run tests", boolean,
@@ -136,9 +148,30 @@ main(Args) ->
           Compiled = code_gen:compile_comps(Comps, C),
           OutDir = proplists:get_value(out_dir, Opts),
 
+          % ensure_dir ensures the *parent* directory exists, so we need to
+          % first join the OutDir with some arbitrary filename.
+          case filelib:ensure_dir(filename:join(OutDir, "foo")) of
+            ok -> ok;
+            {error, OutReason} ->
+              ?ERR(
+                "Couldn't create output directory ~s: ~s~n",
+                [OutDir, file:format_error(OutReason)]
+              ),
+              halt(1)
+          end,
+
           Filenames = lists:map(fun({Mod, Binary}) ->
             Filename = lists:concat([Mod, ".beam"]),
-            file:write_file(filename:join(OutDir, Filename), Binary),
+            BeamPath = filename:join(OutDir, Filename),
+            case file:write_file(BeamPath, Binary) of
+              ok -> ok;
+              {error, BeamReason} ->
+                ?ERR(
+                  "Couldn't write ~s: ~s~n",
+                  [BeamPath, file:format_error(BeamReason)]
+                ),
+                halt(1)
+            end,
             Filename
           end, Compiled),
 

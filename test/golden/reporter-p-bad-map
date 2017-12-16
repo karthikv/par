@@ -1,8 +1,8 @@
 *** file [infer-prg] ***
 
-After this expression, expected either a fat arrow '=>' to define a key/value 
-pair in a map literal, or a pipe '|' to update a record:
+Expected a fat arrow '=>' to define a key/value pair in a map literal or an 
+equals '=' to define a field in a record/struct:
 
 3: { @hello, 3 + 5 }
-     ^^^^^^
+           ^
 

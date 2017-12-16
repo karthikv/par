@@ -446,19 +446,19 @@ test_record(Expr, Run) ->
   , ?_test(5 = Expr("{ abs(x) = if x > 0 then x else abs(-x) }.abs(-5)"))
   , ?_assertEqual(
       #{'_@type' => '_@Record', bar => 4.0},
-      Expr("{ { bar = 3 } | bar = 4.0 }")
+      Expr("{ bar = 4.0 | { bar = 3 } }")
     )
   , ?_assertEqual(
       #{'_@type' => '_@Record', bar => true},
-      Expr("{ { bar = 3 } | bar := true }")
+      Expr("{ bar := true | { bar = 3 } }")
     )
   , ?_assertEqual(
       #{'_@type' => '_@Record', bar => true, baz => hey},
-      Expr("{ { bar = 3, baz = @hi } | bar := true, baz = @hey }")
+      Expr("{ bar := true, baz = @hey | { bar = 3, baz = @hi } }")
     )
   , ?_assertEqual(
       #{'_@type' => '_@Record', bar => true, baz => 3.0},
-      Expr("{ { bar = 3, baz = @hi } | bar := true, baz := 3.0 }")
+      Expr("{ bar := true, baz := 3.0 | { bar = 3, baz = @hi } }")
     )
 
   , ?_test(false = Expr("{ bar = 3 } == { bar = 5 }"))
@@ -523,23 +523,23 @@ test_record(Expr, Run) ->
   % named struct updates
   , ?_assertEqual(#{'_@type' => 'Foo', bar => 7}, Run(
       "struct Foo { bar : Int }\n"
-      "f(x) = { x : Foo | bar = 7 }\n"
+      "f(x) = { bar = 7 | x : Foo }\n"
       "main() = f({ bar = 3 })"
     ))
   , ?_assertEqual(#{'_@type' => '_@Record', bar => true}, Run(
       "struct Foo { bar : Int }\n"
       "foo = Foo { bar = 3 }\n"
-      "main() = { foo | bar := true }"
+      "main() = { bar := true | foo }"
     ))
   , ?_assertEqual(#{'_@type' => '_@Record', bar => true, baz => [<<"hi">>]}, Run(
       "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
-      "main() = { foo | bar := true }"
+      "main() = { bar := true | foo }"
     ))
   , ?_assertEqual(#{'_@type' => 'Foo', bar => true, baz => [<<"hi">>]}, Run(
       "struct Foo<A> { bar : A, baz : [String] }\n"
       "foo = Foo { bar = @a, baz = [\"hi\"] }\n"
-      "main() = Foo { foo | bar := true }"
+      "main() = Foo { bar := true | foo }"
     ))
 
 
@@ -637,7 +637,7 @@ test_interface(Run) ->
     ))
   , ?_test(-3 = Run(
       IfaceToI ++
-      "impl ToI for { A | target: Int } {\n"
+      "impl ToI for { target: Int | A } {\n"
       "  to_i(r) = r.target\n"
       "}\n"
       "main() = to_i({ foo = \"hi\", bar = true, target = -3 })"
@@ -725,7 +725,7 @@ test_interface(Run) ->
       IfaceImpl ++
       "foo(record) = record.b(false)\n"
       "bar(record) =\n"
-      "  let new_record = { record | b := to_i }\n"
+      "  let new_record = { b := to_i | record }\n"
       "  foo(new_record)\n"
       "main() = bar({ a = true, b = 35.0 })"
     ))
@@ -1450,7 +1450,7 @@ test_import(Many) ->
         {"bar",
           "module Bar\n"
           "import \"./foo\"\n"
-          "f(x) = Foo.Baz { x | a = 5 }\n"
+          "f(x) = Foo.Baz { a = 5 | x }\n"
           "main() = f(Foo.Baz { a = 3 })"
         }
       ], "bar")
@@ -1532,7 +1532,7 @@ test_import(Many) ->
           "module Bar\n"
           "import \"./foo\" (Baz)\n"
           "x = Baz { a = 3 }\n"
-          "y = Baz { { a = 3 } | a = 4 }\n"
+          "y = Baz { a = 4 | { a = 3 } }\n"
           "main() = (x, y)"
         }
       ], "bar")

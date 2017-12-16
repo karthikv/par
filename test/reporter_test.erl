@@ -114,6 +114,7 @@ expr_test_() ->
   , ?golden_expr_("p-list-let", "[3\n let x = 4\n 5]")
   , ?golden_expr_("p-list-block-comma", "[foo\n 'b',\n \"hi\"]")
   , ?golden_expr_("p-bad-map", "{ @hello, 3 + 5 }")
+  , ?golden_expr_("p-bad-record-update", "{ a = 3, b := 4, c := @hi }")
   , ?golden_expr_("p-bad-tuple", "(1,)")
   , ?golden_expr_("p-bad-tuple-te", "(1, @hi) : (Int,)")
   , ?golden_expr_("p-bad-tuple-pattern", "let (1,) = (1, @hi)\n2")

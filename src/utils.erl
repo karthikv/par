@@ -127,26 +127,26 @@ subs({record, A, FieldMap}, #sub_opts{subs=Subs}=Opts) ->
     {ok, {anchor, NewA}} -> subs({record, NewA, FieldMap}, Opts);
     {ok, T} -> subs(T, Opts)
   end;
-subs({record_ext, A, BaseT, Ext}, #sub_opts{subs=Subs, aliases=Aliases}=Opts) ->
+subs({record_ext, A, Ext, BaseT}, #sub_opts{subs=Subs, aliases=Aliases}=Opts) ->
   case maps:find(A, Subs) of
     error ->
       NewExt = maps:map(fun(_, T) -> subs(T, Opts) end, Ext),
-      consolidate({record_ext, A, subs(BaseT, Opts), NewExt}, Aliases);
+      consolidate({record_ext, A, NewExt, subs(BaseT, Opts)}, Aliases);
     {ok, {anchor, NewA}} ->
-      subs({record_ext, NewA, BaseT, Ext}, Opts);
+      subs({record_ext, NewA, Ext, BaseT}, Opts);
     {ok, T} -> subs(T, Opts)
   end;
 subs({hole, Report}, _) -> {hole, Report};
 subs(unit, _) -> unit.
 
-consolidate({record_ext, A, {record_ext, _, BaseT, Ext1}, Ext2}, Aliases) ->
-  consolidate({record_ext, A, BaseT, maps:merge(Ext1, Ext2)}, Aliases);
-consolidate({record_ext, A, {record, _, FieldMap}, Ext}, _) ->
+consolidate({record_ext, A, Ext2, {record_ext, _, Ext1, BaseT}}, Aliases) ->
+  consolidate({record_ext, A, maps:merge(Ext1, Ext2), BaseT}, Aliases);
+consolidate({record_ext, A, Ext, {record, _, FieldMap}}, _) ->
   {record, A, maps:merge(FieldMap, Ext)};
-consolidate({record_ext, A, BaseT, Ext}, Aliases) ->
+consolidate({record_ext, A, Ext, BaseT}, Aliases) ->
   case unalias(BaseT, Aliases) of
-    BaseT -> {record_ext, A, BaseT, Ext};
-    NewBaseT -> consolidate({record_ext, A, NewBaseT, Ext}, Aliases)
+    BaseT -> {record_ext, A, Ext, BaseT};
+    NewBaseT -> consolidate({record_ext, A, Ext, NewBaseT}, Aliases)
   end.
 
 % The keys function, tuple, and record are in lowercase so they don't conflict
@@ -213,8 +213,8 @@ tvs_list({gen, _, _, BaseT, ParamTs}=GenTV, L) ->
 % tvs_list({inst, ...}) ommitted; they should be resolved
 tvs_list({record, _, FieldMap}, L) ->
   lists:foldr(fun tvs_list/2, L, maps:values(FieldMap));
-tvs_list({record_ext, _, BaseT, Ext}, L) ->
-  tvs_list(BaseT, tvs_list({record, none, Ext}, L));
+tvs_list({record_ext, _, Ext, BaseT}, L) ->
+  tvs_list({record, none, Ext}, tvs_list(BaseT, L));
 tvs_list({hole, _}, L) -> L;
 tvs_list(unit, L) -> L.
 
@@ -341,8 +341,8 @@ pretty({inst, _, TV}) -> ?FMT("inst(~s)", [pretty(TV)]);
 pretty({inst, _, GVs, T}) ->
   ?FMT("inst(~s, ~p)", [pretty(T), ordsets:to_list(GVs)]);
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
-pretty({record_ext, _, BaseT, Ext}) ->
-  ?FMT("{ ~s | ~s }", [pretty(BaseT), pretty_field_map(Ext)]);
+pretty({record_ext, _, Ext, BaseT}) ->
+  ?FMT("{ ~s | ~s }", [pretty_field_map(Ext), pretty(BaseT)]);
 pretty({hole, _}) -> "_";
 pretty(unit) -> "()".
 

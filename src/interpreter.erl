@@ -135,17 +135,18 @@ eval({anon_record, _, _, Inits}, ID) ->
 
   maps:from_list(Pairs);
 
-eval({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
+eval({anon_record_ext, Loc, Ref, AllInits, Expr}, C) ->
   Record = eval(Expr, C),
   Inits = lists:map(fun(InitOrExt) ->
     setelement(1, InitOrExt, init)
   end, AllInits),
-  maps:merge(Record, eval({anon_record, Loc, Ref, Inits}, C));
+  Ext = eval({anon_record, Loc, Ref, Inits}, C),
+  maps:merge(Record, Ext);
 
 eval({record, Loc, _, Inits}, ID) -> eval({anon_record, Loc, none, Inits}, ID);
 
-eval({record_ext, Loc, _, Expr, AllInits}, ID) ->
-  eval({anon_record_ext, Loc, none, Expr, AllInits}, ID);
+eval({record_ext, Loc, _, AllInits, Expr}, ID) ->
+  eval({anon_record_ext, Loc, none, AllInits, Expr}, ID);
 
 eval({field_fn, _, {var, _, Name}}, _) ->
   Atom = list_to_atom(Name),

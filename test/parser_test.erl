@@ -308,67 +308,73 @@ expr_test_() ->
 
   , ?_assertEqual(
       {anon_record_ext, l(0, 21), ref,
-        {anon_record, l(2, 9), ref, [
-          {init, l(4, 5), {var, l(4, 1), "a"}, {int, l(8, 1), 3}}
-        ]},
-        [{init, l(14, 5), {var, l(14, 1), "a"}, {int, l(18, 1), 4}}]
+        [{init, l(2, 5), {var, l(2, 1), "a"}, {int, l(6, 1), 4}}],
+        {anon_record, l(10, 9), ref, [
+          {init, l(12, 5), {var, l(12, 1), "a"}, {int, l(16, 1), 3}}
+        ]}
       },
-      ok_expr("{ { a = 3 } | a = 4 }")
+      ok_expr("{ a = 4 | { a = 3 } }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 27), ref, {var_ref, l(2, 1), ref, "a"}, [
-        {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
-        {ext, l(16, 9), {var, l(16, 1), "c"}, {bool, l(21, 4), true}}
-      ]},
-      ok_expr("{ a | bar = @a, c := true }")
+      {anon_record_ext, l(0, 27), ref, [
+          {init, l(2, 8), {var, l(2, 3), "bar"}, {atom, l(8, 2), a}},
+          {ext, l(12, 9), {var, l(12, 1), "c"}, {bool, l(17, 4), true}}
+        ],
+        {var_ref, l(24, 1), ref, "a"}
+      },
+      ok_expr("{ bar = @a, c := true | a }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 34), ref, {var_ref, l(2, 1), ref, "a"}, [
-        {init, l(6, 8), {var, l(6, 1), "f"},
-          {fn, l(6, 8), ref, [], {atom, l(12, 2), a}}},
-        {ext, l(16, 16), {var, l(16, 1), "c"},
-          {fn, l(16, 16), ref,
-            [{var, l(18, 1), "x"}, {var, l(21, 1), "y"}],
-            {binary_op, l(27, 5), '+',
-              {var_ref, l(27, 1), ref, "x"},
-              {var_ref, l(31, 1), ref, "y"}
+      {anon_record_ext, l(0, 34), ref, [
+          {init, l(2, 8), {var, l(2, 1), "f"},
+            {fn, l(2, 8), ref, [], {atom, l(8, 2), a}}},
+          {ext, l(12, 16), {var, l(12, 1), "c"},
+            {fn, l(12, 16), ref,
+              [{var, l(14, 1), "x"}, {var, l(17, 1), "y"}],
+              {binary_op, l(23, 5), '+',
+                {var_ref, l(23, 1), ref, "x"},
+                {var_ref, l(27, 1), ref, "y"}
+              }
             }
           }
-        }
-      ]},
-      ok_expr("{ a | f() = @a, c(x, y) := x + y }")
+        ],
+        {var_ref, l(31, 1), ref, "a"}
+      },
+      ok_expr("{ f() = @a, c(x, y) := x + y | a }")
     )
   , ?_assertEqual(
-      {anon_record_ext, l(0, 0, 1, 17), ref, {var_ref, l(2, 1), ref, "a"}, [
-        {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
-        {ext, l(1, 6, 9), {var, l(1, 6, 1), "c"}, {bool, l(1, 11, 4), true}}
-      ]},
+      {anon_record_ext, l(0, 0, 1, 17), ref, [
+          {init, l(2, 8), {var, l(2, 3), "bar"}, {atom, l(8, 2), a}},
+          {ext, l(1, 2, 9), {var, l(1, 2, 1), "c"}, {bool, l(1, 7, 4), true}}
+        ],
+        {var_ref, l(1, 14, 1), ref, "a"}
+      },
       ok_expr(
-        "{ a | bar = @a\n"
-        "      c := true }"
+        "{ bar = @a\n"
+        "  c := true | a }"
       )
     )
   , ?_assertEqual(
       {record_ext, l(0, 31),
-        {con_token, l(0, 3), "Foo"},
-        {var_ref, l(6, 1), ref, "a"}, [
-          {init, l(10, 8), {var, l(10, 3), "bar"}, {atom, l(16, 2), a}},
-          {ext, l(20, 9), {var, l(20, 1), "c"}, {bool, l(25, 4), true}}
-        ]
+        {con_token, l(0, 3), "Foo"}, [
+          {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
+          {ext, l(16, 9), {var, l(16, 1), "c"}, {bool, l(21, 4), true}}
+        ],
+        {var_ref, l(28, 1), ref, "a"}
       },
-      ok_expr("Foo { a | bar = @a, c := true }")
+      ok_expr("Foo { bar = @a, c := true | a }")
     )
   , ?_assertEqual(
-      {record_ext, l(0, 0, 1, 11),
-        {con_token, l(0, 3), "Foo"},
-        {var_ref, l(6, 1), ref, "a"}, [
-          {init, l(10, 8), {var, l(10, 3), "bar"}, {atom, l(16, 2), a}},
+      {record_ext, l(0, 0, 1, 15),
+        {con_token, l(0, 3), "Foo"}, [
+          {init, l(6, 8), {var, l(6, 3), "bar"}, {atom, l(12, 2), a}},
           {ext, l(1, 0, 9), {var, l(1, 0, 1), "c"}, {bool, l(1, 5, 4), true}}
-        ]
+        ],
+        {var_ref, l(1, 12, 1), ref, "a"}
       },
       ok_expr(
-        "Foo { a | bar = @a,\n"
-        "c := true }"
+        "Foo { bar = @a,\n"
+        "c := true | a }"
       )
     )
 
@@ -966,11 +972,13 @@ expr_test_() ->
   , ?_assertEqual(
       {expr_sig, l(0, 21), ref,
         {unit, l(0, 2)},
-        {record_ext_te, l(5, 16), {tv_te, l(7, 1), "A", []}, [
-          {sig, l(11, 8), {var, l(11, 1), "a"}, {con_token, l(15, 4), "Bool"}}
-        ]}
+        {record_ext_te, l(5, 16), [
+            {sig, l(7, 8), {var, l(7, 1), "a"}, {con_token, l(11, 4), "Bool"}}
+          ],
+          {tv_te, l(18, 1), "A", []}
+        }
       },
-      ok_expr("() : { A | a : Bool }")
+      ok_expr("() : { a : Bool | A }")
     )
   , ?_assertEqual(
       {expr_sig, l(0, 28), ref,
@@ -1009,38 +1017,40 @@ expr_test_() ->
   , ?_assertEqual(
       {expr_sig, l(0, 32), ref,
         {unit, l(0, 2)},
-        {record_ext_te, l(5, 27), {tv_te, l(7, 1), "B", []}, [
-          {sig, l(11, 10),
-            {var, l(11, 3), "foo"},
-            {con_token, l(17, 4), "Atom"}
-          },
-          {sig, l(23, 7),
-            {var, l(23, 3), "bar"},
-            {tv_te, l(29, 1), "A", []}
-          }
-        ]}
+        {record_ext_te, l(5, 27), [
+            {sig, l(7, 10),
+              {var, l(7, 3), "foo"},
+              {con_token, l(13, 4), "Atom"}
+            },
+            {sig, l(19, 7),
+              {var, l(19, 3), "bar"},
+              {tv_te, l(25, 1), "A", []}
+            }
+          ],
+          {tv_te, l(29, 1), "B", []}
+        }
       },
-      ok_expr("() : { B | foo : Atom, bar : A }")
+      ok_expr("() : { foo : Atom, bar : A | B }")
     )
   , ?_assertEqual(
-      {expr_sig, l(0, 0, 1, 9), ref,
+      {expr_sig, l(0, 0, 1, 13), ref,
         {unit, l(0, 2)},
-        {record_ext_te, l(0, 5, 1, 9),
-          {tv_te, l(7, 1), "B", []}, [
-            {sig, l(11, 10),
-              {var, l(11, 3), "foo"},
-              {con_token, l(17, 4), "Atom"}
+        {record_ext_te, l(0, 5, 1, 13), [
+            {sig, l(7, 10),
+              {var, l(7, 3), "foo"},
+              {con_token, l(13, 4), "Atom"}
             },
             {sig, l(1, 0, 7),
               {var, l(1, 0, 3), "bar"},
               {tv_te, l(1, 6, 1), "A", []}
             }
-          ]
+          ],
+          {tv_te, l(1, 10, 1), "B", []}
         }
       },
       ok_expr(
-        "() : { B | foo : Atom,\n"
-        "bar : A }"
+        "() : { foo : Atom,\n"
+        "bar : A | B }"
       )
     )
 
@@ -1342,8 +1352,8 @@ expr_test_() ->
       {match, l(0, 38),
         {record_ext, l(6, 17),
           {con_token, l(6, 3), "Bar"},
-          {var_ref, l(12, 1), ref, "a"},
-          [{init, l(16, 5), {var, l(16, 1), "b"}, {int, l(20, 1), 3}}]
+          [{init, l(12, 5), {var, l(12, 1), "b"}, {int, l(16, 1), 3}}],
+          {var_ref, l(20, 1), ref, "a"}
         }, [
           {'case', l(26, 10),
             {variant, l(26, 3), {con_token, l(26, 3), "Bar"}, []},
@@ -1351,7 +1361,7 @@ expr_test_() ->
           }
         ]
       },
-      ok_expr("match Bar { a | b = 3 } { Bar => Bar }")
+      ok_expr("match Bar { b = 3 | a } { Bar => Bar }")
     )
   , ?_assertEqual(
       {match, l(0, 22), {con_token, l(6, 3), "Bar"}, [

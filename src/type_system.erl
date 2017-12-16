@@ -584,9 +584,9 @@ gen_t_num_params({record_te, _, Fields}) ->
       _ -> FoldNumParams
     end
   end, false, Fields);
-gen_t_num_params({record_ext_te, Loc, BaseTE, Fields}) ->
-  case gen_t_num_params(BaseTE) of
-    false -> gen_t_num_params({record_te, Loc, Fields});
+gen_t_num_params({record_ext_te, Loc, Fields, BaseTE}) ->
+  case gen_t_num_params({record_te, Loc, Fields}) of
+    false -> gen_t_num_params(BaseTE);
     NumParams -> NumParams
   end.
 
@@ -1272,7 +1272,7 @@ infer({anon_record, _, Ref, Inits}, #ctx{record_refs=RecordRefs}=C) ->
   end,
   {RecordT, C2};
 
-infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
+infer({anon_record_ext, Loc, Ref, AllInits, Expr}, C) ->
   {ExprT, C1} = infer(Expr, C),
   {Inits, ExtInits} = lists:foldl(fun(InitOrExt, Memo) ->
     {FoldInits, FoldExtInits} = Memo,
@@ -1288,7 +1288,7 @@ infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
       {{record, A, FieldMap}, C2} = infer({anon_record, Loc, none, Inits}, C1),
       add_cst(
         ExprT,
-        {record_ext, A, tv_server:fresh(C2#ctx.pid), FieldMap},
+        {record_ext, A, FieldMap, tv_server:fresh(C2#ctx.pid)},
         Loc,
         ?FROM_RECORD_UPDATE,
         C2
@@ -1305,13 +1305,13 @@ infer({anon_record_ext, Loc, Ref, Expr, AllInits}, C) ->
 
       C5 = add_cst(
         ExprT,
-        {record_ext, ExtA, tv_server:fresh(C4#ctx.pid), RelaxedExt},
+        {record_ext, ExtA, RelaxedExt, tv_server:fresh(C4#ctx.pid)},
         Loc,
         ?FROM_RECORD_UPDATE,
         C4
       ),
 
-      RecordT = {record_ext, tv_server:next_name(C5#ctx.pid), ExprT, Ext},
+      RecordT = {record_ext, tv_server:next_name(C5#ctx.pid), Ext, ExprT},
       RecordRefs = C5#ctx.record_refs,
       C6 = case Ref of
         none -> C5;
@@ -1352,7 +1352,7 @@ infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
-infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
+infer({record_ext, Loc, {con_token, ConLoc, RawCon}, AllInits, Expr}, C) ->
   Con = utils:resolve_con(RawCon, C),
   case maps:find(Con, C#ctx.types) of
     {ok, #type_binding{is_iface=false, num_params=NumParams}} ->
@@ -1365,7 +1365,7 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
           unalias_except_struct({gen, {con, Con}, Vs}, C#ctx.aliases)
       end,
 
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C),
       From = ?FROM_RECORD_UPDATE,
 
       TV = tv_server:fresh(C1#ctx.pid),
@@ -1374,11 +1374,11 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, Expr, AllInits}, C) ->
       {TV, C3};
 
     {ok, #type_binding{is_iface=true}} ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C),
       {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
 
     error ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, Expr, AllInits}, C),
+      {RecordT, C1} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C),
       {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
   end;
 
@@ -1386,7 +1386,7 @@ infer({field_fn, _, {var, _, Name}}, C) ->
   FieldTV = tv_server:fresh(C#ctx.pid),
   BaseTV = tv_server:fresh(C#ctx.pid),
   A = tv_server:next_name(C#ctx.pid),
-  RecordExtT = {record_ext, A, BaseTV, #{Name => FieldTV}},
+  RecordExtT = {record_ext, A, #{Name => FieldTV}, BaseTV},
   {{lam, [RecordExtT], FieldTV}, C};
 
 infer({field, Loc, Expr, Prop}, C) ->
@@ -1443,10 +1443,10 @@ infer({app, Loc, Expr, Args}, C) ->
   {ResultT, C3};
 
 infer({variant, Loc, Expr, Args}, C) ->
-  {ConLoc, Con, {B, C1}} = case Expr of
-    {field, ConLoc_, {con_token, _, Module}, {con_token, _, Con_}} ->
-      {ConLoc_, Con_, lookup(Module, Con_, ConLoc_, C)};
-    {con_token, ConLoc_, Con_} -> {ConLoc_, Con_, lookup(Con_, ConLoc_, C)}
+  {B, C1} = case Expr of
+    {field, ConLoc, {con_token, _, Module}, {con_token, _, Con}} ->
+      lookup(Module, Con, ConLoc, C);
+    {con_token, ConLoc, Con} -> lookup(Con, ConLoc, C)
   end,
 
   case no_ctx_errs(C1, C) of
@@ -1460,7 +1460,7 @@ infer({variant, Loc, Expr, Args}, C) ->
         {Arity, Arity} -> infer({app, Loc, Expr, Args}, C1);
         {ExpArity, Arity} ->
           TV = tv_server:fresh(C1#ctx.pid),
-          {TV, add_ctx_err(?ERR_OPTION_ARITY(Con, ExpArity, Arity), Loc, C1)}
+          {TV, add_ctx_err(?ERR_ARITY(Arity, ExpArity), Loc, C1)}
       end
   end;
 
@@ -1832,15 +1832,15 @@ infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
   end, {#{}, C}, Fields),
 
   {{record, tv_server:next_name(C1#ctx.pid), FieldMap}, C1};
-infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, BaseTE, Fields}, C) ->
-  {BaseT, C1} = infer_sig_helper(RestrictVs, Unique, BaseTE, C),
-  {{record, A, FieldMap}, C2} = infer_sig_helper(
+infer_sig_helper(RestrictVs, Unique, {record_ext_te, Loc, Fields, BaseTE}, C) ->
+  {{record, A, FieldMap}, C1} = infer_sig_helper(
     RestrictVs,
     Unique,
     {record_te, Loc, Fields},
-    C1
+    C
   ),
-  {{record_ext, A, BaseT, FieldMap}, C2}.
+  {BaseT, C2} = infer_sig_helper(RestrictVs, Unique, BaseTE, C1),
+  {{record_ext, A, FieldMap, BaseT}, C2}.
 
 infer_option(Option, T, FVs, SigVs, C) ->
   {option, Loc, {con_token, _, Con}, ArgTEs, _} = Option,
@@ -2502,15 +2502,15 @@ resolve({record, A, FieldMap}, S) ->
     {{Name, ResT}, FoldS1}
   end, S, Pairs),
   {{record, A, maps:from_list(ResPairs)}, S1};
-resolve({record_ext, A, BaseT, Ext}, S) ->
-  {ResBaseT, S1} = resolve(BaseT, S),
+resolve({record_ext, A, Ext, BaseT}, S) ->
   Pairs = maps:to_list(Ext),
-
-  {ResPairs, S2} = lists:mapfoldl(fun({Name, T}, FoldS) ->
+  {ResPairs, S1} = lists:mapfoldl(fun({Name, T}, FoldS) ->
     {ResT, FoldS1} = resolve(T, FoldS),
     {{Name, ResT}, FoldS1}
-  end, S1, Pairs),
-  {{record_ext, A, ResBaseT, maps:from_list(ResPairs)}, S2};
+  end, S, Pairs),
+
+  {ResBaseT, S2} = resolve(BaseT, S1),
+  {{record_ext, A, maps:from_list(ResPairs), ResBaseT}, S2};
 resolve({hole, Report}, S) -> {{hole, Report}, S}.
 
 inst(GVs, T, Pid) ->
@@ -2642,7 +2642,7 @@ unify({record, A1, FieldMap1}, {record, A2, FieldMap2}, S) ->
       end
   end;
 
-unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
+unify({record, A1, FieldMap}, {record_ext, A2, Ext, BaseT}, S) ->
   Keys = ordsets:from_list(maps:keys(FieldMap)),
   KeysExt = ordsets:from_list(maps:keys(Ext)),
 
@@ -2675,7 +2675,7 @@ unify({record, A1, FieldMap}, {record_ext, A2, BaseT, Ext}, S) ->
 unify({record_ext, _, _, _}=T1, {record, _, _}=T2, S) ->
   sub_unify(T2, T1, S);
 
-unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
+unify({record_ext, A1, Ext1, BaseT1}, {record_ext, A2, Ext2, BaseT2}, S) ->
   Keys1 = ordsets:from_list(maps:keys(Ext1)),
   Keys2 = ordsets:from_list(maps:keys(Ext2)),
   CommonKeys = ordsets:intersection(Keys1, Keys2),
@@ -2710,7 +2710,7 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
     _ ->
       NewA1 = tv_server:next_name(S#solver.pid),
       TV1 = tv_server:fresh(S#solver.pid),
-      sub_unify(BaseT1, {record_ext, NewA1, TV1, RelaxedExt2}, S1)
+      sub_unify(BaseT1, {record_ext, NewA1, RelaxedExt2, TV1}, S1)
   end,
 
   {Base2Valid, S3} = case maps:size(RelaxedExt1) of
@@ -2718,7 +2718,7 @@ unify({record_ext, A1, BaseT1, Ext1}, {record_ext, A2, BaseT2, Ext2}, S) ->
     _ ->
       NewA2 = tv_server:next_name(S#solver.pid),
       TV2 = tv_server:fresh(S#solver.pid),
-      sub_unify(BaseT2, {record_ext, NewA2, TV2, RelaxedExt1}, S2)
+      sub_unify(BaseT2, {record_ext, NewA2, RelaxedExt1, TV2}, S2)
   end,
 
   if
