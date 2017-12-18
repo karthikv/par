@@ -561,13 +561,9 @@ rep({app, Loc, Expr, Args}, CG) ->
     end
   end, [], Args),
 
-  FnRep = case rep(Expr, CG) of
-    {'fun', _, {function, Atom, _}} -> {atom, Line, Atom};
-    ExprRep -> ExprRep
-  end,
-
+  ExprRep = rep(Expr, CG),
   case NewArgsRep of
-    [] -> optimize_call({call, Line, FnRep, ArgsRep});
+    [] -> optimize_call({call, Line, ExprRep, ArgsRep});
     _ ->
       {PassedReps, Stmts} = lists:mapfoldr(fun({Arg, ArgRep}, FoldStmts) ->
         case Arg of
@@ -580,10 +576,25 @@ rep({app, Loc, Expr, Args}, CG) ->
         end
       end, [], lists:zip(Args, ArgsRep)),
 
-      Call = optimize_call({call, Line, FnRep, PassedReps}),
+      {Call, AllStmts} = case ExprRep of
+        % In the following two cases, we don't need to cache ExprRep, as
+        % it refers to a constant, existing function.
+        {'fun', _, {function, _, _}} ->
+          {optimize_call({call, Line, ExprRep, PassedReps}), Stmts};
+        {'fun', _, {function, _, _, _}} ->
+          {optimize_call({call, Line, ExprRep, PassedReps}), Stmts};
+
+        % In other cases, cache ExprRep so it isn't recomputed in each call of
+        % this partially applied function.
+        _ ->
+          VarRep = {var, Line, unique("Expr")},
+          Match = {match, Line, VarRep, ExprRep},
+          {{call, Line, VarRep, PassedReps}, [Match | Stmts]}
+      end,
+
       Clause = {clause, Line, NewArgsRep, [], [Call]},
       FunRep = {'fun', Line, {clauses, [Clause]}},
-      {block, Line, Stmts ++ [FunRep]}
+      {block, Line, AllStmts ++ [FunRep]}
   end;
 
 rep({variant, _, {con_token, Loc, Name}, Args}, CG) ->
@@ -1113,7 +1124,7 @@ optimize_call({call, Line, {'fun', FunLine, {function, Atom, _}}, ArgsRep}) ->
   {call, Line, {atom, FunLine, Atom}, ArgsRep};
 optimize_call(
   {call, Line,
-    {'fun', _, {function, {atom, _, Mod}, {atom, _, Fn}, _ }},
+    {'fun', _, {function, {atom, _, Mod}, {atom, _, Fn}, _}},
     ArgsRep
   }
 ) -> call(Mod, Fn, ArgsRep, Line);

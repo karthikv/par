@@ -314,6 +314,21 @@ test_global(Run) ->
       "bar = @erlang:erase(@globals_once)\n"
       "main() = bar"
     ))
+  % to ensure partial app function and args are only evaluated once
+  , ?_test(5 = Run(
+      "key = @partial_app_count\n"
+      "inc() = @erlang:put(key, @erlang:get(key) + 1)\n"
+      "foo() =\n"
+      "  inc()\n"
+      "  |_, _| inc()\n"
+      "main() =\n"
+      "  @erlang:put(key, 0)\n"
+      "  let f = foo()(inc(), _)\n"
+      "  f(1)\n"
+      "  f(@hi)\n"
+      "  f(true)\n"
+      "  @erlang:get(key)"
+    ))
   % to ensure indirect global dependencies (foo -> f -> b) work
   , ?_test(8 = Run(
       "foo = f(3)\n"
