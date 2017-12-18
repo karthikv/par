@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
-Delimiting comma ',' is unnecessary because the next item is aligned and 
+Delimiting comma ',' is unnecessary because the next item is aligned and
 separated by a newline:
 
 3: , Bar(String) @bar

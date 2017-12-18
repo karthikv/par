@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
-Expected a fat arrow '=>' to define a key/value pair in a map literal or an 
+Expected a fat arrow '=>' to define a key/value pair in a map literal or an
 equals '=' to define a field in a record/struct:
 
 3: { @hello, 3 + 5 }

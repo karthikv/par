@@ -152,7 +152,8 @@ wrap([Word | Words], Width, Length, Accum) ->
 
   if
     Length + WordLength > Width ->
-      wrap(Words, Width, WordLength, [$\s, Word, $\n | Accum]);
+      % Use tl(Accum) to remove extra whitespace at end of line.
+      wrap(Words, Width, WordLength, [$\s, Word, $\n | tl(Accum)]);
     true ->
       wrap(Words, Width, Length + WordLength, [$\s, Word | Accum])
   end.

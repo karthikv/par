@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
-You must separate successive items either with a comma ',' or by aligning them 
+You must separate successive items either with a comma ',' or by aligning them
 on separate lines:
 
 3: [@a @b]

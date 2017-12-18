@@ -1,6 +1,6 @@
 *** file [infer-prg] ***
 
-Expected capitalized type name, which should be at least two letters long. A 
+Expected capitalized type name, which should be at least two letters long. A
 single, capitalized letter is a type variable:
 
 2: enum T { Foo }
