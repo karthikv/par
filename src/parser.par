@@ -921,7 +921,7 @@ elems_base(f, base_f, bracket, inner) =
         if empty?(rest) then
           parsed((elems, Some(base)))
         else
-          head_loc(rest) |> one_err("Expected closing " ++ bracket_str(bracket))
+          head_loc(rest) |> one_err("Expected closing " ++ close_str(bracket))
       )
 
     // rest must be empty at this point; delim_comma_or_nl_cb ensures it
@@ -1512,9 +1512,9 @@ enclosed(bracket, tokens, cb) = match tokens {
     if token_tag(h) == open_tag(bracket) then
       enclosed_r([], 1, bracket, token_loc(h), t, cb)
     else
-      Some(token_loc(h)) |> one_err("Expected open " ++ bracket_str(bracket))
+      Some(token_loc(h)) |> one_err("Expected open " ++ open_str(bracket))
 
-  [] => None |> one_err("Expected open " ++ bracket_str(bracket))
+  [] => None |> one_err("Expected open " ++ open_str(bracket))
 }
 
 enclosed_r : (
@@ -1544,7 +1544,7 @@ enclosed_r(inner, depth, bracket, s, tokens, cb) = match tokens {
             (new_err_ml, str)
           else if let Some(("", end)) = String.span(no_close_prefix, str) then
             let new_str = "Expected a closing " ++ end ++ " before closing " ++
-              bracket_str(bracket)
+              close_str(bracket)
             (new_err_ml, new_str)
           else
             (err_ml, str)
@@ -1558,7 +1558,7 @@ enclosed_r(inner, depth, bracket, s, tokens, cb) = match tokens {
     else
       enclosed_r([h | inner], depth, bracket, s, t, cb)
 
-  [] => Some(s) |> one_err(no_close_prefix ++ bracket_str(bracket))
+  [] => Some(s) |> one_err(no_close_prefix ++ close_str(bracket))
 }
 
 no_close_prefix : String
@@ -1580,8 +1580,16 @@ close_tag(bracket) = match bracket {
   Angle => token_tag(Lexer.Gt(fake_loc))
 }
 
-bracket_str : Bracket -> String
-bracket_str(bracket) = match bracket {
+open_str : Bracket -> String
+open_str(bracket) = match bracket {
+  Paren => "paren '('"
+  Bracket => "bracket '['"
+  Brace => "brace '{'"
+  Angle => "angle bracket '<'"
+}
+
+close_str : Bracket -> String
+close_str(bracket) = match bracket {
   Paren => "paren ')'"
   Bracket => "bracket ']'"
   Brace => "brace '}'"

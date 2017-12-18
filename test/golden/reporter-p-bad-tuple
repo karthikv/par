@@ -1,7 +1,0 @@
-*** file [infer-prg] ***
-
-Expected at least two elements within tuple:
-
-3: (1,)
-   ^^^^
-

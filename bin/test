@@ -9,6 +9,7 @@ if [ $# -eq 0 ]; then
 elif [ $# -eq 1 ]; then
   rebar3 eunit --module "${1}_test"
 elif [ $# -eq 2 ] && [ "$2" = "update" ]; then
+  rm test/golden/reporter-*
   ERL_FLAGS="-update" rebar3 eunit --module "${1}_test"
 else
   rebar3 eunit "$@"

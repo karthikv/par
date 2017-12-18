@@ -14,9 +14,9 @@
 %   - Should build dir be configurable?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
+%   - ^Mod.foo in pattern; update docs
 % - Avoid propagating sig error when wrong number of args
 % - In partial app, evaluate function expr only once
-% - ^Mod.foo in pattern; update docs
 % - Confusion between Con and TV
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
