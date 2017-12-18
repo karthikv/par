@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected an expression:
+
+3: ('h', -)
+          ^
+

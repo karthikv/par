@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected a closing brace '}' before closing paren ')':
+
+3: (match 1 { 1) => 2 })
+               ^
+

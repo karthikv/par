@@ -14,11 +14,6 @@
 %   - Should build dir be configurable?
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
-% - Bad error message in enclosed_paren/brace when enclosed expression doesn't
-%   finish. Error is "expected ... before end-of-file" even though it's not
-%   the end of file
-%   - "Expected closing '}'" messages might have wrong start location b/c
-%     we use the keyword location!
 % - Avoid propagating sig error when wrong number of args
 % - In partial app, evaluate function expr only once
 % - ^Mod.foo in pattern; update docs

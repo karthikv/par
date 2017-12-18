@@ -1,0 +1,16 @@
+*** file [infer-prg] ***
+
+To create a record, fields must be assigned with the '=' operator. The operator 
+':=' may only be used when updating a record or struct to change the type of an 
+existing field:
+
+3: { a = 3, b := 4, c := @hi }
+            ^^^^^^
+
+To create a record, fields must be assigned with the '=' operator. The operator 
+':=' may only be used when updating a record or struct to change the type of an 
+existing field:
+
+3: { a = 3, b := 4, c := @hi }
+                    ^^^^^^^^
+
