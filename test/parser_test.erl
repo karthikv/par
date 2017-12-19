@@ -304,16 +304,6 @@ expr_test_() ->
       },
       ok_expr("Foo { a = 3 } == 1")
     )
-  , ?_assertEqual(
-      {},
-      ok_expr(
-        "let foo = Foo {\n"
-        "  a = 3,\n"
-        "  b = 4,\n"
-        "  | f\n"
-        "}"
-      )
-    )
 
 
   , ?_assertEqual(

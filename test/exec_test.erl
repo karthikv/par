@@ -39,9 +39,7 @@ many_code_gen(PathPrgs, TargetPath) ->
     utils:remove_mod(Mod)
   end, Compiled),
 
-  #comp{module=Module} = hd(Comps),
-  MainMod = list_to_atom(Module),
-
+  {MainMod, _} = hd(Compiled),
   code:add_patha(Dir),
   par_native:init(MainMod),
   V = MainMod:main(),

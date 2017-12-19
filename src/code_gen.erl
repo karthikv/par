@@ -3,7 +3,6 @@
 
 -include("common.hrl").
 -define(COUNTER_NAME, code_gen_counter).
--define(INIT_FN_ATOM, '_@init').
 
 -record(cg, {env, in_impl = false, ctx, prg_lines}).
 
@@ -170,7 +169,7 @@ compile_ast(Comp, Exports, CG) ->
 
   Forms = [
     {attribute, 1, file, {Path, 1}},
-    {attribute, 1, module, list_to_atom(Module)},
+    {attribute, 1, module, list_to_atom(?MODULE_PREFIX ++ Module)},
     {attribute, 1, compile, [no_auto_import]},
     {attribute, 1, export, [{InitAtom, InitArity} | Exports]},
     InitRep |
@@ -426,7 +425,7 @@ rep({N, Loc, Name}, CG) when N == var; N == con_token; N == var_value ->
     {option, _, Atom, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {global_fn, Atom, Arity} -> {'fun', Line, {function, Atom, Arity}};
     {external, Module} ->
-      Mod = list_to_atom(Module),
+      Mod = list_to_atom(?MODULE_PREFIX ++ Module),
       case maps:get({Module, Name}, CG#cg.env) of
         % global variable handled by the global manager
         {global, Atom} -> call(Mod, Atom, [], Line);
@@ -909,8 +908,10 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
   MatchAddCall = {match, 1, InitSetVar,
     call(ordsets, add_element, [ModuleRep, ArgVar], 1)},
 
+  InitFnAtom = '_@init',
   InitCalls = lists:map(fun({DepModule, _}) ->
-    call(list_to_atom(DepModule), ?INIT_FN_ATOM, [InitSetVar], 1)
+    DepMod = list_to_atom(?MODULE_PREFIX ++ DepModule),
+    call(DepMod, InitFnAtom, [InitSetVar], 1)
   end, Deps),
 
   GlobalVarNames = lists:filtermap(fun
@@ -934,7 +935,7 @@ rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
 
   % must return ok for module load to succeed
   Clause = {clause, 1, [ArgVar], [], [Case]},
-  {function, 1, ?INIT_FN_ATOM, 1, [Clause]}.
+  {function, 1, InitFnAtom, 1, [Clause]}.
 
 rep_arg_iv_patterns([], [[]], _, CG) -> {[], CG};
 rep_arg_iv_patterns(RawArgsRep, ArgsIVs, Line, CG) ->

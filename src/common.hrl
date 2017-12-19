@@ -1,6 +1,7 @@
 -ifndef(COMMON_HRL_).
 -define(COMMON_HRL_, 1).
 
+-define(MODULE_PREFIX, "Par.").
 -define(BUILTIN_LOC, builtin).
 
 -define(

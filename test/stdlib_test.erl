@@ -42,7 +42,7 @@ test_stdlib({Paths, _, C}) ->
     end, string:split(Root, "_", all)),
 
     Module = lists:flatten(ModuleParts),
-    Mod = list_to_atom(Module),
+    Mod = list_to_atom(?MODULE_PREFIX ++ Module),
     ordsets:fold(fun(TestName, FoldTestSet) ->
       [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
     end, [], utils:test_names(Module, C#ctx.g_env))
