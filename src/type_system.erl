@@ -122,7 +122,7 @@
 -endif.
 
 % this also initializes the lexer by dependency
-load() -> par_native:init('Parser').
+load() -> par_native:init('Par.Parser').
 
 infer_file(Path) ->
   case parse_file(Path, #{}) of
@@ -305,7 +305,7 @@ parse_prg(Prg, Path) ->
   case 'Lexer':tokenize(Prg) of
     {errors, Errs} -> {lexer_errors, Errs, Path, PrgLines};
     {ok, Tokens} ->
-      case 'Parser':parse(Tokens) of
+      case 'Par.Parser':parse(Tokens) of
         #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, PrgLines};
         #{value := {'Some', Ast}} -> {ok, Ast, PrgLines}
       end

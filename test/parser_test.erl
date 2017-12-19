@@ -6,11 +6,11 @@
 -define(DEF_PREFIX, "module Mod\n").
 -define(EXPR_PREFIX, "module Mod expr =\n").
 
-load() -> par_native:init('Parser').
+load() -> par_native:init('Par.Parser').
 
 ok_prg(Prg) ->
   {ok, Tokens} = 'Lexer':tokenize(Prg),
-  #{value := {'Some', Ast}, errs := []} = 'Parser':parse(Tokens),
+  #{value := {'Some', Ast}, errs := []} = 'Par.Parser':parse(Tokens),
   rewrite_refs(Ast).
 
 ok_prefix(Prefix, Prg) ->

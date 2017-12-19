@@ -9,7 +9,6 @@
 %   - Fix bug in separate for sets
 % - Default args?
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Prefix module names with 'Par.'
 % - Allow running program via cli; require that main is defined
 %   - Should build dir be configurable?
 % - Bug with referencing global variable in pattern
