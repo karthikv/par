@@ -36,10 +36,10 @@ update_test = group([
     { @hi => 'i' }
   test
     let cb() = update("foo", |a| a * 2, { "bar" => 3.7, "baz" => 1 })
-    assert capture(cb) == Some(BadKey)
+    assert capture(cb) == BadKey
   test assert update("bar", |a| a * 2, { "bar" => 3.7, "baz" => 1 }) ==
     { "bar" => 7.4, "baz" => 1 }
-  test assert capture(|-| update(true, |v| v, {})) == Some(BadKey)
+  test assert capture(|-| update(true, |v| v, {})) == BadKey
 ])
 
 upsert_test : Test

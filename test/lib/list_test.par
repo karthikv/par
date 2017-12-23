@@ -164,11 +164,11 @@ nth_test : Test
 nth_test = group([
   test assert nth(0, ["cow", "dog", "cat"]) == "cow"
   test assert nth(-1, ["cow", "dog", "cat"]) == "cat"
-  test assert capture(|-| nth(3, ["cow", "dog", "cat"])) == Some(BadIndex(3))
+  test assert capture(|-| nth(3, ["cow", "dog", "cat"])) == BadIndex(3)
   test assert nth(2, [42.3, .428, 13.3]) == 13.3
   test assert nth(-3, [42.3, .428, 13.3]) == 42.3
-  test assert capture(|-| nth(-4, [42.3, .428, 13.3])) == Some(BadIndex(-4))
-  test assert capture(|-| nth(0, [])) == Some(BadIndex(0))
+  test assert capture(|-| nth(-4, [42.3, .428, 13.3])) == BadIndex(-4)
+  test assert capture(|-| nth(0, [])) == BadIndex(0)
 ])
 
 split_at_test : Test
@@ -176,11 +176,11 @@ split_at_test = group([
   test assert split_at(0, ["cow", "dog", "cat"]) == ([], ["cow", "dog", "cat"])
   test assert split_at(-1, ["cow", "dog", "cat"]) == (["cow", "dog"], ["cat"])
   test assert split_at(1, ["cow", "dog", "cat"]) == (["cow"], ["dog", "cat"])
-  test assert capture(|-| split_at(3, ["cow", "dog", "cat"])) == Some(BadIndex(3))
+  test assert capture(|-| split_at(3, ["cow", "dog", "cat"])) == BadIndex(3)
   test assert split_at(2, [42.3, .428, 13.3]) == ([42.3, .428], [13.3])
   test assert split_at(-3, [42.3, .428, 13.3]) == ([], [42.3, .428, 13.3])
-  test assert capture(|-| split_at(-4, [42.3, .428, 13.3])) == Some(BadIndex(-4))
-  test assert capture(|-| split_at(0, [])) == Some(BadIndex(0))
+  test assert capture(|-| split_at(-4, [42.3, .428, 13.3])) == BadIndex(-4)
+  test assert capture(|-| split_at(0, [])) == BadIndex(0)
 ])
 
 slice_test : Test
@@ -188,18 +188,15 @@ slice_test = group([
   test assert slice(0, 1, ["cow", "dog", "cat"]) == ["cow"]
   test assert slice(-1, 1, ["cow", "dog", "cat"]) == ["cat"]
   test assert slice(3, 0, ["cow", "dog", "cat"]) == []
-  test assert capture(|-| slice(3, 1, ["cow", "dog", "cat"])) ==
-    Some(BadIndex(3))
-  test assert capture(|-| slice(2, 2, ["cow", "dog", "cat"])) ==
-    Some(BadIndex(3))
+  test assert capture(|-| slice(3, 1, ["cow", "dog", "cat"])) == BadIndex(3)
+  test assert capture(|-| slice(2, 2, ["cow", "dog", "cat"])) == BadIndex(3)
   test assert slice(0, 3, [42.3, .428, 13.3]) == [42.3, .428, 13.3]
   test assert slice(-3, 2, [42.3, .428, 13.3]) == [42.3, .428]
   test assert slice(-4, 0, [42.3, .428, 13.3]) == []
-  test assert capture(|-| slice(-4, 1, [42.3, .428, 13.3])) ==
-    Some(BadIndex(-4))
-  test assert capture(|-| slice(-1, 2, [42.3, .428, 13.3])) == Some(BadIndex(3))
+  test assert capture(|-| slice(-4, 1, [42.3, .428, 13.3])) == BadIndex(-4)
+  test assert capture(|-| slice(-1, 2, [42.3, .428, 13.3])) == BadIndex(3)
   test assert slice(0, 0, []) == []
-  test assert capture(|-| slice(0, 1, [])) == Some(BadIndex(0))
+  test assert capture(|-| slice(0, 1, [])) == BadIndex(0)
 ])
 
 range_test : Test
@@ -208,14 +205,12 @@ range_test = group([
   test assert range(-1, 2, ["cow", "dog", "cat"]) == ["cat"]
   test assert range(2, -2, ["cow", "dog", "cat"]) == []
   test assert range(3, 1, ["cow", "dog", "cat"]) == []
-  test assert capture(|-| range(2, 3, ["cow", "dog", "cat"])) ==
-    Some(BadIndex(3))
+  test assert capture(|-| range(2, 3, ["cow", "dog", "cat"])) == BadIndex(3)
   test assert range(0, 2, [42.3, .428, 13.3]) == [42.3, .428, 13.3]
   test assert range(-3, 1, [42.3, .428, 13.3]) == [42.3, .428]
-  test assert capture(|-| range(-4, 0, [42.3, .428, 13.3])) ==
-    Some(BadIndex(-4))
+  test assert capture(|-| range(-4, 0, [42.3, .428, 13.3])) == BadIndex(-4)
   test assert range(0, -4, [42.3, .428, 13.3]) == []
-  test assert capture(|-| range(0, 0, [])) == Some(BadIndex(0))
+  test assert capture(|-| range(0, 0, [])) == BadIndex(0)
   test assert range(1, 0, []) == []
 ])
 
@@ -231,9 +226,9 @@ zip_test = group([
   test assert zip(["cow", "dog", "cat"], [42.3, .428, 13.3]) ==
     [("cow", 42.3), ("dog", .428), ("cat", 13.3)]
   test assert capture(|-| zip(["cow", "dog"], [42.3, .428, 13.3]))
-    == Some(MismatchedLengths(2, 3))
+    == MismatchedLengths(2, 3)
   test assert zip([@hi], ['h']) == [(@hi, 'h')]
-  test assert capture(|-| zip([], ['h'])) == Some(MismatchedLengths(0, 1))
+  test assert capture(|-| zip([], ['h'])) == MismatchedLengths(0, 1)
   test assert zip([], []) == []
 ])
 

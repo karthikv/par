@@ -8,14 +8,17 @@ exception Fail(String)
 group : [Test] -> Test
 export group(tests) = assume tests
 
-capture : (() -> A) -> Option<Exception>
+capture : (() -> A) -> Exception
 export capture(cb) =
-  try
+  let result = try
     cb()
     None
-  catch {
-    e => Some(e)
-  }
+  catch { e => Some(e) }
+
+  if let Some(e) = result then
+    e
+  else
+    raise Fail("no exception raised")
 
 ok : Assertion
 export ok = assume @ok

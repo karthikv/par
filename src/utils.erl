@@ -21,6 +21,7 @@
   pretty/1,
   codepoints/1,
   temp_dir/0,
+  hex_encode/1,
   remove_mod/1
 ]).
 -include("common.hrl").

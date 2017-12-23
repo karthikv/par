@@ -1,0 +1,421 @@
+module File
+
+import Base (*)
+import String
+
+struct Mode {
+  owner : Permissions
+  group : Permissions
+  other : Permissions
+}
+
+enum Permissions {
+  AllowNone
+  AllowRead
+  AllowWrite
+  AllowExec
+  AllowReadWrite
+  AllowReadExec
+  AllowWriteExec
+  AllowAll
+}
+
+struct Stat {
+  size : Int
+  type : FileType
+  atime : Int
+  mtime : Int
+  mode : Mode
+  uid : Int
+  gid : Int
+}
+
+enum FileType {
+  File
+  Directory
+  Symlink
+  Device
+  Other
+}
+
+enum OpenMode {
+  Read
+  Write
+  Append
+  ReadWrite
+}
+
+enum Handle {
+  Handle(Native)
+}
+
+enum ReadAmount {
+  Chars(Int)
+  Line
+  All
+}
+
+enum PosixCode {
+  Eacces
+  Eagain
+  Ebadf
+  Ebusy
+  Edquot
+  Eexist
+  Efault
+  Efbig
+  Eintr
+  Einval
+  Eio
+  Eisdir
+  Eloop
+  Emfile
+  Emlink
+  Enametoolong
+  Enfile
+  Enodev
+  Enoent
+  Enomem
+  Enospc
+  Enotblk
+  Enotdir
+  Enotsup
+  Enxio
+  Eperm
+  Epipe
+  Erofs
+  Espipe
+  Esrch
+  Estale
+  Exdev
+}
+
+exception Terminated
+exception SystemLimit
+exception PosixError(PosixCode, String)
+exception EndOfFile
+exception UnknownError(Atom)
+
+stat : String -> Stat
+export stat(path) =
+  match @file:read_file_info(path, [(@time, @posix)]) {
+    (@ok, info) => munge_file_info(info)
+    e => fail(e)
+  }
+
+lstat : String -> Stat
+export lstat(path) =
+  match @file:read_link_info(path, [(@time, @posix)]) {
+    (@ok, info) => munge_file_info(info)
+    e => fail(e)
+  }
+
+munge_file_info : Native -> Stat
+munge_file_info(info) =
+  let (
+    @file_info, size, type_atom, _, atime, mtime, _, mode_num,
+    _, _, _, _, uid, gid
+  ) = assume info
+
+  let type = match type_atom {
+    @regular => File
+    @directory => Directory
+    @symlink => Symlink
+    @device => Device
+    @other => Other
+    @undefined => Other
+  }
+
+  Stat {
+    size = size
+    type = type
+    atime = atime
+    mtime = mtime
+    mode = num_to_mode(mode_num)
+    uid = uid
+    gid = gid
+  }
+
+
+chmod : (String, Mode) -> ()
+export chmod(path, mode) =
+  let num = mode_to_num(mode)
+  match @file:change_mode(path, num) {
+    @ok => ()
+    e => fail(e)
+  }
+
+num_to_mode : Int -> Mode
+num_to_mode(num) =
+  let mask = @erlang:bsl(1, 3) - 1
+  let owner_oct = @erlang:band(@erlang:bsr(num, 6), mask)
+  let group_oct = @erlang:band(@erlang:bsr(num, 3), mask)
+  let other_oct = @erlang:band(num, mask)
+
+  Mode {
+    owner = get(owner_oct, oct_to_perm)
+    group = get(group_oct, oct_to_perm)
+    other = get(other_oct, oct_to_perm)
+  }
+
+mode_to_num : Mode -> Int
+mode_to_num(mode) =
+  let owner_num = @erlang:bsl(get(mode.owner, perm_to_oct), 6)
+  let group_num = @erlang:bsl(get(mode.group, perm_to_oct), 3)
+  let other_num = get(mode.other, perm_to_oct)
+  owner_num + group_num + other_num
+
+oct_to_perm : Map<Int, Permissions>
+oct_to_perm = {
+  0 => AllowNone
+  1 => AllowExec
+  2 => AllowWrite
+  3 => AllowWriteExec
+  4 => AllowRead
+  5 => AllowReadExec
+  6 => AllowReadWrite
+  7 => AllowAll
+}
+
+perm_to_oct : Map<Permissions, Int>
+perm_to_oct = map(|(k, v)| (v, k), oct_to_perm)
+
+chown : (String, Int) -> ()
+export chown(path, uid) = match @file:change_owner(path, uid) {
+  // change_owner fails to report errors, so we check for success.
+  @ok => if stat(path).uid != uid then raise PosixError(Eperm, desc(@eperm))
+  e => fail(e)
+}
+
+chgrp : (String, Int) -> ()
+export chgrp(path, gid) = match @file:change_group(path, gid) {
+  // change_owner fails to report errors, so we check for success.
+  @ok => if stat(path).gid != gid then raise PosixError(Eperm, desc(@eperm))
+  e => fail(e)
+}
+
+cp : (String, String) -> Int
+export cp(from, to) = match @file:copy(from, to) {
+  (@ok, count) => count
+  e => fail(e)
+}
+
+mv : (String, String) -> ()
+export mv(from, to) = match @file:rename(from, to) {
+  @ok => ()
+  e => fail(e)
+}
+
+rm : String -> ()
+export rm(path) = match @file:delete(path) {
+  @ok => ()
+  e => fail(e)
+}
+
+rmdir : String -> ()
+export rmdir(path) = match @file:del_dir(path) {
+  @ok => ()
+  e => fail(e)
+}
+
+ls : String -> [String]
+export ls(path) = match @file:list_dir(path) {
+  (@ok, files) => map(String.from_chars, files)
+  e => fail(e)
+}
+
+glob : String -> [String]
+export glob(path) =
+  String.chars(path)
+  |> @filelib:wildcard/1
+  |> map(String.from_chars)
+
+mkdir : String -> ()
+export mkdir(path) = match @file:make_dir(path) {
+  @ok => ()
+  e => fail(e)
+}
+
+mkdir_p : String -> ()
+export mkdir_p(path) =
+  // ensure_dir ensures the *parent* directory exists, so we need to
+  // join path with an arbitrary filename.
+  let sub_path = @filename:join(path, "foo")
+  match @filelib:ensure_dir(sub_path) {
+    @ok => ()
+    e => fail(e)
+  }
+
+ln : (String, String) -> ()
+export ln(from, to) = match @file:make_link(from, to) {
+  @ok => ()
+  e => fail(e)
+}
+
+ln_s : (String, String) -> ()
+export ln_s(from, to) = match @file:make_symlink(from, to) {
+  @ok => ()
+  e => fail(e)
+}
+
+readlink : String -> String
+export readlink(path) = match @file:read_link(path) {
+  (@ok, resolved) => String.from_chars(resolved)
+  e => fail(e)
+}
+
+read_path : String -> String
+export read_path(path) = match @file:read_file(path) {
+  (@ok, contents) => @unicode:characters_to_binary(contents)
+  e => fail(e)
+}
+
+write_path : (String, String) -> ()
+export write_path(path, contents) = match @file:write_file(path, contents) {
+  @ok => ()
+  e => fail(e)
+}
+
+cwd : () -> String
+export cwd() = match @file:get_cwd() {
+  (@ok, dir) => String.from_chars(dir)
+  e => fail(e)
+}
+
+cd : String -> ()
+export cd(path) = match @file:set_cwd(path) {
+  @ok => ()
+  e => fail(e)
+}
+
+open : (String, OpenMode) -> Handle
+export open(path, mode) =
+  let base_opts = [@read_ahead, @binary, assume (@encoding, @utf8)]
+  let opts = match mode {
+    Read => [@read | base_opts]
+    Write => [@write | base_opts]
+    Append => [@append | base_opts]
+    ReadWrite => [@read, @write | base_opts]
+  }
+  let device = match @file:open(path, opts) {
+    (@ok, device) => device
+    e => fail(e)
+  }
+  Handle(device)
+
+close : Handle -> ()
+export close(handle) =
+  let Handle(device) = handle
+  match @file:close(device) {
+    @ok => ()
+    e => fail(e)
+  }
+
+read : (Handle, ReadAmount) -> String
+export read(handle, amount) =
+  let Handle(device) = handle
+  let result = match amount {
+    Chars(count) => @io:get_chars(device, "", count)
+    Line => @io:get_line(device, "")
+    All =>
+      let pos = tell(handle)
+      let len = seek_end(handle)
+
+      if pos == len then
+        raise EndOfFile
+      else
+        seek(handle, pos)
+
+        // It's possible that there are fewer than len chars, since unicode
+        // chars may be encoded in more than one byte. Nevertheless, we know
+        // len >= num chars, so get_chars will still return everything.
+        @io:get_chars(device, 0, len)
+  }
+
+  match result {
+    @eof => raise EndOfFile
+    (@error, e) => fail((@error, e))
+    data => data
+  }
+
+write : (Handle, String) -> ()
+export write(handle, str) =
+  let Handle(device) = handle
+  match @io:put_chars(device, str) {
+    @ok => ()
+    e => fail(e)
+  }
+
+seek : (Handle, Int) -> ()
+export seek(handle, pos) =
+  let Handle(device) = handle
+  match @file:position(device, pos) {
+    (@ok, _) => ()
+    e => fail(e)
+  }
+
+seek_end : Handle -> Int
+export seek_end(handle) =
+  let Handle(device) = handle
+  match @file:position(device, @eof) {
+    (@ok, len) => len
+    e => fail(e)
+  }
+
+tell : Handle -> Int
+export tell(handle) =
+  let Handle(device) = handle
+  match @file:position(device, @cur) {
+    (@ok, pos) => pos
+    e => fail(e)
+  }
+
+truncate : Handle -> ()
+export truncate(handle) =
+  let Handle(device) = handle
+  match @file:truncate(device) {
+    @ok => ()
+    e => fail(e)
+  }
+
+fail : ((Atom, Atom)) -> A
+fail((@error, e)) = match e {
+  @terminated => raise Terminated
+  @system_limit => raise SystemLimit
+  @eacces => raise PosixError(Eacces, desc(e))
+  @eagain => raise PosixError(Eagain, desc(e))
+  @ebadf => raise PosixError(Ebadf, desc(e))
+  @ebusy => raise PosixError(Ebusy, desc(e))
+  @edquot => raise PosixError(Edquot, desc(e))
+  @eexist => raise PosixError(Eexist, desc(e))
+  @efault => raise PosixError(Efault, desc(e))
+  @efbig => raise PosixError(Efbig, desc(e))
+  @eintr => raise PosixError(Eintr, desc(e))
+  @einval => raise PosixError(Einval, desc(e))
+  @eio => raise PosixError(Eio, desc(e))
+  @eisdir => raise PosixError(Eisdir, desc(e))
+  @eloop => raise PosixError(Eloop, desc(e))
+  @emfile => raise PosixError(Emfile, desc(e))
+  @emlink => raise PosixError(Emlink, desc(e))
+  @enametoolong => raise PosixError(Enametoolong, desc(e))
+  @enfile => raise PosixError(Enfile, desc(e))
+  @enodev => raise PosixError(Enodev, desc(e))
+  @enoent => raise PosixError(Enoent, desc(e))
+  @enomem => raise PosixError(Enomem, desc(e))
+  @enospc => raise PosixError(Enospc, desc(e))
+  @enotblk => raise PosixError(Enotblk, desc(e))
+  @enotdir => raise PosixError(Enotdir, desc(e))
+  @enotsup => raise PosixError(Enotsup, desc(e))
+  @enxio => raise PosixError(Enxio, desc(e))
+  @eperm => raise PosixError(Eperm, desc(e))
+  @epipe => raise PosixError(Epipe, desc(e))
+  @erofs => raise PosixError(Erofs, desc(e))
+  @espipe => raise PosixError(Espipe, desc(e))
+  @esrch => raise PosixError(Esrch, desc(e))
+  @estale => raise PosixError(Estale, desc(e))
+  @exdev => raise PosixError(Exdev, desc(e))
+  _ => raise UnknownError(e)
+}
+
+desc : Atom -> String
+desc(e) = @file:format_error(e) |> String.from_chars

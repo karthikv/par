@@ -8,13 +8,21 @@
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
 % - Default args?
+% - Parallelize code gen
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Allow running program via cli; require that main is defined
 %   - Should build dir be configurable?
+% - Native function w/o arity on rhs of |>
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 %   - ^Mod.foo in pattern; update docs
 % - Confusion between Con and TV
+% - Change order of arguments
+% - Only parse/compile necessary stdlib modules
+%   - Try not to make stdlib modules depend on each other
+%   - Wait, we can **definitely** pre-parse stdlib modules as well!
+% - Global exception handler for better printing
+% - Description along with raise?
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
 %   - Ensure all code samples in tutorial work

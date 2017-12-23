@@ -9,7 +9,7 @@
 load() -> par_native:init('Par.Parser').
 
 ok_prg(Prg) ->
-  {ok, Tokens} = 'Lexer':tokenize(Prg),
+  {ok, Tokens} = 'Par.Lexer':tokenize(Prg),
   #{value := {'Some', Ast}, errs := []} = 'Par.Parser':parse(Tokens),
   rewrite_refs(Ast).
 

@@ -140,6 +140,8 @@ stdlib_modules() ->
     "Map" => "map.par",
     "String" => "string.par",
     "Char" => "char.par",
+    "File" => "file.par",
+    "Path" => "path.par",
     "Test" => "test.par"
   }.
 
@@ -302,7 +304,7 @@ infer_prg(Prg) ->
 
 parse_prg(Prg, Path) ->
   PrgLines = array:from_list(re:split(Prg, "\r?\n", [{return, list}])),
-  case 'Lexer':tokenize(Prg) of
+  case 'Par.Lexer':tokenize(Prg) of
     {errors, Errs} -> {lexer_errors, Errs, Path, PrgLines};
     {ok, Tokens} ->
       case 'Par.Parser':parse(Tokens) of

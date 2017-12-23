@@ -1,0 +1,107 @@
+module Path
+
+import Base (*)
+import String
+
+base : String -> String
+export base = @filename:basename/1
+
+dir : String -> String
+export dir = @filename:dirname/1
+
+ext : String -> String
+export ext = @filename:extension/1
+
+strip_ext : String -> String
+export strip_ext = @filename:rootname/1
+
+normalize : String -> String
+export normalize(path) =
+  let normed = split(path) |> normalize_r
+  if normed == [] then
+    "."
+  else
+    join_all(normed)
+
+normalize_r : [String] -> [String]
+normalize_r(parts) = match parts {
+  ["." | t] => normalize_r(t)
+
+  // We can't reduce a leading "..". This order is important so as to prevent
+  // ["..", ".."] from being incorrectly reduced to [".."].
+  [".." | t] => [".." | normalize_r(t)]
+  [h, ".." | t] =>
+    if String.ends_with?("/", h) then
+      // This is an absolute path; keep the leading drive or forward slash to
+      // reduce additional "..".
+      normalize_r([h | t])
+    else
+      normalize_r(t)
+
+  // We can't further normalize a followed by b. But it's possible that we can
+  // reduce [b | t] further, possibly getting rid of b. If we can get rid of
+  // b, we need to recurse again with a as the head. If b can't be removed, we
+  // can keep a and b in the final result.
+  [a, b | t] =>
+    let norm = normalize_r([b | t])
+    if let [&b | _] = norm then
+      [a | norm]
+    else
+      normalize_r([a | norm])
+
+  // A list with one or fewer elements can't be reduced further.
+  l => l
+}
+
+to_absolute : String -> String
+export to_absolute(path) = @filename:absname(path) |> normalize
+
+to_relative : (String, String) -> String
+export to_relative(from, to) =
+  let from_parts = to_absolute(from) |> split
+  let to_parts = to_absolute(to) |> split
+  relative_r(from_parts, to_parts)
+
+relative_r : ([String], [String]) -> String
+relative_r(from_parts, to_parts) = match (from_parts, to_parts) {
+  ([h | from_t], [h | to_t]) => relative_r(from_t, to_t)
+  _ => join_all(map(|_| "..", from_parts) ++ to_parts)
+}
+
+absolute? : String -> Bool
+export absolute?(path) = @filename:pathtype(path) == @absolute
+
+relative? : String -> Bool
+export relative?(path) =
+  let type = @filename:pathtype(path)
+  type == @relative || type == @volumerelative
+
+join : (String, String) -> String
+export join(path1, path2) = join_all([path1, path2])
+
+join_all : [String] -> String
+export join_all(paths) =
+  if paths == [] then
+    ""
+  else
+    // If any path after the first is absolute, @filename:join will discard all
+    // paths prior to it in the list. To prevent this, force every path to be
+    // relative. Note that we don't change the first path, as it decides whether
+    // the entire path is absolute or not.
+    if let [h | t] = paths then
+      @filename:join([h | map(make_relative, t)])
+    else
+      @filename:join(paths)
+
+// We only need to handle Unix-like absolute paths in the form /foo/bar, as
+// these are the ones that cause @filename:join() to discard prior paths.
+make_relative : String -> String
+make_relative(path) =
+  if String.starts_with?("/", path) then
+    let Some((_, suffix)) = String.span("/", path)
+    suffix
+  else
+    path
+
+split : String -> [String]
+export split = @filename:split/1

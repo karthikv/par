@@ -1,0 +1,507 @@
+module FileTest
+
+import File (*)
+import Test (group, capture)
+
+uid : Int
+uid =
+  String.chars("id -u")
+  |> @os:cmd/1
+  |> String.from_chars
+  |> String.strip
+  |> to_int
+
+root_temp_dir : String
+root_temp_dir = @os:getenv("TEMP", "/tmp")
+
+temp_path : () -> String
+temp_path() =
+  let bytes = @crypto:strong_rand_bytes(16)
+  let str = String.from_chars(@utils:hex_encode(bytes))
+  let path = @filename:join(root_temp_dir, "par-file-" ++ str)
+
+  match @file:read_file_info(path) {
+    (@ok, _) => temp_path()
+    (@error, @enoent) => path
+  }
+
+temp_file : String -> String
+temp_file(contents) =
+  let path = temp_path()
+  let @ok = @file:write_file(path, contents)
+  path
+
+temp_dir : () -> String
+temp_dir = @utils:temp_dir/0
+
+code : (() -> A) -> PosixCode
+code(f) =
+  assert let PosixError(code, _) = capture(f)
+  code
+
+stat_test : Test
+stat_test = group([
+  test
+    let stat = stat("test/lib/file/foo.txt")
+    assert stat.size == 6
+    assert stat.type == File
+    assert stat.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
+    }
+
+  test
+    let stat = stat("test/lib/file/bar")
+    assert stat.type == Directory
+    assert stat.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
+    }
+
+  // Symlinks are resolved.
+  test
+    let stat = stat("test/lib/file/bar/baz")
+    assert stat.type == File
+    assert stat.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
+    }
+
+  test assert code(|-| stat("asdf")) == Enoent
+])
+
+lstat_test : Test
+lstat_test = group([
+  test
+    let lstat = lstat("test/lib/file/foo.txt")
+    assert lstat.size == 6
+    assert lstat.type == File
+    assert lstat.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
+    }
+
+  test
+    let lstat = lstat("test/lib/file/bar")
+    assert lstat.type == Directory
+    assert lstat.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
+    }
+
+  // Symlinks aren't resolved.
+  test
+    let lstat = lstat("test/lib/file/bar/baz")
+    assert lstat.type == Symlink
+    assert lstat.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
+    }
+
+  test assert code(|-| lstat("asdf")) == Enoent
+])
+
+chmod_test : Test
+chmod_test = group([
+  test
+    let path = temp_file("")
+    let new_mode = Mode {
+      owner = AllowWrite
+      group = AllowNone
+      other = AllowExec
+    }
+    chmod(path, new_mode)
+    assert stat(path).mode == new_mode
+
+  test
+    let new_mode = Mode {
+      owner = AllowAll
+      group = AllowAll
+      other = AllowAll
+    }
+    assert code(|-| chmod("asdf", new_mode)) == Enoent
+])
+
+// Can't actually test this without running as root. For now, ensure we get
+// a permission error.
+chown_test : Test
+chown_test = test
+  let path = temp_file("")
+  assert code(|-| chown(path, 0)) == Eperm
+
+chgrp_test : Test
+chgrp_test = group([
+  test
+    let path = temp_file("")
+    let new_gid = if stat(path).gid == 0 then uid else 0
+    chgrp(path, new_gid)
+    assert stat(path).gid == new_gid
+
+  test
+    let path = temp_file("")
+    assert code(|-| chgrp(path, -1)) == Eperm
+])
+
+cp_test : Test
+cp_test = group([
+  test
+    let path = temp_file("foo")
+    let new_path = temp_path()
+
+    cp(path, new_path)
+    assert @file:read_file(new_path) == (@ok, "foo")
+    assert @file:read_file(path) == (@ok, "foo")
+
+  test
+    let path = temp_path()
+    let new_path = temp_path()
+    assert code(|-| cp(path, new_path)) == Enoent
+
+  test
+    let path = temp_file("foo")
+    let new_path = temp_file("bar")
+
+    cp(path, new_path)
+    assert @file:read_file(new_path) == (@ok, "foo")
+    assert @file:read_file(path) == (@ok, "foo")
+])
+
+mv_test : Test
+mv_test = group([
+  test
+    let path = temp_file("foo")
+    let new_path = temp_path()
+
+    mv(path, new_path)
+    assert @file:read_file(new_path) == (@ok, "foo")
+    assert code(|-| stat(path)) == Enoent
+
+  test
+    let path = temp_path()
+    let new_path = temp_path()
+    assert code(|-| mv(path, new_path)) == Enoent
+
+  test
+    let path = temp_file("foo")
+    let new_path = temp_file("bar")
+
+    mv(path, new_path)
+    assert @file:read_file(new_path) == (@ok, "foo")
+    assert code(|-| stat(path)) == Enoent
+])
+
+rm_test : Test
+rm_test = group([
+  test
+    let path = temp_file("")
+    rm(path)
+    assert code(|-| rm(path)) == Enoent
+  test assert code(|-| rm("asdf")) == Enoent
+  test assert  code(|-| rm(temp_dir())) == Eperm
+])
+
+rmdir_test : Test
+rmdir_test = group([
+  test
+    let path = temp_dir()
+    rmdir(path)
+    assert code(|-| rmdir(path)) == Enoent
+  test assert code(|-| rmdir(temp_file(""))) == Enotdir
+  test
+    let path = temp_dir()
+    let @ok = @file:write_file(@filename:join(path, "foo"), "bar")
+    assert code(|-| rmdir(path)) == Eexist
+])
+
+ls_test : Test
+ls_test = group([
+  test
+    let path = temp_dir()
+    let @ok = @file:write_file(@filename:join(path, "foo"), "")
+    let @ok = @file:write_file(@filename:join(path, "bar"), "")
+    let @ok = @file:make_dir(@filename:join(path, "baz"))
+    assert to_set(ls(path)) == #["foo", "bar", "baz"]
+  test assert ls(temp_dir()) == []
+  test assert code(|-| ls(temp_file(""))) == Enotdir
+])
+
+glob_test : Test
+glob_test = group([
+  test
+    let path = temp_dir()
+    let foo_path = @filename:join(path, "foo")
+    let bar_path = @filename:join(path, "bar")
+    let baz_path = @filename:join(path, "baz-foo")
+    let @ok = @file:write_file(foo_path, "")
+    let @ok = @file:write_file(bar_path, "")
+    let @ok = @file:make_dir(baz_path)
+
+    assert to_set(glob(@filename:join(path, "*"))) ==
+      #[foo_path, bar_path, baz_path]
+    assert to_set(glob(@filename:join(path, "*foo"))) ==
+      #[foo_path, baz_path]
+    assert to_set(glob(@filename:join(path, "{foo,bar}"))) ==
+      #[foo_path, bar_path]
+  test assert glob(temp_path()) == []
+])
+
+mkdir_test : Test
+mkdir_test = group([
+  test
+    let path = temp_path()
+    mkdir(path)
+    assert stat(path).type == Directory
+  test
+    let path = @filename:join(temp_path(), "foo")
+    assert code(|-| mkdir(path)) == Enoent
+  test assert code(|-| mkdir(temp_dir())) == Eexist
+  test assert code(|-| mkdir(temp_file(""))) == Eexist
+])
+
+mkdir_p_test : Test
+mkdir_p_test = group([
+  test
+    let path = temp_path()
+    mkdir_p(path)
+    assert stat(path).type == Directory
+  test
+    let path = @filename:join(temp_path(), "foo")
+    mkdir_p(path)
+    assert stat(path).type == Directory
+  test
+    let path = temp_dir()
+    mkdir_p(path)
+    assert stat(path).type == Directory
+  test assert code(|-| mkdir_p(temp_file(""))) == Eexist
+])
+
+ln_test : Test
+ln_test = group([
+  test
+    let target_path = temp_file("foo")
+    let path = temp_path()
+
+    ln(target_path, path)
+    assert @file:read_file(path) == (@ok, "foo")
+
+    // Hard link should be maintained even when original is deleted.
+    @file:delete(target_path)
+    assert @file:read_file(path) == (@ok, "foo")
+
+  test
+    let target_path = temp_dir()
+    let path = temp_path()
+    // Hard links cannot be made to directories.
+    assert code(|-| ln(target_path, path)) == Eperm
+
+  test
+    let target_path = temp_path()
+    let path = temp_path()
+    assert code(|-| ln(target_path, path)) == Enoent
+
+  test
+    let target_path = temp_file("")
+    let path = temp_file("")
+    assert code(|-| ln(target_path, path)) == Eexist
+])
+
+ln_s_test : Test
+ln_s_test = group([
+  test
+    let target_path = temp_file("foo")
+    let path = temp_path()
+
+    ln_s(target_path, path)
+    assert stat(path).type == File
+    assert @file:read_file(path) == (@ok, "foo")
+
+    @file:delete(target_path)
+    assert code(|-| stat(path)) == Enoent
+
+  test
+    let target_path = temp_dir()
+    let path = temp_path()
+
+    ln_s(target_path, path)
+    assert stat(path).type == Directory
+    assert @file:list_dir(path) == (@ok, [])
+
+  test
+    let target_path = temp_path()
+    let path = temp_path()
+
+    ln_s(target_path, path)
+    assert code(|-| stat(path)) == Enoent
+
+  test
+    let target_path = temp_file("")
+    let path = temp_file("")
+    assert code(|-| ln_s(target_path, path)) == Eexist
+])
+
+readlink_test : Test
+readlink_test = group([
+  test
+    let target_path = temp_file("")
+    let path = temp_path()
+    ln_s(target_path, path)
+    assert readlink(path) == target_path
+
+  // Hardlinks cannot be resolved with readlink.
+  test
+    let target_path = temp_file("")
+    let path = temp_path()
+    ln(target_path, path)
+    assert code(|-| readlink(path)) == Einval
+
+  test assert code(|-| readlink("asdf")) == Enoent
+  test assert code(|-| readlink(temp_file(""))) == Einval
+])
+
+read_path_test : Test
+read_path_test = group([
+  test assert read_path(temp_file("")) == ""
+  test assert read_path(temp_file("foo")) == "foo"
+  test assert code(|-| read_path("asdf")) == Enoent
+])
+
+write_path_test : Test
+write_path_test = group([
+  test
+    let path = temp_path()
+    write_path(path, "foo")
+    assert @file:read_file(path) == (@ok, "foo")
+  test
+    let path = temp_file("foo")
+    write_path(path, "bar")
+    assert @file:read_file(path) == (@ok, "bar")
+  test
+    let path = @filename:join(temp_path(), "foo")
+    assert code(|-| write_path(path, "foo")) == Enoent
+])
+
+// Hard to test this in a more comprehensive way; we can't cd because that could
+// affect other tests running in parallel.
+cwd_test : Test
+cwd_test =
+  let path = @filename:join(cwd(), "rebar.config")
+  test assert stat(path).type == File
+
+// Hard to test cd because it can affect other tests running in parallel; just
+// check failure cases.
+cd_test : Test
+cd_test = group([
+  test
+    let orig_cwd = cwd()
+    assert code(|-| cd("asdf")) == Enoent
+    assert cwd() == orig_cwd
+
+  test
+    let orig_cwd = cwd()
+    assert code(|-| cd(temp_file(""))) == Enotdir
+    assert cwd() == orig_cwd
+])
+
+open_read_close_test : Test
+open_read_close_test = group([
+  test
+    let h = open(temp_file("hey\nthere"), Read)
+    ensure close(h) after
+    assert read(h, Chars(3)) == "hey"
+    assert read(h, Chars(20)) == "\nthere"
+    assert capture(|-| read(h, Chars(1))) == EndOfFile
+
+  test
+    let h = open(temp_file("hey\nthere"), Read)
+    ensure close(h) after
+    assert read(h, Line) == "hey\n"
+    assert read(h, Line) == "there"
+    assert capture(|-| read(h, Line)) == EndOfFile
+
+  test
+    let h = open(temp_file("hey\nthere"), Read)
+    ensure close(h) after
+    assert read(h, All) == "hey\nthere"
+    assert capture(|-| read(h, All)) == EndOfFile
+
+  test
+    let h = open(temp_file("hey\nthere"), Read)
+    ensure close(h) after
+    assert read(h, Line) == "hey\n"
+    assert read(h, Chars(2)) == "th"
+    assert read(h, All) == "ere"
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, Write)
+    ensure close(h) after
+
+    // Should be truncated.
+    assert @file:read_file(path) == (@ok, "")
+    write(h, "hello")
+    assert @file:read_file(path) == (@ok, "hello")
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, Append)
+    ensure close(h) after
+
+    assert @file:read_file(path) == (@ok, "hey\nthere")
+    write(h, "where")
+    assert @file:read_file(path) == (@ok, "hey\ntherewhere")
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, ReadWrite)
+    ensure close(h) after
+
+    assert @file:read_file(path) == (@ok, "hey\nthere")
+    assert read(h, Chars(3)) == "hey"
+    write(h, "where")
+    assert read(h, All) == "e"
+    assert @file:read_file(path) == (@ok, "heywheree")
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, ReadWrite)
+    ensure close(h) after
+
+    seek(h, 4)
+    write(h, "where")
+    assert tell(h) == 9
+    assert @file:read_file(path) == (@ok, "hey\nwhere")
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, ReadWrite)
+    ensure close(h) after
+
+    let end = seek_end(h)
+    assert tell(h) == end
+    write(h, "where")
+    assert tell(h) == end + 5
+    assert @file:read_file(path) == (@ok, "hey\ntherewhere")
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, ReadWrite)
+    ensure close(h) after
+
+    truncate(h)
+    assert @file:read_file(path) == (@ok, "")
+
+  test
+    let path = temp_file("hey\nthere")
+    let h = open(path, ReadWrite)
+    ensure close(h) after
+
+    seek(h, 4)
+    truncate(h)
+    assert @file:read_file(path) == (@ok, "hey\n")
+])

@@ -66,15 +66,15 @@ slice_test = group([
   test assert slice(0, 1, "bar") == "b"
   test assert slice(-1, 1, "bar") == "r"
   test assert slice(3, 0, "bar") == ""
-  test assert capture(|-| slice(3, 1, "bar")) == Some(BadIndex(3))
-  test assert capture(|-| slice(2, 2, "bar")) == Some(BadIndex(3))
+  test assert capture(|-| slice(3, 1, "bar")) == BadIndex(3)
+  test assert capture(|-| slice(2, 2, "bar")) == BadIndex(3)
   test assert slice(0, 3, "bar") == "bar"
   test assert slice(-3, 2, "bar") == "ba"
   test assert slice(-4, 0, "bar") == ""
-  test assert capture(|-| slice(-4, 1, "bar")) == Some(BadIndex(-4))
-  test assert capture(|-| slice(-1, 2, "bar")) == Some(BadIndex(3))
+  test assert capture(|-| slice(-4, 1, "bar")) == BadIndex(-4)
+  test assert capture(|-| slice(-1, 2, "bar")) == BadIndex(3)
   test assert slice(0, 0, "") == ""
-  test assert capture(|-| slice(0, 1, "")) == Some(BadIndex(0))
+  test assert capture(|-| slice(0, 1, "")) == BadIndex(0)
 ])
 
 range_test : Test
@@ -83,12 +83,12 @@ range_test = group([
   test assert range(-1, 2, "bar") == "r"
   test assert range(2, -2, "bar") == ""
   test assert range(3, 1, "bar") == ""
-  test assert capture(|-| range(2, 3, "bar")) == Some(BadIndex(3))
+  test assert capture(|-| range(2, 3, "bar")) == BadIndex(3)
   test assert range(0, 2, "bar") == "bar"
   test assert range(-3, 1, "bar") == "ba"
-  test assert capture(|-| range(-4, 0, "bar")) == Some(BadIndex(-4))
+  test assert capture(|-| range(-4, 0, "bar")) == BadIndex(-4)
   test assert range(0, -4, "bar") == ""
-  test assert capture(|-| range(0, 0, "")) == Some(BadIndex(0))
+  test assert capture(|-| range(0, 0, "")) == BadIndex(0)
   test assert range(1, 0, "") == ""
 ])
 
@@ -149,13 +149,13 @@ substr_test = group([
 re_test : Test
 re_test = group([
   test assert capture(|-| re("?", [])) ==
-    Some(BadRegexp({ reason = "nothing to repeat", index = 0 }))
+    BadRegexp({ reason = "nothing to repeat", index = 0 })
   test assert capture(|-| re("a(b", [])) ==
-    Some(BadRegexp({ reason = "missing )", index = 3 }))
-  test assert capture(|-| re("a(?q)b", [])) == Some(BadRegexp({
+    BadRegexp({ reason = "missing )", index = 3 })
+  test assert capture(|-| re("a(?q)b", [])) == BadRegexp({
     reason = "unrecognized character after (? or (?-"
     index = 3
-  }))
+  })
 ])
 
 matches_test : Test
