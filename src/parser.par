@@ -140,8 +140,8 @@ enum State {
 }
 
 enum Transition {
-  Push([Token], Node)
-  PushOp([Token], NodeOp)
+  Push(Node, [Token])
+  PushOp(NodeOp, [Token])
   PushParsed(Parsed<(Node, [Token])>)
 }
 
@@ -161,8 +161,8 @@ export parse(tokens) = match tokens {
     let parsed = imports(tokens) |> pbind(|(_, rest)| many(def, rest))
     add_err(
       parsed,
+      head_loc(tokens),
       "Expected 'module' keyword at start of file",
-      head_loc(tokens)
     )
 }
 
@@ -189,7 +189,7 @@ imports(tokens) = match tokens {
             parsed((Import(l, from, [All(all_l)]), rest))
           else
             many_delim_comma_or_nl(import_ident, inner)
-            |> pmap_or(|v| v, [])
+            |> pmap_or([], |v| v)
             |> pmap(|idents| (Import(l, from, idents), rest))
         )
       else
@@ -339,7 +339,7 @@ enumeration(s, tokens) =
   new_type(tokens) |> pbind(|(node, rest)|
     enclosed(Brace, rest, |brace_l, inner, rest|
       many_delim_comma_or_nl(option, inner)
-      |> pmap_or(|v| v, [])
+      |> pmap_or([], |v| v)
       |> pmap(|options|
         let l = range(s, brace_l)
         (Enum(l, node, options), rest)
@@ -393,7 +393,7 @@ structure(s, tokens) =
   new_type(tokens) |> pbind(|(node, rest)|
     enclosed(Brace, rest, |brace_l, inner, rest|
       many_delim_comma_or_nl(field_sig, inner)
-      |> pmap_or(|v| v, [])
+      |> pmap_or([], |v| v)
       |> pmap(|field_sigs|
         let l = range(s, brace_l)
         (Struct(l, node, field_sigs), rest)
@@ -407,7 +407,7 @@ new_type(tokens) = match tokens {
     enclosed(Angle, [Lexer.Lt(lt_l) | t], |angle_l, inner, rest|
       let l = range(con_l, angle_l)
       many_delim_comma(tv, inner)
-      |> pmap_or(|v| v, [])
+      |> pmap_or([], |v| v)
       |> pmap(|tvs| (Gen(l, Con(con_l, con), tvs), rest))
     )
 
@@ -444,7 +444,7 @@ iface(s, tokens) = match tokens {
     parsed_parents |> pbind(|(parents, rest)|
       enclosed(Brace, rest, |brace_l, inner, rest|
         many_delim_comma_or_nl(field_sig, inner)
-        |> pmap_or(|v| v, [])
+        |> pmap_or([], |v| v)
         |> pmap(|field_sigs|
           let l = range(s, brace_l)
           let con_node = Con(con_l, name)
@@ -481,7 +481,7 @@ implementation(s, tokens) =
             else
               enclosed(Brace, rest, |brace_l, inner, rest|
                 many(init, inner)
-                |> pmap_or(|v| v, [])
+                |> pmap_or([], |v| v)
                 |> pmap(|globals|
                   let l = range(s, brace_l)
                   let ref = make_ref()
@@ -579,7 +579,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
             })
             // Might parse a pattern, not an expr, if it's a match body. Note
             // that we must use pbind_or instead of pmap_or to remove errors.
-            |> pbind_or(|v| parsed(v), parsed((field_node, after_con)))
+            |> pbind_or(parsed((field_node, after_con)), |v| parsed(v))
           )
           |> PushParsed
         else
@@ -624,7 +624,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
                   else
                     Parsed { value = None, errs = errs }
               })
-              |> pmap_or(|v| (v, rest), (AnonRecord(l, make_ref(), []), rest))
+              |> pmap_or((AnonRecord(l, make_ref(), []), rest), |v| (v, rest))
             else
               expr(inner) |> pbind(|v| match v {
                 (_, [Lexer.FatArrow(_) | _]) =>
@@ -640,7 +640,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
                   "record/struct"
                 )
               })
-              |> pmap_or(|v| (v, rest), (Map(l, []), rest))
+              |> pmap_or((Map(l, []), rest), |v| (v, rest))
           )
         )
         |> PushParsed
@@ -670,13 +670,13 @@ expr_r(expr_s, state, stack, tokens) = match state {
         )
         |> PushParsed
 
-      [Lexer.Sub(l) | t] => PushOp(t, UnaryOp(l, Neg))
-      [Lexer.Not(l) | t] => PushOp(t, UnaryOp(l, Not))
-      [Lexer.Pound(l) | t] => PushOp(t, UnaryOp(l, Pound))
-      [Lexer.Dollar(l) | t] => PushOp(t, UnaryOp(l, Dollar))
-      [Lexer.Raise(l) | t] => PushOp(t, UnaryOp(l, Raise))
-      [Lexer.Discard(l) | t] => PushOp(t, UnaryOp(l, Discard))
-      [Lexer.Assume(l) | t] => PushOp(t, UnaryOp(l, Assume))
+      [Lexer.Sub(l) | t] => PushOp(UnaryOp(l, Neg), t)
+      [Lexer.Not(l) | t] => PushOp(UnaryOp(l, Not), t)
+      [Lexer.Pound(l) | t] => PushOp(UnaryOp(l, Pound), t)
+      [Lexer.Dollar(l) | t] => PushOp(UnaryOp(l, Dollar), t)
+      [Lexer.Raise(l) | t] => PushOp(UnaryOp(l, Raise), t)
+      [Lexer.Discard(l) | t] => PushOp(UnaryOp(l, Discard), t)
+      [Lexer.Assume(l) | t] => PushOp(UnaryOp(l, Assume), t)
 
       // lam, test, and assert have lowest prec, so it's fine to recurse
       [Lexer.Test(s) | t] =>
@@ -723,7 +723,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
         |> pbind(|v| match v {
           (ensured, [Lexer.After(_) | t]) =>
             expr(t) |> pmap(|(node, rest)|
-              let l = node_loc(node) |> range(s)
+              let l = range(s, node_loc(node))
               (Ensure(l, ensured, node), rest)
             )
 
@@ -738,8 +738,8 @@ expr_r(expr_s, state, stack, tokens) = match state {
     }
 
     match transition {
-      Push(rest, node) => expr_r(expr_s, AcceptOp, [Node(node) | stack], rest)
-      PushOp(rest, op) => expr_r(expr_s, Start, [op | stack], rest)
+      Push(node, rest) => expr_r(expr_s, AcceptOp, [Node(node) | stack], rest)
+      PushOp(op, rest) => expr_r(expr_s, Start, [op | stack], rest)
       PushParsed(p) => p |> pbind(|(node, rest)|
         expr_r(expr_s, AcceptOp, [Node(node) | stack], rest)
       )
@@ -748,7 +748,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
   AcceptOp =>
     let shunt(bopa, t) =
       let op = BinaryOp(bopa)
-      let next_prec = get(Bin(bopa), opa_prec)
+      let next_prec = get(opa_prec, Bin(bopa))
       expr_r(expr_s, Start, [op | reduce(next_prec, stack)], t)
 
     let head_end_line(stack) =
@@ -778,16 +778,16 @@ expr_r(expr_s, state, stack, tokens) = match state {
 
       [Lexer.Colon(s), Lexer.Var(_, _) | _] =>
         one_err(
+          Some(s),
           "A colon can either be used to separate an expression and its " ++
           "corresponding type signature, such as in 1 : Int, or to call a " ++
           "native erlang function, such as in @erlang:length([]). It looks " ++
           "like you're trying to do the latter here, but you must specify " ++
-          "a literal atom, like @erlang or @lists, before the colon",
-          Some(s)
+          "a literal atom, like @erlang or @lists, before the colon"
         )
       [Lexer.Colon(_) | t] =>
         type_expr(t) |> pbind(|(node, rest)|
-          let next_prec = get(Bin(Colon), opa_prec)
+          let next_prec = get(opa_prec, Bin(Colon))
           let op = BinaryOp(Colon)
           let new_stack = [Node(node), op | reduce(next_prec, stack)]
           expr_r(expr_s, AcceptOp, new_stack, rest)
@@ -900,7 +900,7 @@ list(f, tokens) =
       else
         Parsed { value = None, errs = errs }
     )
-    |> pmap_or(|v| (v, rest), (List(l, []), rest))
+    |> pmap_or((List(l, []), rest), |v| (v, rest))
   )
 
 elems_base : (
@@ -939,20 +939,20 @@ tuple(f, wrap, tokens) =
       [Lexer.Comma(_)] =>
         parsed_err(
           (wrap(l, []), rest),
+          Some(l),
           "Expected at least two elements within tuple",
-          Some(l)
         )
 
       [Lexer.Comma(_) | t] =>
         many_delim_comma(f, t)
-        |> pmap_or(|elems| wrap(l, [node | elems]), wrap(l, []))
+        |> pmap_or(wrap(l, []), |elems| wrap(l, [node | elems]))
         |> pmap(|tuple| (tuple, rest))
 
       [h | _] =>
         parsed_err(
           (wrap(l, []), rest),
+          Some(token_loc(h)),
           "Expected comma ',' delimiter or closing paren ')'",
-          Some(token_loc(h))
         )
 
       [] => parsed((@erlang:setelement(2, node, l), rest))
@@ -964,7 +964,7 @@ arguments : ([Token] -> Parsed<(Node, [Token])>, [Token]) ->
 arguments(f, tokens) =
   enclosed(Paren, tokens, |l, inner, rest|
     many_delim_comma(f, inner)
-    |> pmap_or(|v| v, [])
+    |> pmap_or([], |v| v)
     |> pmap(|args| (l, args, rest))
   )
 
@@ -995,7 +995,7 @@ expr_cases(try_expr?, tokens) =
       if let [Lexer.LBrace(_) | _] = rest then
         enclosed(Brace, rest, |l, inner, rest|
           many_delim_comma_or_nl(case, inner)
-          |> pmap_or(|v| v, [])
+          |> pmap_or([], |v| v)
           |> pmap(|cases| (l, node, cases, rest))
         )
       else
@@ -1039,7 +1039,7 @@ type_expr_r(lhs, tokens) = match lhs {
             else
               parsed([param])
           )
-          |> pmap_or(|v| v, [])
+          |> pmap_or([], |v| v)
           |> pmap(|params|
             let gen = Gen(l, Con(l, ['L', 'i', 's', 't']), params)
             (gen, rest)
@@ -1062,7 +1062,7 @@ type_expr_r(lhs, tokens) = match lhs {
       [Lexer.LBrace(_) | _] =>
         enclosed(Brace, tokens, |l, inner, rest|
           elems_base(field_sig, tv, Brace, inner)
-          |> pmap_or(|v| v, ([], None))
+          |> pmap_or(([], None), |v| v)
           |> pmap(|(field_sigs, base)| match base {
             Some(b) => (RecordExtTE(l, field_sigs, b), rest)
             None => (RecordTE(l, field_sigs), rest)
@@ -1098,7 +1098,7 @@ type_params(l, tokens) = match tokens {
   [Lexer.Lt(_) | _] =>
     enclosed(Angle, tokens, |params_l, inner, rest|
       many_delim_comma(type_expr, inner)
-      |> pmap_or(|v| v, [])
+      |> pmap_or([], |v| v)
       |> pmap(|params| (range(l, params_l), params, rest))
     )
 
@@ -1233,7 +1233,7 @@ binding(tokens) = match tokens {
 
 pattern : [Token] -> Parsed<(Node, [Token])>
 pattern(tokens) =
-  let finish(t, node) = parsed((node, t))
+  let finish(node, t) = parsed((node, t))
   match tokens {
     [Lexer.LitInt(l, int) | t] => LitInt(l, int) |> finish(t)
     [Lexer.Sub(s), Lexer.LitInt(e, int) | t] =>
@@ -1302,7 +1302,7 @@ reduce : (Int, [NodeOp]) -> [NodeOp]
 reduce(next_prec, stack) =
   match last_op(stack) {
     Some(BinaryOp(bopa)) =>
-      if next_prec <= get(Bin(bopa), opa_prec) then
+      if next_prec <= get(opa_prec, Bin(bopa)) then
         let [Node(right), BinaryOp(&bopa), Node(left) | t] = stack
         let l = range(node_loc(left), node_loc(right))
         let node =
@@ -1316,7 +1316,7 @@ reduce(next_prec, stack) =
         stack
 
     Some(UnaryOp(s, uopa)) =>
-      if next_prec <= get(Un(uopa), opa_prec) then
+      if next_prec <= get(opa_prec, Un(uopa)) then
         let [Node(right), UnaryOp(&s, &uopa) | t] = stack
         let l = range(s, node_loc(right))
         reduce(next_prec, [Node(UnaryExpr(l, uopa, right)) | t])
@@ -1337,7 +1337,7 @@ last_op(stack) = match stack {
 opa_prec : Map<OpAtom, Int>
 opa_prec =
   List.with_index(opa_prec_list)
-  |> List.flat_map(|(opas, i)| map(|opa| (opa, i), opas))
+  |> List.flat_map(|(opas, i)| map(opas, |opa| (opa, i)))
   |> to_map
 
 opa_prec_list : [[OpAtom]]
@@ -1369,15 +1369,15 @@ flatten_blocks(elems) = match elems {
 validate_elems : [Node] -> [(Option<Loc>, String)]
 validate_elems(elems) =
   let str = "let statements are not allowed as list items"
-  filter_map(|node| match node {
+  filter_map(elems, |node| match node {
     Let(s, [binding | _], _) =>
       let l = range(s, node_loc(binding))
       Some((Some(l), str))
     _ => None
-  }, elems)
+  })
 
 validate_no_ext : [Node] -> [(Option<Loc>, String)]
-validate_no_ext(fields) = filter_map(|field| match field {
+validate_no_ext(fields) = filter_map(fields, |field| match field {
   Ext(l, _, _) => Some((
     Some(l),
     "To create a record, fields must be assigned with the '=' operator. " ++
@@ -1386,7 +1386,7 @@ validate_no_ext(fields) = filter_map(|field| match field {
   ))
 
   Init(_, _, _) => None
-}, fields)
+})
 
 many : ([Token] -> Parsed<(T, [Token])>, [Token]) -> Parsed<[T]>
 many(f, tokens) =
@@ -1417,7 +1417,7 @@ many_delim_cb(cb, f, tokens) = f(tokens) |> pbind(|(item, rest)|
     if !continue? then
       parsed(([item], rest))
     else if rest == [] then
-      one_err("many_delim didn't finish", None)
+      one_err(None, "many_delim didn't finish")
     else
       many_delim_cb(cb, f, rest) |> pmap(|(items, rest)| ([item | items], rest))
   )
@@ -1470,8 +1470,9 @@ delim_or_nl_cb(delim_tag, delim_str, node, tokens) =
         elem_l.start_line > node_l.end_line
 
       if aligned? then
-        Some(l) |> parsed_err(
+        parsed_err(
           (true, t),
+          Some(l),
           "Delimiting " ++ delim_str ++ " is unnecessary because the next " ++
           "item is aligned and separated by a newline"
         )
@@ -1539,16 +1540,16 @@ enclosed_r(inner, depth, bracket, s, tokens, cb) = match tokens {
         // Any errors that have no location occurred at the end of the inner
         // token list. Change their location to that of the closing bracket.
         let new_err_ml = Some(h_l)
-        let new_errs = map(|(err_ml, str)|
+        let new_errs = map(parsed.errs, |(err_ml, str)|
           if err_ml == None then
             (new_err_ml, str)
-          else if let Some(("", end)) = String.span(no_close_prefix, str) then
+          else if let Some(("", end)) = String.span(str, no_close_prefix) then
             let new_str = "Expected a closing " ++ end ++ " before closing " ++
               close_str(bracket)
             (new_err_ml, new_str)
           else
             (err_ml, str)
-        , parsed.errs)
+        )
 
         { errs = new_errs | parsed }
       else
@@ -1620,47 +1621,47 @@ range(start, end) = Loc {
   end_col = end.end_col
 }
 
-pmap : (A -> B, Parsed<A>) -> Parsed<B>
-pmap(f, p) =
+pmap : (Parsed<A>, A -> B) -> Parsed<B>
+pmap(p, f) =
   let new_value = match p.value {
     Some(a) => Some(f(a))
     None => None
   }
   { value := new_value | p }
 
-pmap_or : (A -> B, B, Parsed<A>) -> Parsed<B>
-pmap_or(f, default, p) =
+pmap_or : (Parsed<A>, B, A -> B) -> Parsed<B>
+pmap_or(p, default, f) =
   let new_value = match p.value {
     Some(a) => Some(f(a))
     None => Some(default)
   }
   { value := new_value | p }
 
-pbind : (A -> Parsed<B>, Parsed<A>) -> Parsed<B>
-pbind(f, p) = match p.value {
+pbind : (Parsed<A>, A -> Parsed<B>) -> Parsed<B>
+pbind(p, f) = match p.value {
   Some(a) =>
     let new_r = f(a)
     { errs = new_r.errs ++ p.errs | new_r }
   None => { value := None | p }
 }
 
-pbind_or : (A -> Parsed<B>, Parsed<B>, Parsed<A>) -> Parsed<B>
-pbind_or(f, default, p) = match p.value {
-  Some(_) => pbind(f, p)
+pbind_or : (Parsed<A>, Parsed<B>, A -> Parsed<B>) -> Parsed<B>
+pbind_or(p, default, f) = match p.value {
+  Some(_) => pbind(p, f)
   None => default
 }
 
 parsed : A -> Parsed<A>
 parsed(a) = Parsed { value = Some(a), errs = [] }
 
-parsed_err : (A, String, Option<Loc>) -> Parsed<A>
-parsed_err(a, str, ml) = Parsed { value = Some(a), errs = [(ml, str)] }
+parsed_err : (A, Option<Loc>, String) -> Parsed<A>
+parsed_err(a, ml, str) = Parsed { value = Some(a), errs = [(ml, str)] }
 
-add_err : (Parsed<A>, String, Option<Loc>) -> Parsed<B>
-add_err(p, str, ml) = { value := None, errs = [(ml, str) | p.errs] | p }
+add_err : (Parsed<A>, Option<Loc>, String) -> Parsed<B>
+add_err(p, ml, str) = { value := None, errs = [(ml, str) | p.errs] | p }
 
-one_err : (String, Option<Loc>) -> Parsed<A>
-one_err(str, ml) = Parsed { value = None, errs = [(ml, str)] }
+one_err : (Option<Loc>, String) -> Parsed<A>
+one_err(ml, str) = Parsed { value = None, errs = [(ml, str)] }
 
 make_ref : () -> Ref
 make_ref = @erlang:make_ref/0

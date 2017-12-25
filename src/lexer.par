@@ -108,12 +108,14 @@ enum Result<T, E> {
 tokenize : [Char] -> Result<[Token], [Token]>
 export tokenize(chs) =
   let tokens = tokenize_r(chs, 1, 1, [])
-  let (tokens, errs) = fold(|token, (accum, errs)| match token {
-    Comment(_, _) => (accum, errs)
-    Whitespace(_, _) => (accum, errs)
-    Unexpected(_, _, _) => (accum, [token | errs])
-    _ => ([token | accum], errs)
-  }, ([], []), tokens)
+  let (tokens, errs) = fold(tokens, ([], []), |token, (accum, errs)|
+    match token {
+      Comment(_, _) => (accum, errs)
+      Whitespace(_, _) => (accum, errs)
+      Unexpected(_, _, _) => (accum, [token | errs])
+      _ => ([token | accum], errs)
+    }
+  )
 
   if errs == [] then
     Ok(reverse(tokens))
@@ -235,9 +237,9 @@ tokenize_r(chs, line, col, tokens) =
         else if lower?(h) then
           let (chs, len, t) = until_not(word?, t) |> allow_qmark
           let token_fn = Map.get_or(
-            [h | chs],
-            Var(_, [h | chs]),
             chs_to_token_fn,
+            [h | chs],
+            Var(_, [h | chs])
           )
           (token_fn(inc(loc, 1 + len)), t)
         else if h == '.' then

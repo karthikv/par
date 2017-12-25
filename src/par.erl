@@ -17,7 +17,6 @@
 %   - Also use ^ instead of & for matching existing variable
 %   - ^Mod.foo in pattern; update docs
 % - Confusion between Con and TV
-% - Change order of arguments
 % - Only parse/compile necessary stdlib modules
 %   - Try not to make stdlib modules depend on each other
 %   - Wait, we can **definitely** pre-parse stdlib modules as well!
