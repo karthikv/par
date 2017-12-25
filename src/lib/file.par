@@ -153,16 +153,16 @@ num_to_mode(num) =
   let other_oct = @erlang:band(num, mask)
 
   Mode {
-    owner = get(owner_oct, oct_to_perm)
-    group = get(group_oct, oct_to_perm)
-    other = get(other_oct, oct_to_perm)
+    owner = get(oct_to_perm, owner_oct)
+    group = get(oct_to_perm, group_oct)
+    other = get(oct_to_perm, other_oct)
   }
 
 mode_to_num : Mode -> Int
 mode_to_num(mode) =
-  let owner_num = @erlang:bsl(get(mode.owner, perm_to_oct), 6)
-  let group_num = @erlang:bsl(get(mode.group, perm_to_oct), 3)
-  let other_num = get(mode.other, perm_to_oct)
+  let owner_num = @erlang:bsl(get(perm_to_oct, mode.owner), 6)
+  let group_num = @erlang:bsl(get(perm_to_oct, mode.group), 3)
+  let other_num = get(perm_to_oct, mode.other)
   owner_num + group_num + other_num
 
 oct_to_perm : Map<Int, Permissions>
@@ -178,7 +178,7 @@ oct_to_perm = {
 }
 
 perm_to_oct : Map<Permissions, Int>
-perm_to_oct = map(|(k, v)| (v, k), oct_to_perm)
+perm_to_oct = map(oct_to_perm, |(k, v)| (v, k))
 
 chown : (String, Int) -> ()
 export chown(path, uid) = match @file:change_owner(path, uid) {
@@ -220,7 +220,7 @@ export rmdir(path) = match @file:del_dir(path) {
 
 ls : String -> [String]
 export ls(path) = match @file:list_dir(path) {
-  (@ok, files) => map(String.from_chars, files)
+  (@ok, files) => map(files, String.from_chars)
   e => fail(e)
 }
 

@@ -551,9 +551,9 @@ expr_test_() ->
       "let inc(x) = x + 1\n"
       "(5 |> |x| 2 * x |> inc) * 7"
     ))
-  , ?_test("Atom -> Bool" = ok_expr(
-      "let f(x, y) = x == y\n"
-      "@hi |> f(_)"
+  , ?_test("Bool -> (String, Bool)" = ok_expr(
+      "let f(x, y) = (x ++ \"hey\", y && true)\n"
+      "\"hi\" |> f(_)"
     ))
   , ?_test(bad_expr(
       "3 |> true",

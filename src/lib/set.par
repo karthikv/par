@@ -12,7 +12,7 @@ subtract : (Set<A>, Set<A>) -> Set<A>
 export subtract(a, b) = @maps:without(to_list(b), a)
 
 subset? : (Set<A>, Set<A>) -> Bool
-export subset?(a, b) = all?(|e| contains?(e, b), a)
+export subset?(a, b) = all?(b, |e| contains?(a, e))
 
 disjoint? : (Set<A>, Set<A>) -> Bool
 export disjoint?(a, b) = empty?(intersect(a, b))

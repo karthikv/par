@@ -57,15 +57,15 @@ to_absolute : String -> String
 export to_absolute(path) = @filename:absname(path) |> normalize
 
 to_relative : (String, String) -> String
-export to_relative(from, to) =
+export to_relative(path, from) =
+  let parts = to_absolute(path) |> split
   let from_parts = to_absolute(from) |> split
-  let to_parts = to_absolute(to) |> split
-  relative_r(from_parts, to_parts)
+  relative_r(parts, from_parts)
 
 relative_r : ([String], [String]) -> String
-relative_r(from_parts, to_parts) = match (from_parts, to_parts) {
-  ([h | from_t], [h | to_t]) => relative_r(from_t, to_t)
-  _ => join_all(map(|_| "..", from_parts) ++ to_parts)
+relative_r(parts, from_parts) = match (parts, from_parts) {
+  ([h | t], [h | from_t]) => relative_r(t, from_t)
+  _ => join_all(map(from_parts, |_| "..") ++ parts)
 }
 
 absolute? : String -> Bool
@@ -89,7 +89,7 @@ export join_all(paths) =
     // relative. Note that we don't change the first path, as it decides whether
     // the entire path is absolute or not.
     if let [h | t] = paths then
-      @filename:join([h | map(make_relative, t)])
+      @filename:join([h | map(t, make_relative)])
     else
       @filename:join(paths)
 
@@ -97,8 +97,8 @@ export join_all(paths) =
 // these are the ones that cause @filename:join() to discard prior paths.
 make_relative : String -> String
 make_relative(path) =
-  if String.starts_with?("/", path) then
-    let Some((_, suffix)) = String.span("/", path)
+  if String.starts_with?(path, "/") then
+    let Some((_, suffix)) = String.span(path, "/")
     suffix
   else
     path

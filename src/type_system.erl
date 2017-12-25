@@ -1592,7 +1592,7 @@ infer({block, _, Exprs}, C) ->
 
 infer({binary_op, _, '|>', Left, Right}, C) ->
   App = case Right of
-    {app, Loc, Expr, Args} -> {app, Loc, Expr, Args ++ [Left]};
+    {app, Loc, Expr, Args} -> {app, Loc, Expr, [Left | Args]};
     _ -> {app, ?LOC(Right), Right, [Left]}
   end,
   infer(App, C);

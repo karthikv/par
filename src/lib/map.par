@@ -2,8 +2,8 @@ module Map
 
 import Base (*)
 
-get_or : (K, V, Map<K, V>) -> V
-export get_or(k, default, m) = match @maps:find(k, m) {
+get_or : (Map<K, V>, K, V) -> V
+export get_or(m, k, default) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => default
 }
@@ -14,14 +14,14 @@ export keys = @maps:keys/1
 values : Map<K, V> -> [V]
 export values = @maps:values/1
 
-update : (K, V -> V, Map<K, V>) -> Map<K, V>
-export update(k, f, m) = match @maps:find(k, m) {
+update : (Map<K, V>, K, V -> V) -> Map<K, V>
+export update(m, k, f) = match @maps:find(k, m) {
   (@ok, v) => @maps:put(k, f(v), m)
   @error => raise BadKey
 }
 
-upsert : (K, V -> V, V, Map<K, V>) -> Map<K, V>
-export upsert(k, f, default, m) = match @maps:find(k, m) {
+upsert : (Map<K, V>, K, V, V -> V) -> Map<K, V>
+export upsert(m, k, default, f) = match @maps:find(k, m) {
   (@ok, v) => @maps:put(k, f(v), m)
   @error => @maps:put(k, default, m)
 }
@@ -29,8 +29,8 @@ export upsert(k, f, default, m) = match @maps:find(k, m) {
 merge : (Map<K, V>, Map<K, V>) -> Map<K, V>
 export merge = @maps:merge/2
 
-with : ([K], Map<K, V>) -> Map<K, V>
-export with = @maps:with/2
+with : (Map<K, V>, [K]) -> Map<K, V>
+export with(m, keys) = @maps:with(keys, m)
 
-without : ([K], Map<K, V>) -> Map<K, V>
-export without = @maps:without/2
+without : (Map<K, V>, [K]) -> Map<K, V>
+export without(m, keys) = @maps:without(keys, m)

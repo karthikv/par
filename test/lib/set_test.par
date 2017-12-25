@@ -32,13 +32,13 @@ subtract_test = group([
 
 subset_test : Test
 subset_test = group([
-  test assert subset?(#[1, 3, 5], #[3, 5, 6]) == false
-  test assert subset?(#[3, 5], #[3, 5, 6]) == true
-  test assert subset?(#[3, 5, 6], #[3, 5]) == false
-  test assert subset?(#['a', 'b'], #['b']) == false
-  test assert subset?(#['a', 'b'], #['b', 'a']) == true
-  test assert subset?(#[], #["hey", "hello"]) == true
-  test assert subset?(#["hey", "hello"], #[]) == false
+  test assert subset?(#[3, 5, 6], #[1, 3, 5]) == false
+  test assert subset?(#[3, 5, 6], #[3, 5]) == true
+  test assert subset?(#[3, 5], #[3, 5, 6]) == false
+  test assert subset?(#['b'], #['a', 'b']) == false
+  test assert subset?(#['b', 'a'], #['a', 'b']) == true
+  test assert subset?(#["hey", "hello"], #[]) == true
+  test assert subset?(#[], #["hey", "hello"]) == false
   test assert subset?(#[], #[]) == true
 ])
 

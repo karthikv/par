@@ -74,16 +74,16 @@ absolute_test = group([
 to_relative_test : Test
 to_relative_test = group([
   test assert to_relative("foo", "foo") == ""
-  test assert to_relative("foo", "bar") == "../bar"
-  test assert to_relative("foo/bar/baz", "foo/a.txt") == "../../a.txt"
-  test assert to_relative("foo", "foo/bar") == "bar"
+  test assert to_relative("bar", "foo") == "../bar"
+  test assert to_relative("foo/a.txt", "foo/bar/baz") == "../../a.txt"
+  test assert to_relative("foo/bar", "foo") == "bar"
   test
     let parts = File.cwd()
       |> split
       |> map(|_| "..")
       |> List.range(1, -1)
-    assert to_relative("", "/foo/bar") == join_all(parts ++ ["foo", "bar"])
-  test assert to_relative("/foo/bar", "baz") ==
+    assert to_relative("/foo/bar", "") == join_all(parts ++ ["foo", "bar"])
+  test assert to_relative("baz", "/foo/bar") ==
     join_all(["..", "..", File.cwd(), "baz"])
 ])
 

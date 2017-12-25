@@ -235,10 +235,10 @@ test_expr(Expr) ->
       "let inc(x) = x + 1\n"
       "(5 |> |x| 2 * x |> inc) * 7"
     ))
-  , ?_test(true = (Expr(
-      "let f(x, y) = x == y\n"
-      "@hi |> f(_)"
-    ))(hi))
+  , ?_test({<<"hihey">>, false} = (Expr(
+      "let f(x, y) = (x ++ \"hey\", y && true)\n"
+      "\"hi\" |> f(_)"
+    ))(false))
   ].
 
 % used for the last few tests above

@@ -50,8 +50,8 @@ export rstrip(s) = @string:trim(s, @trailing)
 strip : String -> String
 export strip(s) = @string:trim(s, @both)
 
-slice : (Int, Int, String) -> String
-export slice(i, num, s) =
+slice : (String, Int, Int) -> String
+export slice(s, i, num) =
   if num <= 0 then
     ""
   else
@@ -59,10 +59,10 @@ export slice(i, num, s) =
     if wrapped_i < 0 then
       raise BadIndex(i)
     else
-      slice_r(0, wrapped_i, num, s) |> @erlang:iolist_to_binary/1
+      slice_r(s, 0, wrapped_i, num) |> @erlang:iolist_to_binary/1
 
-range : (Int, Int, String) -> String
-export range(start, end, s) =
+range : (String, Int, Int) -> String
+export range(s, start, end) =
   let len = if start < 0 || end < 0 then length(s) else 0
   let wrapped_start = if start < 0 then len + start else start
   let wrapped_end = if end < 0 then len + end else end
@@ -74,20 +74,20 @@ export range(start, end, s) =
   else if wrapped_end < 0 then
     raise BadIndex(end)
   else
-    slice_r(0, wrapped_start, wrapped_end - wrapped_start + 1, s)
+    slice_r(s, 0, wrapped_start, wrapped_end - wrapped_start + 1)
     |> @erlang:iolist_to_binary/1
 
-slice_r : (Int, Int, Int, String) -> [Char]
-slice_r(i, start, num, s) =
+slice_r : (String, Int, Int, Int) -> [Char]
+slice_r(s, i, start, num) =
   if num <= 0 then
     []
   else
     match @string:next_grapheme(s) {
       [h | t] =>
         if i >= start then
-          [h | slice_r(i + 1, start, num - 1, assume t)]
+          [h | slice_r(assume t, i + 1, start, num - 1)]
         else
-          slice_r(i + 1, start, num, assume t)
+          slice_r(assume t, i + 1, start, num)
       [] => raise BadIndex(i)
     }
 
@@ -101,13 +101,13 @@ reverse : String -> String
 export reverse(s) = @string:reverse(s) |> @erlang:iolist_to_binary/1
 
 starts_with? : (String, String) -> Bool
-export starts_with?(prefix, s) = @string:prefix(s, prefix) != @nomatch
+export starts_with?(s, prefix) = @string:prefix(s, prefix) != @nomatch
 
 ends_with? : (String, String) -> Bool
-export ends_with?(suffix, s) = @string:find(s, suffix, @trailing) == suffix
+export ends_with?(s, suffix) = @string:find(s, suffix, @trailing) == suffix
 
 substr? : (String, String) -> Bool
-export substr?(sub, s) = @string:find(s, sub) != @nomatch
+export substr?(s, sub) = @string:find(s, sub) != @nomatch
 
 re : (String, [RegexpOpt]) -> Regexp
 export re(s, opts) =
@@ -118,34 +118,34 @@ export re(s, opts) =
     (@ok, re) => Regexp { re = re, str = s }
   }
 
-matches? : (Regexp, String) -> Bool
-export matches?(r, s) = @re:run(s, r.re) != @nomatch
+matches? : (String, Regexp) -> Bool
+export matches?(s, r) = @re:run(s, r.re) != @nomatch
 
-search : (Regexp, String) -> [String]
-export search(r, s) = match @re:run(s, r.re, [(@capture, @all, @binary)]) {
+search : (String, Regexp) -> [String]
+export search(s, r) = match @re:run(s, r.re, [(@capture, @all, @binary)]) {
   @nomatch => []
   (@match, results) => results
 }
 
-search_all : (Regexp, String) -> [[String]]
-export search_all(r, s) =
+search_all : (String, Regexp) -> [[String]]
+export search_all(s, r) =
   match @re:run(s, r.re, [@global, assume (@capture, @all, @binary)]) {
     @nomatch => []
     (@match, results) => results
   }
 
 span : (String, String) -> Option<(String, String)>
-export span(sub, s) =
+export span(s, sub) =
   if sub == "" then
     None
   else
-    match splitn(sub, 2, s) {
+    match splitn(s, sub, 2) {
       [l, r] => Some((l, r))
       [_] => None
     }
 
 rspan : (String, String) -> Option<(String, String)>
-export rspan(sub, s) =
+export rspan(s, sub) =
   if sub == "" then
     None
   else
@@ -154,80 +154,80 @@ export rspan(sub, s) =
       [_] => None
     }
 
-search_span : (Regexp, String) -> Option<(String, [String], String)>
-export search_span(r, s) =
+search_span : (String, Regexp) -> Option<(String, [String], String)>
+export search_span(s, r) =
   if r.str == "" then
     None
   else
-    match splitn(r, 2, s) {
+    match splitn(s, r, 2) {
       [_] => None
       [l | t] =>
-        let (matches, [r]) = List.split_at(-1, t)
+        let (matches, [r]) = List.split_at(t, -1)
         Some((l, matches, r))
     }
 
 interface Pattern {
-  splitn : (T, Int, String) -> [String]
-  replace : (T, String, String) -> String
-  replace_one : (T, String, String) -> String
+  splitn : (String, T, Int) -> [String]
+  replace : (String, T, String) -> String
+  replace_one : (String, T, String) -> String
 }
 
 impl Pattern for String {
-  splitn(sub, n, s) =
+  splitn(s, sub, n) =
     if sub == "" then
       if n <= 0 then
         @string:to_graphemes(s) : [Char] |> map(|ch| from_chars([ch]))
       else
-        splitn_graphemes(n, s)
+        splitn_graphemes(s, n)
     else if n <= 0 then
       @string:split(s, sub, @all)
     else
-      splitn_r(sub, n, s)
-  replace(sub, rep, s) =
+      splitn_r(s, sub, n)
+  replace(s, sub, rep) =
     if sub == "" then
-      let parts = split("", s) |> map(|s| [s, assume rep])
+      let parts = split(s, "") |> map(|s| [s, assume rep])
       @erlang:iolist_to_binary([assume rep, parts])
     else
       @string:replace(s, sub, rep, @all) |> @erlang:iolist_to_binary/1
-  replace_one(sub, rep, s) =
+  replace_one(s, sub, rep) =
     if sub == "" then
       rep ++ s
     else
       @string:replace(s, sub, rep) |> @erlang:iolist_to_binary/1
 }
 
-splitn_graphemes : (Int, String) -> [String]
-splitn_graphemes(n, s) =
+splitn_graphemes : (String, Int) -> [String]
+splitn_graphemes(s, n) =
   if n <= 1 then
     [s]
   else
     match @string:next_grapheme(s) {
-      [h | t] => [from_chars([h]) | splitn_graphemes(n - 1, assume t)]
+      [h | t] => [from_chars([h]) | splitn_graphemes(assume t, n - 1)]
       [] => [s]
     }
 
-splitn_r : (String, Int, String) -> [String]
-splitn_r(sub, n, s) =
+splitn_r : (String, String, Int) -> [String]
+splitn_r(s, sub, n) =
   if n <= 1 then
     [s]
   else
     match @string:split(s, sub, @leading) {
       [_] => [s]
-      [l, r] => [l | splitn_r(sub, n - 1, r)]
+      [l, r] => [l | splitn_r(r, sub, n - 1)]
     }
 
 impl Pattern for Regexp {
-  splitn(r, n, s) =
+  splitn(s, r, n) =
     if r.str == "" then
-      splitn("", n, s)
+      splitn(s, "", n)
     else if n <= 0 then
       @re:split(s, r.re, [(@return, @binary)])
     else
       @re:split(s, r.re, [(@parts, n), assume (@return, @binary)])
-  replace(r, rep, s) =
+  replace(s, r, rep) =
     @re:replace(s, r.re, rep, [@global, assume (@return, @binary)])
-  replace_one(r, rep, s) = @re:replace(s, r.re, rep, [(@return, @binary)])
+  replace_one(s, r, rep) = @re:replace(s, r.re, rep, [(@return, @binary)])
 }
 
-split : (T ~ Pattern, String) -> [String]
-export split(r, s) = splitn(r, -1, s)
+split : (String, T ~ Pattern) -> [String]
+export split(s, r) = splitn(s, r, -1)

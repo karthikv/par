@@ -19,95 +19,95 @@ min_in_test = group([
 
 max_by_test : Test
 max_by_test = group([
-  test assert max_by(|l| length(l), ["cow", "dog", "turtle"]) == Some("turtle")
-  test assert max_by(|l| -l, [42.3, .428, 13.3]) == Some(.428)
-  test assert max_by(|l| l, []) == None
+  test assert max_by(["cow", "dog", "turtle"], |l| length(l)) == Some("turtle")
+  test assert max_by([42.3, .428, 13.3], |l| -l) == Some(.428)
+  test assert max_by([], |l| l) == None
 ])
 
 min_by_test : Test
 min_by_test = group([
-  test assert min_by(|l| length(l), ["cow", "dog", "turtle"]) == Some("cow")
-  test assert min_by(|l| -l, [42.3, .428, 13.3]) == Some(42.3)
-  test assert min_by(|l| l, []) == None
+  test assert min_by(["cow", "dog", "turtle"], |l| length(l)) == Some("cow")
+  test assert min_by([42.3, .428, 13.3], |l| -l) == Some(42.3)
+  test assert min_by([], |l| l) == None
 ])
 
 take_while_test : Test
 take_while_test = group([
-  test assert take_while(|a| a < "d", ["cow", "dog", "cat"]) == ["cow"]
-  test assert take_while(|a| a > "e", ["cow", "dog", "cat"]) == []
-  test assert take_while(|a| a < 50, [42.3, .428, 13.3]) ==
+  test assert take_while(["cow", "dog", "cat"], |a| a < "d") == ["cow"]
+  test assert take_while(["cow", "dog", "cat"], |a| a > "e") == []
+  test assert take_while([42.3, .428, 13.3], |a| a < 50) ==
     [42.3, .428, 13.3]
-  test assert take_while(|_| true, []) == []
+  test assert take_while([], |_| true) == []
 ])
 
 drop_while_test : Test
 drop_while_test = group([
-  test assert drop_while(|a| a < "d", ["cow", "dog", "cat"]) == ["dog", "cat"]
-  test assert drop_while(|a| a > "e", ["cow", "dog", "cat"]) ==
+  test assert drop_while(["cow", "dog", "cat"], |a| a < "d") == ["dog", "cat"]
+  test assert drop_while(["cow", "dog", "cat"], |a| a > "e") ==
     ["cow", "dog", "cat"]
-  test assert drop_while(|a| a < 50, [42.3, .428, 13.3]) == []
-  test assert drop_while(|_| true, []) == []
+  test assert drop_while([42.3, .428, 13.3], |a| a < 50) == []
+  test assert drop_while([], |_| true) == []
 ])
 
 split_while_test : Test
 split_while_test = group([
-  test assert split_while(|a| a < "d", ["cow", "dog", "cat"]) ==
+  test assert split_while(["cow", "dog", "cat"], |a| a < "d") ==
     (["cow"], ["dog", "cat"])
-  test assert split_while(|a| a > "e", ["cow", "dog", "cat"]) ==
+  test assert split_while(["cow", "dog", "cat"], |a| a > "e") ==
     ([], ["cow", "dog", "cat"])
-  test assert split_while(|a| a < 50, [42.3, .428, 13.3]) ==
+  test assert split_while([42.3, .428, 13.3], |a| a < 50) ==
     ([42.3, .428, 13.3], [])
-  test assert split_while(|_| true, []) == ([], [])
+  test assert split_while([], |_| true) == ([], [])
 ])
 
 repeat_test : Test
 repeat_test = group([
-  test assert repeat(3, @hi) == [@hi, @hi, @hi]
-  test assert repeat(1, 'h') == ['h']
-  test assert repeat(0, true) == []
+  test assert repeat(@hi, 3) == [@hi, @hi, @hi]
+  test assert repeat('h', 1) == ['h']
+  test assert repeat(true, 0) == []
 ])
 
 flat_map_test : Test
 flat_map_test = group([
-  test assert flat_map(String.chars, ["cow", "dog", "cat"]) ==
+  test assert flat_map(["cow", "dog", "cat"], String.chars) ==
     String.chars("cowdogcat")
-  test assert flat_map(|a| [a, a + 0.1], [42.3, .428, 13.3]) ==
+  test assert flat_map([42.3, .428, 13.3], |a| [a, a + 0.1]) ==
     [42.3, 42.4, .428, .528, 13.3, 13.4]
-  test assert flat_map(|a| [a], [42.3, .428, 13.3]) == [42.3, .428, 13.3]
-  test assert flat_map(|a| [a], []) == []
+  test assert flat_map([42.3, .428, 13.3], |a| [a]) == [42.3, .428, 13.3]
+  test assert flat_map([], |a| [a]) == []
 ])
 
 foldr_test : Test
 foldr_test = group([
-  test assert foldr(|a, memo| memo ++ a, "turtle", ["cow", "dog", "cat"]) ==
+  test assert foldr(["cow", "dog", "cat"], "turtle", |a, memo| memo ++ a) ==
     "turtlecatdogcow"
-  test assert foldr(|a, memo| -memo + a, 5, [42.3, .428, 13.3]) == 50.172
-  test assert foldr(|a, memo| a && memo, true, []) == true
+  test assert foldr([42.3, .428, 13.3], 5, |a, memo| -memo + a) == 50.172
+  test assert foldr([], true, |a, memo| a && memo) == true
 ])
 
 map_foldr_test : Test
 map_foldr_test = group([
   test
     let l = ["cow", "dog", "cat"]
-    assert map_foldr(|a, memo| (a ++ "!", memo ++ "!" ++ a), "turtle", l) ==
+    assert map_foldr(l, "turtle", |a, memo| (a ++ "!", memo ++ "!" ++ a)) ==
       (["cow!", "dog!", "cat!"], "turtle!cat!dog!cow")
   test
     let l = [42.3, .4, 13.3]
-    let (mapped, memo) = map_foldr(|a, memo| (memo, -memo + a), 5, l)
+    let (mapped, memo) = map_foldr(l, 5, |a, memo| (memo, -memo + a))
     assert mapped == [-7.9, 8.3, 5]
     assert abs(memo - 50.2) < 0.000001
-  test assert map_foldr(|a, memo| (a, a && memo), true, []) == ([], true)
+  test assert map_foldr([], true, |a, memo| (a, a && memo)) == ([], true)
 ])
 
 partition_test : Test
 partition_test = group([
-  test assert partition(|a| a < "d", ["cow", "dog", "cat"]) ==
+  test assert partition(["cow", "dog", "cat"], |a| a < "d") ==
     (["cow", "cat"], ["dog"])
-  test assert partition(|a| a > "e", ["cow", "dog", "cat"]) ==
+  test assert partition(["cow", "dog", "cat"], |a| a > "e") ==
     ([], ["cow", "dog", "cat"])
-  test assert partition(|a| a < 1, [42.3, .428, 13.3]) ==
+  test assert partition([42.3, .428, 13.3], |a| a < 1) ==
     ([.428], [42.3, 13.3])
-  test assert partition(|a| true, []) == ([], [])
+  test assert partition([], |a| true) == ([], [])
 ])
 
 reverse_test : Test
@@ -144,9 +144,9 @@ sort_by_test : Test
 sort_by_test = group([
   test
     let cb(a) = String.chars(a) |> nth(2) |> to_int
-    assert sort_by(cb, ["cow", "dog", "cat"]) == ["dog", "cat", "cow"]
-  test assert sort_by(|a| -a, [42.3, .428, 13.3]) == [42.3, 13.3, .428]
-  test assert sort_by(|a| a, []) == []
+    assert sort_by(["cow", "dog", "cat"], cb) == ["dog", "cat", "cow"]
+  test assert sort_by([42.3, .428, 13.3], |a| -a) == [42.3, 13.3, .428]
+  test assert sort_by([], |a| a) == []
 ])
 
 sort_cmp_test : Test
@@ -154,71 +154,71 @@ sort_cmp_test = group([
   test
     let key(s) = String.chars(s) |> nth(2) |> to_int
     let cb(a, b) = key(a) > key(b)
-    assert sort_cmp(cb, ["cow", "dog", "cat"]) == ["cow", "cat", "dog"]
-  test assert sort_cmp(|a, b| -a < -b, [42.3, .428, 13.3]) ==
+    assert sort_cmp(["cow", "dog", "cat"], cb) == ["cow", "cat", "dog"]
+  test assert sort_cmp([42.3, .428, 13.3], |a, b| -a < -b) ==
     [42.3, 13.3, .428]
-  test assert sort_cmp(|a, b| a < b, []) == []
+  test assert sort_cmp([], |a, b| a < b) == []
 ])
 
 nth_test : Test
 nth_test = group([
-  test assert nth(0, ["cow", "dog", "cat"]) == "cow"
-  test assert nth(-1, ["cow", "dog", "cat"]) == "cat"
-  test assert capture(|-| nth(3, ["cow", "dog", "cat"])) == BadIndex(3)
-  test assert nth(2, [42.3, .428, 13.3]) == 13.3
-  test assert nth(-3, [42.3, .428, 13.3]) == 42.3
-  test assert capture(|-| nth(-4, [42.3, .428, 13.3])) == BadIndex(-4)
-  test assert capture(|-| nth(0, [])) == BadIndex(0)
+  test assert nth(["cow", "dog", "cat"], 0) == "cow"
+  test assert nth(["cow", "dog", "cat"], -1) == "cat"
+  test assert capture(|-| nth(["cow", "dog", "cat"], 3)) == BadIndex(3)
+  test assert nth([42.3, .428, 13.3], 2) == 13.3
+  test assert nth([42.3, .428, 13.3], -3) == 42.3
+  test assert capture(|-| nth([42.3, .428, 13.3], -4)) == BadIndex(-4)
+  test assert capture(|-| nth([], 0)) == BadIndex(0)
 ])
 
 split_at_test : Test
 split_at_test = group([
-  test assert split_at(0, ["cow", "dog", "cat"]) == ([], ["cow", "dog", "cat"])
-  test assert split_at(-1, ["cow", "dog", "cat"]) == (["cow", "dog"], ["cat"])
-  test assert split_at(1, ["cow", "dog", "cat"]) == (["cow"], ["dog", "cat"])
-  test assert capture(|-| split_at(3, ["cow", "dog", "cat"])) == BadIndex(3)
-  test assert split_at(2, [42.3, .428, 13.3]) == ([42.3, .428], [13.3])
-  test assert split_at(-3, [42.3, .428, 13.3]) == ([], [42.3, .428, 13.3])
-  test assert capture(|-| split_at(-4, [42.3, .428, 13.3])) == BadIndex(-4)
-  test assert capture(|-| split_at(0, [])) == BadIndex(0)
+  test assert split_at(["cow", "dog", "cat"], 0) == ([], ["cow", "dog", "cat"])
+  test assert split_at(["cow", "dog", "cat"], -1) == (["cow", "dog"], ["cat"])
+  test assert split_at(["cow", "dog", "cat"], 1) == (["cow"], ["dog", "cat"])
+  test assert capture(|-| split_at(["cow", "dog", "cat"], 3)) == BadIndex(3)
+  test assert split_at([42.3, .428, 13.3], 2) == ([42.3, .428], [13.3])
+  test assert split_at([42.3, .428, 13.3], -3) == ([], [42.3, .428, 13.3])
+  test assert capture(|-| split_at([42.3, .428, 13.3], -4)) == BadIndex(-4)
+  test assert capture(|-| split_at([], 0)) == BadIndex(0)
 ])
 
 slice_test : Test
 slice_test = group([
-  test assert slice(0, 1, ["cow", "dog", "cat"]) == ["cow"]
-  test assert slice(-1, 1, ["cow", "dog", "cat"]) == ["cat"]
-  test assert slice(3, 0, ["cow", "dog", "cat"]) == []
-  test assert capture(|-| slice(3, 1, ["cow", "dog", "cat"])) == BadIndex(3)
-  test assert capture(|-| slice(2, 2, ["cow", "dog", "cat"])) == BadIndex(3)
-  test assert slice(0, 3, [42.3, .428, 13.3]) == [42.3, .428, 13.3]
-  test assert slice(-3, 2, [42.3, .428, 13.3]) == [42.3, .428]
-  test assert slice(-4, 0, [42.3, .428, 13.3]) == []
-  test assert capture(|-| slice(-4, 1, [42.3, .428, 13.3])) == BadIndex(-4)
-  test assert capture(|-| slice(-1, 2, [42.3, .428, 13.3])) == BadIndex(3)
-  test assert slice(0, 0, []) == []
-  test assert capture(|-| slice(0, 1, [])) == BadIndex(0)
+  test assert slice(["cow", "dog", "cat"], 0, 1) == ["cow"]
+  test assert slice(["cow", "dog", "cat"], -1, 1) == ["cat"]
+  test assert slice(["cow", "dog", "cat"], 3, 0) == []
+  test assert capture(|-| slice(["cow", "dog", "cat"], 3, 1)) == BadIndex(3)
+  test assert capture(|-| slice(["cow", "dog", "cat"], 2, 2)) == BadIndex(3)
+  test assert slice([42.3, .428, 13.3], 0, 3) == [42.3, .428, 13.3]
+  test assert slice([42.3, .428, 13.3], -3, 2) == [42.3, .428]
+  test assert slice([42.3, .428, 13.3], -4, 0) == []
+  test assert capture(|-| slice([42.3, .428, 13.3], -4, 1)) == BadIndex(-4)
+  test assert capture(|-| slice([42.3, .428, 13.3], -1, 2)) == BadIndex(3)
+  test assert slice([], 0, 0) == []
+  test assert capture(|-| slice([], 0, 1)) == BadIndex(0)
 ])
 
 range_test : Test
 range_test = group([
-  test assert range(0, 1, ["cow", "dog", "cat"]) == ["cow", "dog"]
-  test assert range(-1, 2, ["cow", "dog", "cat"]) == ["cat"]
-  test assert range(2, -2, ["cow", "dog", "cat"]) == []
-  test assert range(3, 1, ["cow", "dog", "cat"]) == []
-  test assert capture(|-| range(2, 3, ["cow", "dog", "cat"])) == BadIndex(3)
-  test assert range(0, 2, [42.3, .428, 13.3]) == [42.3, .428, 13.3]
-  test assert range(-3, 1, [42.3, .428, 13.3]) == [42.3, .428]
-  test assert capture(|-| range(-4, 0, [42.3, .428, 13.3])) == BadIndex(-4)
-  test assert range(0, -4, [42.3, .428, 13.3]) == []
-  test assert capture(|-| range(0, 0, [])) == BadIndex(0)
-  test assert range(1, 0, []) == []
+  test assert range(["cow", "dog", "cat"], 0, 1) == ["cow", "dog"]
+  test assert range(["cow", "dog", "cat"], -1, 2) == ["cat"]
+  test assert range(["cow", "dog", "cat"], 2, -2) == []
+  test assert range(["cow", "dog", "cat"], 3, 1) == []
+  test assert capture(|-| range(["cow", "dog", "cat"], 2, 3)) == BadIndex(3)
+  test assert range([42.3, .428, 13.3], 0, 2) == [42.3, .428, 13.3]
+  test assert range([42.3, .428, 13.3], -3, 1) == [42.3, .428]
+  test assert capture(|-| range([42.3, .428, 13.3], -4, 0)) == BadIndex(-4)
+  test assert range([42.3, .428, 13.3], 0, -4) == []
+  test assert capture(|-| range([], 0, 0)) == BadIndex(0)
+  test assert range([], 1, 0) == []
 ])
 
 join_test : Test
 join_test = group([
-  test assert join("", ["cow", "dog", "cat"]) == "cowdogcat"
-  test assert join(", ", ["cow", "dog", "cat"]) == "cow, dog, cat"
-  test assert join(", ", []) == ""
+  test assert join(["cow", "dog", "cat"], "") == "cowdogcat"
+  test assert join(["cow", "dog", "cat"], ", ") == "cow, dog, cat"
+  test assert join([], ", ") == ""
 ])
 
 zip_test : Test
@@ -242,15 +242,15 @@ unzip_test = group([
 
 group_by_test : Test
 group_by_test = group([
-  test assert group_by(|a| String.chars(a) |> head, ["cow", "dog", "cat"]) ==
+  test assert group_by(["cow", "dog", "cat"], |a| String.chars(a) |> head) ==
     { 'c' => ["cow", "cat"], 'd' => ["dog"] }
-  test assert group_by(|a| length(a), ["turtle", "dog", "cat"]) ==
+  test assert group_by(["turtle", "dog", "cat"], |a| length(a)) ==
     { 6 => ["turtle"], 3 => ["dog", "cat"] }
-  test assert group_by(|a| a, [42.3, .428, 13.3]) ==
+  test assert group_by([42.3, .428, 13.3], |a| a) ==
     { 42.3 => [42.3], .428 => [.428], 13.3 => [13.3] }
-  test assert group_by(|a| a > 10, [42.3, .428, 13.3]) ==
+  test assert group_by([42.3, .428, 13.3], |a| a > 10) ==
     { true => [42.3, 13.3], false => [.428] }
-  test assert group_by(|a| a, []) == {}
+  test assert group_by([], |a| a) == {}
 ])
 
 unique_test : Test
@@ -263,11 +263,11 @@ unique_test = group([
 
 unique_by_test : Test
 unique_by_test = group([
-  test assert unique_by(|a| String.chars(a) |> head, ["cow", "dog", "cat"]) ==
+  test assert unique_by(["cow", "dog", "cat"], |a| String.chars(a) |> head) ==
     ["cow", "dog"]
-  test assert unique_by(|a| a > 10, [42.3, .428, 13.3]) == [42.3, .428]
-  test assert unique_by(|a| true, [42.3, .428, 13.3]) == [42.3]
-  test assert unique_by(|a| a, []) == []
+  test assert unique_by([42.3, .428, 13.3], |a| a > 10) == [42.3, .428]
+  test assert unique_by([42.3, .428, 13.3], |a| true) == [42.3]
+  test assert unique_by([], |a| a) == []
 ])
 
 with_index_test : Test
@@ -283,14 +283,14 @@ each_test = group([
   test
     @erlang:put(@each_test1, "")
     let l = ["cow", "dog", "cat"]
-    each(|a| @erlang:put(@each_test1, @erlang:get(@each_test1) ++ a), l)
+    each(l, |a| @erlang:put(@each_test1, @erlang:get(@each_test1) ++ a))
     assert @erlang:get(@each_test1) == "cowdogcat"
   test
     @erlang:put(@each_test2, 0)
-    each(|a| @erlang:put(@each_test2, @erlang:get(@each_test2) + a), [42.3])
+    each([42.3], |a| @erlang:put(@each_test2, @erlang:get(@each_test2) + a))
     assert @erlang:get(@each_test2) == 42.3
   test
     @erlang:put(@each_test3, 0)
-    each(|a| @erlang:put(@each_test3, 1), [])
+    each([], |a| @erlang:put(@each_test3, 1))
     assert @erlang:get(@each_test3) == 0
 ])

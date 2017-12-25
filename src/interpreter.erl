@@ -243,7 +243,7 @@ eval({block, _, Exprs}, ID) ->
 
 eval({binary_op, _, '|>', Left, Right}, ID) ->
   App = case Right of
-    {app, Loc, Expr, Args} -> {app, Loc, Expr, Args ++ [Left]};
+    {app, Loc, Expr, Args} -> {app, Loc, Expr, [Left | Args]};
     _ -> {app, ?LOC(Right), Right, [Left]}
   end,
   eval(App, ID);

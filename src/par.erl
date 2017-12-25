@@ -21,8 +21,8 @@
 % - Only parse/compile necessary stdlib modules
 %   - Try not to make stdlib modules depend on each other
 %   - Wait, we can **definitely** pre-parse stdlib modules as well!
-% - Global exception handler for better printing
 % - Description along with raise?
+% - debug function in stdlib
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
 %   - Ensure all code samples in tutorial work
@@ -95,6 +95,7 @@
 %   - Put: [a, b | c], #[a, b | c], {a => b, c => d | m}, {a = b, c = d | r}
 % - Operator |< to prepend an argument?
 % - Force all block expressions except last to be type ()?
+% - Global exception handler for better printing
 
 main(Args) ->
   Release = erlang:system_info(otp_release),

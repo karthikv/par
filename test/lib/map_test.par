@@ -5,9 +5,9 @@ import Test (group, capture)
 
 get_or_test : Test
 get_or_test = group([
-  test assert get_or(@hi, 'i', { @hi => 'h' }) == 'h'
-  test assert get_or("foo", 5.02, { "bar" => 3.7, "baz" => 1 }) == 5.02
-  test assert get_or(true, [false], {}) == [false]
+  test assert get_or({ @hi => 'h' }, @hi, 'i') == 'h'
+  test assert get_or({ "bar" => 3.7, "baz" => 1 }, "foo", 5.02) == 5.02
+  test assert get_or({}, true, [false]) == [false]
 ])
 
 keys_test : Test
@@ -32,26 +32,26 @@ values_test = group([
 
 update_test : Test
 update_test = group([
-  test assert update(@hi, |ch| to_int(ch) + 1 |> to_char, { @hi => 'h' }) ==
+  test assert update({ @hi => 'h' }, @hi, |ch| to_int(ch) + 1 |> to_char) ==
     { @hi => 'i' }
   test
-    let cb() = update("foo", |a| a * 2, { "bar" => 3.7, "baz" => 1 })
+    let cb() = update({ "bar" => 3.7, "baz" => 1 }, "foo", |a| a * 2)
     assert capture(cb) == BadKey
-  test assert update("bar", |a| a * 2, { "bar" => 3.7, "baz" => 1 }) ==
+  test assert update({ "bar" => 3.7, "baz" => 1 }, "bar", |a| a * 2) ==
     { "bar" => 7.4, "baz" => 1 }
-  test assert capture(|-| update(true, |v| v, {})) == BadKey
+  test assert capture(|-| update({}, true, |v| v)) == BadKey
 ])
 
 upsert_test : Test
 upsert_test = group([
   test
     let cb = |ch| to_int(ch) + 1 |> to_char
-    assert upsert(@hi, cb, 'a', { @hi => 'h' }) == { @hi => 'i' }
-  test assert upsert("foo", |a| a * 2, 0, { "bar" => 3.7, "baz" => 1 }) ==
+    assert upsert({ @hi => 'h' }, @hi, 'a', cb) == { @hi => 'i' }
+  test assert upsert({ "bar" => 3.7, "baz" => 1 }, "foo", 0, |a| a * 2) ==
     { "foo" => 0, "bar" => 3.7, "baz" => 1 }
-  test assert upsert("bar", |a| a * 2, 0, { "bar" => 3.7, "baz" => 1 }) ==
+  test assert upsert({ "bar" => 3.7, "baz" => 1 }, "bar", 0, |a| a * 2) ==
     { "bar" => 7.4, "baz" => 1 }
-  test assert upsert(true, |v| v, false, {}) == { true => false }
+  test assert upsert({}, true, false, |v| v) == { true => false }
 ])
 
 merge_test : Test
@@ -69,26 +69,26 @@ merge_test = group([
 
 with_test : Test
 with_test = group([
-  test assert with([@hi], { @hi => 'h' }) == { @hi => 'h' }
-  test assert with([], { @hi => 'h' }) == {}
-  test assert with(["foo"], { "bar" => 3.7, "baz" => 1 }) == {}
-  test assert with(["foo", "bar"], { "bar" => 3.7, "baz" => 1 }) ==
+  test assert with({ @hi => 'h' }, [@hi]) == { @hi => 'h' }
+  test assert with({ @hi => 'h' }, []) == {}
+  test assert with({ "bar" => 3.7, "baz" => 1 }, ["foo"]) == {}
+  test assert with({ "bar" => 3.7, "baz" => 1 }, ["foo", "bar"]) ==
     { "bar" => 3.7 }
-  test assert with(["baz", "foo", "bar"], { "bar" => 3.7, "baz" => 1 }) ==
+  test assert with({ "bar" => 3.7, "baz" => 1 }, ["baz", "foo", "bar"]) ==
     { "bar" => 3.7, "baz" => 1 }
-  test assert with([true], {}) == {}
-  test assert with([], {}) == {}
+  test assert with({}, [true]) == {}
+  test assert with({}, []) == {}
 ])
 
 without_test : Test
 without_test = group([
-  test assert without([@hi], { @hi => 'h' }) == {}
-  test assert without([], { @hi => 'h' }) == { @hi => 'h' }
-  test assert without(["foo"], { "bar" => 3.7, "baz" => 1 }) ==
+  test assert without({ @hi => 'h' }, [@hi]) == {}
+  test assert without({ @hi => 'h' }, []) == { @hi => 'h' }
+  test assert without({ "bar" => 3.7, "baz" => 1 }, ["foo"]) ==
     { "bar" => 3.7, "baz" => 1 }
-  test assert without(["foo", "bar"], { "bar" => 3.7, "baz" => 1 }) ==
+  test assert without({ "bar" => 3.7, "baz" => 1 }, ["foo", "bar"]) ==
     { "baz" => 1 }
-  test assert without(["baz", "foo", "bar"], { "bar" => 3.7, "baz" => 1 }) == {}
-  test assert without([true], {}) == {}
-  test assert without([], {}) == {}
+  test assert without({ "bar" => 3.7, "baz" => 1 }, ["baz", "foo", "bar"]) == {}
+  test assert without({}, [true]) == {}
+  test assert without({}, []) == {}
 ])

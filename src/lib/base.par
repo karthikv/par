@@ -35,116 +35,116 @@ impl Sized for Map<A, B> {
 }
 
 interface Mappable {
-  map : (A -> B, T<A>) -> T<B>
+  map : (T<A>, A -> B) -> T<B>
 }
 
 impl Mappable for Option {
-  map(f, o) = match o {
+  map(o, f) = match o {
     Some(a) => Some(f(a))
     None => None
   }
 }
 
 impl Mappable for List {
-  map = @lists:map/2
+  map(l, f) = @lists:map(f, l)
 }
 
 impl Mappable for Set {
-  map(f, s) = map(f, to_list(s)) |> to_set
+  map(s, f) = map(to_list(s), f) |> to_set
 }
 
 impl Mappable for Map {
-  map(f, m) = @maps:fold(|k, v, new_m|
+  map(m, f) = @maps:fold(|k, v, new_m|
     let (new_k, new_v) = f((k, v))
     @maps:put(new_k, new_v, new_m)
   , {}, m)
 }
 
 interface Collection extends Mappable {
-  fold : ((A, F) -> F, F, T<A>) -> F
-  filter : (A -> Bool, T<A>) -> T<A>
-  find : (A -> Bool, T<A>) -> Option<A>
+  fold : (T<A>, F, (A, F) -> F) -> F
+  filter : (T<A>, A -> Bool) -> T<A>
+  find : (T<A>, A -> Bool) -> Option<A>
 
-  filter_map : (A -> Option<B>, T<A>) -> T<B>
-  map_fold : ((A, F) -> (B, F), F, T<A>) -> (T<B>, F)
+  filter_map : (T<A>, A -> Option<B>) -> T<B>
+  map_fold : (T<A>, F, (A, F) -> (B, F)) -> (T<B>, F)
 
-  put : (A, T<A>) -> T<A>
-  delete : (A, T<A>) -> T<A>
+  put : (T<A>, A) -> T<A>
+  delete : (T<A>, A) -> T<A>
 
-  contains? : (A, T<A>) -> Bool
-  all? : (A -> Bool, T<A>) -> Bool
-  any? : (A -> Bool, T<A>) -> Bool
+  contains? : (T<A>, A) -> Bool
+  all? : (T<A>, A -> Bool) -> Bool
+  any? : (T<A>, A -> Bool) -> Bool
 }
 
 impl Collection for List {
-  fold = @lists:foldl/3
-  filter = @lists:filter/2
-  find(f, l) = match l {
+  fold(l, init, f) = @lists:foldl(f, init, l)
+  filter(l, f) = @lists:filter(f, l)
+  find(l, f) = match l {
     [] => None
-    [h | t] => if f(h) then Some(h) else find(f, t)
+    [h | t] => if f(h) then Some(h) else find(t, f)
   }
 
-  filter_map(f, l) = @lists:filtermap(|a|
+  filter_map(l, f) = @lists:filtermap(|a|
     if let Some(b) = f(a) then
       assume (true, b)
     else
       false
   , l)
-  map_fold = @lists:mapfoldl/3
+  map_fold(l, init, f) = @lists:mapfoldl(f, init, l)
 
-  put(h, t) = [h | t]
-  delete(a, l) = match l {
+  put(l, h) = [h | l]
+  delete(l, a) = match l {
     [] => []
-    [&a | t] => delete(a, t)
-    [h | t] => [h | delete(a, t)]
+    [&a | t] => delete(t, a)
+    [h | t] => [h | delete(t, a)]
   }
 
-  contains?(a, l) = match l {
+  contains?(l, a) = match l {
     [] => false
     [&a | _] => true
-    [_ | t] => contains?(a, t)
+    [_ | t] => contains?(t, a)
   }
-  all? = @lists:all/2
-  any? = @lists:any/2
+  all?(l, f) = @lists:all(f, l)
+  any?(l, f) = @lists:any(f, l)
 }
 
 impl Collection for Set {
-  fold(f, init, s) = to_list(s) |> fold(f, init)
-  filter(f, s) = @maps:filter(|k, _| assume k == @"_@type" || f(k), s)
-  find(f, s) = to_list(s) |> find(f)
+  fold(s, init, f) = to_list(s) |> fold(init, f)
+  filter(s, f) = @maps:filter(|k, _| assume k == @"_@type" || f(k), s)
+  find(s, f) = to_list(s) |> find(f)
 
-  filter_map(f, s) = to_list(s) |> filter_map(|a| f(a)) |> to_set
-  map_fold(f, init, s) =
-    let (l, memo) = to_list(s) |> map_fold(|a, memo| f(a, memo), init)
+  filter_map(s, f) = to_list(s) |> filter_map(f) |> to_set
+  map_fold(s, init, f) =
+    let (l, memo) = to_list(s) |> map_fold(init, f)
     (to_set(l), memo)
 
-  put(a, s) = @maps:put(a, true, s)
-  delete = @maps:remove/2
+  put(s, a) = @maps:put(a, true, s)
+  delete(s, a) = @maps:remove(a, s)
 
-  contains? = @maps:is_key/2
-  all?(f, s) = to_list(s) |> all?(f)
-  any?(f, s) = to_list(s) |> any?(f)
+  contains?(s, a) = @maps:is_key(a, s)
+  all?(s, f) = to_list(s) |> all?(f)
+  any?(s, f) = to_list(s) |> any?(f)
 }
 
 impl Collection for Map {
-  fold(f, init, m) = @maps:fold(|k, v, memo| f((k, v), memo), init, m)
-  filter(f, m) = @maps:filter(|k, v| f((k, v)), m)
-  find(f, m) = to_list(m) |> find(f)
+  fold(m, init, f) = @maps:fold(|k, v, memo| f((k, v), memo), init, m)
+  filter(m, f) = @maps:filter(|k, v| f((k, v)), m)
+  find(m, f) = to_list(m) |> find(f)
 
-  filter_map(f, m) = to_list(m) |> filter_map(f) |> to_map
-  map_fold(f, init, m) =
-    let (pairs, memo) = to_list(m) |> map_fold(f, init)
+  filter_map(m, f) = to_list(m) |> filter_map(f) |> to_map
+  map_fold(m, init, f) =
+    let (pairs, memo) = to_list(m) |> map_fold(init, f)
     (to_map(pairs), memo)
 
-  put((k, v), m) = @maps:put(k, v, m)
-  delete((k, v), m) = if contains?((k, v), m) then @maps:remove(k, m) else m
+  put(m, (k, v)) = @maps:put(k, v, m)
+  delete(m, (k, v)) = if contains?(m, (k, v)) then @maps:remove(k, m) else m
 
-  contains?((k, v), m) = match @maps:find(k, m) {
+  contains?(m, (k, v)) = match @maps:find(k, m) {
     (@ok, &v) => true
     _ => false
   }
-  all?(f, m) = to_list(m) |> all?(f)
-  any?(f, m) = to_list(m) |> any?(f)
+  all?(m, f) = to_list(m) |> all?(f)
+  any?(m, f) = to_list(m) |> any?(f)
 }
 
 
@@ -173,23 +173,23 @@ export head = @erlang:hd/1
 tail : [A] -> [A]
 export tail = @erlang:tl/1
 
-lookup : (K, Map<K, V>) -> Option<V>
-export lookup(k, m) = match @maps:find(k, m) {
+lookup : (Map<K, V>, K) -> Option<V>
+export lookup(m, k) = match @maps:find(k, m) {
   (@ok, v) => Some(v)
   @error => None
 }
 
-get : (K, Map<K, V>) -> V
-export get(k, m) = match @maps:find(k, m) {
+get : (Map<K, V>, K) -> V
+export get(m, k) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => raise BadKey
 }
 
-key? : (K, Map<K, V>) -> Bool
-export key? = @maps:is_key/2
+key? : (Map<K, V>, K) -> Bool
+export key?(m, k) = @maps:is_key(k, m)
 
-remove : (K, Map<K, V>) -> Map<K, V>
-export remove = @maps:remove/2
+remove : (Map<K, V>, K) -> Map<K, V>
+export remove(m, k) = @maps:remove(k, m)
 
 
 //-- Math
@@ -325,7 +325,7 @@ interface ToSet {
 
 impl ToSet for List {
   to_set(l) =
-    let pairs = map(|a| (a, true), l)
+    let pairs = map(l, |a| (a, true))
     @maps:from_list([assume (@"_@type", @Set) | pairs])
 }
 

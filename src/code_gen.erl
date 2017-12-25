@@ -708,7 +708,7 @@ rep({block, Loc, Exprs}, CG) ->
 
 rep({binary_op, _, '|>', Left, Right}, CG) ->
   App = case Right of
-    {app, Loc, Expr, Args} -> {app, Loc, Expr, Args ++ [Left]};
+    {app, Loc, Expr, Args} -> {app, Loc, Expr, [Left | Args]};
     _ -> {app, ?LOC(Right), Right, [Left]}
   end,
   rep(App, CG);
