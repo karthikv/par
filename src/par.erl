@@ -4,6 +4,11 @@
 
 % TODO:
 % - [2 weeks] Stdlib
+%   - debug function
+%   - File.exists?
+%   - Description for exceptions??
+%   - Rename String.lines?
+%   - some_or
 % - Fork eunite and fix macro display
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
@@ -20,8 +25,6 @@
 % - Only parse/compile necessary stdlib modules
 %   - Try not to make stdlib modules depend on each other
 %   - Wait, we can **definitely** pre-parse stdlib modules as well!
-% - Description along with raise?
-% - debug function in stdlib
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
 %   - Ensure all code samples in tutorial work
@@ -173,22 +176,30 @@ main(Args) ->
             Filename
           end, Compiled),
 
+          #comp{module=Module} = hd(Comps),
+          {Mod, _} = hd(Compiled),
+          code:add_patha(OutDir),
+          par_native:init(Mod),
+
           case proplists:get_value(test, Opts, false) of
             true ->
-              #comp{module=Module} = hd(Comps),
-              {Mod, _} = hd(Compiled),
-
               TestSet = ordsets:fold(fun(TestName, FoldTestSet) ->
                 [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
               end, [], utils:test_names(Module, C#ctx.g_env)),
 
-              code:add_patha(OutDir),
-              par_native:init(Mod),
               eunit:test(TestSet, [no_tty, {report, {unite_compact, []}}]),
               eunit:stop();
 
             false ->
-              io:format(standard_error, "~s~n", [string:join(Filenames, "\n")])
+              Exported = erlang:function_exported(Mod, main, 0),
+              if
+                Exported -> Mod:main();
+                true ->
+                  ?ERR(
+                    "Built ~p modules. No main() in module ~s; exiting.~n",
+                    [length(Filenames), Module]
+                  )
+              end
           end;
 
         Errors ->

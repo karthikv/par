@@ -2,17 +2,23 @@ module Set
 
 import Base (*)
 
+// Returns a new set with elements that are **both** in set `a` and in set `b`.
 intersect : (Set<A>, Set<A>) -> Set<A>
 export intersect(a, b) = @maps:with(@maps:keys(b), a)
 
+// Returns a new set with elements that are **either** in set `a` or in set `b`.
 union : (Set<A>, Set<A>) -> Set<A>
 export union(a, b) = @maps:merge(a, b)
 
+// Returns a new set with elements that are in set `a`, but aren't in set `b`.
 subtract : (Set<A>, Set<A>) -> Set<A>
 export subtract(a, b) = @maps:without(to_list(b), a)
 
+// Returns true if `b` is a subset of `a`; that is, if `a` contains every
+// element in `b`. Note that if `a == b`, this function returns `true`.
 subset? : (Set<A>, Set<A>) -> Bool
 export subset?(a, b) = all?(b, |e| contains?(a, e))
 
+// Returns true if `a` and `b` share no elements in common.
 disjoint? : (Set<A>, Set<A>) -> Bool
 export disjoint?(a, b) = empty?(intersect(a, b))

@@ -1465,14 +1465,14 @@ infer({variant, Loc, Expr, Args}, C) ->
       end
   end;
 
-infer({native, Loc, {atom, _, Module}, {var, _, Name}, Arity}, C) ->
+infer({native, Loc, {atom, _, Mod}, {var, _, Name}, Arity}, C) ->
   % For now, ignore return value. We'll get a native function error below if
   % this fails.
-  code:ensure_loaded(Module),
+  code:ensure_loaded(Mod),
 
-  C1 = case erlang:function_exported(Module, list_to_atom(Name), Arity) of
+  C1 = case erlang:function_exported(Mod, list_to_atom(Name), Arity) of
     true -> C;
-    false -> add_ctx_err(?ERR_NOT_DEF_NATIVE(Module, Name, Arity), Loc, C)
+    false -> add_ctx_err(?ERR_NOT_DEF_NATIVE(Mod, Name, Arity), Loc, C)
   end,
 
   ArgTs = [tv_server:fresh(C1#ctx.pid) || _ <- lists:seq(1, Arity)],
@@ -2343,6 +2343,9 @@ connect(ID, #tarjan{stack=Stack, map=Map, next_index=NextIndex, solver=S}) ->
       %% PrettySubs = maps:map(
       %%   fun
       %%     (_, {anchor, A}) -> ?FMT("anchor(~s)", [A]);
+      %%     (_, {rigid, V}) -> ?FMT("rigid(~s)", [V]);
+      %%     (_, {set_ifaces, Is}) -> ?FMT("set_ifaces(~p)", [Is]);
+      %%     (_, {set_ifaces_rigid, Is}) -> ?FMT("set_ifaces_rigid(~p)", [Is]);
       %%     (_, T) -> utils:pretty(T)
       %%   end,
       %%   S3#solver.subs
@@ -3250,7 +3253,7 @@ subs_s(T, #solver{subs=Subs, aliases=Aliases}, Opts) ->
   utils:subs(T, Opts#sub_opts{subs=Subs, aliases=Aliases}).
 
 bound_vs(LEnv, #solver{schemes=Schemes}=S) ->
-  maps:fold(fun
+  BoundVs = maps:fold(fun
     (_, #binding{tv=TV, id=undefined}, FoldVs) ->
       ordsets:union(FoldVs, fvs(subs_s(TV, S)));
 
@@ -3260,10 +3263,23 @@ bound_vs(LEnv, #solver{schemes=Schemes}=S) ->
       % 2) If a given other binding is currently being generalized,
       %    its TV can be generalized over, and so we shouldn't add it here.
       case maps:find(V, Schemes) of
-        {ok, {_, _, BoundVs}} -> ordsets:union(FoldVs, BoundVs);
+        {ok, {_, _, SchemeBoundVs}} -> ordsets:union(FoldVs, SchemeBoundVs);
         error -> FoldVs
       end
-  end, ordsets:new(), LEnv).
+  end, ordsets:new(), LEnv),
+
+  % Regression: If the BaseV of a GenTV is bound, the GenV must be bound as
+  % well. Otherwise, if the BaseV is subbed for some concrete type, and the
+  % GenV is then resolved/instantiated (which happens *before* subbing), the
+  % GenV will be replaced with a new V, and we won't sub with a concrete GenT.
+  ordsets:fold(fun(V, FoldBoundVs) ->
+    case maps:find(V, S#solver.gen_vs) of
+      error -> FoldBoundVs;
+      {ok, GenTVs} ->
+        GenBoundVs = [GenV || {gen, GenV, _, _, _} <- GenTVs],
+        ordsets:union(FoldBoundVs, ordsets:from_list(GenBoundVs))
+    end
+  end, BoundVs, BoundVs).
 
 fvs(T) ->
   FVsList = lists:filtermap(fun

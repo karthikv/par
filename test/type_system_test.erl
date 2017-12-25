@@ -2273,6 +2273,21 @@ gen_tv_test_() ->
       "  y == z",
       {"A<Int>", "B<C, D>", l(7, 7, 1), ?FROM_OP_RHS('==')}
     ))
+
+
+    % Regression: If the BaseV of a GenTV is bound, the GenV must be bound as
+    % well. Otherwise, if the BaseV is subbed for some concrete type, and the
+    % GenV is then resolved/instantiated (which happens *before* subbing), the
+    % GenV will be replaced with a new V, and we won't sub with a concrete GenT.
+  , ?_test(bad_prg(
+      "map : (T<A>, A -> B) -> T<B>\n"
+      "map(_, _) = assume []\n"
+      "foo : [Int] -> Map<Int, Int>\n"
+      "foo(nums) =\n"
+      "  let pairs = map(nums, |num| (num, num))\n"
+      "  pairs",
+      {"[(Int, Int)]", "Map<Int, Int>", l(5, 2, 5), ?FROM_VAR("pairs")}
+    ))
   ].
 
 pattern_test_() ->
