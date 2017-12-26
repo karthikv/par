@@ -19,6 +19,7 @@ if [ "$1" == "start" ]; then
     echo "Already bootstrapped"
   else
     echo "Compiling new par..."
+    # Compiles the new Par with the *old* standard libraries.
     bin/par -o ebin src/parser.par
     rebar3 as escript escriptize
 
@@ -43,8 +44,10 @@ elif [ "$1" == "finish" ]; then
     set -e
 
     if [ $succeeded -eq 0 ]; then
-      echo "Success!"
+      rebar3 as escript escriptize
+      mv _build/escript/bin/par "$PAR_PATH"
       rm "$OLD_PAR_PATH"
+      echo "Success!"
     else
       echo -n "Failed; still bootstrapped."
       exit 1

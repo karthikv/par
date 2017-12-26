@@ -348,9 +348,16 @@ impl ToMap for Set {
 to_str : A -> String
 export to_str = @par_native:to_str/1
 
+to_pretty : A -> String
+export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
 
 //-- Misc
 print : A -> ()
 export print(a) =
-  @io:format("~s~n", [to_str(a)])
+  @io:format("~s~n", [to_pretty(a)])
+  ()
+
+debug : (A, String) -> ()
+export debug(a, prefix) =
+  @io:format("~s: ~s~n", [prefix, to_pretty(a)])
   ()
