@@ -110,6 +110,16 @@ export lstat(path) =
     e => fail(e)
   }
 
+exists? : String -> Bool
+export exists?(path) =
+  match @file:read_file_info(path, []) {
+    (@ok, _) => true
+    (@error, @enoent) => false
+    // Returned when part of the path is not a directory.
+    (@error, @enotdir) => false
+    e => fail(e)
+  }
+
 munge_file_info : Native -> Stat
 munge_file_info(info) =
   let (

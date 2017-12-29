@@ -107,6 +107,14 @@ lstat_test = group([
   test assert code(|-| lstat("asdf")) == Enoent
 ])
 
+exists_test : Test
+exists_test = group([
+  test assert exists?(temp_file(""))
+  test assert exists?(temp_dir())
+  test assert !exists?(temp_path())
+  test assert !exists?("asdf")
+])
+
 chmod_test : Test
 chmod_test = group([
   test

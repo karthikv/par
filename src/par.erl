@@ -4,15 +4,12 @@
 
 % TODO:
 % - [2 weeks] Stdlib
-%   - debug function that *returns* value
-%   - File.exists?
 %   - Description for exceptions??
-%   - Rename String.lines?
-%   - some_or
-%   - concat_all/List.flatten
 %   - String.search: return empty array when re = ""?
+% - Assign all () to _Unit 
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
+%   - Add concat_all function
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable

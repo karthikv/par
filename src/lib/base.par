@@ -188,6 +188,12 @@ export key?(m, k) = @maps:is_key(k, m)
 remove : (Map<K, V>, K) -> Map<K, V>
 export remove(m, k) = @maps:remove(k, m)
 
+some_or : (Option<A>, A) -> A
+export some_or(option, default) = match option {
+  Some(a) => a
+  None => default
+}
+
 
 //-- Math
 abs : A ~ Num -> A ~ Num
@@ -354,7 +360,7 @@ export print(a) =
   @io:format("~s~n", [to_pretty(a)])
   ()
 
-debug : (A, String) -> ()
+debug : (A, String) -> A
 export debug(a, prefix) =
   @io:format("~s: ~s~n", [prefix, to_pretty(a)])
-  ()
+  a

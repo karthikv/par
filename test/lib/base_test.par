@@ -267,6 +267,12 @@ remove_test = group([
   test assert remove({}, true) == {}
 ])
 
+some_or_test : Test
+some_or_test = group([
+  test assert some_or(Some(@hi), @hey) == @hi
+  test assert some_or(None, 'h') == 'h'
+])
+
 
 //-- Math
 abs_test : Test
