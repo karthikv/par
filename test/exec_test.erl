@@ -1278,7 +1278,7 @@ test_pattern(Expr, Run) ->
 
 
   , ?_test({} = Expr("if let a = 3.0 then a"))
-  % to ensure env is reset appropriately
+  % To ensure env is reset appropriately.
   , ?_test(true = Expr(
       "let a = true\n"
       "if let a = 3.0 then a\n"
@@ -1289,6 +1289,9 @@ test_pattern(Expr, Run) ->
       "if let a = 3.0 then a else 5\n"
       "a"
     ))
+  % Ensure the correct a is used in the else clause. The Erlang compiler
+  % will complain if a is unbound.
+  , ?_test(3 = Expr("(|a| if let a = a + 1 then a else a)(2)"))
   , ?_test(<<"hey">> = Expr("if let (2, a) = (1, \"hi\") then a else \"hey\""))
   , ?_test(2.5 = Expr(
       "if let f = |b| if b then f(!b) + 1 else 1.5\n"

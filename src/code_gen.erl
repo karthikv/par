@@ -626,9 +626,11 @@ rep({native, _, {atom, Loc, Mod}, {var, _, Name}, Arity}, _) ->
 
 rep({'if', Loc, Cond, Then, Else}, CG) ->
   Line = ?START_LINE(Loc),
-  ThenBody = case Else of
-    {unit, _} -> [rep(Then, CG), eabs({}, Line)];
-    _ -> [rep(Then, CG)]
+  {ThenBody, ElseBody} = case Else of
+    {unit, _} ->
+      Unit = unit_no_warnings(Line),
+      {[rep(Then, CG), Unit], [Unit]};
+    _ -> {[rep(Then, CG)], [rep(Else, CG)]}
   end,
 
   % must factor out cond into its own variable, since it might not be a valid
@@ -637,7 +639,7 @@ rep({'if', Loc, Cond, Then, Else}, CG) ->
   CondVar = {var, CondLine, unique("Cond")},
   Match = {match, CondLine, CondVar, rep(Cond, CG)},
 
-  ElseClause = {clause, Line, [], [[{atom, Line, true}]], [rep(Else, CG)]},
+  ElseClause = {clause, Line, [], [[{atom, Line, true}]], ElseBody},
   Clauses = [{clause, Line, [], [[CondVar]], ThenBody}, ElseClause],
   {block, Line, [Match, {'if', Line, Clauses}]};
 
@@ -653,14 +655,18 @@ rep({'let', Loc, Bindings, Then}, CG) ->
 rep({if_let, Loc, Pattern, Expr, Then, Else}, CG) ->
   Line = ?START_LINE(Loc),
   {PatternRep, ExprRep, CG1} = rep_pattern(Pattern, Expr, CG),
-  ThenBody = case Else of
-    {unit, _} -> [rep(Then, CG1), eabs({}, Line)];
-    _ -> [rep(Then, CG1)]
+  {ThenBody, ElseBody} = case Else of
+    {unit, _} ->
+      Unit = unit_no_warnings(Line),
+      {[rep(Then, CG1), Unit], [Unit]};
+
+    % Pattern bindings aren't accessible in else, so use original CG.
+    _ -> {[rep(Then, CG1)], [rep(Else, CG)]}
   end,
 
   CaseClauses = [
     {clause, Line, [PatternRep], [], ThenBody},
-    {clause, Line, [{var, Line, '_'}], [], [rep(Else, CG)]}
+    {clause, Line, [{var, Line, '_'}], [], ElseBody}
   ],
   {'case', Line, ExprRep, CaseClauses};
 
@@ -860,7 +866,7 @@ rep({unary_op, Loc, Op, Expr}, CG) ->
     '$' -> ExprRep;
     '-' -> {op, Line, '-', ExprRep};
     'raise' -> call(erlang, throw, [ExprRep], Line);
-    'discard' -> {block, Line, [ExprRep, eabs({}, Line)]};
+    'discard' -> {block, Line, [ExprRep, unit_no_warnings(Line)]};
     % assume is used to subvert the type system; it doesn't modify value
     'assume' -> ExprRep;
 
@@ -1403,6 +1409,8 @@ option_key(Module, Name, #cg{env=Env}=CG) ->
   end.
 
 eabs(Lit, Line) -> erl_parse:abstract(Lit, Line).
+unit_no_warnings(Line) ->
+  {match, Line, {var, Line, unique("_Unit")}, eabs({}, Line)}.
 
 env_set(Name, Value, #cg{env=Env, ctx=#ctx{module=Module}}=CG) ->
   Env1 = Env#{{Module, Name} => Value},

@@ -11,11 +11,9 @@
 %   - some_or
 %   - concat_all/List.flatten
 %   - String.search: return empty array when re = ""?
-% - Assign _Unit to {} for if statement to suppress warnings
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Test failure due to low OTP version
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 %   - ^Mod.foo in pattern; update docs
@@ -23,6 +21,7 @@
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
 %   - Ensure all code samples in tutorial work
+%     - Update descriptions of |> and ^foo
 %   - Copyright and icons8 link
 %   - Keep mention of test framework on home page?
 %   - Docs for stdlib
