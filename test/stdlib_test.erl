@@ -54,4 +54,9 @@ remove_stdlib({_, Compiled, _}) ->
   % Must explicitly remove all modules. Some of these modules are from *new*
   % stdlibs. We don't want the old parser/lexer to use new stdlibs.
   [utils:remove_mod(Mod) || {Mod, _} <- Compiled],
+
+  % We need to re-initialize the parser; otherwise, the gm can contain
+  % references to funs from the stdlib modules that were just removed.
+  par_native:init('Par.Parser'),
+
   ok.

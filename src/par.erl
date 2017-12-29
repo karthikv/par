@@ -6,7 +6,6 @@
 % - [2 weeks] Stdlib
 %   - Description for exceptions??
 %   - String.search: return empty array when re = ""?
-% - Assign all () to _Unit 
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
 %   - Add concat_all function
@@ -22,6 +21,13 @@
 %   - Copyright and icons8 link
 %   - Keep mention of test framework on home page?
 %   - Docs for stdlib
+%     - Capture tests?
+%     - Examples for `re` test
+%     - Module prefixes in tests
+%     - Better tests for String.to_lower/to_upper/capitalize
+%     - Section for implementations
+%     - Tagline and description
+%     - How to import modules
 %   - Download page
 %   - Make GitHub repo public, add GitHub link
 %

@@ -382,7 +382,7 @@ rep({expr_sig, Loc, Ref, Expr, _}, CG) ->
   Rep = rep(Expr, CG),
   rewrite_ref(Rep, Ref, Loc, CG);
 
-rep({unit, Loc}, _) -> eabs({}, ?START_LINE(Loc));
+rep({unit, Loc}, _) -> unit_no_warnings(?START_LINE(Loc));
 rep({N, Loc, V}, _)
   when N == int; N == float; N == bool; N == str; N == atom ->
     eabs(V, ?START_LINE(Loc));
