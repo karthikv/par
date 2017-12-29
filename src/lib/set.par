@@ -6,16 +6,17 @@ import Base (*)
 intersect : (Set<A>, Set<A>) -> Set<A>
 export intersect(a, b) = @maps:with(@maps:keys(b), a)
 
-// Returns a new set with elements that are **either** in set `a` or in set `b`.
+// Merges sets `a` and `b`, returning a new set. This is equivalent to `a ++ b`.
 union : (Set<A>, Set<A>) -> Set<A>
 export union(a, b) = @maps:merge(a, b)
 
-// Returns a new set with elements that are in set `a`, but aren't in set `b`.
+// Returns a new set with elements that are in set `a`, but not in set `b`. This
+// is equivalent to `a -- b`.
 subtract : (Set<A>, Set<A>) -> Set<A>
 export subtract(a, b) = @maps:without(to_list(b), a)
 
 // Returns true if `b` is a subset of `a`; that is, if `a` contains every
-// element in `b`. Note that if `a == b`, this function returns `true`.
+// element in `b`. Note that if `a == b`, this function returns true.
 subset? : (Set<A>, Set<A>) -> Bool
 export subset?(a, b) = all?(b, |e| contains?(a, e))
 

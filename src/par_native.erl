@@ -81,12 +81,12 @@ separate(Left, Right) ->
   end.
 
 to_str(Str) when is_binary(Str) -> Str;
-to_str(Term) -> iolist_to_binary(to_iolist(Term)).
+to_str(Term) -> unicode:characters_to_binary(to_iolist(Term)).
 
 to_pretty(Str, _, _) when is_binary(Str) -> Str;
 to_pretty(Term, MaxLength, Cur) ->
   List = wrap(with_length(to_iolist(Term)), MaxLength, Cur),
-  iolist_to_binary(List).
+  unicode:characters_to_binary(List).
 
 with_length(List) ->
   lists:mapfoldl(fun
@@ -147,7 +147,11 @@ to_iolist(Int) when is_integer(Int) -> [integer_to_binary(Int)];
 % Atom also accounts for booleans. Note that we don't fallback for atoms
 % specifically because formatting a capitalized atom includes single quotes.
 to_iolist(Atom) when is_atom(Atom) -> [atom_to_binary(Atom, utf8)];
-to_iolist(Str) when is_binary(Str) -> [$", Str, $"];
+to_iolist(Bin) when is_binary(Bin) ->
+  case unicode:characters_to_binary(Bin) of
+    Result when is_binary(Result) -> [$", Bin, $"];
+    _ -> [unicode:characters_to_binary(io_lib:format("~P", [Bin, 10]))]
+  end;
 to_iolist(Tuple) when is_atom(element(1, Tuple)) ->
   [Atom | Rest] = tuple_to_list(Tuple),
   [to_iolist(Atom), $(, comma_sep(lists:map(fun to_iolist/1, Rest)), $)];
@@ -178,7 +182,8 @@ to_iolist(Map) when is_map(Map) ->
     [to_iolist(K), <<" => ">>, to_iolist(V)]
   end, maps:to_list(Map)),
   [${, $\s, comma_sep(Pairs), $\s, $}];
-to_iolist(Term) -> [iolist_to_binary(io_lib:format("~p", [Term]))].
+to_iolist(Term) ->
+  [unicode:characters_to_binary(io_lib:format("~P", [Term, 20]))].
 
 comma_sep([]) -> [];
 comma_sep([H]) -> [H];

@@ -164,11 +164,11 @@ nth_test : Test
 nth_test = group([
   test assert nth(["cow", "dog", "cat"], 0) == "cow"
   test assert nth(["cow", "dog", "cat"], -1) == "cat"
-  test assert capture(|-| nth(["cow", "dog", "cat"], 3)) == BadIndex(3)
+  test assert capture(|-| nth(["cow", "dog", "cat"], 3)) == BadListIndex(3)
   test assert nth([42.3, .428, 13.3], 2) == 13.3
   test assert nth([42.3, .428, 13.3], -3) == 42.3
-  test assert capture(|-| nth([42.3, .428, 13.3], -4)) == BadIndex(-4)
-  test assert capture(|-| nth([], 0)) == BadIndex(0)
+  test assert capture(|-| nth([42.3, .428, 13.3], -4)) == BadListIndex(-4)
+  test assert capture(|-| nth([], 0)) == BadListIndex(0)
 ])
 
 split_at_test : Test
@@ -176,11 +176,11 @@ split_at_test = group([
   test assert split_at(["cow", "dog", "cat"], 0) == ([], ["cow", "dog", "cat"])
   test assert split_at(["cow", "dog", "cat"], -1) == (["cow", "dog"], ["cat"])
   test assert split_at(["cow", "dog", "cat"], 1) == (["cow"], ["dog", "cat"])
-  test assert capture(|-| split_at(["cow", "dog", "cat"], 3)) == BadIndex(3)
+  test assert capture(|-| split_at(["cow", "dog", "cat"], 3)) == BadListIndex(3)
   test assert split_at([42.3, .428, 13.3], 2) == ([42.3, .428], [13.3])
   test assert split_at([42.3, .428, 13.3], -3) == ([], [42.3, .428, 13.3])
-  test assert capture(|-| split_at([42.3, .428, 13.3], -4)) == BadIndex(-4)
-  test assert capture(|-| split_at([], 0)) == BadIndex(0)
+  test assert capture(|-| split_at([42.3, .428, 13.3], -4)) == BadListIndex(-4)
+  test assert capture(|-| split_at([], 0)) == BadListIndex(0)
 ])
 
 slice_test : Test
@@ -188,15 +188,15 @@ slice_test = group([
   test assert slice(["cow", "dog", "cat"], 0, 1) == ["cow"]
   test assert slice(["cow", "dog", "cat"], -1, 1) == ["cat"]
   test assert slice(["cow", "dog", "cat"], 3, 0) == []
-  test assert capture(|-| slice(["cow", "dog", "cat"], 3, 1)) == BadIndex(3)
-  test assert capture(|-| slice(["cow", "dog", "cat"], 2, 2)) == BadIndex(3)
+  test assert capture(|-| slice(["cow", "dog", "cat"], 3, 1)) == BadListIndex(3)
+  test assert capture(|-| slice(["cow", "dog", "cat"], 2, 2)) == BadListIndex(3)
   test assert slice([42.3, .428, 13.3], 0, 3) == [42.3, .428, 13.3]
   test assert slice([42.3, .428, 13.3], -3, 2) == [42.3, .428]
   test assert slice([42.3, .428, 13.3], -4, 0) == []
-  test assert capture(|-| slice([42.3, .428, 13.3], -4, 1)) == BadIndex(-4)
-  test assert capture(|-| slice([42.3, .428, 13.3], -1, 2)) == BadIndex(3)
+  test assert capture(|-| slice([42.3, .428, 13.3], -4, 1)) == BadListIndex(-4)
+  test assert capture(|-| slice([42.3, .428, 13.3], -1, 2)) == BadListIndex(3)
   test assert slice([], 0, 0) == []
-  test assert capture(|-| slice([], 0, 1)) == BadIndex(0)
+  test assert capture(|-| slice([], 0, 1)) == BadListIndex(0)
 ])
 
 range_test : Test
@@ -205,12 +205,12 @@ range_test = group([
   test assert range(["cow", "dog", "cat"], -1, 2) == ["cat"]
   test assert range(["cow", "dog", "cat"], 2, -2) == []
   test assert range(["cow", "dog", "cat"], 3, 1) == []
-  test assert capture(|-| range(["cow", "dog", "cat"], 2, 3)) == BadIndex(3)
+  test assert capture(|-| range(["cow", "dog", "cat"], 2, 3)) == BadListIndex(3)
   test assert range([42.3, .428, 13.3], 0, 2) == [42.3, .428, 13.3]
   test assert range([42.3, .428, 13.3], -3, 1) == [42.3, .428]
-  test assert capture(|-| range([42.3, .428, 13.3], -4, 0)) == BadIndex(-4)
+  test assert capture(|-| range([42.3, .428, 13.3], -4, 0)) == BadListIndex(-4)
   test assert range([42.3, .428, 13.3], 0, -4) == []
-  test assert capture(|-| range([], 0, 0)) == BadIndex(0)
+  test assert capture(|-| range([], 0, 0)) == BadListIndex(0)
   test assert range([], 1, 0) == []
 ])
 

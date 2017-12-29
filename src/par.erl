@@ -4,33 +4,39 @@
 
 % TODO:
 % - [2 weeks] Stdlib
-%   - debug function
+%   - debug function that *returns* value
 %   - File.exists?
 %   - Description for exceptions??
 %   - Rename String.lines?
 %   - some_or
-% - Fork eunite and fix macro display
+%   - concat_all/List.flatten
+%   - String.search: return empty array when re = ""?
+% - Assign _Unit to {} for if statement to suppress warnings
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
-% - Default args?
-% - Parallelize code gen
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Allow running program via cli; require that main is defined
-%   - Should build dir be configurable?
-% - Native function w/o arity on rhs of |>
+% - Test failure due to low OTP version
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 %   - ^Mod.foo in pattern; update docs
-% - Confusion between Con and TV
-% - Only parse/compile necessary stdlib modules
-%   - Try not to make stdlib modules depend on each other
-%   - Wait, we can **definitely** pre-parse stdlib modules as well!
+% - Precompile stdlib modules
 % - Website + Documentation
 %   - Commands to run each program in tutorial and output
 %   - Ensure all code samples in tutorial work
 %   - Copyright and icons8 link
 %   - Keep mention of test framework on home page?
 %   - Docs for stdlib
+%   - Download page
+%   - Make GitHub repo public, add GitHub link
+%
+% - Default args?
+% - Confusion between Con and TV
+% - Fork eunite and fix macro display
+% - Parallelize code gen
+% - Make warnings print to stderr?
+% - Bad "Fat arrow or equals error" when writing { Class = "hi" }
+% - Bad error when using map on Map<Attr, String> in docs.par
+% - Native function w/o arity on rhs of |>
 %
 % Defer
 % - if-let condition and other condition (or maybe when statement?)
@@ -104,7 +110,10 @@ main(Args) ->
   case string:to_integer(Release) of
     {OTP, []} when OTP >= 20 -> ok;
     _ ->
-      ?ERR("Par requires Erlang/OTP 20 or higher, but you have ~s", [Release]),
+      ?ERR(
+        "Par requires Erlang/OTP 20 or higher, but you have ~s~n",
+        [Release]
+      ),
       halt(1)
   end,
 

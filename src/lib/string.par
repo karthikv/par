@@ -3,64 +3,104 @@ module String
 import Base (*)
 import List
 
-struct Regexp {
+// Represents a compiled regular expression. To create a regular expression,
+// use [`re()`](#re).
+//
+// @opaque
+struct Regex {
   re : Native
   str : String
 }
 
-enum RegexpOpt {
-  Caseless @caseless
-  Multiline @multiline
-  DotAll @dotall
-  Extended @extended
-  UnicodeCharProps @ucp
+// Options for creating a regular expression, passed to [`re()`](#re):
+//
+// - `Caseless` &mdash; Case-insensitive, so `A` matches both A and a.
+// - `Multiline` &mdash; `^` matches at the start of a line and `$` matches at
+// the end of a line. Without this option, `^` only matches at the start of the
+// entire string, and `$` only matches at the end of the entire string (or
+// before a final `\n` character).
+// - `DotAll` &mdash; `.` matches any character, including `\n`. Without this
+// option, `.` matches anything **except** `\n`.
+// - `Extended` &mdash; Whitespace characters are ignored, unless they're
+// escaped by `\` or in a character class. An unescaped `#` starts a comment
+// that lasts until the next `\n`.
+enum RegexOpt {
+  Caseless
+  Multiline
+  DotAll
+  Extended
 }
 
-exception BadRegexp({ reason : String, index : Int })
+// Raised by [`slice()`](#slice) and [`range()`](#range) when they try to access
+// an index out of bounds.
+exception BadStringIndex(Int)
 
+// Raised by [`re()`](#re) when the regular expression pattern is invalid.
+// `reason` is a description of what's wrong, and `index` is the index at which
+// the error occurs.
+exception BadRegex({ reason : String, index : Int })
+
+// Converts a string `s` into a list of characters.
 chars : String -> [Char]
 export chars(s) = match @string:next_codepoint(s) {
   [h | t] => [h | chars(assume t)]
   [] => []
 }
 
+// Converts a list of characters, `chars` into a string.
 from_chars : [Char] -> String
-export from_chars = @unicode:characters_to_binary/1
+export from_chars(chars) = @unicode:characters_to_binary(chars)
 
+// Capitalizes the first letter in `s`, returning a new string. If the
+// first character isn't a letter, simply returns `s`.
 capitalize : String -> String
 export capitalize(s) =
   if empty?(s) then
     s
   else
     let [g | t] = @string:next_grapheme(s)
-    @erlang:iolist_to_binary([@string:to_upper([g]) | t])
+    @unicode:characters_to_binary([@string:to_upper([g]) | t])
 
+// Converts every character in `s` to lowercase, returning a new string.
 to_lower : String -> String
-export to_lower = @string:lowercase/1
+export to_lower(s) = @string:lowercase(s)
 
+// Converts every character in `s` to uppercase, returning a new string.
 to_upper : String -> String
-export to_upper = @string:uppercase/1
+export to_upper(s) = @string:uppercase(s)
 
+// Removes leading whitespace in `s`, returning a new string.
 lstrip : String -> String
 export lstrip(s) = @string:trim(s, @leading)
 
+// Removes trailing whitespace in `s`, returning a new string.
 rstrip : String -> String
 export rstrip(s) = @string:trim(s, @trailing)
 
+// Removes leading and trailing whitespace in `s`, returning a new string.
 strip : String -> String
 export strip(s) = @string:trim(s, @both)
 
+// Returns a substring of `s` starting at index `i` with length `len`. `i` can
+// be negative, where `-1` is the last index, `-2` is the second-to-last index,
+// etc. If `len <= 0`, returns `""`. If `slice` tries to access an element at an
+// invalid index, it raises [`BadStringIndex`](#BadStringIndex).
 slice : (String, Int, Int) -> String
-export slice(s, i, num) =
-  if num <= 0 then
+export slice(s, i, len) =
+  if len <= 0 then
     ""
   else
     let wrapped_i = if i < 0 then length(s) + i else i
     if wrapped_i < 0 then
-      raise BadIndex(i)
+      raise BadStringIndex(i)
     else
-      slice_r(s, 0, wrapped_i, num) |> @erlang:iolist_to_binary/1
+      slice_r(s, 0, wrapped_i, len) |> @unicode:characters_to_binary/1
 
+// Returns a substring of `s` starting at index `start` and ending at index
+// `end`, inclusive. `start` and `end` can be negative, where `-1` is the last
+// index, `-2` is the second-to-last index, etc. If `start > end` (after
+// resolving negative indexes), returns `""`. If `range` tries to access an
+// element at an invalid index, it raises [`BadStringIndex`](#BadStringIndex).
 range : (String, Int, Int) -> String
 export range(s, start, end) =
   let len = if start < 0 || end < 0 then length(s) else 0
@@ -70,70 +110,127 @@ export range(s, start, end) =
   if wrapped_start > wrapped_end then
     ""
   else if wrapped_start < 0 then
-    raise BadIndex(start)
+    raise BadStringIndex(start)
   else if wrapped_end < 0 then
-    raise BadIndex(end)
+    raise BadStringIndex(end)
   else
     slice_r(s, 0, wrapped_start, wrapped_end - wrapped_start + 1)
-    |> @erlang:iolist_to_binary/1
+    |> @unicode:characters_to_binary/1
 
 slice_r : (String, Int, Int, Int) -> [Char]
-slice_r(s, i, start, num) =
-  if num <= 0 then
+slice_r(s, i, start, len) =
+  if len <= 0 then
     []
   else
     match @string:next_grapheme(s) {
       [h | t] =>
         if i >= start then
-          [h | slice_r(assume t, i + 1, start, num - 1)]
+          [h | slice_r(assume t, i + 1, start, len - 1)]
         else
-          slice_r(assume t, i + 1, start, num)
-      [] => raise BadIndex(i)
+          slice_r(assume t, i + 1, start, len)
+      [] => raise BadStringIndex(i)
     }
 
+// Returns a list of lines in `s`, where lines are separated either by `"\n"` or
+// `"\r\n"`. Each line in the result list is stripped of the trailing `"\n"` or
+// `"\r\n"`. All trailing blank lines at the end of `s` are removed from the
+// resultant list.
 lines : String -> [String]
 export lines(s) = @binary:split(s, newline_pattern, [@global, @trim])
 
 newline_pattern : Native
 newline_pattern = @binary:compile_pattern(["\n", "\r\n"])
 
+// Reverses the string `s`, returning a new string.
 reverse : String -> String
-export reverse(s) = @string:reverse(s) |> @erlang:iolist_to_binary/1
+export reverse(s) = @string:reverse(s) |> @unicode:characters_to_binary/1
 
+// Returns true if `s` starts with the given `prefix`.
 starts_with? : (String, String) -> Bool
 export starts_with?(s, prefix) = @string:prefix(s, prefix) != @nomatch
 
+// Returns true if `s` ends with the given `suffix`.
 ends_with? : (String, String) -> Bool
 export ends_with?(s, suffix) = @string:find(s, suffix, @trailing) == suffix
 
+// Returns true if `s` contains the substring `sub`. If `s == sub`, returns
+// true.
 substr? : (String, String) -> Bool
 export substr?(s, sub) = @string:find(s, sub) != @nomatch
 
-re : (String, [RegexpOpt]) -> Regexp
+// Creates a regular expression based on the pattern given by string `s`. See
+// [Erlang's `re` documentation](http://erlang.org/doc/man/re.html#sect2) for
+// a full description of the supported regex syntax. If `s` isn't a valid
+// pattern, raises [`BadRegex`](#BadRegex).
+//
+// Many regular expressions contain literal backslashes. For instance, the
+// regular expression `\d+` matches one or more digits. Because Par uses
+// backslashes as the escape character in normal strings, you'd have to write
+// this as `String.re("\\d+", [])` (the `\\` represents a single `\` in
+// a string). To avoid this, it's recommended to use **raw strings**, which are
+// delimited by backticks. In raw strings, backslashes don't need to be escaped,
+// so you can simply write ``String.re(`\d+`, [])``. See
+// [primitives](/learn/reference#primitives) for details about raw strings.
+//
+// `opts` is a list of regex options. See [`RegexOpt`](#RegexOpt) for details
+// about each option.
+//
+// [RegExr](https://regexr.com/) is a useful resource to test regular
+// expressions and understand how they match text.
+re : (String, [RegexOpt]) -> Regex
 export re(s, opts) =
-  let opts = [assume @unicode, assume (@newline, @anycrlf) | opts]
-  match @re:compile(s, opts) {
+  let atoms = map(opts, |opt| match opt {
+    Caseless => @caseless
+    Multiline => @multiline
+    DotAll => @dotall
+    Extended => @extended
+  })
+
+  match @re:compile(s, [@unicode, assume (@newline, @anycrlf) | atoms]) {
     (@error, (reason, index)) =>
-      raise BadRegexp({ reason = from_chars(reason), index = index })
-    (@ok, re) => Regexp { re = re, str = s }
+      raise BadRegex({ reason = from_chars(reason), index = index })
+    (@ok, re) => Regex { re = re, str = s }
   }
 
-matches? : (String, Regexp) -> Bool
+// Returns true if the regex `r` successfully matches some part of `s`.
+matches? : (String, Regex) -> Bool
 export matches?(s, r) = @re:run(s, r.re) != @nomatch
 
-search : (String, Regexp) -> [String]
+// Runs the regex `r` on `s` once. If there is a match, returns a list of
+// strings describing the match. The first element in the resultant list is the
+// full matched text. The second element is the text matched by the first
+// capture group in `r`. The third element is the text matched by the second
+// capture group in `r`, and so on for all capture groups. If no match is found,
+// returns `[]`.
+//
+// Capture groups are defined by parentheses. In the regex `foo ((\w+) bar)`,
+// the first capture group is `((\w+) bar)`, which matches one or more word
+// characters followed by the literal text ` bar`. The second capture group,
+// which happens to be a subset of the first capture group, is `(\w+)`, which
+// matches one or more word characters.
+//
+// See [`re()`](#re) for how to create a `Regex` and details about syntax.
+search : (String, Regex) -> [String]
 export search(s, r) = match @re:run(s, r.re, [(@capture, @all, @binary)]) {
   @nomatch => []
   (@match, results) => results
 }
 
-search_all : (String, Regexp) -> [[String]]
+// Runs the regex `r` on `s` iteratively until there are no more matces. For
+// each match, creates a list of strings describing the match, where the first
+// element is the full matched text, and each subsequent element corresponds to
+// a capture group in `r` (see [`search()`](#search) for details). Returns
+// a list of list of strings describing all matches.
+search_all : (String, Regex) -> [[String]]
 export search_all(s, r) =
   match @re:run(s, r.re, [@global, assume (@capture, @all, @binary)]) {
     @nomatch => []
     (@match, results) => results
   }
 
+// Looks for the first occurrence of `sub` in `s`. If `sub` is found, returns
+// `Some(a, b)` where `a` is the text before `sub`, and `b` is the text after
+// `sub`. If `sub` isn't found, returns `None`.
 span : (String, String) -> Option<(String, String)>
 export span(s, sub) =
   if sub == "" then
@@ -144,6 +241,9 @@ export span(s, sub) =
       [_] => None
     }
 
+// Looks for the last occurrence of `sub` in `s`. If `sub` is found, returns
+// `Some((a, b))` where `a` is the text before `sub`, and `b` is the text after
+// `sub`. If `sub` isn't found, returns `None`.
 rspan : (String, String) -> Option<(String, String)>
 export rspan(s, sub) =
   if sub == "" then
@@ -154,7 +254,14 @@ export rspan(s, sub) =
       [_] => None
     }
 
-search_span : (String, Regexp) -> Option<(String, [String], String)>
+// Runs the regex `r` on `s` once. If there is a match, returns `Some((a, l,
+// b))`, where `a` is the text before the match, `l` is a list describing the
+// match, and `b` is the text after the match. Each element in `l` corresponds
+// to a capture group in `r` (see [`search()`](#search) for details). Note that,
+// unlike `search()`, the first element in `l` is **not** the fully matched text
+// (though you can add a capture group around the entire regex to get this
+// behavior).
+search_span : (String, Regex) -> Option<(String, [String], String)>
 export search_span(s, r) =
   if r.str == "" then
     None
@@ -166,9 +273,48 @@ export search_span(s, r) =
         Some((l, matches, r))
     }
 
+// Patterns are used to split a string into parts or to replace portions of
+// a string. A pattern identifies where to split or what to replace. The
+// types `String` and [`Regex`](#Regex) implement the Pattern interface.
 interface Pattern {
+  // Splits a string into at most `n` parts, where each part is separated by
+  // the given pattern `pat`. Returns a list with these constituent parts. If
+  // `n <= 0`, there is no limit to the number of parts. If `n > 0` and there
+  // are more than `n - 1` occurrences of `pat`, only the first `n - 1`
+  // occurrences will be used to determine the parts.
+  //
+  // If `pat` is a string, this function splits on substrings that exactly match
+  // `pat`.
+  //
+  // If `pat` is a regex, this function splits on any substring that matches
+  // `pat`. If `pat` contains capture groups, the matched text for each capture
+  // group is included in the result list, located in-between the two parts
+  // that were split by the substring matched by `pat`.
+  //
+  // @args s, pat, n
   splitn : (String, T, Int) -> [String]
+
+  // Replaces all occurrences of `pat` in `s` with `replacement`.
+  //
+  // If `pat` is a string, this function looks for substrings that exactly match
+  // `pat`, and replaces them with the literal text in `replacement`.
+  //
+  // If `pat` is a regex, this function looks for substrings that match `pat`.
+  // The special sequences `\1`, `\2`, ..., `\n` etc. in `replacement` can
+  // be used to include the text captured by the `n`th capture group in `pat`.
+  //
+  // If you're including `\1`, `\2`, etc. in `replacement`, it's generally best
+  // to use raw strings so you don't need to escape the backslashes, such as in
+  // ``replace(s, pat, `\1`)``. Otherwise, you'll need to write `replace(s, pat,
+  // "\\1")`. See [`re()`](#re) for details about raw strings.
+  //
+  // @args s, pat, replacement
   replace : (String, T, String) -> String
+
+  // Replaces the **first occurrence** of `pat` in `s` with `replacement`. This
+  // works exactly like [`replace`](#replace), but only replaces one occurrence.
+  //
+  // @args s, pat, replacement
   replace_one : (String, T, String) -> String
 }
 
@@ -186,14 +332,14 @@ impl Pattern for String {
   replace(s, sub, rep) =
     if sub == "" then
       let parts = split(s, "") |> map(|s| [s, assume rep])
-      @erlang:iolist_to_binary([assume rep, parts])
+      @unicode:characters_to_binary([assume rep, parts])
     else
-      @string:replace(s, sub, rep, @all) |> @erlang:iolist_to_binary/1
+      @string:replace(s, sub, rep, @all) |> @unicode:characters_to_binary/1
   replace_one(s, sub, rep) =
     if sub == "" then
       rep ++ s
     else
-      @string:replace(s, sub, rep) |> @erlang:iolist_to_binary/1
+      @string:replace(s, sub, rep) |> @unicode:characters_to_binary/1
 }
 
 splitn_graphemes : (String, Int) -> [String]
@@ -216,7 +362,7 @@ splitn_r(s, sub, n) =
       [l, r] => [l | splitn_r(r, sub, n - 1)]
     }
 
-impl Pattern for Regexp {
+impl Pattern for Regex {
   splitn(s, r, n) =
     if r.str == "" then
       splitn(s, "", n)
@@ -229,5 +375,7 @@ impl Pattern for Regexp {
   replace_one(s, r, rep) = @re:replace(s, r.re, rep, [(@return, @binary)])
 }
 
+// This works exactly like [`splitn()`](#splitn) when `n` is set to -1, meaning
+// there's no limit on the number of splits.
 split : (String, T ~ Pattern) -> [String]
 export split(s, r) = splitn(s, r, -1)

@@ -152,9 +152,6 @@ impl Collection for Map {
 // Can't include the key here because it could be of any type.
 exception BadKey
 
-// This is here so it can be shared by the List and String modules.
-exception BadIndex(Int)
-
 // Used when converting a String or [Char] to an Int or Float.
 exception CantParseInt(String)
 exception CantParseFloat(String)

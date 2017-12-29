@@ -3,6 +3,7 @@ module List
 import Base (*)
 import Map
 
+exception BadListIndex(Int)
 exception MismatchedLengths(Int, Int)
 
 max_in : [A ~ Ord] -> Option<A ~ Ord>
@@ -88,26 +89,26 @@ export sort_cmp(l, f) = @lists:sort(f, l)
 nth : ([A], Int) -> A
 export nth(l, i) =
   let wrapped_i = if i < 0 then length(l) + i else i
-  if wrapped_i < 0 then raise BadIndex(i) else nth_r(l, 0, wrapped_i)
+  if wrapped_i < 0 then raise BadListIndex(i) else nth_r(l, 0, wrapped_i)
 
 nth_r : ([A], Int, Int) -> A
 nth_r(l, i, n) = match l {
   [h | t] => if i == n then h else nth_r(t, i + 1, n)
-  [] => raise BadIndex(i)
+  [] => raise BadListIndex(i)
 }
 
 split_at : ([A], Int) -> ([A], [A])
 export split_at(l, i) =
   let wrapped_i = if i < 0 then length(l) + i else i
   if wrapped_i < 0 then
-    raise BadIndex(i)
+    raise BadListIndex(i)
   else
     split_at_r(l, 0, wrapped_i, [])
 
 split_at_r : ([A], Int, Int, [A]) -> ([A], [A])
 split_at_r(l, i, n, before) =
   if l == [] then
-    raise BadIndex(i)
+    raise BadListIndex(i)
   else if i == n then
     (reverse(before), l)
   else
@@ -120,7 +121,10 @@ export slice(l, i, num) =
     []
   else
     let wrapped_i = if i < 0 then length(l) + i else i
-    if wrapped_i < 0 then raise BadIndex(i) else slice_r(l, 0, wrapped_i, num)
+    if wrapped_i < 0 then
+      raise BadListIndex(i)
+    else
+      slice_r(l, 0, wrapped_i, num)
 
 range : ([A], Int, Int) -> [A]
 export range(l, start, end) =
@@ -131,9 +135,9 @@ export range(l, start, end) =
   if wrapped_start > wrapped_end then
     []
   else if wrapped_start < 0 then
-    raise BadIndex(start)
+    raise BadListIndex(start)
   else if wrapped_end < 0 then
-    raise BadIndex(end)
+    raise BadListIndex(end)
   else
     slice_r(l, 0, wrapped_start, wrapped_end - wrapped_start + 1)
 
@@ -148,11 +152,11 @@ slice_r(l, i, start, num) =
           [h | slice_r(t, i + 1, start, num - 1)]
         else
           slice_r(t, i + 1, start, num)
-      [] => raise BadIndex(i)
+      [] => raise BadListIndex(i)
     }
 
 join : ([String], String) -> String
-export join(l, start) = @erlang:iolist_to_binary(intersperse(l, start))
+export join(l, start) = @unicode:characters_to_binary(intersperse(l, start))
 
 intersperse : ([A], A) -> [A]
 intersperse(l, a) = match l {
