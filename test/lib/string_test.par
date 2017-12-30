@@ -6,7 +6,7 @@ import Test (group, capture)
 chars_test : Test
 chars_test = group([
   // @example
-  test assert chars("foo bar") == ['f', 'o', 'o', ' ', 'b', 'a', 'r']
+  test assert chars("foo BAR") == ['f', 'o', 'o', ' ', 'B', 'A', 'R']
   // @example
   test assert chars("åäö") == ['å', 'ä', 'ö']
   // @example
@@ -16,7 +16,7 @@ chars_test = group([
 from_chars_test : Test
 from_chars_test = group([
   // @example
-  test assert from_chars(['f', 'o', 'o', ' ', 'b', 'a', 'r']) == "foo bar"
+  test assert from_chars(['f', 'o', 'o', ' ', 'B', 'A', 'R']) == "foo BAR"
   // @example
   test assert from_chars(['å', 'ä', 'ö']) == "åäö"
   // @example
@@ -26,7 +26,11 @@ from_chars_test = group([
 capitalize_test : Test
 capitalize_test = group([
   // @example
-  test assert capitalize("foo bar") == "Foo bar"
+  test assert capitalize("foo BAR") == "Foo BAR"
+  // @example
+  test assert capitalize("Foo BAR") == "Foo BAR"
+  // @example
+  test assert capitalize("158") == "158"
   // @example
   test assert capitalize("") == ""
 ])
@@ -34,7 +38,9 @@ capitalize_test = group([
 to_lower_test : Test
 to_lower_test = group([
   // @example
-  test assert to_lower("Foo BAR") == "foo bar"
+  test assert to_lower("foo BAR") == "foo bar"
+  // @example
+  test assert to_lower("158") == "158"
   // @example
   test assert to_lower("") == ""
 ])
@@ -42,7 +48,9 @@ to_lower_test = group([
 to_upper_test : Test
 to_upper_test = group([
   // @example
-  test assert to_upper("Foo BAR") == "FOO BAR"
+  test assert to_upper("foo BAR") == "FOO BAR"
+  // @example
+  test assert to_upper("158") == "158"
   // @example
   test assert to_upper("") == ""
 ])

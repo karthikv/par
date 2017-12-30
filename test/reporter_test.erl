@@ -124,7 +124,8 @@ expr_test_() ->
   , ?golden_expr_("p-no-close-1", "{ a = 3")
   , ?golden_expr_("p-no-close-2", "[1, [2, [3, 4], 5, 6]")
   , ?golden_prg_("p-no-open", "enum Bar")
-  , ?golden_expr_("p-extra-closing", "(match 1 { 1) => 2 })")
+  , ?golden_expr_("p-extra-closing-1", "(match 1 { 1) => 2 })")
+  , ?golden_expr_("p-extra-closing-2", "Foo { a = (1 }")
   , ?golden_expr_("p-native-no-atom", "erlang:length([])")
   , ?golden_expr_("p-native-arity", "@erlang:length")
   , ?golden_prg_(

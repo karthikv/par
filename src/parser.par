@@ -562,7 +562,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
             let brace_e = Loc {
               start_line = brace_l.end_line
               start_col = brace_l.end_col - 1
-              | brace_s
+              | brace_l
             }
 
             expr([Lexer.LBrace(brace_s) | inner] ++ [Lexer.RBrace(brace_e)])

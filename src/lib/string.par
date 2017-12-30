@@ -1,3 +1,14 @@
+// Functions in this module operate on type `String`, which is a collection of
+// ordered characters. Literal strings can be created with double quotes (a
+// regular string) or backticks (a raw string), such as in `"hello"` or `` `hey
+// there` ``.
+//
+// Within a regular string, [escape sequences](/learn/reference#escape) can be
+// used to include special characters. Within a raw string, no escape sequences
+// are allowed, meaning backslash is a literal character. Raw strings are useful
+// to define regular expressions, as they often include literal backslashes.
+//
+// @tagline Standard library for string operations.
 module String
 
 import Base (*)

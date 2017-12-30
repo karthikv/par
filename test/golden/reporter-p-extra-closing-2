@@ -1,0 +1,7 @@
+*** file [infer-prg] ***
+
+Expected a closing paren ')' before closing brace '}':
+
+3: Foo { a = (1 }
+                ^
+

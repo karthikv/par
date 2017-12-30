@@ -24,9 +24,7 @@
 %     - Capture tests?
 %     - Examples for `re` test
 %     - Module prefixes in tests
-%     - Better tests for String.to_lower/to_upper/capitalize
 %     - Section for implementations
-%     - Tagline and description
 %     - How to import modules
 %   - Download page
 %   - Make GitHub repo public, add GitHub link
@@ -39,6 +37,8 @@
 % - Bad "Fat arrow or equals error" when writing { Class = "hi" }
 % - Bad error when using map on Map<Attr, String> in docs.par
 % - Native function w/o arity on rhs of |>
+% - If # of args in sig is diff from decl, ignore sig
+% - Better messages for indirect errors from T<B> due to T<A> being unified
 %
 % Defer
 % - if-let condition and other condition (or maybe when statement?)
@@ -92,7 +92,6 @@
 %     type that matches
 %   - Better message for T<A> <=> anon record or anon record ext
 %   - Fix other_errors_test that ensures sig cst is unified first
-%   - Better messages for indirect errors from T<B> due to T<A> being unified
 %   - Add explicit error when assert let w/ a pattern that'll always match
 %   - Impl error due to iface type sig, where type sig can be in another module
 %   - Explanation for how to circumvent builtin redef error?

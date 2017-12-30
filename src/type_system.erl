@@ -2409,6 +2409,7 @@ unify_csts(#gnr{csts=Csts, l_env=LEnv}, S) ->
 
     SubbedT1 = subs_s(ResolvedT1, FoldS2),
     SubbedT2 = subs_s(ResolvedT2, FoldS2),
+    %% ?LOG("Unifying", [utils:pretty(SubbedT1), utils:pretty(SubbedT2)]),
     FoldS3 = FoldS2#solver{
       t1=SubbedT1,
       t2=SubbedT2,
