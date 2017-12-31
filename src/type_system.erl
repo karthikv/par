@@ -2927,43 +2927,23 @@ unify(
       end, {true, S}, lists:zip(ParamTs1, ParamTs2));
 
     Length1 == 1 ->
-      case ParamTs1 of
-        [{tv, _, _, _}] -> {true, S};
-        [{tuple, Elems}] when length(Elems) == Length2 -> {true, S};
-        _ -> add_err(S)
-      end;
+      [ParamT1] = ParamTs1,
+      sub_unify(ParamT1, {tuple, ParamTs2}, S);
 
     Length2 == 1 ->
-      case ParamTs2 of
-        [{tv, _, _, _}] -> {true, S};
-        [{tuple, Elems}] when length(Elems) == Length1 -> {true, S};
-        _ -> add_err(S)
-      end;
+      [ParamT2] = ParamTs2,
+      sub_unify(ParamT2, {tuple, ParamTs1}, S);
 
     true -> add_err(S)
   end,
 
   if
     ParamsValid ->
-      % Do this before unifying BaseTV1 and BaseTV2 so the GenTV sets are
-      % merged after params are fixed.
-      {GenValid, S2} = if
-        not SameLengths andalso Length1 == 1 ->
-          sub_unify_gen_vs(GenTV1, none, Length2, S1);
-        not SameLengths andalso Length2 == 1 ->
-          sub_unify_gen_vs(GenTV2, none, Length1, S1);
-        SameLengths -> {true, S1}
-      end,
-
+      {BaseValid, S2} = sub_unify(BaseTV1, BaseTV2, S1),
       if
-        GenValid ->
-          {BaseValid, S3} = sub_unify(BaseTV1, BaseTV2, S2),
-          if
-            BaseValid ->
-              sub_unify({tv, V1, Is1, false}, {tv, V2, Is2, false}, S3);
-            true -> {false, S3}
-          end;
-
+        BaseValid, SameLengths orelse Length1 == 1 ->
+          sub_unify({tv, V1, Is1, false}, GenTV2, S2);
+        BaseValid -> sub_unify({tv, V2, Is2, false}, GenTV1, S2);
         true -> {false, S2}
       end;
 
@@ -3014,52 +2994,58 @@ unify(T1, T2, #solver{aliases=Aliases}=S) ->
 sub_unify(T1, T2, S) -> unify(subs_s(T1, S), subs_s(T2, S), S).
 
 sub_unify_gen_vs(
-  {gen, _, _, {tv, BaseV, _, _}, ParamTs},
+  {gen, _, _, {tv, BaseV, _, _}, _},
   ConT,
   NewNumParams,
   #solver{t1=OrigT1, t2=OrigT2}=S
 ) ->
-  NumParams = length(ParamTs),
   GenVs = maps:get(BaseV, S#solver.gen_vs),
 
   {Valid, S1} = lists:foldl(fun(GenTV, {FoldValid, FoldS}) ->
-    {gen, FoldV, FoldIs, FoldBaseTV, FoldParamTs} = GenTV,
-    NewParamTs = if
-      NumParams /= NewNumParams ->
-        lists:map(fun(_) ->
-          tv_server:fresh(FoldS#solver.pid)
-        end, lists:seq(1, NewNumParams));
+    {gen, FoldV, FoldIs, _, FoldParamTs} = GenTV,
+    TV = {tv, FoldV, FoldIs, false},
+    NumParams = length(FoldParamTs),
 
-      true -> none
-    end,
+    {GenValid, FinalS} = if
+      NumParams == NewNumParams ->
+        TargetT = {gen, ConT, FoldParamTs},
+        sub_unify(TV, TargetT, FoldS#solver{t1=GenTV, t2=TargetT});
 
-    TargetT = if
-      ConT /= none andalso NewParamTs /= none -> {gen, ConT, NewParamTs};
-      ConT /= none -> {gen, ConT, FoldParamTs};
-      NewParamTs /= none ->
-        NewV = tv_server:next_name(FoldS#solver.pid),
-        {gen, NewV, FoldIs, FoldBaseTV, NewParamTs}
-    end,
-
-    FoldS1 = FoldS#solver{t1=GenTV, t2=TargetT},
-    {ParamsValid, FoldS2} = case NewParamTs of
-      none -> {true, FoldS1};
-      [NewParamT] -> sub_unify(NewParamT, {tuple, FoldParamTs}, FoldS1);
-      _ ->
+      NumParams == 1 ->
         [FoldParamT] = FoldParamTs,
-        sub_unify(FoldParamT, {tuple, NewParamTs}, FoldS1)
+        NewParamTs = [
+          tv_server:fresh(FoldS#solver.pid) ||
+          _ <- lists:seq(1, NewNumParams)
+        ],
+
+        TargetT = {gen, ConT, NewParamTs},
+        {ParamsValid, FoldS1} = sub_unify(
+          FoldParamT,
+          {tuple, NewParamTs},
+          FoldS#solver{t1=GenTV, t2=TargetT}
+        ),
+
+        % If we unify TV with TargetT when params are invalid, we could get
+        % a bad error message like "Mismatched types Map<A, B> and Map<A, B>",
+        % since the GenV is subbed, but the param unification failed.
+        if
+          ParamsValid -> sub_unify(TV, TargetT, FoldS1);
+          true -> {false, FoldS1}
+        end;
+
+      NewNumParams == 1 ->
+        TargetT = {gen, ConT, [{tuple, FoldParamTs}]},
+        sub_unify(TV, TargetT, FoldS#solver{t1=GenTV, t2=TargetT});
+
+      true ->
+        NewParamTs = [
+          tv_server:fresh(FoldS#solver.pid) ||
+          _ <- lists:seq(1, NewNumParams)
+        ],
+        add_err(FoldS#solver{t1=GenTV, t2={gen, ConT, NewParamTs}})
     end,
 
-    if
-      ParamsValid ->
-        {GenValid, FoldS3} = sub_unify(
-          {tv, FoldV, FoldIs, false},
-          TargetT,
-          FoldS2
-        ),
-        {FoldValid andalso GenValid, FoldS3};
-      true -> {false, FoldS2}
-    end
+    {FoldValid andalso GenValid, FinalS}
   end, {true, S}, GenVs),
 
   {Valid, S1#solver{t1=OrigT1, t2=OrigT2}}.

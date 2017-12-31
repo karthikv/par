@@ -2288,6 +2288,25 @@ gen_tv_test_() ->
       "  pairs",
       {"[(Int, Int)]", "Map<Int, Int>", l(5, 2, 5), ?FROM_VAR("pairs")}
     ))
+
+    % Regression: If A<B> is unified with C<D, E> when there's an A<F ~ Num>,
+    % there shouldn't be an error, as A can be a single param gen, like List.
+    % Note that the test below is still a bad_prg because it has a different
+    % error in it.
+    %
+    % Put differently, we don't need to do anything with gen vs when unifying
+    % one GenTV with another GenTV.
+  , ?_test(bad_prg(
+      "interface Collection { map : (T<A>, A -> B) -> T<B> }\n"
+      "to_map : T<A, B> -> Map<A, B>\n"
+      "to_map(_) = assume {}\n"
+      "foo : Int -> Map<Atom, Bool>\n"
+      "foo(l) =\n"
+      "  let pairs = map(l, |e| match e { 0 => (@hey, true) })\n"
+      "  to_map(pairs)",
+      {"Int -> Map<Atom, Bool>", "A<B ~ Num> ~ Collection -> Map<Atom, Bool>",
+       l(3, 0, 28), ?FROM_GLOBAL_SIG("foo")}
+    ))
   ].
 
 pattern_test_() ->
