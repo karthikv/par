@@ -5,7 +5,7 @@ import Test (group, capture)
 
 uid : Int
 uid =
-  String.chars("id -u")
+  String.to_chars("id -u")
   |> @os:cmd/1
   |> String.from_chars
   |> String.strip

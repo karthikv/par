@@ -1,40 +1,66 @@
+// Provides baseline functionality that is automatically included in all
+// modules. All functions are in the global namespace and can be accessed
+// directly.
+//
+// @tagline Builtin functions, types, and interfaces.
 module Base
 
-//-- Types
+// Represents an optional value of type T. `None` means no value, similar to the
+// concept of `null` in other languages, and `Some(T)` means there is a value of
+// type T.
 enum Option<T> {
-  Some(T)
   None
+  Some(T)
 }
 
-
-//-- Interfaces/Implementations
+// The `Sized` interface represents a type that has a length. The types
+// `String`, `[A]`, `Set<A>`, and `Map<K, V>` implement the `Sized` interface.
 interface Sized {
+  // Returns the length of `sized`.
+  //
+  // If `sized` is a string, the length is the number of characters (more
+  // specifically, the number of unicode codepoints).
+  //
+  // If `sized` is a list or set, the length is the number of elements.
+  //
+  // If `sized` is a map, the length is the number of key-value pairs.
+  //
+  // @args sized
   length : T -> Int
+
+  // Returns whether `sized` is empty. `""` is an empty string, `[]` is an empty
+  // list, `#[]` is an empty set, and `{}` is an empty map. This is equivalent
+  // to when [`length`](#length) returns 0, but avoids computing the full length
+  // in various cases.
+  //
+  // @args sized
   empty? : T -> Bool
 }
 
-impl Sized for String {
-  length = @string:length/1
-  empty?(s) = s == ""
-}
-
-impl Sized for [A] {
-  length = @erlang:length/1
-  empty?(l) = l == []
-}
-
-impl Sized for Set<A> {
-  // subtract 1 to get rid of tag
-  length(s) = @erlang:map_size(s) - 1
-  empty?(s) = length(s) == 0
-}
-
-impl Sized for Map<A, B> {
-  length = @erlang:map_size/1
-  empty?(m) = m == {}
-}
-
+// The `Mappable` interface represents a generic type `T` such that we can map
+// `T<A>` to `T<B>` with a mapping function `A -> B`. We call `T` a container
+// type, whereas `A` and `B` are element types. `Mappable` lets us map
+// a container type with element type `A` to the same container type with
+// a different element type `B`. The container types `List`, `Set`, `Map`, and
+// `Option` implement `Mappable`.
 interface Mappable {
+  // For each element in `container`, calls the given `fn`, collecting the
+  // results into a new container.
+  //
+  // If `container` is a list, the order of the mapped elements mirrors the
+  // order of the original elements. If `collection` is a set or map, the order
+  // is undefined.
+  //
+  // If `container` is of type `Map<K, V>`, `fn` must accept a tuple of type
+  // `(K, V)`, representing a single key-value pair, and return a tuple of type
+  // `(L, M)` for some `L` and `M`, representing a new key-value pair. The
+  // resultant type is then `Map<L, M>`.
+  //
+  // If `container` is of type [`Option<T>`](#Option), and `container == None`,
+  // the return value is `None`. If `container` is `Some(a)`, the return value
+  // is `Some(f(a))`.
+  //
+  // @args container, fn
   map : (T<A>, A -> B) -> T<B>
 }
 
@@ -45,181 +71,276 @@ impl Mappable for Option {
   }
 }
 
-impl Mappable for List {
-  map(l, f) = @lists:map(f, l)
-}
-
-impl Mappable for Set {
-  map(s, f) = map(to_list(s), f) |> to_set
-}
-
-impl Mappable for Map {
-  map(m, f) = @maps:fold(|k, v, new_m|
-    let (new_k, new_v) = f((k, v))
-    @maps:put(new_k, new_v, new_m)
-  , {}, m)
-}
-
+// The `Collection` interface represents a generic container type that can hold
+// many elements. The types `List`, `Set`, and `Map` implement `Collection`.
 interface Collection extends Mappable {
+  // Computes a single value by applying the combining function `fn` to each
+  // element of the given `collection`, starting with the initial value `init`.
+  // This is also called a reduce, accumulate, or inject operation.
+  //
+  // Calls `fn(e, accum)` for each element `e` in the given `collection`. For
+  // the first element, `accum` is `init`. For each subsequent element, `accum`
+  // is the return value of the last call to `fn`. So `accum` is computed
+  // across multiple calls to `fn`, and the final value of `accum` after all
+  // elements have been processed is the return value of `fold`.
+  //
+  // Put another way, `fold` lets you build up an accumulated value by
+  // incrementally computing it based on the current element, and the previously
+  // accumulated value.
+  //
+  // If `collection` is a list, `fold` processes elements in order. If
+  // `collection` is a set or map, the order is undefined.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn`'s first argument, `e`, will
+  // be a tuple of type `(K, V)`, representing the current key-value pair.
+  //
+  // @args collection, init, fn
   fold : (T<A>, F, (A, F) -> F) -> F
+
+  // Calls `fn` for each element in `collection`, returning a new collection
+  // that only contains the elements for which `fn` returns true.
+  //
+  // If `collection` is a list, the returned collection maintains the order of
+  // elements in the original `collection`. If `collection` is a set or map, the
+  // order is undefined.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // type `(K, V)`, representing a key-value pair.
+  //
+  // @args collection, fn
   filter : (T<A>, A -> Bool) -> T<A>
+
+  // Returns the first element in `collection` for which `fn` returns true.
+  //
+  // If `collection` is a list, processes elements in order. If `collection` is
+  // a set or map, the order is undefined.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // type `(K, V)`, representing a key-value pair.
+  //
+  // @args collection, fn
   find : (T<A>, A -> Bool) -> Option<A>
 
+  // Calls `fn` for each element in `collection`, returning a new collection
+  // that contains every `e` such that `fn` returned [`Some(e)`](#Option). This
+  // performs a [`filter`](#filter) and [`map`](#map) operation at the same
+  // time. For elements that should be filtered out, `fn` should return `None`,
+  // and for elements that need to be mapped, `fn` should return `Some(e)`,
+  // where `e` is the new element in the resulting collection.
+  //
+  // If `collection` is a list, the order of the mapped elements mirrors the
+  // order of the original elements. If `collection` is a set or map, the order
+  // is undefined.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // type `(K, V)`, representing a key-value pair.
+  //
+  // @args collection, fn
   filter_map : (T<A>, A -> Option<B>) -> T<B>
+
+  // Computes a new collection and a single value by applying the combining
+  // function `fn` to each element of the given `collection`, starting with the
+  // initial value `init`. This performs a [`map`](#map) and [`fold`](#fold)
+  // operation at the same time.
+  //
+  // Calls `fn(e, accum)` for each element `e` in the given `collection`. `fn`
+  // returns a tuple `(new_e, new_accum)`. The `new_e`s are collected into a new
+  // collection.
+  //
+  // For the first element, `accum` is `init`. For each subsequent element,
+  // `accum` is the `new_accum` returned from the last call to `fn`. So `accum`
+  // is computed across multiple calls to `fn`. The collection of `new_e`s,
+  // along with the final value of `accum` after all elements have been
+  // processed, is the return value of `fold_map`.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn`'s first argument, `e`, will
+  // be a tuple of type `(K, V)`, representing the current key-value pair.
+  //
+  // @args collection, init, fn
   map_fold : (T<A>, F, (A, F) -> (B, F)) -> (T<B>, F)
 
+  // Puts `elem` into `collection`, returning a new collection. The original
+  // `collection` is not modified.
+  //
+  // If `collection` is a list, `elem` is added to **the front** of the list.
+  //
+  // If `collection` is of type `Map<K, V>`, the second argument to `put`
+  // should be a tuple of type `(K, V)`, representing one key-value pair.
+  //
+  // @args collection, elem
   put : (T<A>, A) -> T<A>
+
+  // Removes `elem` from `collection`, returning a new collection. The original
+  // `collection` is not modified. If `collection` doesn't contain `elem`, does
+  // nothing and returns the original `collection.`
+  //
+  // To delete a key from a map, use [`remove`](#remove), not `delete`. `delete`
+  // works with maps, but it requires a tuple of type `(K, V)` as the second
+  // argument. meaning you need to pass both the key and its associated value,
+  // which isn't what you usually want.
+  //
+  // @args collection, elem
   delete : (T<A>, A) -> T<A>
 
+  // Returns true if `collection` contains `elem`.
+  //
+  // To check if a key is contained within a map, use [`key?`](#key?), not
+  // `contains?`. `contains?` works with maps, but it accepts a tuple of type
+  // `(K, V)` as the second argument, meaning you need to pass both the key
+  // and its associated value, which isn't usually what you want.
+  //
+  // @args collection, elem
   contains? : (T<A>, A) -> Bool
+
+  // Calls `fn` for each element in `collection`, and returns true if `fn`
+  // returns true for **every** element. If `collection` is empty, returns true.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // type `(K, V)`, representing a key-value pair.
+  //
+  // @args collection, fn
   all? : (T<A>, A -> Bool) -> Bool
+
+  // Calls `fn` for each element in `collection`, and returns true if `fn`
+  // returns true for **at least one** element. If `collection` is empty,
+  // returns false.
+  //
+  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // type `(K, V)`, representing a key-value pair.
+  //
+  // @args collection, fn
   any? : (T<A>, A -> Bool) -> Bool
 }
 
-impl Collection for List {
-  fold(l, init, f) = @lists:foldl(f, init, l)
-  filter(l, f) = @lists:filter(f, l)
-  find(l, f) = match l {
-    [] => None
-    [h | t] => if f(h) then Some(h) else find(t, f)
-  }
+// Raised by [`head`](#head) and [`tail`](#tail) if the list is empty.
+exception EmptyList
 
-  filter_map(l, f) = @lists:filtermap(|a|
-    if let Some(b) = f(a) then
-      assume (true, b)
-    else
-      false
-  , l)
-  map_fold(l, init, f) = @lists:mapfoldl(f, init, l)
-
-  put(l, h) = [h | l]
-  delete(l, a) = match l {
-    [] => []
-    [&a | t] => delete(t, a)
-    [h | t] => [h | delete(t, a)]
-  }
-
-  contains?(l, a) = match l {
-    [] => false
-    [&a | _] => true
-    [_ | t] => contains?(t, a)
-  }
-  all?(l, f) = @lists:all(f, l)
-  any?(l, f) = @lists:any(f, l)
-}
-
-impl Collection for Set {
-  fold(s, init, f) = to_list(s) |> fold(init, f)
-  filter(s, f) = @maps:filter(|k, _| assume k == @"_@type" || f(k), s)
-  find(s, f) = to_list(s) |> find(f)
-
-  filter_map(s, f) = to_list(s) |> filter_map(f) |> to_set
-  map_fold(s, init, f) =
-    let (l, memo) = to_list(s) |> map_fold(init, f)
-    (to_set(l), memo)
-
-  put(s, a) = @maps:put(a, true, s)
-  delete(s, a) = @maps:remove(a, s)
-
-  contains?(s, a) = @maps:is_key(a, s)
-  all?(s, f) = to_list(s) |> all?(f)
-  any?(s, f) = to_list(s) |> any?(f)
-}
-
-impl Collection for Map {
-  fold(m, init, f) = @maps:fold(|k, v, memo| f((k, v), memo), init, m)
-  filter(m, f) = @maps:filter(|k, v| f((k, v)), m)
-  find(m, f) = to_list(m) |> find(f)
-
-  filter_map(m, f) = to_list(m) |> filter_map(f) |> to_map
-  map_fold(m, init, f) =
-    let (pairs, memo) = to_list(m) |> map_fold(init, f)
-    (to_map(pairs), memo)
-
-  put(m, (k, v)) = @maps:put(k, v, m)
-  delete(m, (k, v)) = if contains?(m, (k, v)) then @maps:remove(k, m) else m
-
-  contains?(m, (k, v)) = match @maps:find(k, m) {
-    (@ok, &v) => true
-    _ => false
-  }
-  all?(m, f) = to_list(m) |> all?(f)
-  any?(m, f) = to_list(m) |> any?(f)
-}
-
-
-//-- Exceptions
-// Can't include the key here because it could be of any type.
+// Raised by [`get`](#get) when a key isn't in a map.
 exception BadKey
 
-// Used when converting a String or [Char] to an Int or Float.
+// Raised by [`to_int`](#to_int) when an Int can't be parsed from a String.
+// This can happen if the string is empty or contains non-numeric characters.
 exception CantParseInt(String)
+
+// Raised by [`to_float`](#to_float) when a Float can't be parsed from a String.
+// This can happen if the string is empty or contains non-numeric characters.
 exception CantParseFloat(String)
 
-
-//-- Collections
-first : ((A, B)) -> A
-export first((a, _)) = a
-
-second : ((A, B)) -> B
-export second((_, b)) = b
-
+// Returns the first element in the list `l`. Raises [`EmptyList`](#EmptyList)
+// if `l` is empty.
 head : [A] -> A
-export head = @erlang:hd/1
+export head(l) = match l {
+  [h | _] => h
+  [] => raise EmptyList
+}
 
+// Returns a list containing all elements in `l` except the first. Raises
+// [`EmptyList`](#EmptyList) if `l` is empty.
 tail : [A] -> [A]
-export tail = @erlang:tl/1
+export tail(l) = match l {
+  [_ | t] => t
+  [] => raise EmptyList
+}
 
+// If key `k` is in the map `m`, returns [`Some(v)`](#Option), where `v` is the
+// value associated with `k`. Otherwise, returns [`None`](#Option).
 lookup : (Map<K, V>, K) -> Option<V>
 export lookup(m, k) = match @maps:find(k, m) {
   (@ok, v) => Some(v)
   @error => None
 }
 
+// Returns the value associated with key `k` in the map `m`. If `k` isn't in
+// `m`, raises [`BadKey`](#BadKey).
 get : (Map<K, V>, K) -> V
 export get(m, k) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => raise BadKey
 }
 
+// Returns true if the key `k` is in map `m`.
 key? : (Map<K, V>, K) -> Bool
 export key?(m, k) = @maps:is_key(k, m)
 
+// Removes the key `k` and its associated value from `m`, returning a new map.
+// `m` is not modified.
 remove : (Map<K, V>, K) -> Map<K, V>
 export remove(m, k) = @maps:remove(k, m)
 
+// Returns the first element in the tuple `t`.
+//
+// @args t
+first : ((A, B)) -> A
+export first((a, _)) = a
+
+// Returns the second element in the tuple `t`.
+//
+// @args t
+second : ((A, B)) -> B
+export second((_, b)) = b
+
+// If `option` is [`Some(a)`](#Option), returns `a`. Otherwise, if `option` is
+// [`None`](#Option), returns `default`.
 some_or : (Option<A>, A) -> A
 export some_or(option, default) = match option {
   Some(a) => a
   None => default
 }
 
-
-//-- Math
+// Returns the absolute value of `a`.
+//
+// @args a
 abs : A ~ Num -> A ~ Num
 export abs = @erlang:abs/1
 
+// Returns the smallest integer that is greater than or equal to `a`.
+//
+// @args a
 ceil : Float -> Int
 export ceil = @erlang:ceil/1
 
+// Returns the largest integer that is less than or equal to `a`.
+//
+// @args a
 floor : Float -> Int
 export floor = @erlang:floor/1
 
+// Returns the maximum of `a` and `b`.
+//
+// @args a
 max : (A ~ Ord, A ~ Ord) -> A ~ Ord
 export max(a, b) = if a > b then a else b
 
+// Returns the minimum of `a` and `b`.
 min : (A ~ Ord, A ~ Ord) -> A ~ Ord
 export min(a, b) = if a < b then a else b
 
+// Rounds `a` to the nearest integer.
+//
+// @args a
 round : Float -> Int
 export round = @erlang:round/1
 
+// Removes anything after the decimal point in `a`, returning an integer.
+//
+// @args a
 trunc : Float -> Int
 export trunc = @erlang:trunc/1
 
-
-//-- Conversions
+// The `ToInt` interface represents a type that can be converted to an integer.
+// The types `Float`, `Char`, `String`, and `[Char]` implement the `ToInt`
+// interface.
 interface ToInt {
+  // Converts `a` to an integer.
+  //
+  // If `a` is a float, this is equivalent to [`trunc`](#trunc). If `a` is
+  // a character, returns the unicode codepoint of `a`.
+  //
+  // If `a` is of type `String` or `[Char]`, tries to parse an integer from
+  // the characters in `a`. Raises [`CantParseInt`](#CantParseInt) if `a`
+  // is empty or contains non-numeric characters.
+  //
+  // @args a
   to_int : T -> Int
 }
 
@@ -227,25 +348,18 @@ impl ToInt for Float {
   to_int = trunc
 }
 
-impl ToInt for Char {
-  to_int(c) = $c
-}
-
-impl ToInt for [Char] {
-  to_int(chs) = match @string:to_integer(chs) {
-    (i, []) => i
-    _ => raise CantParseInt(@unicode:characters_to_binary(chs))
-  }
-}
-
-impl ToInt for String {
-  to_int(s) = match @string:to_integer(s) {
-    (i, "") => i
-    _ => raise CantParseInt(s)
-  }
-}
-
+// The `ToFloat` interface represents a type that can be converted to a float.
+// The types `Int`, `String`, and `[Char]` implement the `ToFloat` interface.
 interface ToFloat {
+  // Converts `a` to a float.
+  //
+  // If `a` is an integer, returns the floating point representation of `a`.
+  //
+  // If `a` is of type `String` or `[Char]`, tries to parse an integer from
+  // the characters in `a`. Raises [`CantParseInt`](#CantParseInt) if `a`
+  // is empty or contains non-numeric characters.
+  //
+  // @args a
   to_float : T -> Float
 }
 
@@ -253,40 +367,15 @@ impl ToFloat for Int {
   to_float = @erlang:float/1
 }
 
-impl ToFloat for [Char] {
-  to_float(chs) =
-    let result = match chs {
-      ['.' | _] => @string:to_float(['0' | chs])
-      _ => @string:to_float(chs)
-    }
-    match result {
-      (f, []) => f
-      _ => match @string:to_integer(chs) {
-        (i, []) => to_float(i : Int)
-        _ => raise CantParseFloat(@unicode:characters_to_binary(chs))
-      }
-    }
-}
-
-impl ToFloat for String {
-  to_float(s) =
-    let result = match @string:next_grapheme(s) {
-      ['.' | _] => @string:to_float(['0', assume s])
-      _ => @string:to_float(s)
-    }
-    match result {
-      (f, "") => f
-      // If we prepend a 0 above, on a successful parse, we'll get back an empty
-      // list instead of an empty string.
-      (f, []) => f
-      _ => match @string:to_integer(s) {
-        (i, "") => to_float(i : Int)
-        _ => raise CantParseFloat(s)
-      }
-    }
-}
-
+// The `ToChar` interface represents a type that can be converted to
+// a character. The type `Int` implements the `ToChar` interface.
 interface ToChar {
+  // Converts `a` to a character.
+  //
+  // If `a` is an integer, representing a unicode codepoint, returns the
+  // character corresponding to that codepoint.
+  //
+  // @args a
   to_char : T -> Char
 }
 
@@ -294,72 +383,117 @@ impl ToChar for Int {
   to_char(i) = assume i
 }
 
+// The `ToAtom` interface represents a type that can be converted to
+// an atom. The types `Char`, `String`, and `[Char]` implements the `ToAtom`
+// interface.
 interface ToAtom {
+  // Converts `a` to an atom.
+  //
+  // If `a` is a character, returns the atom containing just that character.
+  //
+  // If `a` is of type `String` or `[Char]`, returns the atom containing the
+  // characters given by `a`.
+  //
+  // @args a
   to_atom : T -> Atom
 }
 
-impl ToAtom for Char {
-  to_atom(c) = to_atom([c])
-}
-
-impl ToAtom for [Char] {
-  to_atom = @erlang:list_to_atom/1
-}
-
-impl ToAtom for String {
-  to_atom(s) = @erlang:binary_to_atom(s, @utf8)
-}
-
+// The `ToList` interface represents a generic type that can be converted to
+// a list. The types `Set` and `Map` implement the `ToList` interface.
 interface ToList {
+  // Converts `a` to a list.
+  //
+  // If `a` is a set, the resultant list will contain all elements of `a`,
+  // but the order of those elements is undefined.
+  //
+  // If `a` is of type `Map<K, V>`, the resultant list will contain tuples of
+  // type `(K, V)`, each representing a key-value pair in `a`. The order of
+  // the tuples is undefined.
+  //
+  // @args a
   to_list : T<A> -> [A]
 }
 
-impl ToList for Set {
-  to_list(s) = @maps:keys(@maps:remove(@"_@type", s))
-}
-
-impl ToList for Map {
-  to_list(m) = @maps:to_list(m)
-}
-
+// The `ToSet` interface represents a generic type that can be converted to
+// a set. The types `List` and `Map` implement the `ToSet` interface.
 interface ToSet {
+  // Converts `a` to a set.
+  //
+  // If `a` is a list, the resultant set will contain all elements of `a`.
+  //
+  // If `a` is of type `Map<K, V>`, the resultant set will contain tuples of
+  // type `(K, V)`, each representing a key-value pair in `a`.
+  //
+  // @args a
   to_set : T<A> -> Set<A>
 }
 
-impl ToSet for List {
-  to_set(l) =
-    let pairs = map(l, |a| (a, true))
-    @maps:from_list([assume (@"_@type", @Set) | pairs])
-}
-
-impl ToSet for Map {
-  to_set(m) = to_list(m) |> to_set
-}
-
+// The `ToMap` interface represents a generic type that can be converted to
+// a map. The types `List` and `Set` implement the `ToMap` interface.
 interface ToMap {
+  // Converts `a` to a map.
+  //
+  // If `a` is a list or set, `a` must contain tuples of type `(K, V)` for some
+  // `K` and `V`, each representing a key-value pair. The return value will be
+  // of type `Map<K, V>`.
+  //
+  // If `a` is a list, and there are multiple elements in `a` with the same
+  // key, the last element's value will overwrite the others.
+  //
+  // If `a` is a set, and there are multiple elements in `a` with the same key,
+  // the value that takes precedence is undefined, as sets are unordered.
+  //
+  // @args a
   to_map : T<K, V> -> Map<K, V>
 }
 
-impl ToMap for List {
-  to_map(l) = @maps:from_list(l)
-}
-
-impl ToMap for Set {
-  to_map(s) = to_list(s) |> to_map
-}
-
+// Converts any value `a` into a string. Most values are represented as they
+// would appear in code, but there are a few exceptions:
+//
+// - Characters are internally stored as integers by their unicode codepoint, so
+// their string representation is numeric; e.g. `to_str('a') == "65"`. If you'd
+// like to convert a `Char` or `[Char]` to a `String` containing those
+// characters (e.g. convert `'a'` to `"a"` or `['h', i']` to `"hi"`), use
+// [`String.from_chars`](string#from_chars).
+// - Atoms are represented without the leading `@`, so `to_str(@hey) == "hey"`.
+// - A tuple with an atom as the first element, like `(@Some, 3)`, is converted
+// to look like an enum variant: `"Some(3)"`. This is because enum variants are
+// internally represented as tuples in this form.
+//
+// Atoms should rarely be used in Par, except when interoperating with Erlang,
+// so the latter two exceptions should rarely cause issues. The main case that
+// may cause surprise is characters.
+//
+// @args a
 to_str : A -> String
 export to_str = @par_native:to_str/1
 
+// Converts any value `a` into a string, exactly like [`to_str`](#to_str), but
+// if the result is long, adds newlines and tabbing to make it easy to read.
 to_pretty : A -> String
 export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
 
-//-- Misc
+// Prints any value `a` by calling [`to_pretty`](#to_pretty) on it and
+// outputting the result to `stdout`.
+//
+// @example print("hello")  // outputs hello
+// | print({ foo = "hi", bar => true })  // outputs { foo = "hi", bar => true }
+// | print([37.8])  // outputs [37.8]
 print : A -> ()
 export print(a) =
   @io:format("~s~n", [to_pretty(a)])
   ()
 
+// Prints any value `a` just like [`print`](#print), but prefixes it with the
+// given `prefix`, and returns `a`. `debug` is meant to be used with the pipe
+// operator `|>` in the middle of expressions. For instance, given the
+// expression `foo('a', bar("baz", false), 27.5)`, if you're debugging and want
+// to print the second argument, you can write `foo('a', bar("baz", false)
+// |> debug("bar"), 27.5)`. This'll print `bar: ...`, where `...` is the return
+// value of the `bar` function call.
+//
+// @example length([true, false]) |> debug("length")  // outputs length: 2
+// | lookup("b", { "a" => 37.5, "b" => 15 }) |> debug("b")  // outputs b: 15
 debug : (A, String) -> A
 export debug(a, prefix) =
   @io:format("~s: ~s~n", [prefix, to_pretty(a)])

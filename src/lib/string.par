@@ -5,8 +5,9 @@
 //
 // Within a regular string, [escape sequences](/learn/reference#escape) can be
 // used to include special characters. Within a raw string, no escape sequences
-// are allowed, meaning backslash is a literal character. Raw strings are useful
-// to define regular expressions, as they often include literal backslashes.
+// are allowed, meaning backslash is a literal character. Raw strings are often
+// used to define regular expressions, which frequently contain literal
+// backslashes.
 //
 // @tagline Standard library for string operations.
 module String
@@ -42,6 +43,69 @@ enum RegexOpt {
   Extended
 }
 
+impl Sized for String {
+  length(s) = match @string:next_codepoint(s) {
+    [_ | t] => 1 + length(assume t : String)
+    [] => 0
+  }
+  empty?(s) = s == ""
+}
+
+impl ToInt for String {
+  to_int(s) = match @string:to_integer(s) {
+    (i, "") => i
+    _ => raise CantParseInt(s)
+  }
+}
+
+impl ToInt for [Char] {
+  to_int(chs) = match @string:to_integer(chs) {
+    (i, []) => i
+    _ => raise CantParseInt(@unicode:characters_to_binary(chs))
+  }
+}
+
+impl ToFloat for String {
+  to_float(s) =
+    let result = match @string:next_grapheme(s) {
+      ['.' | _] => @string:to_float(['0', assume s])
+      _ => @string:to_float(s)
+    }
+    match result {
+      (f, "") => f
+      // If we prepend a 0 above, on a successful parse, we'll get back an empty
+      // list instead of an empty string.
+      (f, []) => f
+      _ => match @string:to_integer(s) {
+        (i, "") => to_float(i : Int)
+        _ => raise CantParseFloat(s)
+      }
+    }
+}
+
+impl ToFloat for [Char] {
+  to_float(chs) =
+    let result = match chs {
+      ['.' | _] => @string:to_float(['0' | chs])
+      _ => @string:to_float(chs)
+    }
+    match result {
+      (f, []) => f
+      _ => match @string:to_integer(chs) {
+        (i, []) => to_float(i : Int)
+        _ => raise CantParseFloat(@unicode:characters_to_binary(chs))
+      }
+    }
+}
+
+impl ToAtom for String {
+  to_atom(s) = @erlang:binary_to_atom(s, @utf8)
+}
+
+impl ToAtom for [Char] {
+  to_atom = @erlang:list_to_atom/1
+}
+
 // Raised by [`slice()`](#slice) and [`range()`](#range) when they try to access
 // an index out of bounds.
 exception BadStringIndex(Int)
@@ -52,9 +116,9 @@ exception BadStringIndex(Int)
 exception BadRegex({ reason : String, index : Int })
 
 // Converts a string `s` into a list of characters.
-chars : String -> [Char]
-export chars(s) = match @string:next_codepoint(s) {
-  [h | t] => [h | chars(assume t)]
+to_chars : String -> [Char]
+export to_chars(s) = match @string:next_codepoint(s) {
+  [h | t] => [h | to_chars(assume t)]
   [] => []
 }
 
@@ -69,7 +133,7 @@ export capitalize(s) =
   if empty?(s) then
     s
   else
-    let [g | t] = @string:next_grapheme(s)
+    let [g | t] = @string:next_codepoint(s)
     @unicode:characters_to_binary([@string:to_upper([g]) | t])
 
 // Converts every character in `s` to lowercase, returning a new string.
@@ -133,7 +197,7 @@ slice_r(s, i, start, len) =
   if len <= 0 then
     []
   else
-    match @string:next_grapheme(s) {
+    match @string:next_codepoint(s) {
       [h | t] =>
         if i >= start then
           [h | slice_r(assume t, i + 1, start, len - 1)]
@@ -188,6 +252,16 @@ export substr?(s, sub) = @string:find(s, sub) != @nomatch
 //
 // [RegExr](https://regexr.com/) is a useful resource to test regular
 // expressions and understand how they match text.
+//
+// @example // matches one or more digits, optionally followed by a decimal
+// | // point and more digits
+// | re(`\d+(.\d+)?`, [])
+// |
+// | // matches the literal text "foo bar", case-insensitive
+// | re(`foo bar`, [Caseless])
+// |
+// | // matches any text within braces that spans an entire line
+// | re(`^\{.*?\}$`, [Multiline])
 re : (String, [RegexOpt]) -> Regex
 export re(s, opts) =
   let atoms = map(opts, |opt| match opt {
@@ -240,8 +314,8 @@ export search_all(s, r) =
   }
 
 // Looks for the first occurrence of `sub` in `s`. If `sub` is found, returns
-// `Some(a, b)` where `a` is the text before `sub`, and `b` is the text after
-// `sub`. If `sub` isn't found, returns `None`.
+// [`Some((a, b))`](base#Option) where `a` is the text before `sub`, and `b` is
+// the text after `sub`. If `sub` isn't found, returns `None`.
 span : (String, String) -> Option<(String, String)>
 export span(s, sub) =
   if sub == "" then
@@ -253,8 +327,8 @@ export span(s, sub) =
     }
 
 // Looks for the last occurrence of `sub` in `s`. If `sub` is found, returns
-// `Some((a, b))` where `a` is the text before `sub`, and `b` is the text after
-// `sub`. If `sub` isn't found, returns `None`.
+// [`Some((a, b))`](base#Option) where `a` is the text before `sub`, and `b` is
+// the text after `sub`. If `sub` isn't found, returns [`None`](base#Option).
 rspan : (String, String) -> Option<(String, String)>
 export rspan(s, sub) =
   if sub == "" then
@@ -265,13 +339,14 @@ export rspan(s, sub) =
       [_] => None
     }
 
-// Runs the regex `r` on `s` once. If there is a match, returns `Some((a, l,
-// b))`, where `a` is the text before the match, `l` is a list describing the
-// match, and `b` is the text after the match. Each element in `l` corresponds
-// to a capture group in `r` (see [`search()`](#search) for details). Note that,
-// unlike `search()`, the first element in `l` is **not** the fully matched text
-// (though you can add a capture group around the entire regex to get this
-// behavior).
+// Runs the regex `r` on `s` once. If there is a match, returns [`Some((a, l,
+// b))`](base#Option), where `a` is the text before the match, `l` is a list
+// describing the match, and `b` is the text after the match. Each element in
+// `l` corresponds to a capture group in `r` (see [`search()`](#search) for
+// details). Note that, unlike `search()`, the first element in `l` is **not**
+// the fully matched text (though you can add a capture group around the entire
+// regex to get this behavior). If there is no match, returns
+// [`None`](base#Option).
 search_span : (String, Regex) -> Option<(String, [String], String)>
 export search_span(s, r) =
   if r.str == "" then
@@ -286,7 +361,7 @@ export search_span(s, r) =
 
 // Patterns are used to split a string into parts or to replace portions of
 // a string. A pattern identifies where to split or what to replace. The
-// types `String` and [`Regex`](#Regex) implement the Pattern interface.
+// types `String` and [`Regex`](#Regex) implement the `Pattern` interface.
 interface Pattern {
   // Splits a string into at most `n` parts, where each part is separated by
   // the given pattern `pat`. Returns a list with these constituent parts. If
@@ -333,9 +408,9 @@ impl Pattern for String {
   splitn(s, sub, n) =
     if sub == "" then
       if n <= 0 then
-        @string:to_graphemes(s) : [Char] |> map(|ch| from_chars([ch]))
+        to_chars(s) |> map(|ch| from_chars([ch]))
       else
-        splitn_graphemes(s, n)
+        splitn_codepoints(s, n)
     else if n <= 0 then
       @string:split(s, sub, @all)
     else
@@ -353,13 +428,13 @@ impl Pattern for String {
       @string:replace(s, sub, rep) |> @unicode:characters_to_binary/1
 }
 
-splitn_graphemes : (String, Int) -> [String]
-splitn_graphemes(s, n) =
+splitn_codepoints : (String, Int) -> [String]
+splitn_codepoints(s, n) =
   if n <= 1 then
     [s]
   else
-    match @string:next_grapheme(s) {
-      [h | t] => [from_chars([h]) | splitn_graphemes(assume t, n - 1)]
+    match @string:next_codepoint(s) {
+      [h | t] => [from_chars([h]) | splitn_codepoints(assume t, n - 1)]
       [] => [s]
     }
 

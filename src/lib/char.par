@@ -1,5 +1,15 @@
 module Char
 
+import Base (*)
+
+impl ToInt for Char {
+  to_int(c) = $c
+}
+
+impl ToAtom for Char {
+  to_atom(c) = to_atom([c])
+}
+
 to_lower : Char -> Char
 export to_lower(ch) = match @string:lowercase([ch]) {
   [lower] => lower

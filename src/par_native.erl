@@ -152,7 +152,8 @@ to_iolist(Bin) when is_binary(Bin) ->
     Result when is_binary(Result) -> [$", Bin, $"];
     _ -> [unicode:characters_to_binary(io_lib:format("~P", [Bin, 10]))]
   end;
-to_iolist(Tuple) when is_atom(element(1, Tuple)) ->
+to_iolist(Tuple) when not is_boolean(element(1, Tuple)),
+    is_atom(element(1, Tuple)) ->
   [Atom | Rest] = tuple_to_list(Tuple),
   [to_iolist(Atom), $(, comma_sep(lists:map(fun to_iolist/1, Rest)), $)];
 to_iolist(Tuple) when is_tuple(Tuple) ->

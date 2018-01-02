@@ -3,14 +3,14 @@ module StringTest
 import String (*)
 import Test (group, capture)
 
-chars_test : Test
-chars_test = group([
+to_chars_test : Test
+to_chars_test = group([
   // @example
-  test assert chars("foo BAR") == ['f', 'o', 'o', ' ', 'B', 'A', 'R']
+  test assert to_chars("foo BAR") == ['f', 'o', 'o', ' ', 'B', 'A', 'R']
   // @example
-  test assert chars("åäö") == ['å', 'ä', 'ö']
+  test assert to_chars("åäö") == ['å', 'ä', 'ö']
   // @example
-  test assert chars("") == []
+  test assert to_chars("") == []
 ])
 
 from_chars_test : Test

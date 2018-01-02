@@ -69,8 +69,8 @@ repeat_test = group([
 
 flat_map_test : Test
 flat_map_test = group([
-  test assert flat_map(["cow", "dog", "cat"], String.chars) ==
-    String.chars("cowdogcat")
+  test assert flat_map(["cow", "dog", "cat"], String.to_chars) ==
+    String.to_chars("cowdogcat")
   test assert flat_map([42.3, .428, 13.3], |a| [a, a + 0.1]) ==
     [42.3, 42.4, .428, .528, 13.3, 13.4]
   test assert flat_map([42.3, .428, 13.3], |a| [a]) == [42.3, .428, 13.3]
@@ -143,7 +143,7 @@ sort_test = group([
 sort_by_test : Test
 sort_by_test = group([
   test
-    let cb(a) = String.chars(a) |> nth(2) |> to_int
+    let cb(a) = String.to_chars(a) |> nth(2) |> to_int
     assert sort_by(["cow", "dog", "cat"], cb) == ["dog", "cat", "cow"]
   test assert sort_by([42.3, .428, 13.3], |a| -a) == [42.3, 13.3, .428]
   test assert sort_by([], |a| a) == []
@@ -152,7 +152,7 @@ sort_by_test = group([
 sort_cmp_test : Test
 sort_cmp_test = group([
   test
-    let key(s) = String.chars(s) |> nth(2) |> to_int
+    let key(s) = String.to_chars(s) |> nth(2) |> to_int
     let cb(a, b) = key(a) > key(b)
     assert sort_cmp(["cow", "dog", "cat"], cb) == ["cow", "cat", "dog"]
   test assert sort_cmp([42.3, .428, 13.3], |a, b| -a < -b) ==
@@ -242,8 +242,10 @@ unzip_test = group([
 
 group_by_test : Test
 group_by_test = group([
-  test assert group_by(["cow", "dog", "cat"], |a| String.chars(a) |> head) ==
-    { 'c' => ["cow", "cat"], 'd' => ["dog"] }
+  test assert group_by(
+    ["cow", "dog", "cat"],
+    |a| String.to_chars(a) |> head
+  ) == { 'c' => ["cow", "cat"], 'd' => ["dog"] }
   test assert group_by(["turtle", "dog", "cat"], |a| length(a)) ==
     { 6 => ["turtle"], 3 => ["dog", "cat"] }
   test assert group_by([42.3, .428, 13.3], |a| a) ==
@@ -263,8 +265,10 @@ unique_test = group([
 
 unique_by_test : Test
 unique_by_test = group([
-  test assert unique_by(["cow", "dog", "cat"], |a| String.chars(a) |> head) ==
-    ["cow", "dog"]
+  test assert unique_by(
+    ["cow", "dog", "cat"],
+    |a| String.to_chars(a) |> head
+  ) == ["cow", "dog"]
   test assert unique_by([42.3, .428, 13.3], |a| a > 10) == [42.3, .428]
   test assert unique_by([42.3, .428, 13.3], |a| true) == [42.3]
   test assert unique_by([], |a| a) == []

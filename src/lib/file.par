@@ -236,7 +236,7 @@ export ls(path) = match @file:list_dir(path) {
 
 glob : String -> [String]
 export glob(path) =
-  String.chars(path)
+  String.to_chars(path)
   |> @filelib:wildcard/1
   |> map(String.from_chars)
 

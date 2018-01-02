@@ -2,155 +2,132 @@ module BaseTest
 
 import Test (group, capture)
 
-//-- Interfaces/Implementations
-sized_string_test : Test
-sized_string_test = group([
+length_test : Test
+length_test = group([
+  // @example
   test assert length("abc") == 3
+  // @example
   test assert length("") == 0
 
-  test assert !empty?("abc")
-  test assert empty?("")
-])
-
-sized_list_test : Test
-sized_list_test = group([
+  // @example
   test assert length(['a', 'b']) == 2
+  // @example
   test assert length([]) == 0
 
-  test assert !empty?(['a', 'b'])
-  test assert empty?([])
-])
-
-sized_set_test : Test
-sized_set_test = group([
+  // @example
   test assert length(#[3.7]) == 1
+  // @example
   test assert length(#[]) == 0
 
-  test assert !empty?(#[3.7])
-  test assert empty?(#[])
+  // @example
+  test assert length({ true => @hi, false => @hey }) == 2
+  // @example
+  test assert length({}) == 0
 ])
 
-sized_map_test : Test
-sized_map_test = group([
-  test assert length({ true => @hi, false => @hey }) == 2
-  test assert length({}) == 0
+empty_test : Test
+empty_test = group([
+  // @example
+  test assert !empty?("abc")
+  // @example
+  test assert empty?("")
 
+  // @example
+  test assert !empty?(['a', 'b'])
+  // @example
+  test assert empty?([])
+
+  // @example
+  test assert !empty?(#[3.7])
+  // @example
+  test assert empty?(#[])
+
+  // @example
   test assert !empty?({ true => @hi, false => @hey })
+  // @example
   test assert empty?({})
 ])
 
-mappable_test : Test
-mappable_test = group([
+map_test : Test
+map_test = group([
+  // @example
   test assert map(Some(3), |a| a + 1) == Some(4)
+  // @example
   test assert map(None, |a| a + 1) == None
 
+  // @example
   test assert map([@hi, @hey], |a| a == @hey) == [false, true]
+  // @example
   test assert map([], |a| a == @hey) == []
 
-  test assert map(#[{ ch = 'a' }, { ch = 'b' }], |a| a.ch) == #['a', 'b']
-  test assert map(#[], |a| a.ch) == #[]
+  // @example
+  test assert map(#[{ ch = 'a' }, { ch = 'b' }], .ch) == #['a', 'b']
+  // @example
+  test assert map(#[], .ch) == #[]
 
+  // @example
   test assert map({ true => @hi }, |(k, v)| (v, k)) == { @hi => true }
+  // @example
   test assert map({}, |(k, v)| (v, k)) == {}
 ])
 
-collection_list_test : Test
-collection_list_test = group([
+fold_test : Test
+fold_test = group([
+  // @example
   test assert fold([1, 2, 3], 10, |a, memo| a + memo) == 16
+  // @example
   test assert fold([], 10, |a, memo| a + memo) == 10
 
-  test assert filter(["cat", "dog", "mouse"], |a| a < "lion") == ["cat", "dog"]
-  test assert filter([], |a| a < "lion") == []
-
-  test assert find(['c', 'z', 'g'], |a| a > 'e') == Some('z')
-  test assert find(['c', 'a'], |a| a > 'e') == None
-
-  test assert filter_map([true, false], |a| if a then Some([a]) else None) ==
-    [[true]]
-  test assert filter_map([], |a| if a then Some([a]) else None) == []
-
-  test assert map_fold(["hi", "bye"], "-", |a, s| (a ++ "!", s ++ a)) ==
-    (["hi!", "bye!"], "-hibye")
-  test assert map_fold([], "-", |a, s| (a ++ "!", s ++ a)) == ([], "-")
-
-  test assert put([@second], @first) == [@first, @second]
-  test assert put([], @first) == [@first]
-
-  test assert delete([38.52, 1.7, 4, 1.7], 1.7) == [38.52, 4]
-  test assert delete([38.52, 1.7, 4, 1.7], 37.0) == [38.52, 1.7, 4, 1.7]
-  test assert delete([], 37.0) == []
-
-  test assert contains?([38.52, 1.7, 4, 1.7], 1.7)
-  test assert !contains?([38.52, 1.7, 4, 1.7], 37.0)
-  test assert !contains?([], 37.0)
-
-  test assert all?(['a', 'e', 'a'], |x| x == 'a' || x == 'e')
-  test assert !all?(['a', 'e', 'a'], |x| x == 'a' || x == 'i')
-  test assert all?([], |x| x)
-
-  test assert any?(['a', 'e', 'a'], |x| x == 'e' || x == 'i')
-  test assert !any?(['a', 'e', 'a'], |x| x == 'o' || x == 'i')
-  test assert !any?([], |x| x == 'e' || x == 'i')
-])
-
-collection_test_set : Test
-collection_test_set = group([
+  // @example
   test assert fold(#[1, 2, 3], 10, |a, memo| a + memo) == 16
+  // @example
   test assert fold(#[], 10, |a, memo| a + memo) == 10
 
+  // @example
+  test
+    let m = { 1 => 2, 3 => 4, 5 => 6 }
+    assert fold(m, 10, |(k, v), memo| k + v + memo) == 31
+  // @example
+  test assert fold({}, 10, |(k, v), memo| k + v + memo) == 10
+])
+
+filter_test : Test
+filter_test = group([
+  // @example
+  test assert filter(["cat", "dog", "mouse"], |a| a < "lion") == ["cat", "dog"]
+  // @example
+  test assert filter([], |a| a < "lion") == []
+
+  // @example
   test assert filter(#["cat", "dog", "mouse"], |a| a < "lion") ==
     #["cat", "dog"]
+  // @example
   test assert filter(#[], |a| a < "lion") == #[]
 
+  // @example
+  test
+    let m = { "cat" => @cat, "dog" => @dog, "mouse" => @mouse }
+    assert filter(m, |(k, v)| k < "lion" && v == @dog) == { "dog" => @dog }
+  // @example
+  test assert filter({}, |(k, v)| k < "lion" && v == @dog) == {}
+])
+
+find_test : Test
+find_test = group([
+  // @example
+  test assert find(['c', 'z', 'g'], |a| a > 'e') == Some('z')
+  // @example
+  test assert find(['c', 'a'], |a| a > 'e') == None
+
+  // @example
   test
     let found = find(#['c', 'z', 'g'], |a| a > 'e')
     // order is undefined
     assert found == Some('z') || found == Some('g')
+  // @example
   test assert find(#['c', 'a'], |a| a > 'e') == None
 
-  test assert filter_map(#[true, false], |a| if a then Some([a]) else None) ==
-    #[[true]]
-  test assert filter_map(#[], |a| if a then Some([a]) else None) == #[]
-
-  test
-    let (mapped, memo) = map_fold(#["hi", "bye"], "-", |a, s| (a ++ "!", s ++ a))
-    assert mapped == #["hi!", "bye!"]
-    // order is undefined
-    assert memo == "-hibye" || memo == "-byehi"
-  test assert map_fold(#[], "-", |a, s| (a ++ "!", s ++ a)) == (#[], "-")
-
-  test assert put(#[@second], @first) == #[@first, @second]
-  test assert put(#[], @first) == #[@first]
-
-  test assert delete(#[38.52, 1.7, 4, 1.7], 1.7) == #[38.52, 4]
-  test assert delete(#[38.52, 1.7, 4, 1.7], 37.0) == #[38.52, 1.7, 4]
-  test assert delete(#[], 37.0) == #[]
-
-  test assert contains?(#[38.52, 1.7, 4, 1.7], 1.7)
-  test assert !contains?(#[38.52, 1.7, 4, 1.7], 37.0)
-  test assert !contains?(#[], 37.0)
-
-  test assert all?(#['a', 'e', 'a'], |x| x == 'a' || x == 'e')
-  test assert !all?(#['a', 'e', 'a'], |x| x == 'a' || x == 'i')
-  test assert all?(#[], |x| x)
-
-  test assert any?(#['a', 'e', 'a'], |x| x == 'e' || x == 'i')
-  test assert !any?(#['a', 'e', 'a'], |x| x == 'o' || x == 'i')
-  test assert !any?(#[], |x| x == 'e' || x == 'i')
-])
-
-collection_test_map : Test
-collection_test_map = group([
-  test
-    let map = { 1 => 2, 3 => 4, 5 => 6 }
-    assert fold(map, 10, |(k, v), memo| k + v + memo) == 31
-  test assert fold({}, 10, |(k, v), memo| k + v + memo) == 10
-
-  test
-    let map = { "cat" => @cat, "dog" => @dog, "mouse" => @mouse }
-    assert filter(map, |(k, v)| k < "lion" && v == @dog) == { "dog" => @dog }
-  test assert filter({}, |(k, v)| k < "lion" && v == @dog) == {}
-
+  // @example
   test
     let found = find({
       'c' => true
@@ -159,14 +136,51 @@ collection_test_map = group([
     }, |(k, v)| k > 'e' && !v)
     // order is undefined
     assert found == Some(('z', false)) || found == Some(('g', false))
+  // @example
   test assert find(#['c', 'a'], |a| a > 'e') == None
+])
 
+filter_map_test : Test
+filter_map_test = group([
+  // @example
+  test assert filter_map([true, false], |a| if a then Some([a]) else None) ==
+    [[true]]
+  // @example
+  test assert filter_map([], |a| if a then Some([a]) else None) == []
+
+  // @example
+  test assert filter_map(#[true, false], |a| if a then Some([a]) else None) ==
+    #[[true]]
+  // @example
+  test assert filter_map(#[], |a| if a then Some([a]) else None) == #[]
+
+  // @example
   test
-    let map = { true => [true], false => [false] }
-    assert filter_map(map, |(k, v)| if k then Some((v, k)) else None) ==
+    let m = { true => [true], false => [false] }
+    assert filter_map(m, |(k, v)| if k then Some((v, k)) else None) ==
       { [true] => true }
+  // @example
   test assert filter_map({}, |(k, v)| if k then Some((v, k)) else None) == {}
+])
 
+map_fold_test : Test
+map_fold_test = group([
+  // @example
+  test assert map_fold(["hi", "bye"], "-", |a, s| (a ++ "!", s ++ a)) ==
+    (["hi!", "bye!"], "-hibye")
+  // @example
+  test assert map_fold([], "-", |a, s| (a ++ "!", s ++ a)) == ([], "-")
+
+  // @example
+  test
+    let (mapped, memo) = map_fold(#["hi", "bye"], "-", |a, s| (a ++ "!", s ++ a))
+    assert mapped == #["hi!", "bye!"]
+    // order is undefined
+    assert memo == "-hibye" || memo == "-byehi"
+  // @example
+  test assert map_fold(#[], "-", |a, s| (a ++ "!", s ++ a)) == (#[], "-")
+
+  // @example
   test
     let (mapped, memo) = map_fold(
       { "hi" => "now", "bye" => "later" },
@@ -176,27 +190,96 @@ collection_test_map = group([
     assert mapped == { "hi!" => "now!", "bye!" => "later!" }
     // order is undefined
     assert memo == "-hinowbyelater" || memo == "-byelaterhinow"
+  // @example
   test
     let (mapped, memo) = map_fold({}, "-", |(k, v), s|
       ((k ++ "!", v ++ "!"), s ++ k ++ v)
     )
     assert (mapped, memo) == ({}, "-")
+])
 
-  test assert put({ @second => 2 }, (@first, 1)) == { @first => 1, @second => 2 }
-  test assert put({}, (@first, 1)) == { @first => 1 }
+put_test : Test
+put_test = group([
+  // @example
+  test assert put(["second"], "first") == ["first", "second"]
+  // @example
+  test assert put([], "first") == ["first"]
 
+  // @example
+  test assert put(#["second"], "first") == #["first", "second"]
+  // @example
+  test assert put(#[], "first") == #["first"]
+
+  // @example
+  test assert put({ "second" => 2 }, ("first", 1)) ==
+    { "first" => 1, "second" => 2 }
+  // @example
+  test assert put({}, ("first", 1)) == { "first" => 1 }
+])
+
+delete_test : Test
+delete_test = group([
+  // @example
+  test assert delete([38.52, 1.7, 4, 1.7], 1.7) == [38.52, 4]
+  // @example
+  test assert delete([38.52, 1.7, 4, 1.7], 37.0) == [38.52, 1.7, 4, 1.7]
+  test assert delete([], 37.0) == []
+
+  // @example
+  test assert delete(#[38.52, 1.7, 4, 1.7], 1.7) == #[38.52, 4]
+  test assert delete(#[38.52, 1.7, 4, 1.7], 37.0) == #[38.52, 1.7, 4]
+  // @example
+  test assert delete(#[], 37.0) == #[]
+
+  // @example
   test assert delete({ 38.52 => 1.7, 4 => 2.9 }, (38.52, 1.7)) == { 4 => 2.9 }
+  // @example
   test assert delete({ 38.52 => 1.7, 4 => 2.9 }, (4, 3)) ==
     { 38.52 => 1.7, 4 => 2.9 }
   test assert delete({}, (38.52, 1.7)) == {}
+])
 
+contains_test : Test
+contains_test = group([
+  // @example
+  test assert contains?([38.52, 1.7, 4, 1.7], 1.7)
+  // @example
+  test assert !contains?([38.52, 1.7, 4, 1.7], 37.0)
+  test assert !contains?([], 37.0)
+
+  // @example
+  test assert contains?(#[38.52, 1.7, 4, 1.7], 1.7)
+  // @example
+  test assert !contains?(#[38.52, 1.7, 4, 1.7], 37.0)
+  test assert !contains?(#[], 37.0)
+
+  // @example
   test assert contains?({ 38.52 => 1.7, 4 => 2.9 }, (38.52, 1.7))
   test assert !contains?({ 38.52 => 1.7, 4 => 2.9 }, (4, 3))
+  // @example
   test assert !contains?({}, (38.52, 1.7))
+])
 
+all_test : Test
+all_test = group([
+  // @example
+  test assert all?(['a', 'e', 'a'], |x| x == 'a' || x == 'e')
+  // @example
+  test assert !all?(['a', 'e', 'a'], |x| x == 'a' || x == 'i')
+  // @example
+  test assert all?([], |x| x)
+
+  // @example
+  test assert all?(#['a', 'e', 'a'], |x| x == 'a' || x == 'e')
+  // @example
+  test assert !all?(#['a', 'e', 'a'], |x| x == 'a' || x == 'i')
+  test assert all?(#[], |x| x)
+
+  // @example
   test assert all?({ 'a' => 1, 'e' => 2 }, |(k, v)|
     (k == 'a' || k == 'e') && v > 0
   )
+  // @example
   test assert !all?({ 'a' => 1, 'e' => 2 }, |(k, v)|
     (k == 'a' || k == 'e') && v > 1
   )
@@ -204,91 +287,134 @@ collection_test_map = group([
     (k == 'a' || k == 'i') && v > 0
   )
   test assert all?({}, |(k, v)| (k == 'a' || k == 'i') && v > 0)
+])
 
+any_test : Test
+any_test = group([
+  // @example
+  test assert any?(['a', 'e', 'a'], |x| x == 'e' || x == 'i')
+  // @example
+  test assert !any?(['a', 'e', 'a'], |x| x == 'o' || x == 'i')
+  // @example
+  test assert !any?([], |x| x == 'e' || x == 'i')
+
+  // @example
+  test assert any?(#['a', 'e', 'a'], |x| x == 'e' || x == 'i')
+  // @example
+  test assert !any?(#['a', 'e', 'a'], |x| x == 'o' || x == 'i')
+  test assert !any?(#[], |x| x == 'e' || x == 'i')
+
+  // @example
   test assert any?({ 'a' => 1, 'e' => 2 }, |(k, v)| k == 'a' || v > 2)
   test assert any?({ 'a' => 1, 'e' => 2 }, |(k, v)| k == 'i' || v > 1)
+  // @example
   test assert !any?({ 'a' => 1, 'e' => 2 }, |(k, v)| k == 'i' || v > 2)
   test assert !any?({}, |(k, v)| k == 'i' || v > 2)
 ])
 
-
-//-- Collections
-first_test : Test
-first_test = group([
-  test assert first((1, 2)) == 1
-  test assert first(('a', true)) == 'a'
-])
-
-second_test : Test
-second_test = group([
-  test assert second((1, 2)) == 2
-  test assert second(('a', true)) == true
-])
-
 head_test : Test
 head_test = group([
+  // @example
   test assert head([1]) == 1
-  test assert head([@hi, @hey]) == @hi
+  // @example
+  test assert head(["hi", "hey", "hello"]) == "hi"
+  test assert capture(|-| head([])) == EmptyList
 ])
 
 tail_test : Test
 tail_test = group([
+  // @example
   test assert tail([1]) == []
-  test assert tail([@hi, @hey]) == [@hey]
+  // @example
+  test assert tail(["hi", "hey", "hello"]) == ["hey", "hello"]
+  test assert capture(|-| tail([])) == EmptyList
 ])
 
 lookup_test : Test
 lookup_test = group([
-  test assert lookup({ @hi => 'h' }, @hi) == Some('h')
+  // @example
   test assert lookup({ "bar" => 3.7, "baz" => 1 }, "foo") == None
+  // @example
+  test assert lookup({ 'h' => false }, 'h') == Some(false)
+  // @example
   test assert lookup({}, true) == None
 ])
 
 get_test : Test
 get_test = group([
-  test assert get({ @hi => 'h' }, @hi) == 'h'
-  test assert capture(|-| get({ "bar" => 3.7, "baz" => 1 }, "foo")) == BadKey
+  // @example
+  test assert get({ "bar" => 3.7, "baz" => 1 }, "baz") == 1
+  test assert capture(|-| get({ 'h' => false }, 'g')) == BadKey
   test assert capture(|-| get({}, true)) == BadKey
 ])
 
 key_test : Test
 key_test = group([
-  test assert key?({ @hi => 'h' }, @hi)
-  test assert !key?({ "bar" => 3.7, "baz" => 1 }, "foo")
+  // @example
+  test assert key?({ "bar" => 3.7, "baz" => 1 }, "baz")
+  // @example
+  test assert !key?({ 'h' => false }, 'g')
+  // @example
   test assert !key?({}, true)
 ])
 
 remove_test : Test
 remove_test = group([
-  test assert remove({ @hi => 'h' }, @hi) == {}
-  test assert remove({ "bar" => 3.7, "baz" => 1 }, "foo") ==
-    { "bar" => 3.7, "baz" => 1 }
-  test assert remove({ "bar" => 3.7, "baz" => 1 }, "bar") == { "baz" => 1 }
+  // @example
+  test assert remove({ "bar" => 3.7, "baz" => 1 }, "baz") == { "bar" => 3.7 }
+  // @example
+  test assert remove({ 'h' => false }, 'h') == {}
+  // @example
+  test assert remove({ 'h' => false }, 'g') == { 'h' => false }
+  // @example
   test assert remove({}, true) == {}
 ])
 
 some_or_test : Test
 some_or_test = group([
-  test assert some_or(Some(@hi), @hey) == @hi
+  // @example
+  test assert some_or(Some(0.48), 21.3) == 0.48
+  // @example
   test assert some_or(None, 'h') == 'h'
 ])
 
+first_test : Test
+first_test = group([
+  // @example
+  test assert first((1, 2)) == 1
+  // @example
+  test assert first(('a', true)) == 'a'
+])
 
-//-- Math
+second_test : Test
+second_test = group([
+  // @example
+  test assert second((1, 2)) == 2
+  // @example
+  test assert second(('a', true)) == true
+])
+
 abs_test : Test
 abs_test = group([
+  // @example
   test assert abs(1) == 1
   test assert abs(35.8) == 35.8
+  // @example
   test assert abs(-1) == 1
+  // @example
   test assert abs(-35.8) == 35.8
 ])
 
 ceil_test : Test
 ceil_test = group([
+  // @example
   test assert ceil(38.1) == 39
   test assert ceil(38.9) == 39
+  // @example
   test assert ceil(38) == 38
+  // @example
   test assert ceil(-38.1) == -38
+  // @example
   test assert ceil(-38.9) == -38
   test assert ceil(-38) == -38
 ])
@@ -296,107 +422,139 @@ ceil_test = group([
 floor_test : Test
 floor_test = group([
   test assert floor(38.1) == 38
+  // @example
   test assert floor(38.9) == 38
+  // @example
   test assert floor(38) == 38
+  // @example
   test assert floor(-38.1) == -39
+  // @example
   test assert floor(-38.9) == -39
   test assert floor(-38) == -38
 ])
 
 max_test : Test
 max_test = group([
+  // @example
   test assert max(3, 7) == 7
+  // @example
   test assert max(-3, -7) == -3
 ])
 
 min_test : Test
 min_test = group([
+  // @example
   test assert min(3, 7) == 3
+  // @example
   test assert min(-3, -7) == -7
 ])
 
 round_test : Test
 round_test = group([
+  // @example
   test assert round(-8.4) == -8
+  // @example
   test assert round(1.5) == 2
 ])
 
 trunc_test : Test
 trunc_test = group([
+  // @example
   test assert trunc(-8.6) == -8
+  // @example
   test assert trunc(1.9) == 1
 ])
 
-
-//-- Conversions
 to_int_test : Test
 to_int_test = group([
+  // @example
   test assert to_int(3.7) == 3
+  // @example
   test assert to_int('a') == 97
+  // @example
   test assert to_int(['1', '3', '5']) == 135
   test assert capture(|-| to_int(['0', '.', '8'])) == CantParseInt("0.8")
+  // @example
   test assert to_int("83") == 83
   test assert capture(|-| to_int("2a")) == CantParseInt("2a")
 ])
 
 to_float_test : Test
 to_float_test = group([
+  // @example
   test assert to_float(3 : Int) == 3.0
   test assert to_float(['5', '8']) == 58.0
+  // @example
   test assert to_float(['1', '.', '3', '5']) == 1.35
   test assert to_float(['.', '1']) == .1
   test assert capture(|-| to_float(['1', '.', '3', '.'])) ==
     CantParseFloat("1.3.")
+  // @example
   test assert to_float("2") == 2.0
+  // @example
   test assert to_float("83.0") == 83.0
+  // @example
   test assert to_float(".37") == .37
   test assert capture(|-| to_float("4a")) == CantParseFloat("4a")
 ])
 
 to_char_test : Test
 to_char_test = group([
+  // @example
   test assert to_char(97 : Int) == 'a'
+  // @example
   test assert to_char(10 : Int) == '\n'
 ])
 
 to_atom_test : Test
 to_atom_test = group([
+  // @example
   test assert to_atom('a') == @a
+  // @example
   test assert to_atom(['h', 'i']) == @hi
+  // @example
   test assert to_atom("hello") == @hello
 ])
 
 to_list_test : Test
 to_list_test = group([
+  // @example
   test
     let l = to_list(#[1, 2])
     // order is undefined
     assert l == [1, 2] || l == [2, 1]
   test assert to_list(#[]) == []
 
+  // @example
   test
-    let l = to_list({ @hey => true, @hi => false })
+    let l = to_list({ "hey" => true, "hi" => false })
     // order is undefined
-    assert l == [(@hey, true), (@hi, false)] ||
-      l == [(@hi, false), (@hey, true)]
+    assert l == [("hey", true), ("hi", false)] ||
+      l == [("hi", false), ("hey", true)]
   test assert to_list({}) == []
 ])
 
 to_set_test : Test
 to_set_test = group([
+  // @example
   test assert to_set([1, 2]) == #[1, 2]
   test assert to_set([]) == #[]
-  test assert to_set({ @hey => true, @hi => false }) ==
-    #[(@hey, true), (@hi, false)]
+  // @example
+  test assert to_set({ "hey" => true, "hi" => false }) ==
+    #[("hey", true), ("hi", false)]
+  // @example
   test assert to_set({}) == #[]
 ])
 
 to_map_test : Test
 to_map_test = group([
+  // @example
   test assert to_map([(1, "one"), (2, "two")]) == { 1 => "one", 2 => "two" }
+  // @example
   test assert to_map([]) == {}
-  test assert to_map(#[(@hey, true), (@hi, false)]) ==
-    { @hey => true, @hi => false }
+  // @example
+  test assert to_map(#[("hey", true), ("hi", false)]) ==
+    { "hey" => true, "hi" => false }
   test assert to_map(#[]) == {}
 ])
 
@@ -407,13 +565,20 @@ struct Foo {
 
 to_str_test : Test
 to_str_test = group([
+  // @example
   test assert to_str(1) == "1"
   test assert to_str(7.89) == "7.89"
+  // @example
   test assert to_str(true) == "true"
+  // @example
   test assert to_str(@hey) == "hey"
+  // @example
   test assert to_str('c') == "99"
+  // @example
   test assert to_str("hi") == "hi"
   test assert to_str((7.5, @hi)) == "(7.5, hi)"
+  test assert to_str((true, "hello", '\n')) == "(true, \"hello\", 10)"
+  // @example
   test assert to_str([true, false]) == "[true, false]"
   test
     let str = to_str(#[2, 88.03])
@@ -426,6 +591,7 @@ to_str_test = group([
       str == "{ later => \"bye\", hey => \"hi\" }"
   test assert to_str(Some(true)) == "Some(true)"
   test assert to_str(None) == "None"
+  // @example
   test
     let str = to_str({ a = 8.7, foo = @hello })
     // order is undefined
@@ -478,6 +644,7 @@ to_pretty_test = group([
     assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
       str == "Foo { bar = \"Bar\", foo = 77 }"
 
+  // @example
   test
     let tuple = (
       27,
@@ -485,11 +652,18 @@ to_pretty_test = group([
       false,
       @hello,
       '\n',
-      (@sub_tuple, true, 's', 523.81),
+      (523.81, true, @sub_tuple, 's'),
       ["first", "second", "third"]
     )
-    let quoted = map(@erlang:tuple_to_list(tuple) : [A], to_str)
-    assert to_pretty(tuple) == "(\n  " ++ List.join(quoted, ",\n  ") ++ "\n)"
+    assert to_pretty(tuple) == "(\n" ++
+      "  27,\n" ++
+      "  0.138,\n" ++
+      "  false,\n" ++
+      "  hello,\n" ++
+      "  10,\n" ++
+      "  (523.81, true, sub_tuple, 115),\n" ++
+      "  [\"first\", \"second\", \"third\"]\n" ++
+    ")"
   test
     let list = [
       "this is some sentence"

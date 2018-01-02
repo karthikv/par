@@ -22,10 +22,10 @@
 %   - Keep mention of test framework on home page?
 %   - Docs for stdlib
 %     - Capture tests?
-%     - Examples for `re` test
 %     - Module prefixes in tests
-%     - Section for implementations
 %     - How to import modules
+%     - Move types to top? Or link to types?
+%     - Index at the top of pages
 %   - Download page
 %   - Make GitHub repo public, add GitHub link
 %

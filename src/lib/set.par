@@ -7,6 +7,43 @@ module Set
 
 import Base (*)
 
+impl Sized for Set<A> {
+  // subtract 1 to get rid of tag
+  length(s) = @erlang:map_size(s) - 1
+  empty?(s) = length(s) == 0
+}
+
+impl Mappable for Set {
+  map(s, f) = map(to_list(s), f) |> to_set
+}
+
+impl Collection for Set {
+  fold(s, init, f) = to_list(s) |> fold(init, f)
+  filter(s, f) = @maps:filter(|k, _| assume k == @"_@type" || f(k), s)
+  find(s, f) = to_list(s) |> find(f)
+
+  filter_map(s, f) = to_list(s) |> filter_map(f) |> to_set
+  map_fold(s, init, f) =
+    let (l, memo) = to_list(s) |> map_fold(init, f)
+    (to_set(l), memo)
+
+  put(s, a) = @maps:put(a, true, s)
+  delete(s, a) = @maps:remove(a, s)
+
+  contains?(s, a) = @maps:is_key(a, s)
+  all?(s, f) = to_list(s) |> all?(f)
+  any?(s, f) = to_list(s) |> any?(f)
+}
+
+impl ToList for Set {
+  to_list(s) = @maps:keys(@maps:remove(@"_@type", s))
+}
+
+// @replace T<K, V> => Set<(K, V)>
+impl ToMap for Set {
+  to_map(s) = to_list(s) |> to_map
+}
+
 // Returns a new set with elements that are **both** in set `a` and in set `b`.
 intersect : (Set<A>, Set<A>) -> Set<A>
 export intersect(a, b) = @maps:with(@maps:keys(b), a)

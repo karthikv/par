@@ -3,6 +3,58 @@ module List
 import Base (*)
 import Map
 
+impl Sized for [A] {
+  length = @erlang:length/1
+  empty?(l) = l == []
+}
+
+impl Mappable for List {
+  map(l, f) = @lists:map(f, l)
+}
+
+impl Collection for List {
+  fold(l, init, f) = @lists:foldl(f, init, l)
+  filter(l, f) = @lists:filter(f, l)
+  find(l, f) = match l {
+    [] => None
+    [h | t] => if f(h) then Some(h) else find(t, f)
+  }
+
+  filter_map(l, f) = @lists:filtermap(|a|
+    if let Some(b) = f(a) then
+      assume (true, b)
+    else
+      false
+  , l)
+  map_fold(l, init, f) = @lists:mapfoldl(f, init, l)
+
+  put(l, h) = [h | l]
+  delete(l, a) = match l {
+    [] => []
+    [&a | t] => delete(t, a)
+    [h | t] => [h | delete(t, a)]
+  }
+
+  contains?(l, a) = match l {
+    [] => false
+    [&a | _] => true
+    [_ | t] => contains?(t, a)
+  }
+  all?(l, f) = @lists:all(f, l)
+  any?(l, f) = @lists:any(f, l)
+}
+
+impl ToSet for List {
+  to_set(l) =
+    let pairs = map(l, |a| (a, true))
+    @maps:from_list([assume (@"_@type", @Set) | pairs])
+}
+
+// @replace T<K, V> => [(K, V)]
+impl ToMap for List {
+  to_map(l) = @maps:from_list(l)
+}
+
 exception BadListIndex(Int)
 exception MismatchedLengths(Int, Int)
 
