@@ -1,3 +1,11 @@
+// Functions in this module operate on type `Map<K, V>`, which represents a hash
+// map with `O(1)` [`put()`](#put),
+// [`lookup()`](base#lookup)/[`get()`](base#get), and [`remove()`](base#remove).
+// Literal maps can be created with the syntax `{ k1 => v1, k2 => v2, ... }`,
+// where `k1`, `k2`, etc. are keys and `v1`, `v2`, etc.  are the associated
+// values, respectively.
+//
+// @tagline Standard library for map operations.
 module Map
 
 import Base (*)
@@ -55,35 +63,61 @@ impl ToSet for Map {
   to_set(m) = to_list(m) |> to_set
 }
 
+// Returns the value associated with key `k` in map `m`, or `default` if `k`
+// isn't in `m`.
 get_or : (Map<K, V>, K, V) -> V
 export get_or(m, k, default) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => default
 }
 
+// Returns a list of keys in `m`.
+//
+// @args m
 keys : Map<K, V> -> [K]
 export keys = @maps:keys/1
 
+// Returns a list of values in `m`
+//
+// @args m
 values : Map<K, V> -> [V]
 export values = @maps:values/1
 
+// Updates the value associated with the existing key `k` in map `m` using the
+// function `f`, returning a new map. `f` accepts the current value associated
+// with `k` and returns the new value. If `k` isn't in `m`, raises
+// [`BadKey`](base#BadKey). Use [`upsert()`](#upsert) if you want to handle the
+// case where `k` isn't in `m`. Note that `m` isn't modified.
 update : (Map<K, V>, K, V -> V) -> Map<K, V>
 export update(m, k, f) = match @maps:find(k, m) {
   (@ok, v) => @maps:put(k, f(v), m)
   @error => raise BadKey
 }
 
+// Updates or inserts a value associated with key `k` in map `m` using the
+// function `f`, returning a new map. `f` accepts the current value associated
+// with `k` and returns the new value. If key `k` isn't in `m`, sets the
+// associated value to `default`. If you know key `k` is in `m`, use
+// [`update()`](#update). Note that `m` isn't modified.
 upsert : (Map<K, V>, K, V, V -> V) -> Map<K, V>
 export upsert(m, k, default, f) = match @maps:find(k, m) {
   (@ok, v) => @maps:put(k, f(v), m)
   @error => @maps:put(k, default, m)
 }
 
+// Merges maps `a` and `b` together, returning a new map. If a key exists in
+// both `a` and `b`, the value in `b` takes precedence.
+//
+// @args a, b
 merge : (Map<K, V>, Map<K, V>) -> Map<K, V>
 export merge = @maps:merge/2
 
+// Filters `m` to only have keys in `keys`, returning a new map. `m` is not
+// modified.
 with : (Map<K, V>, [K]) -> Map<K, V>
 export with(m, keys) = @maps:with(keys, m)
 
+// Filters `m` to **not** have any keys in `keys`, returning a new map. `m` is
+// not modified.
 without : (Map<K, V>, [K]) -> Map<K, V>
 export without(m, keys) = @maps:without(keys, m)

@@ -1,20 +1,47 @@
+// Functions in this module operate on filesystem paths. Paths are separated
+// into components by the Unix directory separator `/`. On Windows, even though
+// `\` is the directory separator, the functions in this module convert `\` to
+// `/` for consistency, and these converted paths can be used by the `File`
+// module with no issues.
+//
+// @tagline Standard library for working with filesystem paths.
 module Path
 
 import Base (*)
 import String
 
+// Returns the last component of `path`. If `path` doesn't have any slashes,
+// returns `path`.
+//
+// @args path
 base : String -> String
 export base = @filename:basename/1
 
+// Returns all but the last component of `path`, representing the directory in
+// which `path` resides. The result doesn't end in a trailing slash, unless the
+// directory is the root directory `"/"`. If `path` contains no slashes, returns
+// `"."`.
+//
+// @args path
 dir : String -> String
 export dir = @filename:dirname/1
 
+// Returns the extension of `path`, or `""` if there is no extension.
+//
+// @args path
 ext : String -> String
 export ext = @filename:extension/1
 
+// Returns `path` with the extension stripped.
+//
+// @args path
 strip_ext : String -> String
 export strip_ext = @filename:rootname/1
 
+// Normalizes `path` by eliminating redundant `.` and `..` components and extra
+// slashes, returning the shortest equivalent path. Note that, if `foo` is
+// a symlink, a path like `"foo/../bar"` may not be equivalent to `"bar"`, so
+// this function can return a wrong result in this case.
 normalize : String -> String
 export normalize(path) =
   let normed = split(path) |> normalize_r
@@ -53,9 +80,14 @@ normalize_r(parts) = match parts {
   l => l
 }
 
+// Returns an absolute version of `path`. The result is normalized (see
+// [`normalize()`](#normalize)).
 to_absolute : String -> String
 export to_absolute(path) = @filename:absname(path) |> normalize
 
+// Returns a relative path from `from` to `path`. `from` and `path` are
+// normalized (see [`normalize()`](#normalize)) before a relative path is
+// computed, so the relative path is also normalized.
 to_relative : (String, String) -> String
 export to_relative(path, from) =
   let parts = to_absolute(path) |> split
@@ -68,17 +100,21 @@ relative_r(parts, from_parts) = match (parts, from_parts) {
   _ => join_all(map(from_parts, |_| "..") ++ parts)
 }
 
+// Returns true if `path` is absolute.
 absolute? : String -> Bool
 export absolute?(path) = @filename:pathtype(path) == @absolute
 
+// Returns true if `path` is relative.
 relative? : String -> Bool
 export relative?(path) =
   let type = @filename:pathtype(path)
   type == @relative || type == @volumerelative
 
+// Joins `path1` and `path2` together with the directory separator.
 join : (String, String) -> String
 export join(path1, path2) = join_all([path1, path2])
 
+// Joins all paths in `paths` with the directory separator.
 join_all : [String] -> String
 export join_all(paths) =
   if paths == [] then
@@ -103,5 +139,8 @@ make_relative(path) =
   else
     path
 
+// Splits `path` on the directory separator, returning a list of components.
+//
+// @args path
 split : String -> [String]
 export split = @filename:split/1

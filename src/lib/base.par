@@ -44,14 +44,14 @@ interface Sized {
 // a different element type `B`. The container types `List`, `Set`, `Map`, and
 // `Option` implement `Mappable`.
 interface Mappable {
-  // For each element in `container`, calls the given `fn`, collecting the
-  // results into a new container.
+  // Calls `f` for each element in `container`, collecting the results into
+  // a new container.
   //
   // If `container` is a list, the order of the mapped elements mirrors the
   // order of the original elements. If `collection` is a set or map, the order
   // is undefined.
   //
-  // If `container` is of type `Map<K, V>`, `fn` must accept a tuple of type
+  // If `container` is of type `Map<K, V>`, `f` must accept a tuple of type
   // `(K, V)`, representing a single key-value pair, and return a tuple of type
   // `(L, M)` for some `L` and `M`, representing a new key-value pair. The
   // resultant type is then `Map<L, M>`.
@@ -60,7 +60,7 @@ interface Mappable {
   // the return value is `None`. If `container` is `Some(a)`, the return value
   // is `Some(f(a))`.
   //
-  // @args container, fn
+  // @args container, f
   map : (T<A>, A -> B) -> T<B>
 }
 
@@ -74,14 +74,14 @@ impl Mappable for Option {
 // The `Collection` interface represents a generic container type that can hold
 // many elements. The types `List`, `Set`, and `Map` implement `Collection`.
 interface Collection extends Mappable {
-  // Computes a single value by applying the combining function `fn` to each
+  // Computes a single value by applying the combining function `f` to each
   // element of the given `collection`, starting with the initial value `init`.
   // This is also called a reduce, accumulate, or inject operation.
   //
-  // Calls `fn(e, accum)` for each element `e` in the given `collection`. For
+  // Calls `f(e, accum)` for each element `e` in the given `collection`. For
   // the first element, `accum` is `init`. For each subsequent element, `accum`
-  // is the return value of the last call to `fn`. So `accum` is computed
-  // across multiple calls to `fn`, and the final value of `accum` after all
+  // is the return value of the last call to `f`. So `accum` is computed
+  // across multiple calls to `f`, and the final value of `accum` after all
   // elements have been processed is the return value of `fold`.
   //
   // Put another way, `fold` lets you build up an accumulated value by
@@ -91,72 +91,72 @@ interface Collection extends Mappable {
   // If `collection` is a list, `fold` processes elements in order. If
   // `collection` is a set or map, the order is undefined.
   //
-  // If `collection` is of type `Map<K, V>`, `fn`'s first argument, `e`, will
+  // If `collection` is of type `Map<K, V>`, `f`'s first argument, `e`, will
   // be a tuple of type `(K, V)`, representing the current key-value pair.
   //
-  // @args collection, init, fn
+  // @args collection, init, f
   fold : (T<A>, F, (A, F) -> F) -> F
 
-  // Calls `fn` for each element in `collection`, returning a new collection
-  // that only contains the elements for which `fn` returns true.
+  // Calls `f` for each element in `collection`, returning a new collection
+  // that only contains the elements for which `f` returns true.
   //
   // If `collection` is a list, the returned collection maintains the order of
   // elements in the original `collection`. If `collection` is a set or map, the
   // order is undefined.
   //
-  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // If `collection` is of type `Map<K, V>`, `f` should accept an argument of
   // type `(K, V)`, representing a key-value pair.
   //
-  // @args collection, fn
+  // @args collection, f
   filter : (T<A>, A -> Bool) -> T<A>
 
-  // Returns the first element in `collection` for which `fn` returns true.
+  // Returns the first element in `collection` for which `f` returns true.
   //
   // If `collection` is a list, processes elements in order. If `collection` is
   // a set or map, the order is undefined.
   //
-  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // If `collection` is of type `Map<K, V>`, `f` should accept an argument of
   // type `(K, V)`, representing a key-value pair.
   //
-  // @args collection, fn
+  // @args collection, f
   find : (T<A>, A -> Bool) -> Option<A>
 
-  // Calls `fn` for each element in `collection`, returning a new collection
-  // that contains every `e` such that `fn` returned [`Some(e)`](#Option). This
+  // Calls `f` for each element in `collection`, returning a new collection
+  // that contains every `e` such that `f` returned [`Some(e)`](#Option). This
   // performs a [`filter`](#filter) and [`map`](#map) operation at the same
-  // time. For elements that should be filtered out, `fn` should return `None`,
-  // and for elements that need to be mapped, `fn` should return `Some(e)`,
+  // time. For elements that should be filtered out, `f` should return `None`,
+  // and for elements that need to be mapped, `f` should return `Some(e)`,
   // where `e` is the new element in the resulting collection.
   //
   // If `collection` is a list, the order of the mapped elements mirrors the
   // order of the original elements. If `collection` is a set or map, the order
   // is undefined.
   //
-  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // If `collection` is of type `Map<K, V>`, `f` should accept an argument of
   // type `(K, V)`, representing a key-value pair.
   //
-  // @args collection, fn
+  // @args collection, f
   filter_map : (T<A>, A -> Option<B>) -> T<B>
 
   // Computes a new collection and a single value by applying the combining
-  // function `fn` to each element of the given `collection`, starting with the
+  // function `f` to each element of the given `collection`, starting with the
   // initial value `init`. This performs a [`map`](#map) and [`fold`](#fold)
   // operation at the same time.
   //
-  // Calls `fn(e, accum)` for each element `e` in the given `collection`. `fn`
+  // Calls `f(e, accum)` for each element `e` in the given `collection`. `f`
   // returns a tuple `(new_e, new_accum)`. The `new_e`s are collected into a new
   // collection.
   //
   // For the first element, `accum` is `init`. For each subsequent element,
-  // `accum` is the `new_accum` returned from the last call to `fn`. So `accum`
-  // is computed across multiple calls to `fn`. The collection of `new_e`s,
+  // `accum` is the `new_accum` returned from the last call to `f`. So `accum`
+  // is computed across multiple calls to `f`. The collection of `new_e`s,
   // along with the final value of `accum` after all elements have been
   // processed, is the return value of `fold_map`.
   //
-  // If `collection` is of type `Map<K, V>`, `fn`'s first argument, `e`, will
+  // If `collection` is of type `Map<K, V>`, `f`'s first argument, `e`, will
   // be a tuple of type `(K, V)`, representing the current key-value pair.
   //
-  // @args collection, init, fn
+  // @args collection, init, f
   map_fold : (T<A>, F, (A, F) -> (B, F)) -> (T<B>, F)
 
   // Puts `elem` into `collection`, returning a new collection. The original
@@ -192,23 +192,23 @@ interface Collection extends Mappable {
   // @args collection, elem
   contains? : (T<A>, A) -> Bool
 
-  // Calls `fn` for each element in `collection`, and returns true if `fn`
+  // Calls `f` for each element in `collection`, and returns true if `f`
   // returns true for **every** element. If `collection` is empty, returns true.
   //
-  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // If `collection` is of type `Map<K, V>`, `f` should accept an argument of
   // type `(K, V)`, representing a key-value pair.
   //
-  // @args collection, fn
+  // @args collection, f
   all? : (T<A>, A -> Bool) -> Bool
 
-  // Calls `fn` for each element in `collection`, and returns true if `fn`
+  // Calls `f` for each element in `collection`, and returns true if `f`
   // returns true for **at least one** element. If `collection` is empty,
   // returns false.
   //
-  // If `collection` is of type `Map<K, V>`, `fn` should accept an argument of
+  // If `collection` is of type `Map<K, V>`, `f` should accept an argument of
   // type `(K, V)`, representing a key-value pair.
   //
-  // @args collection, fn
+  // @args collection, f
   any? : (T<A>, A -> Bool) -> Bool
 }
 
@@ -476,9 +476,14 @@ export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
 // Prints any value `a` by calling [`to_pretty`](#to_pretty) on it and
 // outputting the result to `stdout`.
 //
-// @example print("hello")  // outputs hello
-// | print({ foo = "hi", bar => true })  // outputs { foo = "hi", bar => true }
-// | print([37.8])  // outputs [37.8]
+// @example // outputs hello
+// | print("hello")
+// |
+// | // outputs { foo = "hi", bar => true }
+// | print({ foo = "hi", bar => true })
+// |
+// | // outputs [37.8]
+// | print([37.8])
 print : A -> ()
 export print(a) =
   @io:format("~s~n", [to_pretty(a)])
@@ -492,8 +497,11 @@ export print(a) =
 // |> debug("bar"), 27.5)`. This'll print `bar: ...`, where `...` is the return
 // value of the `bar` function call.
 //
-// @example length([true, false]) |> debug("length")  // outputs length: 2
-// | lookup("b", { "a" => 37.5, "b" => 15 }) |> debug("b")  // outputs b: 15
+// @example // outputs length: 2
+// | length([true, false]) |> debug("length")
+// |
+// | // outputs b: 15
+// | lookup("b", { "a" => 37.5, "b" => 15 }) |> debug("b")
 debug : (A, String) -> A
 export debug(a, prefix) =
   @io:format("~s: ~s~n", [prefix, to_pretty(a)])

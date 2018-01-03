@@ -18,6 +18,7 @@
 %   - Commands to run each program in tutorial and output
 %   - Ensure all code samples in tutorial work
 %     - Update descriptions of |> and ^foo
+%   - Update reference with let binding for function
 %   - Copyright and icons8 link
 %   - Keep mention of test framework on home page?
 %   - Docs for stdlib
@@ -26,6 +27,7 @@
 %     - How to import modules
 %     - Move types to top? Or link to types?
 %     - Index at the top of pages
+%     - Put head/tail/lookup/get/key/remove in respective module?
 %   - Download page
 %   - Make GitHub repo public, add GitHub link
 %

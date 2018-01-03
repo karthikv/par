@@ -5,56 +5,88 @@ import Test (group)
 
 to_lower_test : Test
 to_lower_test = group([
+  // @example
   test assert to_lower('a') == 'a'
+  // @example
   test assert to_lower('B') == 'b'
+  // @example
   test assert to_lower('.') == '.'
 ])
 
 to_upper_test : Test
 to_upper_test = group([
+  // @example
   test assert to_upper('a') == 'A'
+  // @example
   test assert to_upper('B') == 'B'
-  test assert to_upper('.') == '.'
+  // @example
+  test assert to_upper('3') == '3'
   test assert to_upper('ß') == 'ß'
 ])
 
 lower_test : Test
 lower_test = group([
+  // @example
   test assert lower?('a')
+  // @example
   test assert !lower?('B')
-  test assert !lower?('.')
+  // @example
+  test assert !lower?(',')
   test assert !lower?('ß')
 ])
 
 upper_test : Test
 upper_test = group([
+  // @example
   test assert !upper?('a')
+  // @example
   test assert upper?('B')
-  test assert !upper?('.')
+  // @example
+  test assert !upper?('[')
   test assert !upper?('ß')
 ])
 
-alpha_test : Test
-alpha_test = group([
-  List.seq(0, 25) |> map(|i| test assert alpha?(to_char($'a' + i))) |> group
-  List.seq(0, 25) |> map(|i| test assert alpha?(to_char($'A' + i))) |> group
-  test assert !alpha?('7')
-  test assert !alpha?('.')
+letter_test : Test
+letter_test = group([
+  // @example
+  test assert letter?('m')
+  // @example
+  test assert letter?('X')
+
+  List.seq(0, 25) |> map(|i| test assert letter?(to_char($'a' + i))) |> group
+  List.seq(0, 25) |> map(|i| test assert letter?(to_char($'A' + i))) |> group
+
+  // @example
+  test assert !letter?('7')
+  // @example
+  test assert !letter?(')')
 ])
 
 digit_test : Test
 digit_test = group([
+  // @example
+  test assert digit?('5')
+  // @example
+  test assert digit?('0')
+
   List.seq(0, 9) |> map(|i| test assert digit?(to_char($'0' + i))) |> group
+
+  // @example
   test assert !digit?('b')
   test assert !digit?('M')
-  test assert !digit?('.')
+  // @example
+  test assert !digit?('"')
 ])
 
 whitespace_test : Test
 whitespace_test = group([
+  // @example
   test assert whitespace?('\t')
+  // @example
   test assert whitespace?('\n')
   test assert !whitespace?('.')
+  // @example
   test assert !whitespace?('s')
+  // @example
   test assert !whitespace?('9')
 ])

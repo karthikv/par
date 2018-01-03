@@ -1,6 +1,14 @@
+// Functions in this module operate on type `Char`, a character that is
+// represented by a single unicode codepoint. A codepoint is a numerical value
+// that maps to a character, as per the unicode standard. Literal characters can
+// be created with single quotes, such as in `'a'` or `'7'`, and [escape
+// sequences](/learn/reference#escape) are supported, as in `'\n'` and `'\t'`.
+//
+// @tagline Standard library for character operations.
 module Char
 
 import Base (*)
+import String (Regex, re, matches?, from_chars)
 
 impl ToInt for Char {
   to_int(c) = $c
@@ -10,6 +18,7 @@ impl ToAtom for Char {
   to_atom(c) = to_atom([c])
 }
 
+// Returns the lowercase form of `ch`. If `ch` isn't a letter, returns `ch`.
 to_lower : Char -> Char
 export to_lower(ch) = match @string:lowercase([ch]) {
   [lower] => lower
@@ -18,6 +27,7 @@ export to_lower(ch) = match @string:lowercase([ch]) {
   _ => ch
 }
 
+// Returns the uppercase form of `ch`. If `ch` isn't a letter, returns `ch`.
 to_upper : Char -> Char
 export to_upper(ch) = match @string:uppercase([ch]) {
   [upper] => upper
@@ -26,25 +36,32 @@ export to_upper(ch) = match @string:uppercase([ch]) {
   _ => ch
 }
 
+// Returns true if `ch` is a lowercase letter.
 lower? : Char -> Bool
 export lower?(ch) = to_upper(ch) != ch
 
+// Returns true if `ch` is an uppercase letter.
 upper? : Char -> Bool
 export upper?(ch) = to_lower(ch) != ch
 
-alpha? : Char -> Bool
-export alpha?(ch) = ($ch >= $'a' && $ch <= $'z') || ($ch >= $'A' && $ch <= $'Z')
+letter_re : Regex
+letter_re = re(`^\p{L}$`, [])
 
+// Returns true if `ch` is a letter (unicode category `L`).
+letter? : Char -> Bool
+export letter?(ch) = matches?(from_chars([ch]), letter_re)
+
+digit_re : Regex
+digit_re = re(`^\p{Nd}$`, [])
+
+// Returns true if `ch` is a digit (unicode category `Nd`).
 digit? : Char -> Bool
-export digit?(ch) = $ch >= $'0' && $ch <= $'9'
+export digit?(ch) = matches?(from_chars([ch]), digit_re)
 
+whitespace_re : Regex
+whitespace_re = re(`^\p{Z}|\h|\v$`, [])
+
+// Returns true if `ch` is whitespace ([unicode property
+// `WSpace=yes`](https://en.wikipedia.org/wiki/Whitespace_character#Unicode)).
 whitespace? : Char -> Bool
-export whitespace?(ch) =
-  ch == '\t' ||
-  ch == '\n' ||
-  ch == '\v' ||
-  ch == '\f' ||
-  ch == '\r' ||
-  ch == ' ' ||
-  $ch == 133 ||
-  $ch == 160
+export whitespace?(ch) = matches?(from_chars([ch]), whitespace_re)

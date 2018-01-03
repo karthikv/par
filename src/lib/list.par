@@ -1,3 +1,9 @@
+// Functions in this module operate on type `[A]` (equivalent to `List<A>`),
+// which represents a linked list with `O(1)` [`put()`](#put) and `O(n)`
+// [`at()`](#at) and [`delete()`](#delete). Literal lists can be created with
+// the syntax `[a, b, ...]`, where `a`, `b`, etc. are elements.
+//
+// @tagline Standard library for list operations.
 module List
 
 import Base (*)
@@ -55,21 +61,36 @@ impl ToMap for List {
   to_map(l) = @maps:from_list(l)
 }
 
+// Raised by [`at()`](#at), [`split_at()`](#split_at), [`slice()`](#slice), and
+// [`range()`](#range) when accessing an index out of bounds.
 exception BadListIndex(Int)
+
+// Raised by [`zip()`](#zip) when the two lists don't have the same lengths.
 exception MismatchedLengths(Int, Int)
 
+// Returns the maximum element in `l` as [`Some(max)`](base#Option), or
+// [`None`](base#Option) if `l` is empty. `l` is expected to contain elements
+// that satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they
+// have a defined ordering.
 max_in : [A ~ Ord] -> Option<A ~ Ord>
 export max_in(l) = match l {
   [] => None
   _ => Some(@lists:max(l))
 }
 
+// Returns the minimum element in `l` as [`Some(min)`](base#Option), or
+// [`None`](base#Option) if `l` is empty. `l` is expected to contain elements
+// that satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they
+// have a defined ordering.
 min_in : [A ~ Ord] -> Option<A ~ Ord>
 export min_in(l) = match l {
   [] => None
   _ => Some(@lists:min(l))
 }
 
+// Returns the element in `l` for which `f` returns the maximum value. `f`
+// accepts an element as an argument and returns a value that satisfies the
+// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
 max_by : ([A], A -> B ~ Ord) -> Option<A>
 export max_by(l, f) = match l {
   [] => None
@@ -81,6 +102,9 @@ export max_by(l, f) = match l {
     Some(max)
 }
 
+// Returns the element in `l` for which `f` returns the minimum value. `f`
+// accepts an element as an argument and returns a value that satisfies the
+// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
 min_by : ([A], A -> B ~ Ord) -> Option<A>
 export min_by(l, f) = match l {
   [] => None
@@ -92,33 +116,56 @@ export min_by(l, f) = match l {
     Some(min)
 }
 
+// Takes elements from `l` while `f` returns true, returning a new list. `f`
+// accepts an element and returns true to take it or false to stop.
 take_while : ([A], A -> Bool) -> [A]
 export take_while(l, f) = @lists:takewhile(f, l)
 
+// Drops elements from `l` while `f` returns true, returning a new list. `f`
+// accepts an element and returns true to take it or false to stop.
 drop_while : ([A], A -> Bool) -> [A]
 export drop_while(l, f) = @lists:dropwhile(f, l)
 
+// Takes elements from `l` while `f` returns true, and returns two new lists:
+// the elements that were taken, and all remaining elements.
 split_while : ([A], A -> Bool) -> ([A], [A])
 export split_while(l, f) = @lists:splitwith(f, l)
 
+// Creates a new list that has the element `a` repeated `n` times.
 repeat : (A, Int) -> [A]
 export repeat(a, n) = @lists:duplicate(n, a)
 
+// Calls `f` for each element in `l`, concatenating the resultant lists together
+// into one list. `f` accepts an element in `l` and returns a list.
 flat_map : ([A], A -> [B]) -> [B]
 export flat_map(l, f) = @lists:flatmap(f, l)
 
+// Same as [`fold`](#fold), expect that it goes through `l` in the reverse
+// order, calling `f` with the last element, then the second-to-last element,
+// etc.
 foldr : ([A], F, (A, F) -> F) -> F
 export foldr(l, init, f) = @lists:foldr(f, init, l)
 
+// Same as [`map_fold`](#map_fold), expect that it goes through `l` in the
+// reverse order, calling `f` with the last element, then the second-to-last
+// element, etc. The resulting mapped list is still in the same order as the
+// original list.
 map_foldr : ([A], F, (A, F) -> (B, F)) -> ([B], F)
 export map_foldr(l, init, f) = @lists:mapfoldr(f, init, l)
 
+// Returns two new lists: one containing elements for which `f` returns true,
+// and the other containing elements for which `f` returns false.
 partition : ([A], A -> Bool) -> ([A], [A])
 export partition(l, f) = @lists:partition(f, l)
 
+// Reverses the list `l`.
+//
+// @args l
 reverse : [A] -> [A]
 export reverse = @lists:reverse/1
 
+// Returns a list containing the sequence of integers from `start` to `end`,
+// both inclusive. If `start > end`, returns `[]`.
 seq : (Int, Int) -> [Int]
 export seq(start, end) =
   if start <= end then
@@ -126,29 +173,56 @@ export seq(start, end) =
   else
     []
 
+// Returns the sum of all numbers in `l`.
+//
+// @args l
 sum : [A ~ Num] -> A ~ Num
 export sum = @lists:sum/1
 
+// Sorts `l` in ascending order. `l` is expected to contain elements that
+// satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they have
+// a defined ordering.
+//
+// @args l
 sort : [A ~ Ord] -> [A ~ Ord]
 export sort = @lists:sort/1
 
+// Sorts `l` in ascending order based on the return value of `f` for each
+// element. The element for which `f` returns the minimum value is first, and
+// the element for which `f` returns the maximum value is last. `f` accepts an
+// element as an argument and returns a value that satisfies the
+// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
+//
+// @args l
 sort_by : ([A], A -> B ~ Ord) -> [A]
 export sort_by(l, f) = @lists:sort(|a, b| f(a) < f(b), l)
 
+// Sorts `l` in ascending order based on the comparator function `f`. `f` is
+// called with two elements `a` and `b`, and the comparator should return true
+// if `a` must be placed before `b` in the sorted list.
 sort_cmp : ([A], (A, A) -> Bool) -> [A]
 export sort_cmp(l, f) = @lists:sort(f, l)
 
-nth : ([A], Int) -> A
-export nth(l, i) =
+// Returns the element at index `i` in `l`. `i` can be negative, where `-1` is
+// the last index, `-2` is the second-to-last index, etc. If `at` tries to
+// access an element at an invalid index, it raises
+// [`BadListIndex`](#BadListIndex).
+at : ([A], Int) -> A
+export at(l, i) =
   let wrapped_i = if i < 0 then length(l) + i else i
-  if wrapped_i < 0 then raise BadListIndex(i) else nth_r(l, 0, wrapped_i)
+  if wrapped_i < 0 then raise BadListIndex(i) else at_r(l, 0, wrapped_i)
 
-nth_r : ([A], Int, Int) -> A
-nth_r(l, i, n) = match l {
-  [h | t] => if i == n then h else nth_r(t, i + 1, n)
+at_r : ([A], Int, Int) -> A
+at_r(l, i, n) = match l {
+  [h | t] => if i == n then h else at_r(t, i + 1, n)
   [] => raise BadListIndex(i)
 }
 
+// Returns two lists: the first contains all elements from index `0` to `i - 1`,
+// and the second contains all elements from index `i` to the end of the list.
+// `i` can be negative, where `-1` is the last index, `-2` is the second-to-last
+// index, etc. If `split_at` tries to access an element at an invalid index, it
+// raises [`BadListIndex`](#BadListIndex).
 split_at : ([A], Int) -> ([A], [A])
 export split_at(l, i) =
   let wrapped_i = if i < 0 then length(l) + i else i
@@ -167,17 +241,26 @@ split_at_r(l, i, n, before) =
     let [h | t] = l
     split_at_r(t, i + 1, n, [h | before])
 
+// Returns a sublist of `l` starting at index `i` with length `len`. `i` can
+// be negative, where `-1` is the last index, `-2` is the second-to-last index,
+// etc. If `len <= 0`, returns `[]`. If `slice` tries to access an element at an
+// invalid index, it raises [`BadListIndex`](#BadListIndex).
 slice : ([A], Int, Int) -> [A]
-export slice(l, i, num) =
-  if num <= 0 then
+export slice(l, i, len) =
+  if len <= 0 then
     []
   else
     let wrapped_i = if i < 0 then length(l) + i else i
     if wrapped_i < 0 then
       raise BadListIndex(i)
     else
-      slice_r(l, 0, wrapped_i, num)
+      slice_r(l, 0, wrapped_i, len)
 
+// Returns a sublist of `l` starting at index `start` and ending at index
+// `end`, inclusive. `start` and `end` can be negative, where `-1` is the last
+// index, `-2` is the second-to-last index, etc. If `start > end` (after
+// resolving negative indexes), returns `[]`. If `range` tries to access an
+// element at an invalid index, it raises [`BadListIndex`](#BadListIndex).
 range : ([A], Int, Int) -> [A]
 export range(l, start, end) =
   let len = if start < 0 || end < 0 then length(l) else 0
@@ -194,29 +277,35 @@ export range(l, start, end) =
     slice_r(l, 0, wrapped_start, wrapped_end - wrapped_start + 1)
 
 slice_r : ([A], Int, Int, Int) -> [A]
-slice_r(l, i, start, num) =
-  if num <= 0 then
+slice_r(l, i, start, len) =
+  if len <= 0 then
     []
   else
     match l {
       [h | t] =>
         if i >= start then
-          [h | slice_r(t, i + 1, start, num - 1)]
+          [h | slice_r(t, i + 1, start, len - 1)]
         else
-          slice_r(t, i + 1, start, num)
+          slice_r(t, i + 1, start, len)
       [] => raise BadListIndex(i)
     }
 
+// Joins the list of strings `l` with the separator `sep`, returning a string.
+// `sep` is placed in-between every two subsequent elements of `l`.
 join : ([String], String) -> String
-export join(l, start) = @unicode:characters_to_binary(intersperse(l, start))
+export join(l, sep) = @unicode:characters_to_binary(intersperse(l, sep))
 
 intersperse : ([A], A) -> [A]
-intersperse(l, a) = match l {
+intersperse(l, sep) = match l {
   [] => []
   [h] => [h]
-  [h | t] => [h, a | intersperse(t, a)]
+  [h | t] => [h, sep | intersperse(t, sep)]
 }
 
+// Returns a list where the `i`-th element is a tuple containing the `i`-th
+// element of `l1` and the `i`-th element of `l2`. If `l1` and `l2` don't have
+// the same length, raises [`MismatchedLengths`](#MismatchedLengths). See
+// [`unzip()`](#unzip) for the opposite operation.
 zip : ([A], [B]) -> [(A, B)]
 export zip(l1, l2) = zip_r(l1, l2, 0)
 
@@ -227,13 +316,22 @@ zip_r(l1, l2, i) = match (l1, l2) {
   _ => raise MismatchedLengths(i + length(l1), i + length(l2))
 }
 
+// Unpacks a list of tuples `l` into two separate lists. If the `i`-th element
+// of `l` is a tuple `(a, b)`, the `i`-th element of the first result list is
+// `a`, and the `i`-th element of the second result list is `b`. See
+// [`zip()`](#zip) for the opposite operation.
+//
+// @args l
 unzip : [(A, B)] -> ([A], [B])
 export unzip = @lists:unzip/1
 
+// Calls `f` on each element of `l`, returning a map from each return value of
+// `f` to the list of elements that gave that return value.
 group_by : ([A], A -> B) -> Map<B, [A]>
 export group_by(l, f) =
   foldr(l, {}, |a, m| Map.upsert(m, f(a), [a], |group| [a | group]))
 
+// Removes duplicates in `l`, returning a new list. `l` is not modified.
 unique : [A] -> [A]
 export unique(l) =
   let (unique_l_rev, _) = fold(l, ([], #[]), |a, (new_l, s)|
@@ -245,6 +343,8 @@ export unique(l) =
 
   reverse(unique_l_rev)
 
+// Removes duplicates in `l`, returning a new list, where two elements are
+// duplicates if `f` returns the same value for them. `l` is not modified.
 unique_by : ([A], A -> B) -> [A]
 export unique_by(l, f) =
   let (unique_l_rev, _) = fold(l, ([], #[]), |a, (new_l, s)|
@@ -257,6 +357,7 @@ export unique_by(l, f) =
 
   reverse(unique_l_rev)
 
+// Pairs each element in `l` with its index, returning a new list of tuples.
 with_index : [A] -> [(A, Int)]
 export with_index(l) = with_index_r(l, 0)
 
@@ -266,6 +367,14 @@ with_index_r(l, i) = match l {
   [] => []
 }
 
+// Calls `f` on each element of `l`. This function rarely needs to be used, and
+// is only necessary when performing a side-effect (e.g. printing, writing to
+// a file, etc.) for each element in a list. In most cases, what you really want
+// is a specific operation like [`map()`](#map), [`filter()`](#filter), or
+// [`fold()`](#fold).
+//
+// @example // prints each element
+// | List.each([1, 2, 3], |e| print("element: " ++ e))
 each : ([A], A -> B) -> ()
 export each(l, f) =
   @lists:foreach(f, l)
