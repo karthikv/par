@@ -1,6 +1,6 @@
 module Lexer
 
-import String (chars, from_chars)
+import String (to_chars, from_chars)
 import List (reverse)
 
 struct Loc {
@@ -108,7 +108,7 @@ enum Result<T, E> {
 tokenize : [Char] -> Result<[Token], [Token]>
 export tokenize(chs) =
   let tokens = tokenize_r(chs, 1, 1, [])
-  let (tokens, errs) = fold(tokens, ([], []), |token, (accum, errs)|
+  let (tokens, errs) = fold(tokens, ([], []), |(accum, errs), token|
     match token {
       Comment(_, _) => (accum, errs)
       Whitespace(_, _) => (accum, errs)
@@ -380,33 +380,33 @@ tokenize_whitespace_r(loc, chs, accum) = match chs {
 
 chs_to_token_fn : Map<[Char], Loc -> Token>
 chs_to_token_fn = {
-  chars("module") => Module
-  chars("import") => Import
-  chars("export") => Export
-  chars("enum") => Enum
-  chars("exception") => Exception
-  chars("struct") => Struct
-  chars("interface") => Interface
-  chars("impl") => Impl
+  to_chars("module") => Module
+  to_chars("import") => Import
+  to_chars("export") => Export
+  to_chars("enum") => Enum
+  to_chars("exception") => Exception
+  to_chars("struct") => Struct
+  to_chars("interface") => Interface
+  to_chars("impl") => Impl
 
-  chars("if") => If
-  chars("then") => Then
-  chars("else") => Else
-  chars("let") => Let
-  chars("match") => Match
-  chars("try") => Try
-  chars("catch") => Catch
-  chars("raise") => Raise
-  chars("ensure") => Ensure
-  chars("after") => After
-  chars("discard") => Discard
-  chars("assume") => Assume
+  to_chars("if") => If
+  to_chars("then") => Then
+  to_chars("else") => Else
+  to_chars("let") => Let
+  to_chars("match") => Match
+  to_chars("try") => Try
+  to_chars("catch") => Catch
+  to_chars("raise") => Raise
+  to_chars("ensure") => Ensure
+  to_chars("after") => After
+  to_chars("discard") => Discard
+  to_chars("assume") => Assume
 
-  chars("test") => Test
-  chars("assert") => Assert
+  to_chars("test") => Test
+  to_chars("assert") => Assert
 
-  chars("true") => LitBool(_, true)
-  chars("false") => LitBool(_, false)
+  to_chars("true") => LitBool(_, true)
+  to_chars("false") => LitBool(_, false)
 }
 
 until_nl : [Char] -> ([Char], Int, [Char])

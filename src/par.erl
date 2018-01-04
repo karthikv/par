@@ -17,7 +17,6 @@
 %   - Include lexer/parser in stdlib or disallow modules named lexer/parser
 % - Website + Documentation
 %   - Link into docs from tutorial
-%   - Ensure all code samples in tutorial and home page work
 %   - Order of functions in modules
 %   - Update reference
 %     - let binding for function

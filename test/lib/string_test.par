@@ -346,6 +346,7 @@ splitn_test = group([
   test assert splitn("foo bar", "foo bar", 0) == ["", ""]
   test assert splitn("foo bar", "flo", 3) == ["foo bar"]
   test assert splitn("foo bar", "R", 7) == ["foo bar"]
+  test assert splitn("", "o", 5) == []
 
   test assert splitn("foo bar", re(`ba`, []), 3) == ["foo ", "r"]
   // @example
@@ -360,6 +361,7 @@ splitn_test = group([
   test assert splitn("foo bar", re(`foo bar`, []), 2) == ["", ""]
   test assert splitn("foo bar", re(`Bar`, []), 1) == ["foo bar"]
   test assert splitn("foo bar", re(`o{3}`, []), 8) == ["foo bar"]
+  test assert splitn("", re(``, []), 1) == []
 ])
 
 split_test : Test
@@ -374,6 +376,7 @@ split_test = group([
   test assert split("foo bar", "foo bar") == ["", ""]
   test assert split("foo bar", "flo") == ["foo bar"]
   test assert split("foo bar", "R") == ["foo bar"]
+  test assert split("", "o") == []
 
   test assert split("foo bar", re(`ba`, [])) == ["foo ", "r"]
   // @example
@@ -387,6 +390,7 @@ split_test = group([
   test assert split("foo bar", re(`foo bar`, [])) == ["", ""]
   test assert split("foo bar", re(`Bar`, [])) == ["foo bar"]
   test assert split("foo bar", re(`o{3}`, [])) == ["foo bar"]
+  test assert split("", re(`\w`, [])) == []
 ])
 
 replace_test : Test

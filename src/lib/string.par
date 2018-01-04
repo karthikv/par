@@ -377,6 +377,8 @@ interface Pattern {
   // group is included in the result list, located in-between the two parts
   // that were split by the substring matched by `pat`.
   //
+  // If `s` is the empty string `""`, returns `[]`.
+  //
   // @args s, pat, n
   splitn : (String, T, Int) -> [String]
 
@@ -406,7 +408,9 @@ interface Pattern {
 
 impl Pattern for String {
   splitn(s, sub, n) =
-    if sub == "" then
+    if s == "" then
+      []
+    else if sub == "" then
       if n <= 0 then
         to_chars(s) |> map(|ch| from_chars([ch]))
       else
@@ -450,7 +454,9 @@ splitn_r(s, sub, n) =
 
 impl Pattern for Regex {
   splitn(s, r, n) =
-    if r.str == "" then
+    if s == "" then
+      []
+    else if r.str == "" then
       splitn(s, "", n)
     else if n <= 0 then
       @re:split(s, r.re, [(@return, @binary)])
