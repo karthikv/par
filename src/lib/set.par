@@ -24,9 +24,9 @@ impl Collection for Set {
   find(s, f) = to_list(s) |> find(f)
 
   filter_map(s, f) = to_list(s) |> filter_map(f) |> to_set
-  map_fold(s, init, f) =
-    let (l, memo) = to_list(s) |> map_fold(init, f)
-    (to_set(l), memo)
+  fold_map(s, init, f) =
+    let (final, mapped) = to_list(s) |> fold_map(init, f)
+    (final, to_set(mapped))
 
   put(s, a) = @maps:put(a, true, s)
   delete(s, a) = @maps:remove(a, s)

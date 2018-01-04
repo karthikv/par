@@ -19,7 +19,10 @@ impl Mappable for List {
 }
 
 impl Collection for List {
-  fold(l, init, f) = @lists:foldl(f, init, l)
+  fold(l, init, f) = match l {
+    [h | t] => fold(t, f(init, h), f)
+    [] => init
+  }
   filter(l, f) = @lists:filter(f, l)
   find(l, f) = match l {
     [] => None
@@ -32,7 +35,13 @@ impl Collection for List {
     else
       false
   , l)
-  map_fold(l, init, f) = @lists:mapfoldl(f, init, l)
+  fold_map(l, init, f) = match l {
+    [h | t] =>
+      let (new_init, new_h) = f(init, h)
+      let (final, mapped) = fold_map(t, new_init, f)
+      (final, [new_h | mapped])
+    [] => (init, [])
+  }
 
   put(l, h) = [h | l]
   delete(l, a) = match l {
@@ -95,7 +104,7 @@ max_by : ([A], A -> B ~ Ord) -> Option<A>
 export max_by(l, f) = match l {
   [] => None
   [h | t] =>
-    let (max, _) = fold(t, (h, f(h)), |x, (max, max_key)|
+    let (max, _) = fold(t, (h, f(h)), |(max, max_key), x|
       let x_key = f(x)
       if x_key > max_key then (x, x_key) else (max, max_key)
     )
@@ -109,7 +118,7 @@ min_by : ([A], A -> B ~ Ord) -> Option<A>
 export min_by(l, f) = match l {
   [] => None
   [h | t] =>
-    let (min, _) = fold(t, (h, f(h)), |x, (min, min_key)|
+    let (min, _) = fold(t, (h, f(h)), |(min, min_key), x|
       let x_key = f(x)
       if x_key < min_key then (x, x_key) else (min, min_key)
     )
@@ -143,15 +152,24 @@ export flat_map(l, f) = @lists:flatmap(f, l)
 // Same as [`fold`](#fold), expect that it goes through `l` in the reverse
 // order, calling `f` with the last element, then the second-to-last element,
 // etc.
-foldr : ([A], F, (A, F) -> F) -> F
-export foldr(l, init, f) = @lists:foldr(f, init, l)
+foldr : ([A], F, (F, A) -> F) -> F
+export foldr(l, init, f) = match l {
+  [h | t] => f(foldr(t, init, f), h)
+  [] => init
+}
 
-// Same as [`map_fold`](#map_fold), expect that it goes through `l` in the
+// Same as [`fold_map`](#fold_map), expect that it goes through `l` in the
 // reverse order, calling `f` with the last element, then the second-to-last
 // element, etc. The resulting mapped list is still in the same order as the
 // original list.
-map_foldr : ([A], F, (A, F) -> (B, F)) -> ([B], F)
-export map_foldr(l, init, f) = @lists:mapfoldr(f, init, l)
+foldr_map : ([A], F, (F, A) -> (F, B)) -> (F, [B])
+export foldr_map(l, init, f) = match l {
+  [h | t] =>
+    let (accum, mapped) = foldr_map(t, init, f)
+    let (new_accum, new_h) = f(accum, h)
+    (new_accum, [new_h | mapped])
+  [] => (init, [])
+}
 
 // Returns two new lists: one containing elements for which `f` returns true,
 // and the other containing elements for which `f` returns false.
@@ -241,6 +259,30 @@ split_at_r(l, i, n, before) =
     let [h | t] = l
     split_at_r(t, i + 1, n, [h | before])
 
+// Takes `n` elements from the beginning of `l`, returning a new list. If `l`
+// has fewer than `n` elements, returns `l`. If `n` is negative, returns `[]`.
+take : ([A], Int) -> [A]
+export take(l, n) =
+  if n <= 0 then
+    []
+  else
+    match l {
+      [h | t] => [h | take(t, n - 1)]
+      [] => []
+    }
+
+// Drops `n` elements from the beginning of `l`, returning a new list. If `l`
+// has fewer than `n` elements, returns `[]`. If `n` is negative, returns `l`.
+drop : ([A], Int) -> [A]
+export drop(l, n) =
+  if n <= 0 then
+    l
+  else
+    match l {
+      [_ | t] => drop(t, n - 1)
+      [] => []
+    }
+
 // Returns a sublist of `l` starting at index `i` with length `len`. `i` can
 // be negative, where `-1` is the last index, `-2` is the second-to-last index,
 // etc. If `len <= 0`, returns `[]`. If `slice` tries to access an element at an
@@ -329,12 +371,12 @@ export unzip = @lists:unzip/1
 // `f` to the list of elements that gave that return value.
 group_by : ([A], A -> B) -> Map<B, [A]>
 export group_by(l, f) =
-  foldr(l, {}, |a, m| Map.upsert(m, f(a), [a], |group| [a | group]))
+  foldr(l, {}, |m, a| Map.upsert(m, f(a), [a], |group| [a | group]))
 
 // Removes duplicates in `l`, returning a new list. `l` is not modified.
 unique : [A] -> [A]
 export unique(l) =
-  let (unique_l_rev, _) = fold(l, ([], #[]), |a, (new_l, s)|
+  let (unique_l_rev, _) = fold(l, ([], #[]), |(new_l, s), a|
     if contains?(s, a) then
       (new_l, s)
     else
@@ -347,7 +389,7 @@ export unique(l) =
 // duplicates if `f` returns the same value for them. `l` is not modified.
 unique_by : ([A], A -> B) -> [A]
 export unique_by(l, f) =
-  let (unique_l_rev, _) = fold(l, ([], #[]), |a, (new_l, s)|
+  let (unique_l_rev, _) = fold(l, ([], #[]), |(new_l, s), a|
     let key = f(a)
     if contains?(s, key) then
       (new_l, s)

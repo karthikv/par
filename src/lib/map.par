@@ -31,14 +31,14 @@ impl Mappable for Map {
 // | T<B> => Map<L, M>
 // | B => (L, M)
 impl Collection for Map {
-  fold(m, init, f) = @maps:fold(|k, v, memo| f((k, v), memo), init, m)
+  fold(m, init, f) = @maps:fold(|k, v, accum| f(accum, (k, v)), init, m)
   filter(m, f) = @maps:filter(|k, v| f((k, v)), m)
   find(m, f) = to_list(m) |> find(f)
 
   filter_map(m, f) = to_list(m) |> filter_map(f) |> to_map
-  map_fold(m, init, f) =
-    let (pairs, memo) = to_list(m) |> map_fold(init, f)
-    (to_map(pairs), memo)
+  fold_map(m, init, f) =
+    let (final, mapped) = to_list(m) |> fold_map(init, f)
+    (final, to_map(mapped))
 
   put(m, (k, v)) = @maps:put(k, v, m)
   delete(m, (k, v)) = if contains?(m, (k, v)) then @maps:remove(k, m) else m

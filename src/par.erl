@@ -12,19 +12,20 @@
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
-%   - ^Mod.foo in pattern; update docs
+%   - ^Mod.foo in pattern; update reference docs
 % - Precompile stdlib modules
+%   - Include lexer/parser in stdlib or disallow modules named lexer/parser
 % - Website + Documentation
-%   - Commands to run each program in tutorial and output
-%   - Ensure all code samples in tutorial work
-%     - Update descriptions of |> and ^foo
-%   - Update reference with let binding for function
+%   - Link into docs from tutorial
+%   - Ensure all code samples in tutorial and home page work
+%   - Order of functions in modules
+%   - Update reference
+%     - let binding for function
+%     - Record update syntax :=
 %   - Copyright and icons8 link
-%   - Keep mention of test framework on home page?
 %   - Docs for stdlib
 %     - Capture tests?
 %     - Module prefixes in tests
-%     - How to import modules
 %     - Move types to top? Or link to types?
 %     - Index at the top of pages
 %     - Put head/tail/lookup/get/key/remove in respective module?

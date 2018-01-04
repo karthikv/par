@@ -111,28 +111,28 @@ flat_map_test = group([
 foldr_test : Test
 foldr_test = group([
   // @example
-  test assert foldr(["cow", "dog", "cat"], "turtle", |a, memo| memo ++ a) ==
+  test assert foldr(["cow", "dog", "cat"], "turtle", |accum, a| accum ++ a) ==
     "turtlecatdogcow"
   // @example
-  test assert foldr([42.3, .428, 13.3], 5, |a, memo| -memo + a) == 50.172
+  test assert foldr([42.3, .428, 13.3], 5, |accum, a| -accum + a) == 50.172
   // @example
-  test assert foldr([], true, |a, memo| a && memo) == true
+  test assert foldr([], true, |accum, a| accum && a) == true
 ])
 
-map_foldr_test : Test
-map_foldr_test = group([
+foldr_map_test : Test
+foldr_map_test = group([
   // @example
   test
     let l = ["cow", "dog", "cat"]
-    assert map_foldr(l, "turtle", |a, memo| (a ++ "!", memo ++ "!" ++ a)) ==
-      (["cow!", "dog!", "cat!"], "turtle!cat!dog!cow")
+    assert foldr_map(l, "turtle", |accum, a| (accum ++ "!" ++ a, a ++ "!")) ==
+      ("turtle!cat!dog!cow", ["cow!", "dog!", "cat!"])
   // @example
   test
     let l = [42, .4, 13.3]
-    assert map_foldr(l, 5, |a, memo| (memo, -memo + a)) ==
-      ([-7.9, 8.3, 5], 49.9)
+    assert foldr_map(l, 5, |accum, a| (-accum + a, accum)) ==
+      (49.9, [-7.9, 8.3, 5])
   // @example
-  test assert map_foldr([], true, |a, memo| (a, a && memo)) == ([], true)
+  test assert foldr_map([], true, |accum, a| (accum && a, accum)) == (true, [])
 ])
 
 partition_test : Test
@@ -248,6 +248,30 @@ split_at_test = group([
   test assert split_at([42.3, .428, 13.3], -3) == ([], [42.3, .428, 13.3])
   test assert capture(|-| split_at([42.3, .428, 13.3], -4)) == BadListIndex(-4)
   test assert capture(|-| split_at([], 0)) == BadListIndex(0)
+])
+
+take_test : Test
+take_test = group([
+  // @example
+  test assert take(["cow", "dog", "cat"], 2) == ["cow", "dog"]
+  // @example
+  test assert take(["cow", "dog", "cat"], 10) == ["cow", "dog", "cat"]
+  // @example
+  test assert take(["cow", "dog", "cat"], 0) == []
+  // @example
+  test assert take(["cow", "dog", "cat"], -3) == []
+])
+
+drop_test : Test
+drop_test = group([
+  // @example
+  test assert drop(["cow", "dog", "cat"], 2) == ["cat"]
+  // @example
+  test assert drop(["cow", "dog", "cat"], 10) == []
+  // @example
+  test assert drop(["cow", "dog", "cat"], 0) == ["cow", "dog", "cat"]
+  // @example
+  test assert drop(["cow", "dog", "cat"], -3) == ["cow", "dog", "cat"]
 ])
 
 slice_test : Test

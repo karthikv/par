@@ -1,6 +1,6 @@
 // Provides baseline functionality that is automatically included in all
 // modules. All functions are in the global namespace and can be accessed
-// directly.
+// directly without any prefix.
 //
 // @tagline Builtin functions, types, and interfaces.
 module Base
@@ -78,7 +78,7 @@ interface Collection extends Mappable {
   // element of the given `collection`, starting with the initial value `init`.
   // This is also called a reduce, accumulate, or inject operation.
   //
-  // Calls `f(e, accum)` for each element `e` in the given `collection`. For
+  // Calls `f(accum, e)` for each element `e` in the given `collection`. For
   // the first element, `accum` is `init`. For each subsequent element, `accum`
   // is the return value of the last call to `f`. So `accum` is computed
   // across multiple calls to `f`, and the final value of `accum` after all
@@ -95,7 +95,7 @@ interface Collection extends Mappable {
   // be a tuple of type `(K, V)`, representing the current key-value pair.
   //
   // @args collection, init, f
-  fold : (T<A>, F, (A, F) -> F) -> F
+  fold : (T<A>, F, (F, A) -> F) -> F
 
   // Calls `f` for each element in `collection`, returning a new collection
   // that only contains the elements for which `f` returns true.
@@ -143,21 +143,21 @@ interface Collection extends Mappable {
   // initial value `init`. This performs a [`map`](#map) and [`fold`](#fold)
   // operation at the same time.
   //
-  // Calls `f(e, accum)` for each element `e` in the given `collection`. `f`
-  // returns a tuple `(new_e, new_accum)`. The `new_e`s are collected into a new
+  // Calls `f(accum, e)` for each element `e` in the given `collection`. `f`
+  // returns a tuple `(new_accum, new_e)`. The `new_e`s are collected into a new
   // collection.
   //
   // For the first element, `accum` is `init`. For each subsequent element,
   // `accum` is the `new_accum` returned from the last call to `f`. So `accum`
-  // is computed across multiple calls to `f`. The collection of `new_e`s,
-  // along with the final value of `accum` after all elements have been
-  // processed, is the return value of `fold_map`.
+  // is computed across multiple calls to `f`. The final value of `accum`
+  // after all elements have been processed, along with the collection of
+  // `new_e`s, is the return value of `fold_map`.
   //
   // If `collection` is of type `Map<K, V>`, `f`'s first argument, `e`, will
   // be a tuple of type `(K, V)`, representing the current key-value pair.
   //
   // @args collection, init, f
-  map_fold : (T<A>, F, (A, F) -> (B, F)) -> (T<B>, F)
+  fold_map : (T<A>, F, (F, A) -> (F, B)) -> (F, T<B>)
 
   // Puts `elem` into `collection`, returning a new collection. The original
   // `collection` is not modified.

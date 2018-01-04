@@ -74,21 +74,21 @@ map_test = group([
 fold_test : Test
 fold_test = group([
   // @example
-  test assert fold([1, 2, 3], 10, |a, memo| a + memo) == 16
+  test assert fold([1, 2, 3], 10, |accum, a| accum + a) == 16
   // @example
-  test assert fold([], 10, |a, memo| a + memo) == 10
+  test assert fold([], 10, |accum, a| accum + a) == 10
 
   // @example
-  test assert fold(#[1, 2, 3], 10, |a, memo| a + memo) == 16
+  test assert fold(#[1, 2, 3], 10, |accum, a| accum + a) == 16
   // @example
-  test assert fold(#[], 10, |a, memo| a + memo) == 10
+  test assert fold(#[], 10, |accum, a| accum + a) == 10
 
   // @example
   test
     let m = { 1 => 2, 3 => 4, 5 => 6 }
-    assert fold(m, 10, |(k, v), memo| k + v + memo) == 31
+    assert fold(m, 10, |accum, (k, v)| accum + k + v) == 31
   // @example
-  test assert fold({}, 10, |(k, v), memo| k + v + memo) == 10
+  test assert fold({}, 10, |accum, (k, v)| accum + k + v) == 10
 ])
 
 filter_test : Test
@@ -163,39 +163,43 @@ filter_map_test = group([
   test assert filter_map({}, |(k, v)| if k then Some((v, k)) else None) == {}
 ])
 
-map_fold_test : Test
-map_fold_test = group([
+fold_map_test : Test
+fold_map_test = group([
   // @example
-  test assert map_fold(["hi", "bye"], "-", |a, s| (a ++ "!", s ++ a)) ==
-    (["hi!", "bye!"], "-hibye")
+  test assert fold_map(["hi", "bye"], "-", |accum, a|
+    (accum ++ a, a ++ "!")
+  ) == ("-hibye", ["hi!", "bye!"])
   // @example
-  test assert map_fold([], "-", |a, s| (a ++ "!", s ++ a)) == ([], "-")
+  test assert fold_map([], "-", |accum, a|
+    (accum ++ a, a ++ "!")
+  ) == ("-", [])
 
   // @example
   test
-    let (mapped, memo) = map_fold(#["hi", "bye"], "-", |a, s| (a ++ "!", s ++ a))
+    let (final, mapped) = fold_map(#["hi", "bye"], "-", |accum, a|
+      (accum ++ a, a ++ "!")
+    )
     assert mapped == #["hi!", "bye!"]
     // order is undefined
-    assert memo == "-hibye" || memo == "-byehi"
+    assert final == "-hibye" || final == "-byehi"
   // @example
-  test assert map_fold(#[], "-", |a, s| (a ++ "!", s ++ a)) == (#[], "-")
+  test assert fold_map(#[], "-", |accum, a|
+    (accum ++ a, a ++ "!")
+  ) == ("-", #[])
 
   // @example
   test
-    let (mapped, memo) = map_fold(
-      { "hi" => "now", "bye" => "later" },
-      "-",
-      |(k, v), s| ((k ++ "!", v ++ "!"), s ++ k ++ v)
+    let m = { "hi" => "now", "bye" => "later" }
+    let (final, mapped) = fold_map(m, "-", |accum, (k, v)|
+      (accum ++ k ++ v, (k ++ "!", v ++ "!"))
     )
     assert mapped == { "hi!" => "now!", "bye!" => "later!" }
     // order is undefined
-    assert memo == "-hinowbyelater" || memo == "-byelaterhinow"
+    assert final == "-hinowbyelater" || final == "-byelaterhinow"
   // @example
-  test
-    let (mapped, memo) = map_fold({}, "-", |(k, v), s|
-      ((k ++ "!", v ++ "!"), s ++ k ++ v)
-    )
-    assert (mapped, memo) == ({}, "-")
+  test assert fold_map({}, "-", |accum, (k, v)|
+    (accum ++ k ++ v, (k ++ "!", v ++ "!"))
+  ) == ("-", {})
 ])
 
 put_test : Test
