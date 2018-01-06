@@ -1,122 +1,127 @@
 module ListTest
 
-import List (*)
 import Test (group, capture)
 
 max_in_test : Test
 max_in_test = group([
   // @example
-  test assert max_in(["cow", "dog", "cat"]) == Some("dog")
+  test assert List.max_in(["cow", "dog", "cat"]) == Some("dog")
   // @example
-  test assert max_in([42.3, .428, 13.3]) == Some(42.3)
+  test assert List.max_in([42.3, .428, 13.3]) == Some(42.3)
   // @example
-  test assert max_in([]) == None
+  test assert List.max_in([]) == None
 ])
 
 min_in_test : Test
 min_in_test = group([
   // @example
-  test assert min_in(["cow", "dog", "cat"]) == Some("cat")
+  test assert List.min_in(["cow", "dog", "cat"]) == Some("cat")
   // @example
-  test assert min_in([42.3, .428, 13.3]) == Some(.428)
+  test assert List.min_in([42.3, .428, 13.3]) == Some(.428)
   // @example
-  test assert min_in([]) == None
+  test assert List.min_in([]) == None
 ])
 
 max_by_test : Test
 max_by_test = group([
   // @example
-  test assert max_by(["cow", "dog", "turtle"], |l| length(l)) == Some("turtle")
+  test assert List.max_by(["cow", "dog", "turtle"], |l| length(l)) ==
+    Some("turtle")
   // @example
-  test assert max_by([42.3, .428, 13.3], |l| -l) == Some(.428)
+  test assert List.max_by([42.3, .428, 13.3], |l| -l) == Some(.428)
   // @example
-  test assert max_by([], |l| l) == None
+  test assert List.max_by([], |l| l) == None
 ])
 
 min_by_test : Test
 min_by_test = group([
   // @example
-  test assert min_by(["cow", "dog", "turtle"], |l| length(l)) == Some("cow")
+  test assert List.min_by(["cow", "dog", "turtle"], |l| length(l)) ==
+    Some("cow")
   // @example
-  test assert min_by([42.3, .428, 13.3], |l| -l) == Some(42.3)
+  test assert List.min_by([42.3, .428, 13.3], |l| -l) == Some(42.3)
   // @example
-  test assert min_by([], |l| l) == None
+  test assert List.min_by([], |l| l) == None
 ])
 
 take_while_test : Test
 take_while_test = group([
   // @example
-  test assert take_while(["cow", "dog", "cat"], |a| a < "d") == ["cow"]
+  test assert List.take_while(["cow", "dog", "cat"], |a| a < "d") == ["cow"]
   // @example
-  test assert take_while(["cow", "dog", "cat"], |a| a > "e") == []
+  test assert List.take_while(["cow", "dog", "cat"], |a| a > "e") == []
   // @example
-  test assert take_while([42.3, .428, 13.3], |a| a < 50) ==
+  test assert List.take_while([42.3, .428, 13.3], |a| a < 50) ==
     [42.3, .428, 13.3]
   // @example
-  test assert take_while([], |_| true) == []
+  test assert List.take_while([], |_| true) == []
 ])
 
 drop_while_test : Test
 drop_while_test = group([
   // @example
-  test assert drop_while(["cow", "dog", "cat"], |a| a < "d") == ["dog", "cat"]
+  test assert List.drop_while(["cow", "dog", "cat"], |a| a < "d") ==
+    ["dog", "cat"]
   // @example
-  test assert drop_while(["cow", "dog", "cat"], |a| a > "e") ==
+  test assert List.drop_while(["cow", "dog", "cat"], |a| a > "e") ==
     ["cow", "dog", "cat"]
   // @example
-  test assert drop_while([42.3, .428, 13.3], |a| a < 50) == []
+  test assert List.drop_while([42.3, .428, 13.3], |a| a < 50) == []
   // @example
-  test assert drop_while([], |_| true) == []
+  test assert List.drop_while([], |_| true) == []
 ])
 
 split_while_test : Test
 split_while_test = group([
   // @example
-  test assert split_while(["cow", "dog", "cat"], |a| a < "d") ==
+  test assert List.split_while(["cow", "dog", "cat"], |a| a < "d") ==
     (["cow"], ["dog", "cat"])
   // @example
-  test assert split_while(["cow", "dog", "cat"], |a| a > "e") ==
+  test assert List.split_while(["cow", "dog", "cat"], |a| a > "e") ==
     ([], ["cow", "dog", "cat"])
   // @example
-  test assert split_while([42.3, .428, 13.3], |a| a < 50) ==
+  test assert List.split_while([42.3, .428, 13.3], |a| a < 50) ==
     ([42.3, .428, 13.3], [])
   // @example
-  test assert split_while([], |_| true) == ([], [])
+  test assert List.split_while([], |_| true) == ([], [])
 ])
 
 repeat_test : Test
 repeat_test = group([
   // @example
-  test assert repeat("hi", 3) == ["hi", "hi", "hi"]
+  test assert List.repeat("hi", 3) == ["hi", "hi", "hi"]
   // @example
-  test assert repeat('h', 1) == ['h']
+  test assert List.repeat('h', 1) == ['h']
   // @example
-  test assert repeat(true, 0) == []
+  test assert List.repeat(true, 0) == []
 ])
 
 flat_map_test : Test
 flat_map_test = group([
   // @example
-  test assert flat_map([42.3, .428, 13.3], |a| [a, a + 0.1]) ==
+  test assert List.flat_map([42.3, .428, 13.3], |a| [a, a + 0.1]) ==
     [42.3, 42.4, .428, .528, 13.3, 13.4]
   // @example
-  test assert flat_map([42.3, .428, 13.3], |a| [a]) == [42.3, .428, 13.3]
+  test assert List.flat_map([42.3, .428, 13.3], |a| [a]) == [42.3, .428, 13.3]
   // @example
-  test assert flat_map(["cow", "dog", "cat"], String.to_chars) ==
+  test assert List.flat_map(["cow", "dog", "cat"], String.to_chars) ==
     String.to_chars("cowdogcat")
   // @example
-  test assert flat_map([], |a| [a]) == []
+  test assert List.flat_map([], |a| [a]) == []
 ])
 
 foldr_test : Test
 foldr_test = group([
   // @example
-  test assert foldr(["cow", "dog", "cat"], "turtle", |accum, a| accum ++ a) ==
-    "turtlecatdogcow"
+  test assert List.foldr(["cow", "dog", "cat"], "turtle", |accum, a|
+    accum ++ a
+  ) == "turtlecatdogcow"
   // @example
-  test assert foldr([42.3, .428, 13.3], 5, |accum, a| -accum + a) == 50.172
+  test assert List.foldr([42.3, .428, 13.3], 5, |accum, a|
+    -accum + a
+  ) == 50.172
   // @example
-  test assert foldr([], true, |accum, a| accum && a) == true
+  test assert List.foldr([], true, |accum, a| accum && a) == true
 ])
 
 foldr_map_test : Test
@@ -124,285 +129,301 @@ foldr_map_test = group([
   // @example
   test
     let l = ["cow", "dog", "cat"]
-    assert foldr_map(l, "turtle", |accum, a| (accum ++ "!" ++ a, a ++ "!")) ==
-      ("turtle!cat!dog!cow", ["cow!", "dog!", "cat!"])
+    assert List.foldr_map(l, "turtle", |accum, a|
+      (accum ++ "!" ++ a, a ++ "!")
+    ) == ("turtle!cat!dog!cow", ["cow!", "dog!", "cat!"])
   // @example
   test
     let l = [42, .4, 13.3]
-    assert foldr_map(l, 5, |accum, a| (-accum + a, accum)) ==
+    assert List.foldr_map(l, 5, |accum, a| (-accum + a, accum)) ==
       (49.9, [-7.9, 8.3, 5])
   // @example
-  test assert foldr_map([], true, |accum, a| (accum && a, accum)) == (true, [])
+  test assert List.foldr_map([], true, |accum, a| (accum && a, accum)) == (true, [])
 ])
 
 partition_test : Test
 partition_test = group([
   // @example
-  test assert partition(["cow", "dog", "cat"], |a| a < "d") ==
+  test assert List.partition(["cow", "dog", "cat"], |a| a < "d") ==
     (["cow", "cat"], ["dog"])
   // @example
-  test assert partition(["cow", "dog", "cat"], |a| a > "e") ==
+  test assert List.partition(["cow", "dog", "cat"], |a| a > "e") ==
     ([], ["cow", "dog", "cat"])
   // @example
-  test assert partition([42.3, .428, 13.3], |a| a < 1) ==
+  test assert List.partition([42.3, .428, 13.3], |a| a < 1) ==
     ([.428], [42.3, 13.3])
   // @example
-  test assert partition([], |a| true) == ([], [])
+  test assert List.partition([], |a| true) == ([], [])
 ])
 
 reverse_test : Test
 reverse_test = group([
   // @example
-  test assert reverse(["cow", "dog", "cat"]) == ["cat", "dog", "cow"]
+  test assert List.reverse(["cow", "dog", "cat"]) == ["cat", "dog", "cow"]
   // @example
-  test assert reverse([42.3, .428, 13.3]) == [13.3, .428, 42.3]
+  test assert List.reverse([42.3, .428, 13.3]) == [13.3, .428, 42.3]
   // @example
-  test assert reverse([]) == []
+  test assert List.reverse([]) == []
 ])
 
 seq_test : Test
 seq_test = group([
   // @example
-  test assert seq(0, 3) == [0, 1, 2, 3]
+  test assert List.seq(0, 3) == [0, 1, 2, 3]
   // @example
-  test assert seq(-3, 1) == [-3, -2, -1, 0, 1]
+  test assert List.seq(-3, 1) == [-3, -2, -1, 0, 1]
   // @example
-  test assert seq(5, 5) == [5]
+  test assert List.seq(5, 5) == [5]
   // @example
-  test assert seq(2, 1) == []
-  test assert seq(9, -1) == []
+  test assert List.seq(2, 1) == []
+  test assert List.seq(9, -1) == []
 ])
 
 sum_test : Test
 sum_test = group([
   // @example
-  test assert sum([5, 9, -37]) == -23
+  test assert List.sum([5, 9, -37]) == -23
   // @example
-  test assert sum([42.3, .4, 13.3]) == 56.0
+  test assert List.sum([42.3, .4, 13.3]) == 56.0
   // @example
-  test assert sum([]) == 0
+  test assert List.sum([]) == 0
 ])
 
 sort_test : Test
 sort_test = group([
   // @example
-  test assert sort(["cow", "dog", "cat"]) == ["cat", "cow", "dog"]
+  test assert List.sort(["cow", "dog", "cat"]) == ["cat", "cow", "dog"]
   // @example
-  test assert sort([42.3, .428, 13.3]) == [.428, 13.3, 42.3]
+  test assert List.sort([42.3, .428, 13.3]) == [.428, 13.3, 42.3]
   // @example
-  test assert sort([]) == []
+  test assert List.sort([]) == []
 ])
 
 sort_by_test : Test
 sort_by_test = group([
   // @example
-  test assert sort_by([42.3, .428, 13.3], |a| -a) == [42.3, 13.3, .428]
+  test assert List.sort_by([42.3, .428, 13.3], |a| -a) == [42.3, 13.3, .428]
   // @example
   test
-    let f(a) = String.to_chars(a) |> at(2) |> to_int
-    assert sort_by(["cow", "dog", "cat"], f) == ["dog", "cat", "cow"]
+    let f(a) = String.to_chars(a) |> List.at(2) |> to_int
+    assert List.sort_by(["cow", "dog", "cat"], f) == ["dog", "cat", "cow"]
   // @example
-  test assert sort_by([], |a| a) == []
+  test assert List.sort_by([], |a| a) == []
 ])
 
 sort_cmp_test : Test
 sort_cmp_test = group([
   // @example
-  test assert sort_cmp([42.3, .428, 13.3], |a, b| a < b) ==
+  test assert List.sort_cmp([42.3, .428, 13.3], |a, b| a < b) ==
     [.428, 13.3, 42.3]
   // @example
   test
-    let key(s) = String.to_chars(s) |> at(2) |> to_int
+    let key(s) = String.to_chars(s) |> List.at(2) |> to_int
     let f(a, b) = key(a) > key(b)
-    assert sort_cmp(["cow", "dog", "cat"], f) == ["cow", "cat", "dog"]
+    assert List.sort_cmp(["cow", "dog", "cat"], f) == ["cow", "cat", "dog"]
   // @example
-  test assert sort_cmp([], |a, b| a < b) == []
+  test assert List.sort_cmp([], |a, b| a < b) == []
 ])
 
 at_test : Test
 at_test = group([
   // @example
-  test assert at(["cow", "dog", "cat"], 0) == "cow"
+  test assert List.at(["cow", "dog", "cat"], 0) == "cow"
   // @example
-  test assert at(["cow", "dog", "cat"], -1) == "cat"
-  test assert capture(|-| at(["cow", "dog", "cat"], 3)) == BadListIndex(3)
+  test assert List.at(["cow", "dog", "cat"], -1) == "cat"
+  test assert capture(|-| List.at(["cow", "dog", "cat"], 3)) ==
+    List.BadListIndex(3)
   // @example
-  test assert at([42.3, .428, 13.3], 2) == 13.3
+  test assert List.at([42.3, .428, 13.3], 2) == 13.3
   // @example
-  test assert at([42.3, .428, 13.3], -3) == 42.3
-  test assert capture(|-| at([42.3, .428, 13.3], -4)) == BadListIndex(-4)
-  test assert capture(|-| at([], 0)) == BadListIndex(0)
+  test assert List.at([42.3, .428, 13.3], -3) == 42.3
+  test assert capture(|-| List.at([42.3, .428, 13.3], -4)) ==
+    List.BadListIndex(-4)
+  test assert capture(|-| List.at([], 0)) == List.BadListIndex(0)
 ])
 
 split_at_test : Test
 split_at_test = group([
   // @example
-  test assert split_at(["cow", "dog", "cat"], 0) == ([], ["cow", "dog", "cat"])
+  test assert List.split_at(["cow", "dog", "cat"], 0) ==
+    ([], ["cow", "dog", "cat"])
   // @example
-  test assert split_at(["cow", "dog", "cat"], -1) == (["cow", "dog"], ["cat"])
-  test assert split_at(["cow", "dog", "cat"], 1) == (["cow"], ["dog", "cat"])
-  test assert capture(|-| split_at(["cow", "dog", "cat"], 3)) == BadListIndex(3)
+  test assert List.split_at(["cow", "dog", "cat"], -1) ==
+    (["cow", "dog"], ["cat"])
+  test assert List.split_at(["cow", "dog", "cat"], 1) ==
+    (["cow"], ["dog", "cat"])
+  test assert capture(|-| List.split_at(["cow", "dog", "cat"], 3)) ==
+    List.BadListIndex(3)
   // @example
-  test assert split_at([42.3, .428, 13.3], 2) == ([42.3, .428], [13.3])
+  test assert List.split_at([42.3, .428, 13.3], 2) ==
+    ([42.3, .428], [13.3])
   // @example
-  test assert split_at([42.3, .428, 13.3], -3) == ([], [42.3, .428, 13.3])
-  test assert capture(|-| split_at([42.3, .428, 13.3], -4)) == BadListIndex(-4)
-  test assert capture(|-| split_at([], 0)) == BadListIndex(0)
+  test assert List.split_at([42.3, .428, 13.3], -3) ==
+    ([], [42.3, .428, 13.3])
+  test assert capture(|-| List.split_at([42.3, .428, 13.3], -4)) ==
+    List.BadListIndex(-4)
+  test assert capture(|-| List.split_at([], 0)) == List.BadListIndex(0)
 ])
 
 take_test : Test
 take_test = group([
   // @example
-  test assert take(["cow", "dog", "cat"], 2) == ["cow", "dog"]
+  test assert List.take(["cow", "dog", "cat"], 2) == ["cow", "dog"]
   // @example
-  test assert take(["cow", "dog", "cat"], 10) == ["cow", "dog", "cat"]
+  test assert List.take(["cow", "dog", "cat"], 10) == ["cow", "dog", "cat"]
   // @example
-  test assert take(["cow", "dog", "cat"], 0) == []
+  test assert List.take(["cow", "dog", "cat"], 0) == []
   // @example
-  test assert take(["cow", "dog", "cat"], -3) == []
+  test assert List.take(["cow", "dog", "cat"], -3) == []
 ])
 
 drop_test : Test
 drop_test = group([
   // @example
-  test assert drop(["cow", "dog", "cat"], 2) == ["cat"]
+  test assert List.drop(["cow", "dog", "cat"], 2) == ["cat"]
   // @example
-  test assert drop(["cow", "dog", "cat"], 10) == []
+  test assert List.drop(["cow", "dog", "cat"], 10) == []
   // @example
-  test assert drop(["cow", "dog", "cat"], 0) == ["cow", "dog", "cat"]
+  test assert List.drop(["cow", "dog", "cat"], 0) == ["cow", "dog", "cat"]
   // @example
-  test assert drop(["cow", "dog", "cat"], -3) == ["cow", "dog", "cat"]
+  test assert List.drop(["cow", "dog", "cat"], -3) == ["cow", "dog", "cat"]
 ])
 
 slice_test : Test
 slice_test = group([
   // @example
-  test assert slice(["cow", "dog", "cat"], 0, 2) == ["cow", "dog"]
+  test assert List.slice(["cow", "dog", "cat"], 0, 2) == ["cow", "dog"]
   // @example
-  test assert slice(["cow", "dog", "cat"], -1, 1) == ["cat"]
+  test assert List.slice(["cow", "dog", "cat"], -1, 1) == ["cat"]
   // @example
-  test assert slice(["cow", "dog", "cat"], 3, 0) == []
-  test assert capture(|-| slice(["cow", "dog", "cat"], 3, 1)) == BadListIndex(3)
-  test assert capture(|-| slice(["cow", "dog", "cat"], 2, 2)) == BadListIndex(3)
-  test assert slice([42.3, .428, 13.3], 0, 3) == [42.3, .428, 13.3]
+  test assert List.slice(["cow", "dog", "cat"], 3, 0) == []
+  test assert capture(|-| List.slice(["cow", "dog", "cat"], 3, 1)) ==
+    List.BadListIndex(3)
+  test assert capture(|-| List.slice(["cow", "dog", "cat"], 2, 2)) ==
+    List.BadListIndex(3)
+  test assert List.slice([42.3, .428, 13.3], 0, 3) == [42.3, .428, 13.3]
   // @example
-  test assert slice([42.3, .428, 13.3], -3, 2) == [42.3, .428]
-  test assert slice([42.3, .428, 13.3], -4, 0) == []
-  test assert capture(|-| slice([42.3, .428, 13.3], -4, 1)) == BadListIndex(-4)
-  test assert capture(|-| slice([42.3, .428, 13.3], -1, 2)) == BadListIndex(3)
-  test assert slice([], 0, 0) == []
-  test assert capture(|-| slice([], 0, 1)) == BadListIndex(0)
+  test assert List.slice([42.3, .428, 13.3], -3, 2) == [42.3, .428]
+  test assert List.slice([42.3, .428, 13.3], -4, 0) == []
+  test assert capture(|-| List.slice([42.3, .428, 13.3], -4, 1)) ==
+    List.BadListIndex(-4)
+  test assert capture(|-| List.slice([42.3, .428, 13.3], -1, 2)) ==
+    List.BadListIndex(3)
+  test assert List.slice([], 0, 0) == []
+  test assert capture(|-| List.slice([], 0, 1)) == List.BadListIndex(0)
 ])
 
 range_test : Test
 range_test = group([
   // @example
-  test assert range(["cow", "dog", "cat"], 0, 1) == ["cow", "dog"]
+  test assert List.range(["cow", "dog", "cat"], 0, 1) == ["cow", "dog"]
   // @example
-  test assert range(["cow", "dog", "cat"], -1, 2) == ["cat"]
-  test assert range(["cow", "dog", "cat"], 2, -2) == []
+  test assert List.range(["cow", "dog", "cat"], -1, 2) == ["cat"]
+  test assert List.range(["cow", "dog", "cat"], 2, -2) == []
   // @example
-  test assert range(["cow", "dog", "cat"], 3, 1) == []
-  test assert capture(|-| range(["cow", "dog", "cat"], 2, 3)) == BadListIndex(3)
-  test assert range([42.3, .428, 13.3], 0, 2) == [42.3, .428, 13.3]
+  test assert List.range(["cow", "dog", "cat"], 3, 1) == []
+  test assert capture(|-| List.range(["cow", "dog", "cat"], 2, 3)) ==
+    List.BadListIndex(3)
+  test assert List.range([42.3, .428, 13.3], 0, 2) == [42.3, .428, 13.3]
   // @example
-  test assert range([42.3, .428, 13.3], -3, 1) == [42.3, .428]
-  test assert capture(|-| range([42.3, .428, 13.3], -4, 0)) == BadListIndex(-4)
-  test assert range([42.3, .428, 13.3], 0, -4) == []
-  test assert capture(|-| range([], 0, 0)) == BadListIndex(0)
-  test assert range([], 1, 0) == []
+  test assert List.range([42.3, .428, 13.3], -3, 1) == [42.3, .428]
+  test assert capture(|-| List.range([42.3, .428, 13.3], -4, 0)) ==
+    List.BadListIndex(-4)
+  test assert List.range([42.3, .428, 13.3], 0, -4) == []
+  test assert capture(|-| List.range([], 0, 0)) == List.BadListIndex(0)
+  test assert List.range([], 1, 0) == []
 ])
 
 join_test : Test
 join_test = group([
   // @example
-  test assert join(["cow", "dog", "cat"], "") == "cowdogcat"
+  test assert List.join(["cow", "dog", "cat"], "") == "cowdogcat"
   // @example
-  test assert join(["cow", "dog", "cat"], ", ") == "cow, dog, cat"
+  test assert List.join(["cow", "dog", "cat"], ", ") == "cow, dog, cat"
   // @example
-  test assert join([], ", ") == ""
+  test assert List.join([], ", ") == ""
 ])
 
 zip_test : Test
 zip_test = group([
   // @example
-  test assert zip(["cow", "dog", "cat"], [42.3, .428, 13.3]) ==
+  test assert List.zip(["cow", "dog", "cat"], [42.3, .428, 13.3]) ==
     [("cow", 42.3), ("dog", .428), ("cat", 13.3)]
-  test assert capture(|-| zip(["cow", "dog"], [42.3, .428, 13.3]))
-    == MismatchedLengths(2, 3)
+  test assert capture(|-| List.zip(["cow", "dog"], [42.3, .428, 13.3]))
+    == List.MismatchedLengths(2, 3)
   // @example
-  test assert zip([@hi], ['h']) == [(@hi, 'h')]
-  test assert capture(|-| zip([], ['h'])) == MismatchedLengths(0, 1)
+  test assert List.zip([@hi], ['h']) == [(@hi, 'h')]
+  test assert capture(|-| List.zip([], ['h'])) == List.MismatchedLengths(0, 1)
   // @example
-  test assert zip([], []) == []
+  test assert List.zip([], []) == []
 ])
 
 unzip_test : Test
 unzip_test = group([
   // @example
-  test assert unzip([("cow", 42.3), ("dog", .428), ("cat", 13.3)]) ==
+  test assert List.unzip([("cow", 42.3), ("dog", .428), ("cat", 13.3)]) ==
     (["cow", "dog", "cat"], [42.3, .428, 13.3])
   // @example
-  test assert unzip([(@hi, 'h')]) == ([@hi], ['h'])
+  test assert List.unzip([(@hi, 'h')]) == ([@hi], ['h'])
   // @example
-  test assert unzip([]) == ([], [])
+  test assert List.unzip([]) == ([], [])
 ])
 
 group_by_test : Test
 group_by_test = group([
   // @example
-  test assert group_by(["turtle", "dog", "cat"], |a| length(a)) ==
+  test assert List.group_by(["turtle", "dog", "cat"], |a| length(a)) ==
     { 6 => ["turtle"], 3 => ["dog", "cat"] }
   // @example
-  test assert group_by([42.3, .428, 13.3], |a| a > 10) ==
+  test assert List.group_by([42.3, .428, 13.3], |a| a > 10) ==
     { true => [42.3, 13.3], false => [.428] }
   // @example
-  test assert group_by([42.3, .428, 13.3], |a| a) ==
+  test assert List.group_by([42.3, .428, 13.3], |a| a) ==
     { 42.3 => [42.3], .428 => [.428], 13.3 => [13.3] }
   // @example
-  test assert group_by(
+  test assert List.group_by(
     ["cow", "dog", "cat"],
     |a| String.to_chars(a) |> head
   ) == { 'c' => ["cow", "cat"], 'd' => ["dog"] }
-  test assert group_by([], |a| a) == {}
+  test assert List.group_by([], |a| a) == {}
 ])
 
 unique_test : Test
 unique_test = group([
   // @example
-  test assert unique(["cow", "dog", "cat"]) == ["cow", "dog", "cat"]
+  test assert List.unique(["cow", "dog", "cat"]) == ["cow", "dog", "cat"]
   // @example
-  test assert unique(["cow", "dog", "cow"]) == ["cow", "dog"]
+  test assert List.unique(["cow", "dog", "cow"]) == ["cow", "dog"]
   // @example
-  test assert unique([42.3, .428, 13.3, .428]) == [42.3, .428, 13.3]
+  test assert List.unique([42.3, .428, 13.3, .428]) == [42.3, .428, 13.3]
   // @example
-  test assert unique([]) == []
+  test assert List.unique([]) == []
 ])
 
 unique_by_test : Test
 unique_by_test = group([
   // @example
-  test assert unique_by([42.3, .428, 13.3], |a| a > 10) == [42.3, .428]
+  test assert List.unique_by([42.3, .428, 13.3], |a| a > 10) == [42.3, .428]
   // @example
-  test assert unique_by([42.3, .428, 13.3], |a| true) == [42.3]
+  test assert List.unique_by([42.3, .428, 13.3], |a| true) == [42.3]
   // @example
-  test assert unique_by(
+  test assert List.unique_by(
     ["cow", "dog", "cat"],
     |a| String.to_chars(a) |> head
   ) == ["cow", "dog"]
   // @example
-  test assert unique_by([], |a| a) == []
+  test assert List.unique_by([], |a| a) == []
 ])
 
 with_index_test : Test
 with_index_test = group([
   // @example
-  test assert with_index(["cow", "dog", "cat"]) ==
+  test assert List.with_index(["cow", "dog", "cat"]) ==
     [("cow", 0), ("dog", 1), ("cat", 2)]
   // @example
-  test assert with_index([42.3]) == [(42.3, 0)]
+  test assert List.with_index([42.3]) == [(42.3, 0)]
   // @example
-  test assert with_index([]) == []
+  test assert List.with_index([]) == []
 ])
 
 each_test : Test
@@ -410,14 +431,18 @@ each_test = group([
   test
     @erlang:put(@each_test1, "")
     let l = ["cow", "dog", "cat"]
-    each(l, |a| @erlang:put(@each_test1, @erlang:get(@each_test1) ++ a))
+    List.each(l, |a|
+      @erlang:put(@each_test1, @erlang:get(@each_test1) ++ a)
+    )
     assert @erlang:get(@each_test1) == "cowdogcat"
   test
     @erlang:put(@each_test2, 0)
-    each([42.3], |a| @erlang:put(@each_test2, @erlang:get(@each_test2) + a))
+    List.each([42.3], |a|
+      @erlang:put(@each_test2, @erlang:get(@each_test2) + a)
+    )
     assert @erlang:get(@each_test2) == 42.3
   test
     @erlang:put(@each_test3, 0)
-    each([], |a| @erlang:put(@each_test3, 1))
+    List.each([], |a| @erlang:put(@each_test3, 1))
     assert @erlang:get(@each_test3) == 0
 ])

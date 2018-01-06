@@ -4,8 +4,6 @@
 
 % TODO:
 % - [2 weeks] Stdlib
-%   - Description for exceptions??
-%   - String.search: return empty array when re = ""?
 % - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
 %   - Fix bug in separate for sets
 %   - Add concat_all function
@@ -15,17 +13,14 @@
 %   - ^Mod.foo in pattern; update reference docs
 % - Precompile stdlib modules
 %   - Include lexer/parser in stdlib or disallow modules named lexer/parser
-% - try/catch construct is awkward
 % - Website + Documentation
 %   - Link into docs from tutorial
 %     - Ensure line numbers are right
 %   - Order of functions in modules
-%   - Copyright and icons8 link
 %   - Docs for stdlib
 %     - Capture tests?
 %     - Module prefixes in tests
 %       - Check @example directives
-%     - Move types to top? Or link to types?
 %     - Index at the top of pages
 %     - Put head/tail/lookup/get/key/remove in respective module?
 %   - Download page
@@ -42,6 +37,10 @@
 % - If # of args in sig is diff from decl, ignore sig
 % - Better messages for indirect errors from T<B> due to T<A> being unified
 % - Improve io:put_char badarg errors when file isn't opened with right mode
+% - Description for exceptions?
+% - Add else clause to try/catch
+% - Docs:
+%   - Link to types from within signatures?
 %
 % Defer
 % - if-let condition and other condition (or maybe when statement?)
