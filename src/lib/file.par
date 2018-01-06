@@ -1,14 +1,41 @@
+// Functions in this module let you read from and write to the filesystem. Many
+// functions accept a path, which can be relative to the current working
+// directory (see [`cwd()`](#cwd)) or absolute. The companion module
+// [`Path`](path) can be used to operate on filesystem paths.
+//
+// Filesystem operations have many error cases, so functions in this module can
+// raise a variety of exceptions, the most common ones being
+// [`Exists`](#Exists), [`DoesntExist`](#DoesntExist),
+// [`EndOfFile`](#EndOfFile), [`PermissionDenied`](#PermissionDenied), and
+// [`NotPermitted`](#NotPermitted).
+//
+// @tagline Standard library for filesystem operations.
 module File
 
 import Base (*)
 import String
+import Path
 
+// Contains access controls for a file. Returned by [`stat()`](#stat) as part of
+// the [`Stat`](#Stat) struct, and can be changed via [`chmod()`](#chmod).
+// `owner`, `group`, and `other` are the permissions granted to the respective
+// groups. See [`Permissions`](#Permissions) for values that `owner`, `group`,
+// and `other` can take on.
 struct Mode {
   owner : Permissions
   group : Permissions
   other : Permissions
 }
 
+// Specifies permissions when accessing a file.
+//
+// - `AllowNone` &mdash; No operations are allowed.
+// - `AllowRead` &mdash; Reading is permitted.
+// - `AllowWrite` &mdash; Writing is permitted.
+// - `AllowExec` &mdash; Executing is permitted.
+// - `AllowReadWrite` &mdash; Reading and writing are permitted.
+// - `AllowWriteExec` &mdash; Writing and executing are permitted.
+// - `AllowAll` &mdash; Reading, writing, and executing are permitted.
 enum Permissions {
   AllowNone
   AllowRead
@@ -20,6 +47,19 @@ enum Permissions {
   AllowAll
 }
 
+// Contains metadata about a file. Returned by [`stat()`](#stat).
+//
+// - `size` &mdash; The file's size.
+// - `type` &mdash; The file type (file, driectory, symlink, etc.); see
+// [`FileType`](#FileType).
+// - `atime` &mdash; The last Unix time the file was accessed, represented as
+// the number of seconds since the epoch.
+// - `mtime` &mdash; The last Unix time the file was modified, represented as
+// the number of seconds since the epoch.
+// - `mode` &mdash; The mode of the file, containing permissions; see
+// [`Mode`](#Mode).
+// - `uid` &mdash; The user ID of the file's owner.
+// - `gid` &mdash; The group ID of the file's group.
 struct Stat {
   size : Int
   type : FileType
@@ -30,6 +70,14 @@ struct Stat {
   gid : Int
 }
 
+// Specifies the type of a file. Returned by [`stat()`](#stat) as part of the
+// [`Stat`](#Stat) struct.
+//
+// - `File` &mdash; A regular file.
+// - `Directory` &mdash; A directory.
+// - `Symlink` &mdash; A symbolic link.
+// - `Device` &mdash; A device (e.g. `/dev/null` is the null device).
+// - `Other` &mdash; Some other file (e.g. named pipe, unix socket, etc.).
 enum FileType {
   File
   Directory
@@ -38,64 +86,163 @@ enum FileType {
   Other
 }
 
+// Specifies what mode to open a file in. Passed to [`open()`](#open).
+//
+// - `Read` &mdash; Open a file for reading.
+// - `Write` &mdash; Open a file for writing. The file is **truncated** (i.e.
+// all current contents are erased). If the file doesn't exist, it is created.
+// - `Append` &mdash; Open a file for appending. If the file doesn't exist, it
+// is created. All writes occur at the end of the file.
+// - `ReadWrite` &mdash; Open a file for reading and writing. If the file
+// doesn't exist, it is created.
+// - `Exclusive` &mdash; Create and open a file for writing. If the file already
+// exists, raises [`Exists`](#Exists).
 enum OpenMode {
   Read
   Write
   Append
   ReadWrite
+  Exclusive
 }
 
+// Represents an open file handle returned by [`open()`](#open).
+//
+// @opaque
 enum Handle {
   Handle(Native)
 }
 
+// Specifies the amount to read from a file.
+//
+// - `Chars(n)` &mdash; Read `n` characters.
+// - `Line` &mdash; Read one line.
+// - `All` &mdash; Read all remaining contents.
 enum ReadAmount {
   Chars(Int)
   Line
   All
 }
 
-enum PosixCode {
-  Eacces
-  Eagain
-  Ebadf
-  Ebusy
-  Edquot
-  Eexist
-  Efault
-  Efbig
-  Eintr
-  Einval
-  Eio
-  Eisdir
-  Eloop
-  Emfile
-  Emlink
-  Enametoolong
-  Enfile
-  Enodev
-  Enoent
-  Enomem
-  Enospc
-  Enotblk
-  Enotdir
-  Enotsup
-  Enxio
-  Eperm
-  Epipe
-  Erofs
-  Espipe
-  Esrch
-  Estale
-  Exdev
-}
+// The file already exists. Raised if, for instance, [`mkdir()`](#mkdir) is
+// called with an existing path.
+exception Exists
 
-exception Terminated
-exception SystemLimit
-exception PosixError(PosixCode, String)
+// No such file or directory exists. Raised if, for instance, you
+// [`stat()`](#stat) a non-existent path.
+exception DoesntExist
+
+// Raised by [`read()`](#read) if you attempt to read at the end of a file.
 exception EndOfFile
-exception UnknownError(Atom)
 
+// There aren't sufficient permissions to access a file.
+exception PermissionDenied
+
+// Either the operation doesn't make sense, like using [`rm()`](#rm) on
+// a directory, or you need root permissions, like when using
+// [`chown()`](#chown).
+exception NotPermitted
+
+// The file handle has been closed already.
+exception ClosedHandle
+
+// The file handle is either invalid or doesn't support this operation. Raised
+// if, for instance, [`read()`](#read) is called on a file that is opened in
+// [`Write`](#OpenMode) mode.
+exception BadHandle
+
+// A resource is temporarily unavailable; try again.
+exception TempUnavailable
+
+// A resource is busy and can't be used.
+exception Busy
+
+// The disk quota has been exceeded.
+exception DiskQuotaExceeded
+
+// Bad address in a system call argument.
+exception BadAddress
+
+// The file is too large.
+exception TooLarge
+
+// A system call was interrupted.
+exception Interrupted
+
+// An invalid file was given as an argument; for instance, a non-symlink was
+// passed to [`readlink()`](#readlink).
+exception InvalidArgument
+
+// Generic IO error.
+exception IOError
+
+// There was an illegal operation on a directory. Raised if, for instance,
+// [`cp()`](#cp) is called on a directory.
+exception IllegalDirOperation
+
+// There are too many open files.
+exception TooManyOpen
+
+// There are too many links.
+exception TooManyLinks
+
+// There are too many levels of symbolic links to traverse.
+exception SymlinkLoop
+
+// A file's name is too long.
+exception NameTooLong
+
+// The file table has overflowed.
+exception TableOverflow
+
+// No such device exists.
+exception NoDevice
+
+// There isn't enough memory.
+exception OutOfMemory
+
+// No space is left on the device.
+exception NoSpace
+
+// A block device is required.
+exception NotBlockDevice
+
+// A directory is required.
+exception NotDirectory
+
+// An operation is not supported.
+exception NotSupported
+
+// No such device or address.
+exception NoDeviceOrAddress
+
+// A pipe was broken. Occurs when you're trying to write to a pipe, but nothing
+// is reading from that pipe.
+exception BrokenPipe
+
+// The filesystem is read-only.
+exception ReadOnlyFS
+
+// A seek operation was performed on an invalid file type.
+exception InvalidSeek
+
+// No such process.
+exception NoProcess
+
+// The file handle is stale.
+exception StaleHandle
+
+// You're trying to perform an operation across two separate filesystems.
+exception CrossDomainLink
+
+// A system limit was reached.
+exception SystemLimit
+
+// An unknown error, where the argument is the error code.
+exception UnknownError(String)
+
+// Returns metadata about the file at `path`. If `path` is a symbolic link,
+// resolves it and returns info about the target path it refers to. See the
+// [`Stat`](#Stat) struct for details on the result.
 stat : String -> Stat
 export stat(path) =
   match @file:read_file_info(path, [(@time, @posix)]) {
@@ -103,6 +250,10 @@ export stat(path) =
     e => fail(e)
   }
 
+// Returns metadata about the file at `path`, but doesn't resolve symbolic
+// links. If `path` is a symbolic link, returns info about the link itself, not
+// the target path the link refers to. See the [`Stat`](#Stat) struct for
+// details on the result.
 lstat : String -> Stat
 export lstat(path) =
   match @file:read_link_info(path, [(@time, @posix)]) {
@@ -110,6 +261,9 @@ export lstat(path) =
     e => fail(e)
   }
 
+// Returns true if `path` exists (regardless of whether it's a file, directory,
+// device, etc.). If `path` is a symbolic link, returns true if the target path
+// it refers to exists.
 exists? : String -> Bool
 export exists?(path) =
   match @file:read_file_info(path, []) {
@@ -146,7 +300,8 @@ munge_file_info(info) =
     gid = gid
   }
 
-
+// Changes the access controls for the file at the given `path` to `mode`. See
+// the [`Mode`](#Mode) struct for details on what can be modified.
 chmod : (String, Mode) -> ()
 export chmod(path, mode) =
   let num = mode_to_num(mode)
@@ -190,62 +345,99 @@ oct_to_perm = {
 perm_to_oct : Map<Permissions, Int>
 perm_to_oct = map(oct_to_perm, |(k, v)| (v, k))
 
+// Changes the owner of `path` to the user given by ID `uid`. This can only be
+// run by a super-user.
+//
+// @example // Change owner of "/foo" to the user with ID 0 (generally root).
+// | chown("/foo", 0)
 chown : (String, Int) -> ()
 export chown(path, uid) = match @file:change_owner(path, uid) {
   // change_owner fails to report errors, so we check for success.
-  @ok => if stat(path).uid != uid then raise PosixError(Eperm, desc(@eperm))
+  @ok => if stat(path).uid != uid then raise NotPermitted
   e => fail(e)
 }
 
+// Changes the group of `path` to the group given by ID `gid`. This can only
+// be run by the owner of the file or a super-user.
+//
+// @example // Change group of "foo/bar" to the group with ID 30.
+// | chgrp("foo/bar", 30)
 chgrp : (String, Int) -> ()
 export chgrp(path, gid) = match @file:change_group(path, gid) {
   // change_owner fails to report errors, so we check for success.
-  @ok => if stat(path).gid != gid then raise PosixError(Eperm, desc(@eperm))
+  @ok => if stat(path).gid != gid then raise NotPermitted
   e => fail(e)
 }
 
+// Copies the file at path `from` to path `to`, overwriting `to` if it exists.
+// Doesn't work with directories.
 cp : (String, String) -> Int
 export cp(from, to) = match @file:copy(from, to) {
   (@ok, count) => count
   e => fail(e)
 }
 
+// Moves the file at path `from` to path `to`, overwriting `to` if it exists.
+// Doesn't work with directories.
 mv : (String, String) -> ()
 export mv(from, to) = match @file:rename(from, to) {
   @ok => ()
   e => fail(e)
 }
 
+// Removes the file at `path`. Doesn't work with directories; use
+// [`rmdir`](#rmdir).
 rm : String -> ()
 export rm(path) = match @file:delete(path) {
   @ok => ()
   e => fail(e)
 }
 
+// Removes the directory at `path`. The directory must be empty to be removable.
 rmdir : String -> ()
 export rmdir(path) = match @file:del_dir(path) {
   @ok => ()
   e => fail(e)
 }
 
+// Lists the files in the directory given by `path`. Returns a list of paths,
+// where each path starts with `path` and is followed by a directory separator
+// and the filename.
 ls : String -> [String]
 export ls(path) = match @file:list_dir(path) {
   (@ok, files) => map(files, String.from_chars)
   e => fail(e)
 }
 
+// Returns a list of existing paths that match the glob pattern `pat`. `pat` may
+// contain the following special sequences:
+//
+// - `?` &mdash; Matches any one character.
+// - `*` &mdash; Matches zero or more characters, **excluding** the directory
+// separator.
+// - `**` &mdash; Matches zero or more characters, including the directory
+// separator.
+// - `{foo,bar,...}` &mdash; Matches either `foo` or `bar` or etc.
+// - `[a,b,f-z,...]` &mdash; Matches either the single character `a` or the
+// single character `b` or the range of characters `f` through `z` or etc.
+//
+// All characters that aren't `?`, `*`, `{`, `}`, `[`, or `]` match themselves,
+// case-sensitive.
 glob : String -> [String]
-export glob(path) =
-  String.to_chars(path)
+export glob(pat) =
+  String.to_chars(pat)
   |> @filelib:wildcard/1
   |> map(String.from_chars)
 
+// Makes a new directory at `path`. All parent directories must exist; to create
+// parent directories as well, use [`mkdir_p()`](#mkdir_p).
 mkdir : String -> ()
 export mkdir(path) = match @file:make_dir(path) {
   @ok => ()
   e => fail(e)
 }
 
+// Makes a new directory at `path`, creating parent directories if need be.
 mkdir_p : String -> ()
 export mkdir_p(path) =
   // ensure_dir ensures the *parent* directory exists, so we need to
@@ -256,48 +448,146 @@ export mkdir_p(path) =
     e => fail(e)
   }
 
+// The system's temporary directory. Use [`make_temp_dir()`](#make_temp_dir) to
+// make a new temporary directory within this directory, and
+// [`write_temp()`](#write_temp) to write a temporary file into this directory.
+//
+// @example // Write to temporary file foo in system temp directory.
+// | let path = Path.join(File.sys_temp_dir, "foo")
+// | File.write_path(path, "bar")
+sys_temp_dir : String
+export sys_temp_dir = @os:getenv("TEMP", "/tmp")
+
+// Makes a new temporary directory within [`sys_temp_dir`](#sys_temp_dir),
+// returning its path. See [`write_temp()`](#write_temp) if you want to write to
+// a temporary file.
+make_temp_dir : () -> String
+export make_temp_dir() = make_temp_dir_r(0)
+
+make_temp_dir_r : Int -> String
+make_temp_dir_r(count) =
+  let path = Path.join(sys_temp_dir, "par-dir-") ++ rand_suffix()
+
+  try
+    mkdir(path)
+    path
+  catch {
+    Exists =>
+      if count >= 10 then
+        @rand:seed(@exrop)
+        make_temp_dir_r(0)
+      else
+        make_temp_dir_r(count + 1)
+  }
+
+// Creates a hard link at path `new` that mirrors the file at path `existing`.
+// A hard link is an alias that refers to the same underlying file (i.e. inode
+// in linux). If `existing` is deleted or moved, `new` will still exist with its
+// contents. If `existing` or `new` is modified, the other will also be
+// modified, as the same underlying file is changed. On many systems, hard links
+// to directories are not allowed.
 ln : (String, String) -> ()
-export ln(from, to) = match @file:make_link(from, to) {
+export ln(existing, new) = match @file:make_link(existing, new) {
   @ok => ()
   e => fail(e)
 }
 
+// Creates a symbolic link at path `new` that points to path `existing`.
+// A symbolic link is a special file whose contents are a filesystem path; in
+// this way, it's just a pointer to `existing`. If `existing` is deleted or
+// moved, `new` will refer to a non-existent path. If `existing` is modified,
+// `new` will still point to `existing`, and hence you can see the changes.
+// Symbolic links can refer to directories.
 ln_s : (String, String) -> ()
-export ln_s(from, to) = match @file:make_symlink(from, to) {
+export ln_s(existing, new) = match @file:make_symlink(existing, new) {
   @ok => ()
   e => fail(e)
 }
 
+// Resolves the symbolic link at `path`, returning the target path to which it
+// refers to.
 readlink : String -> String
 export readlink(path) = match @file:read_link(path) {
   (@ok, resolved) => String.from_chars(resolved)
   e => fail(e)
 }
 
+// Reads and returns the contents of the file at `path`.
 read_path : String -> String
 export read_path(path) = match @file:read_file(path) {
   (@ok, contents) => @unicode:characters_to_binary(contents)
   e => fail(e)
 }
 
+// Writes `contents` to the file at path `path`.
 write_path : (String, String) -> ()
 export write_path(path, contents) = match @file:write_file(path, contents) {
   @ok => ()
   e => fail(e)
 }
 
+// Writes `contents` to a temporary file located within
+// [`sys_temp_dir`](#sys_tmp_dir), returning its path. See
+// [`make_temp_dir()`](#make_temp_dir) if you want to create a new temporary
+// directory.
+write_temp : String -> String
+export write_temp(contents) =
+  let (path, h) = open_temp(contents, 0)
+  ensure close(h) after write(h, contents)
+  chmod(path, Mode {
+    owner = AllowReadWrite
+    group = AllowNone
+    other = AllowNone
+  })
+  path
+
+open_temp : (String, Int) -> (String, Handle)
+open_temp(contents, count) =
+  let path = Path.join(sys_temp_dir, "par-file-") ++ rand_suffix()
+
+  try (path, open(path, Exclusive)) catch {
+    Exists =>
+      if count >= 10 then
+        @rand:seed(@exrop)
+        open_temp(contents, 0)
+      else
+        open_temp(contents, count + 1)
+  }
+
+rand_suffix : () -> String
+rand_suffix() =
+  let suffix = @io_lib:format("~w", [@rand:uniform()]) |> String.from_chars
+  // Strip "0." from suffix to avoid adding a numeric extension to the path.
+  String.range(suffix, 2, -1)
+
+// Returns the current working directory, which starts as the directory in which
+// `par` is initially run.
+//
+// @example // Prints the current working directory.
+// | print(cwd())
 cwd : () -> String
 export cwd() = match @file:get_cwd() {
   (@ok, dir) => String.from_chars(dir)
   e => fail(e)
 }
 
+// Changes the current working directory to `path`.
+//
+// @example // Make foo the new working directory.
+// | cd("foo")
 cd : String -> ()
 export cd(path) = match @file:set_cwd(path) {
   @ok => ()
   e => fail(e)
 }
 
+// Opens the file at `path` in the specified `mode`. See [`OpenMode`](#OpenMode)
+// for a description of the different modes. Returns a file handle that can be
+// passed to [`read()`](#read), [`write()`](#write), [`close()`](#close), etc.
+// In all modes except `Append`, the initial file position is 0, meaning reads/
+// writes will occur at the beginning of the file. In the `Append` mode, writes
+// occur at the end of the file. [`position()`](#position) can be used to modify
+// the position to read/write at.
 open : (String, OpenMode) -> Handle
 export open(path, mode) =
   let base_opts = [@read_ahead, @binary, assume (@encoding, @utf8)]
@@ -306,6 +596,7 @@ export open(path, mode) =
     Write => [@write | base_opts]
     Append => [@append | base_opts]
     ReadWrite => [@read, @write | base_opts]
+    Exclusive => [@write, @exclusive | base_opts]
   }
   let device = match @file:open(path, opts) {
     (@ok, device) => device
@@ -313,6 +604,10 @@ export open(path, mode) =
   }
   Handle(device)
 
+// Closes the file handle `handle` that was opened previously by a call to
+// [`open()`](#open). After this function returns, [`handle`] may no longer be
+// used for any operations. If it is used, a [`ClosedHandle`](#ClosedHandle)
+// exception will be raised.
 close : Handle -> ()
 export close(handle) =
   let Handle(device) = handle
@@ -321,6 +616,11 @@ export close(handle) =
     e => fail(e)
   }
 
+// Reads characters from the file given by `handle` in the amount `amount`. See
+// the [`ReadAmount`](#ReadAmount) struct for details on how to specify an
+// amount.
+//
+// If you try to read from the end of a file, raises [`EndOfFile`](#EndOfFile).
 read : (Handle, ReadAmount) -> String
 export read(handle, amount) =
   let Handle(device) = handle
@@ -348,14 +648,18 @@ export read(handle, amount) =
     data => data
   }
 
+// Writes `contents` to the file given by `handle`.
 write : (Handle, String) -> ()
-export write(handle, str) =
+export write(handle, contents) =
   let Handle(device) = handle
-  match @io:put_chars(device, str) {
+  match @io:put_chars(device, contents) {
     @ok => ()
     e => fail(e)
   }
 
+// Changes the file position of `handle` to `pos`, where 0 is the beginning of
+// the file, and `n` is the `n` bytes after the beginning. The next read or
+// write will occur at position `pos`.
 seek : (Handle, Int) -> ()
 export seek(handle, pos) =
   let Handle(device) = handle
@@ -364,6 +668,9 @@ export seek(handle, pos) =
     e => fail(e)
   }
 
+// Changes the file position of `handle` to the last position. This is useful
+// for writing at the end of the file or getting the size of the file with
+// [`tell()`](#tell).
 seek_end : Handle -> Int
 export seek_end(handle) =
   let Handle(device) = handle
@@ -372,6 +679,8 @@ export seek_end(handle) =
     e => fail(e)
   }
 
+// Returns the file position of `handle`, where 0 is the beginning of the file
+// and `n` is the `n` bytes after the beginning.
 tell : Handle -> Int
 export tell(handle) =
   let Handle(device) = handle
@@ -380,6 +689,8 @@ export tell(handle) =
     e => fail(e)
   }
 
+// Truncates the file given by `handle`, removing all data from the current
+// file position up to the end of the file.
 truncate : Handle -> ()
 export truncate(handle) =
   let Handle(device) = handle
@@ -390,42 +701,39 @@ export truncate(handle) =
 
 fail : ((Atom, Atom)) -> A
 fail((@error, e)) = match e {
-  @terminated => raise Terminated
+  @eexist => raise Exists
+  @enoent => raise DoesntExist
+  @eacces => raise PermissionDenied
+  @eperm => raise NotPermitted
+  @terminated => raise ClosedHandle
+  @ebadf => raise BadHandle
+  @eagain => raise TempUnavailable
+  @ebusy => raise Busy
+  @edquot => raise DiskQuotaExceeded
+  @efault => raise BadAddress
+  @efbig => raise TooLarge
+  @eintr => raise Interrupted
+  @einval => raise InvalidArgument
+  @eio => raise IOError
+  @eisdir => raise IllegalDirOperation
+  @emfile => raise TooManyOpen
+  @emlink => raise TooManyLinks
+  @eloop => raise SymlinkLoop
+  @enametoolong => raise NameTooLong
+  @enfile => raise TableOverflow
+  @enodev => raise NoDevice
+  @enomem => raise OutOfMemory
+  @enospc => raise NoSpace
+  @enotblk => raise NotBlockDevice
+  @enotdir => raise NotDirectory
+  @enotsup => raise NotSupported
+  @enxio => raise NoDeviceOrAddress
+  @epipe => raise BrokenPipe
+  @erofs => raise ReadOnlyFS
+  @espipe => raise InvalidSeek
+  @esrch => raise NoProcess
+  @estale => raise StaleHandle
+  @exdev => raise CrossDomainLink
   @system_limit => raise SystemLimit
-  @eacces => raise PosixError(Eacces, desc(e))
-  @eagain => raise PosixError(Eagain, desc(e))
-  @ebadf => raise PosixError(Ebadf, desc(e))
-  @ebusy => raise PosixError(Ebusy, desc(e))
-  @edquot => raise PosixError(Edquot, desc(e))
-  @eexist => raise PosixError(Eexist, desc(e))
-  @efault => raise PosixError(Efault, desc(e))
-  @efbig => raise PosixError(Efbig, desc(e))
-  @eintr => raise PosixError(Eintr, desc(e))
-  @einval => raise PosixError(Einval, desc(e))
-  @eio => raise PosixError(Eio, desc(e))
-  @eisdir => raise PosixError(Eisdir, desc(e))
-  @eloop => raise PosixError(Eloop, desc(e))
-  @emfile => raise PosixError(Emfile, desc(e))
-  @emlink => raise PosixError(Emlink, desc(e))
-  @enametoolong => raise PosixError(Enametoolong, desc(e))
-  @enfile => raise PosixError(Enfile, desc(e))
-  @enodev => raise PosixError(Enodev, desc(e))
-  @enoent => raise PosixError(Enoent, desc(e))
-  @enomem => raise PosixError(Enomem, desc(e))
-  @enospc => raise PosixError(Enospc, desc(e))
-  @enotblk => raise PosixError(Enotblk, desc(e))
-  @enotdir => raise PosixError(Enotdir, desc(e))
-  @enotsup => raise PosixError(Enotsup, desc(e))
-  @enxio => raise PosixError(Enxio, desc(e))
-  @eperm => raise PosixError(Eperm, desc(e))
-  @epipe => raise PosixError(Epipe, desc(e))
-  @erofs => raise PosixError(Erofs, desc(e))
-  @espipe => raise PosixError(Espipe, desc(e))
-  @esrch => raise PosixError(Esrch, desc(e))
-  @estale => raise PosixError(Estale, desc(e))
-  @exdev => raise PosixError(Exdev, desc(e))
-  _ => raise UnknownError(e)
+  _ => raise UnknownError(to_str(e))
 }
-
-desc : Atom -> String
-desc(e) = @file:format_error(e) |> String.from_chars

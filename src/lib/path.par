@@ -1,8 +1,8 @@
 // Functions in this module operate on filesystem paths. Paths are separated
 // into components by the Unix directory separator `/`. On Windows, even though
 // `\` is the directory separator, the functions in this module convert `\` to
-// `/` for consistency, and these converted paths can be used by the `File`
-// module with no issues.
+// `/` for consistency, and these converted paths can be used by the
+// [`File`](file) module with no issues.
 //
 // @tagline Standard library for working with filesystem paths.
 module Path
