@@ -428,7 +428,7 @@ populate_env_and_types(Comps, C) ->
 
           Con = utils:qualify(Name, ModuleC),
           TB = #type_binding{is_iface=false, num_params=NumParams, loc=Loc},
-          ModuleC1 = define_type(Con, TB, ModuleC),
+          ModuleC1 = define_type(Con, TB, none, ModuleC),
 
           case N of
             enum ->
@@ -478,7 +478,7 @@ populate_env_and_types(Comps, C) ->
             NumParams_ -> NumParams_
           end,
           TB = #type_binding{is_iface=true, num_params=NumParams, loc=Loc},
-          ModuleC1 = define_type(Con, TB, ModuleC),
+          ModuleC1 = define_type(Con, TB, none, ModuleC),
 
           Value = {Fields, none, ordsets:new()},
           NewIfaces = (ModuleC1#ctx.ifaces)#{Con => Value},
@@ -496,10 +496,11 @@ populate_env_and_types(Comps, C) ->
     end, FoldC#ctx{module=Module}, Defs)
   end, C, Comps).
 
-define(Name, #binding{loc=Loc}=B, C) ->
+define(Name, #binding{loc=Loc, soft=Soft}=B, C) ->
   #ctx{module=Module, g_env=GEnv, exports=Exports} = C,
-  case maps:find({Module, Name}, GEnv) of
-    {ok, #binding{loc=OrigLoc}} ->
+
+  {NewB, C1} = case maps:find({Module, Name}, GEnv) of
+    {ok, #binding{loc=OrigLoc, soft=false}} when not Soft ->
       {Err, ErrLoc} = if
         % e.g. global has the same name as a builtin
         Loc == ?BUILTIN_LOC -> {?ERR_REDEF_BUILTIN(Name), OrigLoc};
@@ -507,48 +508,97 @@ define(Name, #binding{loc=Loc}=B, C) ->
         OrigLoc == ?BUILTIN_LOC -> {?ERR_REDEF_BUILTIN(Name), Loc};
         true -> {?ERR_REDEF(Name, OrigLoc), Loc}
       end,
-      add_ctx_err(Err, ErrLoc, C);
+      {none, add_ctx_err(Err, ErrLoc, C)};
 
-    error ->
+    {ok, #binding{soft=false}} when Soft -> {none, C};
+    {ok, #binding{soft=true}} when not Soft -> {B, C};
+    {ok, #binding{soft=true, modules=OrigModules}=OrigB} when Soft ->
+      {OrigB#binding{modules=B#binding.modules ++ OrigModules}, C};
+
+    error -> {B, C}
+  end,
+
+  case NewB of
+    none -> C1;
+    _ ->
       NewExports = if
         B#binding.exported ->
           Names = maps:get(Module, Exports),
           Exports#{Module => ordsets:add_element(Name, Names)};
         true -> Exports
       end,
-      C#ctx{g_env=GEnv#{{Module, Name} => B}, exports=NewExports}
+      C1#ctx{g_env=GEnv#{{Module, Name} => NewB}, exports=NewExports}
   end.
 
-define_type(Con, #type_binding{is_iface=IsIface, loc=Loc}=TB, C) ->
+define_type(Con, TB, AliasCon, C) ->
+  #type_binding{
+    is_iface=IsIface,
+    num_params=NumParams,
+    loc=Loc,
+    soft=Soft,
+    modules=Modules
+  } = TB,
   #ctx{module=Module, types=Types, exports=Exports} = C,
 
-  case maps:find(Con, Types) of
-    % e.g. struct that has the same name as a builtin
-    {ok, #type_binding{is_iface=true, loc=?BUILTIN_LOC}} ->
-      add_ctx_err(?ERR_REDEF_BUILTIN_IFACE(Con), Loc, C);
-    {ok, #type_binding{is_iface=false, loc=?BUILTIN_LOC}} ->
-      add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), Loc, C);
+  {NewTB, C1} = case Soft of
+    true ->
+      case maps:find(Con, Types) of
+        {ok, #type_binding{soft=false}} -> {none, C};
+        {ok, #type_binding{soft=true, modules=OrigModules}=OrigTB} ->
+          {OrigTB#type_binding{modules=Modules ++ OrigModules}, C};
+        error -> {TB, C}
+      end;
 
-    % e.g. imported type that has the same name as a builtin
-    {ok, #type_binding{loc=OrigLoc}} when Loc == ?BUILTIN_LOC, IsIface ->
-      add_ctx_err(?ERR_REDEF_BUILTIN_IFACE(Con), OrigLoc, C);
-    {ok, #type_binding{loc=OrigLoc}} when Loc == ?BUILTIN_LOC, not IsIface ->
-      add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), OrigLoc, C);
+    false ->
+      case maps:find(Con, Types) of
+        {ok, #type_binding{soft=true}} -> {TB, C};
 
-    {ok, #type_binding{is_iface=true, loc=OrigLoc}} ->
-      add_ctx_err(?ERR_REDEF(Con, OrigLoc), Loc, C);
-    {ok, #type_binding{is_iface=false, loc=OrigLoc}} ->
-      add_ctx_err(?ERR_REDEF(Con, OrigLoc), Loc, C);
+        % e.g. struct that has the same name as a builtin
+        {ok, #type_binding{is_iface=true, loc=?BUILTIN_LOC}} ->
+          {none, add_ctx_err(?ERR_REDEF_BUILTIN_IFACE(Con), Loc, C)};
+        {ok, #type_binding{is_iface=false, loc=?BUILTIN_LOC}} ->
+          {none, add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), Loc, C)};
 
-    error ->
+        % e.g. imported type that has the same name as a builtin
+        {ok, #type_binding{loc=OrigLoc}} when Loc == ?BUILTIN_LOC, IsIface ->
+          {none, add_ctx_err(?ERR_REDEF_BUILTIN_IFACE(Con), OrigLoc, C)};
+        {ok, #type_binding{loc=OrigLoc}} when Loc == ?BUILTIN_LOC, not IsIface ->
+          {none, add_ctx_err(?ERR_REDEF_BUILTIN_TYPE(Con), OrigLoc, C)};
+
+        {ok, #type_binding{is_iface=true, loc=OrigLoc}} ->
+          {none, add_ctx_err(?ERR_REDEF(Con, OrigLoc), Loc, C)};
+        {ok, #type_binding{is_iface=false, loc=OrigLoc}} ->
+          {none, add_ctx_err(?ERR_REDEF(Con, OrigLoc), Loc, C)};
+
+        error -> {TB, C}
+      end
+  end,
+
+  case NewTB of
+    none -> C1;
+    _ ->
       NewExports = if
-        TB#type_binding.exported ->
+        NewTB#type_binding.exported ->
           Names = maps:get(Module, Exports),
           RawCon = utils:unqualify(Con),
           Exports#{Module => ordsets:add_element(RawCon, Names)};
         true -> Exports
       end,
-      C#ctx{types=Types#{Con => TB}, exports=NewExports}
+      C2 = C1#ctx{types=Types#{Con => NewTB}, exports=NewExports},
+
+      case NewTB of
+        #type_binding{soft=true, modules=NewModules} when length(NewModules) > 1 ->
+          C2#ctx{aliases=maps:remove(Con, C2#ctx.aliases)};
+
+        _ ->
+          case {AliasCon, NumParams} of
+            {none, _} -> C2;
+            {_, 0} -> add_alias(Con, [], {con, AliasCon}, false, C2);
+            _ ->
+              Vs = [tv_server:fresh(C2#ctx.pid) || _ <- lists:seq(1, NumParams)],
+              add_alias(Con, Vs, {gen, {con, AliasCon}, Vs}, false, C2)
+          end
+      end
   end.
 
 gen_t_num_params({lam_te, _, ArgTEs, ReturnTE}) ->
@@ -717,38 +767,40 @@ infer_defs(Comps, C) ->
 
 populate_direct_imports(Deps, C) ->
   lists:foldl(fun({DepModule, Idents}, ModuleC) ->
-    Expanded = case Idents of
-      [{all, AllLoc}] -> utils:exported_idents(DepModule, AllLoc, C);
-      _ -> Idents
+    {Expanded, Soft, SoftModules} = case Idents of
+      % Names/Types in Base aren't soft to avoid overriding and confusion.
+      [{all, AllLoc}] when DepModule == "Base" ->
+        {utils:exported_idents(DepModule, AllLoc, C), false, undefined};
+      [{all, AllLoc}] ->
+        {utils:exported_idents(DepModule, AllLoc, C), true, [DepModule]};
+      _ -> {Idents, false, undefined}
     end,
 
     lists:foldl(fun(Ident, NestedC) ->
       case Ident of
         {var, Loc, Name} ->
           {B, NestedC1} = lookup(DepModule, Name, Loc, NestedC),
-          define(Name, B#binding{exported=false, loc=Loc}, NestedC1);
+          NewB = B#binding{
+            exported=false,
+            loc=Loc,
+            soft=Soft,
+            modules=SoftModules
+          },
+          define(Name, NewB, NestedC1);
 
         {con_token, Loc, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
           {TypeExists, NestedC1} = case maps:find(Con, NestedC#ctx.types) of
-            {ok, #type_binding{exported=true, num_params=NumParams}=TB} ->
+            {ok, #type_binding{exported=true, soft=false}=TB} ->
               NewCon = utils:qualify(Name, NestedC),
-              NewTB = TB#type_binding{exported=false, loc=Loc},
+              NewTB = TB#type_binding{
+                exported=false,
+                loc=Loc,
+                soft=Soft,
+                modules=SoftModules
+              },
 
-              CaseC = define_type(NewCon, NewTB, NestedC),
-              CaseC1 = case {no_ctx_errs(CaseC, NestedC), NumParams} of
-                % use the error message from define_type
-                {false, _} -> CaseC;
-
-                {true, 0} -> add_alias(NewCon, [], {con, Con}, false, CaseC);
-                {true, _} ->
-                  Vs = lists:map(fun(_) ->
-                    tv_server:fresh(CaseC#ctx.pid)
-                  end, lists:seq(1, NumParams)),
-                  add_alias(NewCon, Vs, {gen, {con, Con}, Vs}, false, CaseC)
-              end,
-
-              {true, CaseC1};
+              {true, define_type(NewCon, NewTB, Con, NestedC)};
 
             error -> {false, NestedC}
           end,
@@ -758,7 +810,13 @@ populate_direct_imports(Deps, C) ->
             {false, false} -> NestedC2;
             {true, false} -> NestedC1;
             {_, true} ->
-              define(Name, B#binding{exported=false, loc=Loc}, NestedC2)
+              NewB = B#binding{
+                exported=false,
+                loc=Loc,
+                soft=Soft,
+                modules=SoftModules
+              },
+              define(Name, NewB, NestedC2)
           end;
 
         {variants, Loc, Name} ->
@@ -767,7 +825,13 @@ populate_direct_imports(Deps, C) ->
             {ok, {OptionNames, _, _}} ->
               lists:foldl(fun(OptionName, #ctx{g_env=GEnv}=FoldC) ->
                 B = maps:get({DepModule, OptionName}, GEnv),
-                define(OptionName, B#binding{exported=false, loc=Loc}, FoldC)
+                NewB = B#binding{
+                  exported=false,
+                  loc=Loc,
+                  soft=Soft,
+                  modules=SoftModules
+                },
+                define(OptionName, NewB, FoldC)
               end, NestedC, OptionNames);
 
             error ->
@@ -790,7 +854,8 @@ infer_ifaces(CompsGEnvs, C) ->
           Con = utils:qualify(RawCon, ModuleC),
           #type_binding{
             is_iface=true,
-            num_params=NumParams
+            num_params=NumParams,
+            soft=false
           } = maps:get(Con, ModuleC#ctx.types),
 
           {Parents, ModuleC1} = lists:foldl(fun(ConToken, Memo) ->
@@ -1041,7 +1106,8 @@ infer({interface, _, {con_token, _, RawCon}, _, Fields}, C) ->
   Con = utils:qualify(RawCon, C),
   #type_binding{
     is_iface=true,
-    num_params=NumParams
+    num_params=NumParams,
+    soft=false
   } = maps:get(Con, C#ctx.types),
 
   Ifaces = C#ctx.ifaces,
@@ -1091,62 +1157,60 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
   ImplLoc = ?LOC(ImplTE),
   IfaceCon = utils:resolve_con(RawIfaceCon, C),
 
-  case maps:find(IfaceCon, C#ctx.ifaces) of
-    % TODO: are builtin type classes implementable?
-    error -> {none, add_ctx_err(?ERR_NOT_DEF_IFACE(IfaceCon), IfaceLoc, C)};
+  C1 = validate_type(IfaceCon, true, any, IfaceLoc, C),
+  C2 = case ordsets:is_element(IfaceCon, utils:builtin_is()) of
+    true -> add_ctx_err(?ERR_CANT_IMPL(IfaceCon), IfaceLoc, C1);
+    false -> C1
+  end,
 
-    {ok, {Fields, FieldTs, Parents}} ->
+  case no_ctx_errs(C2, C) of
+    false -> {none, C2};
+    true ->
+      {Fields, FieldTs, Parents} = maps:get(IfaceCon, C2#ctx.ifaces),
       #type_binding{
         is_iface=true,
         num_params=IfaceNumParams
-      } = maps:get(IfaceCon, C#ctx.types),
+      } = maps:get(IfaceCon, C2#ctx.types),
 
-      {RawT, C1} = case {IfaceNumParams, ImplTE} of
-        {0, _} -> infer_sig(false, false, #{}, ImplTE, C);
+      {RawT, C3} = case {IfaceNumParams, ImplTE} of
+        {0, _} -> infer_sig(false, false, #{}, ImplTE, C2);
 
         {_, {con_token, ConLoc, RawCon}} ->
-          Con = utils:resolve_con(RawCon, C),
-          NumParams = case maps:find(Con, C#ctx.types) of
+          Con = utils:resolve_con(RawCon, C2),
+          NumParams = case maps:find(Con, C2#ctx.types) of
             {ok, #type_binding{num_params=Num}}
               when IfaceNumParams == 1 andalso Num > 1 -> Num;
             {ok, #type_binding{num_params=1}} when IfaceNumParams > 1 -> 1;
             _ -> IfaceNumParams
           end,
 
-          ValidatedC = validate_type(Con, false, NumParams, ConLoc, C),
-          case no_ctx_errs(ValidatedC, C) of
+          ValidatedC = validate_type(Con, false, NumParams, ConLoc, C2),
+          case no_ctx_errs(ValidatedC, C2) of
             false -> {none, ValidatedC};
-            true ->
-              ParamTs = [{con, "()"} || _ <- lists:seq(1, NumParams)],
-              GenT = {gen, {con, Con}, ParamTs},
-              {gen, ConT, _} = unalias_except_struct(
-                GenT,
-                ValidatedC#ctx.aliases
-              ),
-              {ConT, ValidatedC}
+            true -> {{con, Con}, ValidatedC}
           end;
 
-        _ -> {none, add_ctx_err(?ERR_IMPL_TYPE(IfaceCon), ImplLoc, C)}
+        _ -> {none, add_ctx_err(?ERR_IMPL_TYPE(IfaceCon), ImplLoc, C2)}
       end,
 
-      case no_ctx_errs(C1, C) of
-        false -> {none, C1};
+      case no_ctx_errs(C3, C2) of
+        false -> {none, C3};
         true ->
-          {ImplT, _} = norm_sig_type(RawT, false, C1#ctx.pid),
+          {ImplT, _} = norm_sig_type(RawT, false, C3#ctx.pid),
           Key = utils:impl_key(RawT),
-          Impls = C1#ctx.impls,
+          Impls = C3#ctx.impls,
           SubImpls = maps:get(IfaceCon, Impls),
 
-          C2 = case maps:find(Key, SubImpls) of
+          C4 = case maps:find(Key, SubImpls) of
             {ok, {ExistingT, _, _, _}} ->
               DupErr = ?ERR_DUP_IMPL(IfaceCon, Key, utils:pretty(ExistingT)),
-              add_ctx_err(DupErr, ImplLoc, C1);
+              add_ctx_err(DupErr, ImplLoc, C3);
 
             error ->
-              Value = {RawT, ImplT, Inits, C1#ctx.module},
+              Value = {RawT, ImplT, Inits, C3#ctx.module},
               NewSubImpls = SubImpls#{Key => Value},
               NewImpls = Impls#{IfaceCon => NewSubImpls},
-              CaseC = C1#ctx{impls=NewImpls},
+              CaseC = C3#ctx{impls=NewImpls},
 
               V = tv_server:next_name(CaseC#ctx.pid),
               GVs = ordsets:from_list([V]),
@@ -1168,24 +1232,24 @@ infer({impl, Loc, Ref, {con_token, IfaceLoc, RawIfaceCon}, ImplTE, Inits}, C) ->
           end, lists:zip(Fields, FieldTs)),
           FieldLocTs = maps:from_list(Pairs),
 
-          {ActualNames, C3} = infer_impl_inits(
+          {ActualNames, C5} = infer_impl_inits(
             Inits,
             ImplT,
             ImplLoc,
             IfaceCon,
             IfaceNumParams,
             FieldLocTs,
-            C2
+            C4
           ),
 
           ExpNames = ordsets:from_list(maps:keys(FieldLocTs)),
           MissingNames = ordsets:subtract(ExpNames, ActualNames),
 
-          C4 = ordsets:fold(fun(Name, FoldC) ->
+          C6 = ordsets:fold(fun(Name, FoldC) ->
             add_ctx_err(?ERR_MISSING_FIELD_IMPL(Name, IfaceCon), Loc, FoldC)
-          end, C3, MissingNames),
-          ImplRefs = C4#ctx.impl_refs,
-          {none, C4#ctx{impl_refs=ImplRefs#{Ref => Key}}}
+          end, C5, MissingNames),
+          ImplRefs = C6#ctx.impl_refs,
+          {none, C6#ctx{impl_refs=ImplRefs#{Ref => Key}}}
       end
   end;
 
@@ -1323,64 +1387,52 @@ infer({anon_record_ext, Loc, Ref, AllInits, Expr}, C) ->
 
 infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
   Con = utils:resolve_con(RawCon, C),
-  case maps:find(Con, C#ctx.types) of
-    {ok, #type_binding{is_iface=false, num_params=NumParams}} ->
+  C1 = validate_type(Con, false, any, ConLoc, C),
+
+  case no_ctx_errs(C1, C) of
+    true ->
+      #type_binding{num_params=NumParams} = maps:get(Con, C1#ctx.types),
       ExpT = case NumParams of
-        % if we've directly imported a struct type and are creating it here,
-        % we need to unalias
-        0 -> unalias_except_struct({con, Con}, C#ctx.aliases);
+        0 -> {con, Con};
         _ ->
-          Vs = lists:map(fun(_) ->
-            tv_server:fresh(C#ctx.pid)
-          end, lists:seq(1, NumParams)),
-          unalias_except_struct({gen, {con, Con}, Vs}, C#ctx.aliases)
+          Vs = [tv_server:fresh(C1#ctx.pid) || _ <- lists:seq(1, NumParams)],
+          {gen, {con, Con}, Vs}
       end,
 
-      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
+      {RecordT, C2} = infer({anon_record, Loc, none, Inits}, C1),
       From = ?FROM_RECORD_CREATE(Con),
 
-      TV = tv_server:fresh(C1#ctx.pid),
-      C2 = add_cst(TV, RecordT, Loc, From, C1),
-      C3 = add_cst(TV, ExpT, Loc, From, C2),
-      {TV, C3};
+      TV = tv_server:fresh(C2#ctx.pid),
+      C3 = add_cst(TV, RecordT, Loc, From, C2),
+      C4 = add_cst(TV, ExpT, Loc, From, C3),
+      {TV, C4};
 
-    {ok, #type_binding{is_iface=true}} ->
-      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
-      {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
-
-    error ->
-      {RecordT, C1} = infer({anon_record, Loc, none, Inits}, C),
-      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
+    false -> infer({anon_record, Loc, none, Inits}, C1)
   end;
 
 infer({record_ext, Loc, {con_token, ConLoc, RawCon}, AllInits, Expr}, C) ->
   Con = utils:resolve_con(RawCon, C),
-  case maps:find(Con, C#ctx.types) of
-    {ok, #type_binding{is_iface=false, num_params=NumParams}} ->
+  C1 = validate_type(Con, false, any, ConLoc, C),
+
+  case no_ctx_errs(C1, C) of
+    true ->
+      #type_binding{num_params=NumParams} = maps:get(Con, C1#ctx.types),
       ExpT = case NumParams of
-        0 -> unalias_except_struct({con, Con}, C#ctx.aliases);
+        0 -> {con, Con};
         _ ->
-          Vs = lists:map(fun(_) ->
-            tv_server:fresh(C#ctx.pid)
-          end, lists:seq(1, NumParams)),
-          unalias_except_struct({gen, {con, Con}, Vs}, C#ctx.aliases)
+          Vs = [tv_server:fresh(C1#ctx.pid) || _ <- lists:seq(1, NumParams)],
+          {gen, {con, Con}, Vs}
       end,
 
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C),
+      {RecordT, C2} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C1),
       From = ?FROM_RECORD_UPDATE,
 
-      TV = tv_server:fresh(C1#ctx.pid),
-      C2 = add_cst(TV, RecordT, Loc, From, C1),
-      C3 = add_cst(TV, ExpT, Loc, From, C2),
-      {TV, C3};
+      TV = tv_server:fresh(C2#ctx.pid),
+      C3 = add_cst(TV, RecordT, Loc, From, C2),
+      C4 = add_cst(TV, ExpT, Loc, From, C3),
+      {TV, C4};
 
-    {ok, #type_binding{is_iface=true}} ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C),
-      {RecordT, add_ctx_err(?ERR_IFACE_NOT_TYPE(Con), ConLoc, C1)};
-
-    error ->
-      {RecordT, C1} = infer({anon_record_ext, Loc, none, AllInits, Expr}, C),
-      {RecordT, add_ctx_err(?ERR_NOT_DEF_TYPE(Con), ConLoc, C1)}
+    false -> infer({anon_record_ext, Loc, none, AllInits, Expr}, C1)
   end;
 
 infer({field_fn, _, {var, _, Name}}, C) ->
@@ -1704,7 +1756,15 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
             I = utils:resolve_con(RawI, C),
 
             case maps:find(I, C#ctx.types) of
-              {ok, #type_binding{is_iface=true, num_params=0}} ->
+              % If the binding is not ambiguous and has 0 params, we add it to
+              % the GenIs set. If it is ambiguous, we keep it in BaseIfaceTokens
+              % so an error can be reported.
+              {ok, #type_binding{
+                is_iface=true,
+                num_params=0,
+                soft=Soft,
+                modules=Modules
+              }} when not Soft; length(Modules) == 1 ->
                 {FoldBaseIfaceTokens, ordsets:add_element(I, FoldGenIsSet)};
               _ -> {[ConToken | FoldBaseIfaceTokens], FoldGenIsSet}
             end
@@ -1741,7 +1801,7 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
           Is = merge_is(AllIs, AllIs, C2#ctx.ifaces),
           {gen, NewV, Is, BaseT, ParamTs};
 
-        _ -> unalias_except_struct({gen, BaseT, ParamTs}, C2#ctx.aliases)
+        _ -> {gen, BaseT, ParamTs}
       end,
       {T, C2};
 
@@ -1818,7 +1878,7 @@ infer_sig_helper(_, Unique, {con_token, Loc, RawCon}, C) ->
   end,
 
   case no_ctx_errs(C, C1) of
-    true -> {unalias_except_struct({con, Con}, C1#ctx.aliases), C1};
+    true -> {{con, Con}, C1};
     false -> {{hole, false}, C1}
   end;
 infer_sig_helper(RestrictVs, Unique, {record_te, _, Fields}, C) ->
@@ -1908,13 +1968,7 @@ pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
 lookup(Name, Loc, C) ->
   case maps:find(Name, C#ctx.l_env) of
     {ok, B} -> {B, C};
-    error ->
-      case maps:find({C#ctx.module, Name}, C#ctx.g_env) of
-        {ok, B} -> {B, C};
-        error ->
-          TV = tv_server:fresh(C#ctx.pid),
-          {#binding{tv=TV}, add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)}
-      end
+    error -> lookup(C#ctx.module, Name, Loc, C)
   end.
 
 lookup(Module, Name, Loc, C) ->
@@ -1923,11 +1977,19 @@ lookup(Module, Name, Loc, C) ->
   case maps:find({Module, Name}, C#ctx.g_env) of
     {ok, #binding{exported=false}=B} when External ->
       {B, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
+    {ok, #binding{soft=true, modules=Modules}} when length(Modules) > 1 ->
+      false = External,
+      TV = tv_server:fresh(C#ctx.pid),
+      C1 = add_ctx_err(?ERR_AMBIG(Name, Modules), Loc, C),
+      {#binding{tv=TV}, C1};
     {ok, B} -> {B, C};
 
     error ->
       TV = tv_server:fresh(C#ctx.pid),
-      C1 = add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C),
+      C1 = if
+        External -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C);
+        true -> add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)
+      end,
       {#binding{tv=TV}, C1}
   end.
 
@@ -2014,9 +2076,11 @@ infer_impl_inits(
                 end, lists:seq(1, IfaceNumParams)),
                 GenTV = {gen, GenV, none, NewTV, GenTVParamTs},
 
-                Types = CaseC#ctx.types,
                 {con, ImplCon} = ImplT,
-                #type_binding{num_params=NumParams} = maps:get(ImplCon, Types),
+                #type_binding{
+                  num_params=NumParams,
+                  soft=false
+                } = maps:get(ImplCon, CaseC#ctx.types),
 
                 ParamTs = if
                   IfaceNumParams > 1 andalso NumParams == 1 ->
@@ -2104,6 +2168,10 @@ make_cst(T1, T2, Loc, From, C) ->
 
 validate_type(Con, IsIface, NumParams, Loc, C) ->
   case maps:find(Con, C#ctx.types) of
+    {ok, #type_binding{soft=true, modules=Modules}} when length(Modules) > 1 ->
+      add_ctx_err(?ERR_AMBIG(Con, Modules), Loc, C);
+
+    {ok, #type_binding{is_iface=IsIface}} when NumParams == any -> C;
     {ok, #type_binding{is_iface=IsIface, num_params=NumParams}} -> C;
 
     {ok, #type_binding{is_iface=false}} when IsIface ->
@@ -3136,23 +3204,6 @@ rigid_err(T1, T2, From, Err) ->
 
 add_err_v(V, #solver{err_vs=ErrVs}=S) ->
   {false, S#solver{err_vs=ordsets:add_element(V, ErrVs)}}.
-
-unalias_except_struct({con, Con}, Aliases) ->
-  case maps:find(Con, Aliases) of
-    {ok, {[], T, false}} -> unalias_except_struct(T, Aliases);
-    _ -> {con, Con}
-  end;
-unalias_except_struct({gen, {con, Con}, ParamTs}, Aliases) ->
-  case maps:find(Con, Aliases) of
-    {ok, {Vs, T, false}} ->
-      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
-      Opts = #sub_opts{subs=Subs, aliases=Aliases},
-      unalias_except_struct(utils:subs(T, Opts), Aliases);
-    % no need to unalias ParamTs because we'll recursively unalias them if
-    % necessary in infer_sig_helper
-    _ -> {gen, {con, Con}, ParamTs}
-  end;
-unalias_except_struct(T, _) -> T.
 
 instance({con, "Int"}, "Num", _, S) -> {true, S};
 instance({con, "Float"}, "Num", _, S) -> {true, S};

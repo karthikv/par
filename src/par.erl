@@ -19,6 +19,7 @@
 %   - Order of functions in modules
 %   - Docs for stdlib
 %     - Capture tests?
+%       - Add else clause to try/catch
 %     - Module prefixes in tests
 %       - Check @example directives
 %     - Index at the top of pages
@@ -38,7 +39,6 @@
 % - Better messages for indirect errors from T<B> due to T<A> being unified
 % - Improve io:put_char badarg errors when file isn't opened with right mode
 % - Description for exceptions?
-% - Add else clause to try/catch
 % - Docs:
 %   - Link to types from within signatures?
 %

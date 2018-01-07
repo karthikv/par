@@ -2847,6 +2847,10 @@ other_errors_test_() ->
       "expr = Bar('h')",
       "expr"
     ))
+  , ?_test(bad_prg(
+      "impl Num for String { a = 1 }\n",
+      {?ERR_CANT_IMPL("Num"), l(5, 3)}
+    ))
 
   % TODO: think about ways to improve error reporting to make this test pass
   % ensures sig constraints are unified first for better error messages
@@ -3095,17 +3099,76 @@ import_test_() ->
         "y = (Hello(@h), Hi, Baz { first = 'f', second = \"s\" }, x)"
       }
     ], "bar", "y"))
-  , ?_test(bad_many([
+  % Soft bindings can be overridden.
+  , ?_test("Baz" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "struct Baz { first : Char, second : String }"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (*)\n"
+        "enum Baz { Other }\n"
+        "x = Other"
+      }
+    ], "bar", "x"))
+  , ?_test("Bool" = ok_many([
       {"foo",
         "module Foo\n"
         "export x = 3"
       },
       {"bar",
         "module Bar\n"
-        "import \"./foo\" (x)\n"
-        "x = 4"
+        "import \"./foo\" (*)\n"
+        "x = true"
       }
-    ], "bar", {?ERR_REDEF("x", l(1, 0, 1)), "Bar", l(16, 1)}))
+    ], "bar", "x"))
+  % Identical soft bindings are OK if unused.
+  , ?_test("A ~ Num" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "struct Foo { first : Char, second : String }"
+      },
+      {"bar",
+        "module Bar\n"
+        "struct Foo { x : Atom }"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./foo\" (*)\n"
+        "import \"./bar\" (*)\n"
+        "y = 3"
+      }
+    ], "baz", "y"))
+  , ?_test("A ~ Num" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "export x = 3"
+      },
+      {"bar",
+        "module Bar\n"
+        "export x = 4"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./foo\" (*)\n"
+        "import \"./bar\" (*)\n"
+        "y = 3"
+      }
+    ], "baz", "y"))
+  % To ensure soft interface bindings in gen TV sigs are properly handled.
+  , ?_test("(A<B>, A<C> ~ Baz) -> String" = ok_many([
+      {"foo",
+        "module Foo\n"
+        "interface Baz { x : T -> String }\n"
+      },
+      {"bar",
+        "module Bar\n"
+        "import \"./foo\" (*)\n"
+        "f : (T<A>, T<B> ~ Baz) -> String\n"
+        "f(_, a) = x(a)"
+      }
+    ], "bar", "f"))
   , ?_test(bad_many([
       {"foo", "module Foo enum Foo { Foo(Int) }"},
       {"bar",
@@ -3139,19 +3202,90 @@ import_test_() ->
         "f(x) = match x { One => 1, Two(_) => 2, Three => 3 }"
       }
     ], "bar", {?ERR_REDEF("One", l(21, 3)), "Bar", l(26, 12)}))
+  % Identical soft bindings introduce ambiguity if used.
   , ?_test(bad_many([
       {"foo",
         "module Foo\n"
-        "enum Foo { Hello(Atom), Hi }\n"
-        "struct Baz { first : Char, second : String }\n"
-        "x = false"
+        "export x = 3"
       },
       {"bar",
         "module Bar\n"
+        "export x = 4"
+      },
+      {"baz",
+        "module Baz\n"
         "import \"./foo\" (*)\n"
-        "enum Baz { Other }\n"
+        "import \"./bar\" (*)\n"
+        "y = x"
       }
-    ], "bar", {?ERR_REDEF("Baz", l(1, 5, 3)), "Bar", l(16, 1)}))
+    ], "baz", {?ERR_AMBIG("x", ["Bar", "Foo"]), "Baz", l(2, 4, 1)}))
+  , ?_test(bad_many([
+      {"foo",
+        "module Foo\n"
+        "enum Foo { Const }"
+      },
+      {"bar",
+        "module Bar\n"
+        "struct Foo { x : String }"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./foo\" (*)\n"
+        "import \"./bar\" (*)\n"
+        "y : Foo\n"
+        "y = 3"
+      }
+    ], "baz", {?ERR_AMBIG("Foo", ["Bar", "Foo"]), "Baz", l(2, 4, 3)}))
+  , ?_test(bad_many([
+      {"foo",
+        "module Foo\n"
+        "enum Foo { Const }"
+      },
+      {"bar",
+        "module Bar\n"
+        "struct Foo { x : String }"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./foo\" (*)\n"
+        "import \"./bar\" (*)\n"
+        "y = Foo { x = \"hi\" }"
+      }
+    ], "baz", {?ERR_AMBIG("Foo", ["Bar", "Foo"]), "Baz", l(2, 4, 3)}))
+  , ?_test(bad_many([
+      {"foo",
+        "module Foo\n"
+        "enum Foo { Const }"
+      },
+      {"bar",
+        "module Bar\n"
+        "interface Foo { x : T -> String }"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./foo\" (*)\n"
+        "import \"./bar\" (*)\n"
+        "y : A ~ Foo -> String\n"
+        "y = x"
+      }
+    ], "baz", {?ERR_AMBIG("Foo", ["Bar", "Foo"]), "Baz", l(2, 8, 3)}))
+  , ?_test(bad_many([
+      {"foo",
+        "module Foo\n"
+        "enum Foo { Const }"
+      },
+      {"bar",
+        "module Bar\n"
+        "interface Foo { x : T -> String }"
+      },
+      {"baz",
+        "module Baz\n"
+        "import \"./foo\" (*)\n"
+        "import \"./bar\" (*)\n"
+        "struct Baz { baz : Char }\n"
+        "impl Foo for Baz { x(_) = \"hi\" }"
+      }
+    ], "baz", {?ERR_AMBIG("Foo", ["Bar", "Foo"]), "Baz", l(3, 5, 3)}))
   , ?_test(bad_many([
       {"foo",
         "module Foo\n"

@@ -17,10 +17,26 @@
 -record(comp, {module, ast, deps, path, prg, prg_lines}).
 
 % a variable binding in the global or local env
--record(binding, {tv, id, exported = false, arity, inst, loc}).
+-record(binding, {
+  tv,
+  id,
+  exported = false,
+  arity,
+  inst,
+  loc,
+  soft = false,
+  modules
+}).
 
 % a global type binding; types are exported by default
--record(type_binding, {is_iface, num_params, exported = true, loc}).
+-record(type_binding, {
+  is_iface,
+  num_params,
+  exported = true,
+  loc,
+  soft = false,
+  modules
+}).
 
 % C - A context record for type inference with the following fields:
 %   gnr - the current gnr record that constraints are being added to; see G
@@ -350,7 +366,16 @@
   ]
 )).
 -define(ERR_MATCH_STRUCT, "Pattern matching against structs is not supported").
-
+-define(ERR_AMBIG(Name, Modules), [
+  utils:unqualify(Name), " is ambiguous, since you've directly imported it "
+  "from multiple modules. Do you mean ",
+  lists:join(" or ", [[M, ".", utils:unqualify(Name)] || M <- Modules]),
+  "? Please use the fully qualified name, or don't directly import the "
+  "conflicting names"
+]).
+-define(ERR_CANT_IMPL(Con), [
+  "You can't implement the builtin interface ", Con, "."
+]).
 
 -define(LOC(Node), element(2, Node)).
 -define(START_LINE(Loc), maps:get(start_line, Loc)).
