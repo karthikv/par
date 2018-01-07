@@ -1,97 +1,92 @@
 module CharTest
 
+import Char (*)
 import Test (group)
 
 to_lower_test : Test
 to_lower_test = group([
   // @example
-  test assert Char.to_lower('a') == 'a'
+  test assert to_lower('a') == 'a'
   // @example
-  test assert Char.to_lower('B') == 'b'
+  test assert to_lower('B') == 'b'
   // @example
-  test assert Char.to_lower('.') == '.'
+  test assert to_lower('.') == '.'
 ])
 
 to_upper_test : Test
 to_upper_test = group([
   // @example
-  test assert Char.to_upper('a') == 'A'
+  test assert to_upper('a') == 'A'
   // @example
-  test assert Char.to_upper('B') == 'B'
+  test assert to_upper('B') == 'B'
   // @example
-  test assert Char.to_upper('3') == '3'
-  test assert Char.to_upper('ß') == 'ß'
+  test assert to_upper('3') == '3'
+  test assert to_upper('ß') == 'ß'
 ])
 
 lower_test : Test
 lower_test = group([
   // @example
-  test assert Char.lower?('a')
+  test assert lower?('a')
   // @example
-  test assert !Char.lower?('B')
+  test assert !lower?('B')
   // @example
-  test assert !Char.lower?(',')
-  test assert !Char.lower?('ß')
+  test assert !lower?(',')
+  test assert !lower?('ß')
 ])
 
 upper_test : Test
 upper_test = group([
   // @example
-  test assert !Char.upper?('a')
+  test assert !upper?('a')
   // @example
-  test assert Char.upper?('B')
+  test assert upper?('B')
   // @example
-  test assert !Char.upper?('[')
-  test assert !Char.upper?('ß')
+  test assert !upper?('[')
+  test assert !upper?('ß')
 ])
 
 letter_test : Test
 letter_test = group([
   // @example
-  test assert Char.letter?('m')
+  test assert letter?('m')
   // @example
-  test assert Char.letter?('X')
+  test assert letter?('X')
 
-  List.seq(0, 25)
-  |> map(|i| test assert Char.letter?(to_char($'a' + i)))
-  |> group
-  List.seq(0, 25)
-  |> map(|i| test assert Char.letter?(to_char($'A' + i)))
-  |> group
+  List.seq(0, 25) |> map(|i| test assert letter?(to_char($'a' + i))) |> group
+  List.seq(0, 25) |> map(|i| test assert letter?(to_char($'A' + i))) |> group
 
   // @example
-  test assert !Char.letter?('7')
+  test assert !letter?('7')
   // @example
-  test assert !Char.letter?(')')
+  test assert !letter?(')')
 ])
 
 digit_test : Test
 digit_test = group([
   // @example
-  test assert Char.digit?('5')
+  test assert digit?('5')
   // @example
-  test assert Char.digit?('0')
+  test assert digit?('0')
 
-  List.seq(0, 9)
-  |> map(|i| test assert Char.digit?(to_char($'0' + i)))
-  |> group
+  List.seq(0, 9) |> map(|i| test assert digit?(to_char($'0' + i))) |> group
 
   // @example
-  test assert !Char.digit?('b')
-  test assert !Char.digit?('M')
+  test assert !digit?('b')
+  test assert !digit?('M')
   // @example
-  test assert !Char.digit?('"')
+  test assert !digit?('"')
 ])
 
 whitespace_test : Test
 whitespace_test = group([
   // @example
-  test assert Char.whitespace?('\t')
+  test assert whitespace?('\t')
   // @example
-  test assert Char.whitespace?('\n')
-  test assert !Char.whitespace?('.')
+  test assert whitespace?('\n')
+  test assert !whitespace?('.')
   // @example
-  test assert !Char.whitespace?('s')
+  test assert !whitespace?('s')
   // @example
-  test assert !Char.whitespace?('9')
+  test assert !whitespace?('9')
 ])

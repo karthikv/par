@@ -1,5 +1,6 @@
 module FileTest
 
+import File (*)
 import Test (group, capture)
 
 uid : Int
@@ -14,540 +15,530 @@ stat_test : Test
 stat_test = group([
   // @example
   test
-    let meta = File.stat("test/lib/file/foo.txt")
+    let meta = stat("test/lib/file/foo.txt")
     // ^ Assuming a file located at test/lib/file/foo.txt exists with the
     // contents "hello" and 0644 permissions, the following should pass:
 
     assert meta.size == 6
-    assert meta.type == File.File
-    assert meta.mode == File.Mode {
-      owner = File.AllowReadWrite
-      group = File.AllowRead
-      other = File.AllowRead
+    assert meta.type == File
+    assert meta.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
     }
 
   test
-    let meta = File.stat("test/lib/file/bar")
-    assert meta.type == File.Directory
-    assert meta.mode == File.Mode {
-      owner = File.AllowAll
-      group = File.AllowReadExec
-      other = File.AllowReadExec
+    let meta = stat("test/lib/file/bar")
+    assert meta.type == Directory
+    assert meta.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
     }
 
   // Symlinks are resolved.
   test
-    let meta = File.stat("test/lib/file/bar/baz")
-    assert meta.type == File.File
-    assert meta.mode == File.Mode {
-      owner = File.AllowReadWrite
-      group = File.AllowRead
-      other = File.AllowRead
+    let meta = stat("test/lib/file/bar/baz")
+    assert meta.type == File
+    assert meta.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
     }
 
-  test assert capture(|-| File.stat("asdf")) == File.DoesntExist
+  test assert capture(|-| stat("asdf")) == DoesntExist
 ])
 
 lstat_test : Test
 lstat_test = group([
   test
-    let meta = File.lstat("test/lib/file/foo.txt")
+    let meta = lstat("test/lib/file/foo.txt")
     assert meta.size == 6
-    assert meta.type == File.File
-    assert meta.mode == File.Mode {
-      owner = File.AllowReadWrite
-      group = File.AllowRead
-      other = File.AllowRead
+    assert meta.type == File
+    assert meta.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
     }
 
   test
-    let meta = File.lstat("test/lib/file/bar")
-    assert meta.type == File.Directory
-    assert meta.mode == File.Mode {
-      owner = File.AllowAll
-      group = File.AllowReadExec
-      other = File.AllowReadExec
+    let meta = lstat("test/lib/file/bar")
+    assert meta.type == Directory
+    assert meta.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
     }
 
   // Symlinks aren't resolved.
   // @example
   test
-    let meta = File.lstat("test/lib/file/bar/baz")
+    let meta = lstat("test/lib/file/bar/baz")
     // ^ Assuming a symlink exists at test/lib/file/bar/baz with 0755
     // permissions, the following should pass:
 
-    assert meta.type == File.Symlink
-    assert meta.mode == File.Mode {
-      owner = File.AllowAll
-      group = File.AllowReadExec
-      other = File.AllowReadExec
+    assert meta.type == Symlink
+    assert meta.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
     }
 
-  test assert capture(|-| File.lstat("asdf")) == File.DoesntExist
+  test assert capture(|-| lstat("asdf")) == DoesntExist
 ])
 
 exists_test : Test
 exists_test = group([
   // @example
-  test assert File.exists?(File.write_temp(""))
+  test assert exists?(write_temp(""))
   // @example
-  test assert File.exists?(File.make_temp_dir())
+  test assert exists?(make_temp_dir())
   // @example
-  test assert !File.exists?(Path.join(File.make_temp_dir(), "new"))
+  test assert !exists?(Path.join(make_temp_dir(), "new"))
   // @example
-  test assert !File.exists?("asdf")
+  test assert !exists?("asdf")
 ])
 
 chmod_test : Test
 chmod_test = group([
   // @example
   test
-    let path = File.write_temp("")
-    let new_mode = File.Mode {
-      owner = File.AllowWrite
-      group = File.AllowNone
-      other = File.AllowExec
+    let path = write_temp("")
+    let new_mode = Mode {
+      owner = AllowWrite
+      group = AllowNone
+      other = AllowExec
     }
-    File.chmod(path, new_mode)
-    assert File.stat(path).mode == new_mode
+    chmod(path, new_mode)
+    assert stat(path).mode == new_mode
 
   test
-    let new_mode = File.Mode {
-      owner = File.AllowAll
-      group = File.AllowAll
-      other = File.AllowAll
+    let new_mode = Mode {
+      owner = AllowAll
+      group = AllowAll
+      other = AllowAll
     }
-    assert capture(|-| File.chmod("asdf", new_mode)) == File.DoesntExist
+    assert capture(|-| chmod("asdf", new_mode)) == DoesntExist
 ])
 
 // Can't actually test this without running as root. For now, ensure we get
 // a permission error.
 chown_test : Test
 chown_test = test
-  let path = File.write_temp("")
-  assert capture(|-| File.chown(path, 0)) == File.NotPermitted
+  let path = write_temp("")
+  assert capture(|-| chown(path, 0)) == NotPermitted
 
 chgrp_test : Test
 chgrp_test = group([
   test
-    let path = File.write_temp("")
-    let new_gid = if File.stat(path).gid == 0 then uid else 0
-    File.chgrp(path, new_gid)
-    assert File.stat(path).gid == new_gid
+    let path = write_temp("")
+    let new_gid = if stat(path).gid == 0 then uid else 0
+    chgrp(path, new_gid)
+    assert stat(path).gid == new_gid
 
   test
-    let path = File.write_temp("")
-    assert capture(|-| File.chgrp(path, -1)) == File.NotPermitted
+    let path = write_temp("")
+    assert capture(|-| chgrp(path, -1)) == NotPermitted
 ])
 
 cp_test : Test
 cp_test = group([
   // @example
   test
-    let path = File.write_temp("foo")
-    let new_path = Path.join(File.make_temp_dir(), "new")
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
 
-    File.cp(path, new_path)
-    assert File.read_path(new_path) == "foo"
-    assert File.read_path(path) == "foo"
-
-  test
-    let path = Path.join(File.make_temp_dir(), "orig")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    assert capture(|-| File.cp(path, new_path)) == File.DoesntExist
+    cp(path, new_path)
+    assert read_path(new_path) == "foo"
+    assert read_path(path) == "foo"
 
   test
-    let path = File.make_temp_dir()
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    assert capture(|-| File.cp(path, new_path)) == File.IllegalDirOperation
+    let path = Path.join(make_temp_dir(), "orig")
+    let new_path = Path.join(make_temp_dir(), "new")
+    assert capture(|-| cp(path, new_path)) == DoesntExist
 
   test
-    let path = File.write_temp("foo")
-    let new_path = File.write_temp("bar")
+    let path = make_temp_dir()
+    let new_path = Path.join(make_temp_dir(), "new")
+    assert capture(|-| cp(path, new_path)) == IllegalDirOperation
 
-    File.cp(path, new_path)
-    assert File.read_path(new_path) == "foo"
-    assert File.read_path(path) == "foo"
+  test
+    let path = write_temp("foo")
+    let new_path = write_temp("bar")
+
+    cp(path, new_path)
+    assert read_path(new_path) == "foo"
+    assert read_path(path) == "foo"
 ])
 
 mv_test : Test
 mv_test = group([
   // @example
   test
-    let path = File.write_temp("foo")
-    let new_path = Path.join(File.make_temp_dir(), "new")
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
 
-    File.mv(path, new_path)
-    assert File.read_path(new_path) == "foo"
-    assert !File.exists?(path)
-
-  test
-    let path = Path.join(File.make_temp_dir(), "orig")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    assert !File.exists?(path)
+    mv(path, new_path)
+    assert read_path(new_path) == "foo"
+    assert !exists?(path)
 
   test
-    let path = File.write_temp("foo")
-    let new_path = File.write_temp("bar")
+    let path = Path.join(make_temp_dir(), "orig")
+    let new_path = Path.join(make_temp_dir(), "new")
+    assert !exists?(path)
 
-    File.mv(path, new_path)
-    assert File.read_path(new_path) == "foo"
-    assert !File.exists?(path)
+  test
+    let path = write_temp("foo")
+    let new_path = write_temp("bar")
+
+    mv(path, new_path)
+    assert read_path(new_path) == "foo"
+    assert !exists?(path)
 ])
 
 rm_test : Test
 rm_test = group([
   // @example
   test
-    let path = File.write_temp("")
-    File.rm(path)
-    assert !File.exists?(path)
-  test assert capture(|-| File.rm("asdf")) == File.DoesntExist
-  test assert capture(|-| File.rm(File.make_temp_dir())) == File.NotPermitted
+    let path = write_temp("")
+    rm(path)
+    assert !exists?(path)
+  test assert capture(|-| rm("asdf")) == DoesntExist
+  test assert capture(|-| rm(make_temp_dir())) == NotPermitted
 ])
 
 rmdir_test : Test
 rmdir_test = group([
   // @example
   test
-    let path = File.make_temp_dir()
-    File.rmdir(path)
-    assert !File.exists?(path)
-  test assert capture(|-| File.rmdir(File.write_temp(""))) == File.NotDirectory
+    let path = make_temp_dir()
+    rmdir(path)
+    assert !exists?(path)
+  test assert capture(|-| rmdir(write_temp(""))) == NotDirectory
   test
-    let path = File.make_temp_dir()
-    File.write_path(Path.join(path, "foo"), "bar")
-    assert capture(|-| File.rmdir(path)) == File.Exists
+    let path = make_temp_dir()
+    write_path(Path.join(path, "foo"), "bar")
+    assert capture(|-| rmdir(path)) == Exists
 ])
 
 ls_test : Test
 ls_test = group([
   // @example
   test
-    let path = File.make_temp_dir()
-    File.write_path(Path.join(path, "foo"), "")
-    File.write_path(Path.join(path, "bar"), "")
-    File.mkdir(Path.join(path, "baz"))
-    assert to_set(File.ls(path)) == #["foo", "bar", "baz"]
-  test assert File.ls(File.make_temp_dir()) == []
-  test assert capture(|-| File.ls(File.write_temp(""))) == File.NotDirectory
+    let path = make_temp_dir()
+    write_path(Path.join(path, "foo"), "")
+    write_path(Path.join(path, "bar"), "")
+    mkdir(Path.join(path, "baz"))
+    assert to_set(ls(path)) == #["foo", "bar", "baz"]
+  test assert ls(make_temp_dir()) == []
+  test assert capture(|-| ls(write_temp(""))) == NotDirectory
 ])
 
 glob_test : Test
 glob_test = group([
   // @example
   test
-    let path = File.make_temp_dir()
+    let path = make_temp_dir()
     let foo_path = Path.join(path, "foo")
     let bar_path = Path.join(path, "bar")
     let baz_path = Path.join(path, "baz-foo")
 
-    File.write_path(foo_path, "")
-    File.write_path(bar_path, "")
-    File.mkdir(baz_path)
+    write_path(foo_path, "")
+    write_path(bar_path, "")
+    mkdir(baz_path)
 
-    assert to_set(File.glob(Path.join(path, "*"))) ==
+    assert to_set(glob(Path.join(path, "*"))) ==
       #[foo_path, bar_path, baz_path]
-    assert to_set(File.glob(Path.join(path, "*foo"))) ==
+    assert to_set(glob(Path.join(path, "*foo"))) ==
       #[foo_path, baz_path]
-    assert to_set(File.glob(Path.join(path, "{foo,bar}"))) ==
+    assert to_set(glob(Path.join(path, "{foo,bar}"))) ==
       #[foo_path, bar_path]
-  test assert File.glob(Path.join(File.make_temp_dir(), "new")) == []
+  test assert glob(Path.join(make_temp_dir(), "new")) == []
 ])
 
 mkdir_test : Test
 mkdir_test = group([
   // @example
   test
-    let path = Path.join(File.make_temp_dir(), "new")
-    File.mkdir(path)
-    assert File.stat(path).type == File.Directory
+    let path = Path.join(make_temp_dir(), "new")
+    mkdir(path)
+    assert stat(path).type == Directory
   test
-    let path = Path.join_all([File.make_temp_dir(), "new", "sub"])
-    assert capture(|-| File.mkdir(path)) == File.DoesntExist
-  test assert capture(|-| File.mkdir(File.make_temp_dir())) == File.Exists
-  test assert capture(|-| File.mkdir(File.write_temp(""))) == File.Exists
+    let path = Path.join_all([make_temp_dir(), "new", "sub"])
+    assert capture(|-| mkdir(path)) == DoesntExist
+  test assert capture(|-| mkdir(make_temp_dir())) == Exists
+  test assert capture(|-| mkdir(write_temp(""))) == Exists
 ])
 
 mkdir_p_test : Test
 mkdir_p_test = group([
   test
-    let path = Path.join(File.make_temp_dir(), "new")
-    File.mkdir_p(path)
-    assert File.stat(path).type == File.Directory
+    let path = Path.join(make_temp_dir(), "new")
+    mkdir_p(path)
+    assert stat(path).type == Directory
   // @example
   test
-    let path = Path.join_all([File.make_temp_dir(), "new", "sub"])
-    File.mkdir_p(path)
-    assert File.stat(path).type == File.Directory
+    let path = Path.join_all([make_temp_dir(), "new", "sub"])
+    mkdir_p(path)
+    assert stat(path).type == Directory
   test
-    let path = File.make_temp_dir()
-    File.mkdir_p(path)
-    assert File.stat(path).type == File.Directory
-  test assert capture(|-| File.mkdir_p(File.write_temp(""))) == File.Exists
+    let path = make_temp_dir()
+    mkdir_p(path)
+    assert stat(path).type == Directory
+  test assert capture(|-| mkdir_p(write_temp(""))) == Exists
 ])
 
 make_temp_dir_test : Test
 make_temp_dir_test = group([
   // @example
   test
-    let path = File.make_temp_dir()
-    assert Path.dir(path) == File.sys_temp_dir
-    assert File.ls(path) == []
+    let path = make_temp_dir()
+    assert Path.dir(path) == sys_temp_dir
+    assert ls(path) == []
 ])
 
 ln_test : Test
 ln_test = group([
   // @example
   test
-    let path = File.write_temp("foo")
-    let new_path = Path.join(File.make_temp_dir(), "new")
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
 
-    File.ln(path, new_path)
-    assert File.read_path(new_path) == "foo"
+    ln(path, new_path)
+    assert read_path(new_path) == "foo"
 
     // Hard link should be maintained even when original is deleted.
-    File.rm(path)
-    assert File.read_path(new_path) == "foo"
+    rm(path)
+    assert read_path(new_path) == "foo"
 
   test
-    let path = Path.join(File.make_temp_dir(), "orig")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    assert capture(|-| File.ln(path, new_path)) == File.DoesntExist
+    let path = Path.join(make_temp_dir(), "orig")
+    let new_path = Path.join(make_temp_dir(), "new")
+    assert capture(|-| ln(path, new_path)) == DoesntExist
 
   test
-    let path = File.write_temp("")
-    let new_path = File.write_temp("")
-    assert capture(|-| File.ln(path, new_path)) == File.Exists
+    let path = write_temp("")
+    let new_path = write_temp("")
+    assert capture(|-| ln(path, new_path)) == Exists
 ])
 
 ln_s_test : Test
 ln_s_test = group([
   // @example
   test
-    let path = File.write_temp("foo")
-    let new_path = Path.join(File.make_temp_dir(), "new")
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
 
-    File.ln_s(path, new_path)
-    assert File.lstat(new_path).type == File.Symlink
-    assert File.stat(new_path).type == File.File
-    assert File.read_path(new_path) == "foo"
-
-  test
-    let path = File.write_temp("")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-
-    File.ln_s(path, new_path)
-    File.rm(path)
-    assert !File.exists?(new_path)
+    ln_s(path, new_path)
+    assert lstat(new_path).type == Symlink
+    assert stat(new_path).type == File
+    assert read_path(new_path) == "foo"
 
   test
-    let path = File.make_temp_dir()
-    let new_path = Path.join(File.make_temp_dir(), "new")
+    let path = write_temp("")
+    let new_path = Path.join(make_temp_dir(), "new")
 
-    File.ln_s(path, new_path)
-    assert File.lstat(new_path).type == File.Symlink
-    assert File.stat(new_path).type == File.Directory
-    assert File.ls(new_path) == []
-
-  test
-    let path = Path.join(File.make_temp_dir(), "orig")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-
-    File.ln_s(path, new_path)
-    assert !File.exists?(new_path)
+    ln_s(path, new_path)
+    rm(path)
+    assert !exists?(new_path)
 
   test
-    let path = File.write_temp("")
-    let new_path = File.write_temp("")
-    assert capture(|-| File.ln_s(path, new_path)) == File.Exists
+    let path = make_temp_dir()
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln_s(path, new_path)
+    assert lstat(new_path).type == Symlink
+    assert stat(new_path).type == Directory
+    assert ls(new_path) == []
+
+  test
+    let path = Path.join(make_temp_dir(), "orig")
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln_s(path, new_path)
+    assert !exists?(new_path)
+
+  test
+    let path = write_temp("")
+    let new_path = write_temp("")
+    assert capture(|-| ln_s(path, new_path)) == Exists
 ])
 
 readlink_test : Test
 readlink_test = group([
   // @example
   test
-    let path = File.write_temp("")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    File.ln_s(path, new_path)
-    assert File.readlink(new_path) == path
+    let path = write_temp("")
+    let new_path = Path.join(make_temp_dir(), "new")
+    ln_s(path, new_path)
+    assert readlink(new_path) == path
 
   // Hardlinks cannot be resolved with readlink.
   test
-    let path = File.write_temp("")
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    File.ln(path, new_path)
-    assert capture(|-| File.readlink(new_path)) == File.InvalidArgument
+    let path = write_temp("")
+    let new_path = Path.join(make_temp_dir(), "new")
+    ln(path, new_path)
+    assert capture(|-| readlink(new_path)) == InvalidArgument
 
-  test assert capture(|-| File.readlink("asdf")) == File.DoesntExist
-  test assert capture(|-| File.readlink(File.write_temp(""))) ==
-    File.InvalidArgument
+  test assert capture(|-| readlink("asdf")) == DoesntExist
+  test assert capture(|-| readlink(write_temp(""))) == InvalidArgument
 ])
 
 read_path_test : Test
 read_path_test = group([
-  test assert File.read_path(File.write_temp("")) == ""
+  test assert read_path(write_temp("")) == ""
   // @example
-  test assert File.read_path(File.write_temp("foo")) == "foo"
-  test assert capture(|-| File.read_path("asdf")) == File.DoesntExist
+  test assert read_path(write_temp("foo")) == "foo"
+  test assert capture(|-| read_path("asdf")) == DoesntExist
 ])
 
 write_path_test : Test
 write_path_test = group([
   // @example
   test
-    let path = Path.join(File.make_temp_dir(), "new")
-    File.write_path(path, "foo")
-    assert File.read_path(path) == "foo"
+    let path = Path.join(make_temp_dir(), "new")
+    write_path(path, "foo")
+    assert read_path(path) == "foo"
   test
-    let path = File.write_temp("foo")
-    File.write_path(path, "bar")
-    assert File.read_path(path) == "bar"
+    let path = write_temp("foo")
+    write_path(path, "bar")
+    assert read_path(path) == "bar"
   test
-    let path = Path.join_all([File.make_temp_dir(), "new", "sub"])
-    assert capture(|-| File.write_path(path, "foo")) == File.DoesntExist
+    let path = Path.join_all([make_temp_dir(), "new", "sub"])
+    assert capture(|-| write_path(path, "foo")) == DoesntExist
 ])
 
 write_temp_test : Test
 write_temp_test = group([
   // @example
   test
-    let path = File.write_temp("foo")
-    assert Path.dir(path) == File.sys_temp_dir
-    assert File.read_path(path) == "foo"
+    let path = write_temp("foo")
+    assert Path.dir(path) == sys_temp_dir
+    assert read_path(path) == "foo"
 ])
 
 // Hard to test this in a more comprehensive way; we can't cd because that could
 // affect other tests running in parallel.
 cwd_test : Test
 cwd_test =
-  let path = Path.join(File.cwd(), "rebar.config")
-  test assert File.stat(path).type == File.File
+  let path = Path.join(cwd(), "rebar.config")
+  test assert stat(path).type == File
 
 // Hard to test cd because it can affect other tests running in parallel; just
 // check failure cases.
 cd_test : Test
 cd_test = group([
   test
-    let orig_cwd = File.cwd()
-    assert capture(|-| File.cd("asdf")) == File.DoesntExist
-    assert File.cwd() == orig_cwd
+    let orig_cwd = cwd()
+    assert capture(|-| cd("asdf")) == DoesntExist
+    assert cwd() == orig_cwd
 
   test
-    let orig_cwd = File.cwd()
-    assert capture(|-| File.cd(File.write_temp(""))) == File.NotDirectory
-    assert File.cwd() == orig_cwd
+    let orig_cwd = cwd()
+    assert capture(|-| cd(write_temp(""))) == NotDirectory
+    assert cwd() == orig_cwd
 ])
 
 open_test : Test
 open_test = group([
   // @example
   test
-    let h = File.open(File.write_temp("hey\nthere"), File.Read)
-    ensure File.close(h) after
-      assert File.read(h, File.All) == "hey\nthere"
+    let h = open(write_temp("hey\nthere"), Read)
+    ensure close(h) after
+      assert read(h, All) == "hey\nthere"
 
   test
-    let path = File.write_temp("hey\nthere")
-    let h = File.open(path, File.Append)
-    assert File.read_path(path) == "hey\nthere"
+    let path = write_temp("hey\nthere")
+    let h = open(path, Append)
+    assert read_path(path) == "hey\nthere"
 
-    ensure File.close(h) after
-      File.write(h, "where")
-    assert File.read_path(path) == "hey\ntherewhere"
-
-  test
-    let path = File.write_temp("hey\nthere")
-    let h = File.open(path, File.ReadWrite)
-    assert File.read_path(path) == "hey\nthere"
-
-    ensure File.close(h) after
-      assert File.read(h, File.Chars(3)) == "hey"
-      File.write(h, "where")
-      assert File.read(h, File.All) == "e"
-    assert File.read_path(path) == "heywheree"
-
-  test assert capture(|-| File.open(File.write_temp(""), File.Exclusive)) ==
-    File.Exists
+    ensure close(h) after
+      write(h, "where")
+    assert read_path(path) == "hey\ntherewhere"
 
   test
-    let new_path = Path.join(File.make_temp_dir(), "new")
-    let h = File.open(new_path, File.Exclusive)
-    ensure File.close(h) after File.write(h, "hey\nthere")
-    assert File.read_path(new_path) == "hey\nthere"
+    let path = write_temp("hey\nthere")
+    let h = open(path, ReadWrite)
+    assert read_path(path) == "hey\nthere"
+
+    ensure close(h) after
+      assert read(h, Chars(3)) == "hey"
+      write(h, "where")
+      assert read(h, All) == "e"
+    assert read_path(path) == "heywheree"
 ])
 
 close_test : Test
 close_test = group([
   // @example
   test
-    let path = File.write_temp("")
-    let h = File.open(path, File.Write)
+    let path = write_temp("")
+    let h = open(path, Write)
 
-    ensure File.close(h) after
-      File.write(h, "hello")
-    assert File.read_path(path) == "hello"
+    ensure close(h) after
+      write(h, "hello")
+    assert read_path(path) == "hello"
 ])
 
 read_test : Test
 read_test = group([
   test
-    let h = File.open(File.write_temp("hey\nthere"), File.Read)
-    ensure File.close(h) after
-      assert File.read(h, File.Chars(3)) == "hey"
-      assert File.read(h, File.Chars(20)) == "\nthere"
-      assert capture(|-| File.read(h, File.Chars(1))) == File.EndOfFile
+    let h = open(write_temp("hey\nthere"), Read)
+    ensure close(h) after
+      assert read(h, Chars(3)) == "hey"
+      assert read(h, Chars(20)) == "\nthere"
+      assert capture(|-| read(h, Chars(1))) == EndOfFile
 
   test
-    let h = File.open(File.write_temp("hey\nthere"), File.Read)
-    ensure File.close(h) after
-      assert File.read(h, File.Line) == "hey\n"
-      assert File.read(h, File.Line) == "there"
-      assert capture(|-| File.read(h, File.Line)) == File.EndOfFile
+    let h = open(write_temp("hey\nthere"), Read)
+    ensure close(h) after
+      assert read(h, Line) == "hey\n"
+      assert read(h, Line) == "there"
+      assert capture(|-| read(h, Line)) == EndOfFile
 
   test
-    let h = File.open(File.write_temp("hey\nthere"), File.Read)
-    ensure File.close(h) after
-      assert File.read(h, File.All) == "hey\nthere"
-      assert capture(|-| File.read(h, File.All)) == File.EndOfFile
+    let h = open(write_temp("hey\nthere"), Read)
+    ensure close(h) after
+      assert read(h, All) == "hey\nthere"
+      assert capture(|-| read(h, All)) == EndOfFile
 
   // @example
   test
-    let h = File.open(File.write_temp("hey\nthere"), File.Read)
-    ensure File.close(h) after
-      assert File.read(h, File.Line) == "hey\n"
-      assert File.read(h, File.Chars(2)) == "th"
-      assert File.read(h, File.All) == "ere"
+    let h = open(write_temp("hey\nthere"), Read)
+    ensure close(h) after
+      assert read(h, Line) == "hey\n"
+      assert read(h, Chars(2)) == "th"
+      assert read(h, All) == "ere"
 ])
 
 write_test : Test
 write_test = group([
   // @example
   test
-    let path = File.write_temp("hey\nthere")
-    let h = File.open(path, File.Write)
+    let path = write_temp("hey\nthere")
+    let h = open(path, Write)
 
     // File should be truncated.
-    assert File.read_path(path) == ""
+    assert read_path(path) == ""
 
-    ensure File.close(h) after
-      File.write(h, "hello\n")
-      File.write(h, "foo")
-      File.write(h, "end")
-    assert File.read_path(path) == "hello\nfooend"
+    ensure close(h) after
+      write(h, "hello\n")
+      write(h, "foo")
+      write(h, "end")
+    assert read_path(path) == "hello\nfooend"
 ])
 
 seek_test : Test
 seek_test = group([
   // @example
   test
-    let path = File.write_temp("hey\nthere")
-    let h = File.open(path, File.ReadWrite)
+    let path = write_temp("hey\nthere")
+    let h = open(path, ReadWrite)
 
-    ensure File.close(h) after
-      File.seek(h, 4)
-      File.write(h, "where")
-    assert File.read_path(path) == "hey\nwhere"
+    ensure close(h) after
+      seek(h, 4)
+      write(h, "where")
+    assert read_path(path) == "hey\nwhere"
 ])
 
 seek_end_test : Test
@@ -555,52 +546,52 @@ seek_end_test = group([
   // @example
   test
     let contents = "hey\nthere"
-    let path = File.write_temp(contents)
-    let h = File.open(path, File.ReadWrite)
+    let path = write_temp(contents)
+    let h = open(path, ReadWrite)
 
-    ensure File.close(h) after
-      let end = File.seek_end(h)
+    ensure close(h) after
+      let end = seek_end(h)
       assert end == length(contents)
-      assert File.tell(h) == end
-      File.write(h, "where")
-    assert File.read_path(path) == "hey\ntherewhere"
+      assert tell(h) == end
+      write(h, "where")
+    assert read_path(path) == "hey\ntherewhere"
 ])
 
 tell_test : Test
 tell_test = group([
   // @example
   test
-    let h = File.open(File.write_temp("hey\nthere"), File.ReadWrite)
-    ensure File.close(h) after
-      assert File.tell(h) == 0
-      assert File.read(h, File.Line) == "hey\n"
-      assert File.tell(h) == 4
+    let h = open(write_temp("hey\nthere"), ReadWrite)
+    ensure close(h) after
+      assert tell(h) == 0
+      assert read(h, Line) == "hey\n"
+      assert tell(h) == 4
 
-      File.write(h, "foo")
-      assert File.tell(h) == 7
+      write(h, "foo")
+      assert tell(h) == 7
 
-      File.seek(h, 2)
-      assert File.tell(h) == 2
-      assert File.read(h, File.All) == "y\nfoore"
+      seek(h, 2)
+      assert tell(h) == 2
+      assert read(h, All) == "y\nfoore"
 ])
 
 truncate_test : Test
 truncate_test = group([
   test
-    let path = File.write_temp("hey\nthere")
-    let h = File.open(path, File.ReadWrite)
+    let path = write_temp("hey\nthere")
+    let h = open(path, ReadWrite)
 
-    ensure File.close(h) after
-      File.truncate(h)
-    assert File.read_path(path) == ""
+    ensure close(h) after
+      truncate(h)
+    assert read_path(path) == ""
 
   // @example
   test
-    let path = File.write_temp("hey\nthere")
-    let h = File.open(path, File.ReadWrite)
+    let path = write_temp("hey\nthere")
+    let h = open(path, ReadWrite)
 
-    ensure File.close(h) after
-      File.seek(h, 4)
-      File.truncate(h)
-    assert File.read_path(path) == "hey\n"
+    ensure close(h) after
+      seek(h, 4)
+      truncate(h)
+    assert read_path(path) == "hey\n"
 ])

@@ -1,171 +1,167 @@
 module PathTest
 
+import Path (*)
 import Test (group, capture)
 
 base_test : Test
 base_test = group([
   // @example
-  test assert Path.base("/foo/bar/baz.txt") == "baz.txt"
+  test assert base("/foo/bar/baz.txt") == "baz.txt"
   // @example
-  test assert Path.base("foo/bar.pdf") == "bar.pdf"
-  test assert Path.base("/foo") == "foo"
+  test assert base("foo/bar.pdf") == "bar.pdf"
+  test assert base("/foo") == "foo"
   // @example
-  test assert Path.base("foo") == "foo"
+  test assert base("foo") == "foo"
   // @example
-  test assert Path.base("/") == ""
-  test assert Path.base("") == ""
+  test assert base("/") == ""
+  test assert base("") == ""
 ])
 
 dir_test : Test
 dir_test = group([
   // @example
-  test assert Path.dir("/foo/bar/baz.txt") == "/foo/bar"
+  test assert dir("/foo/bar/baz.txt") == "/foo/bar"
   // @example
-  test assert Path.dir("foo/bar.pdf") == "foo"
-  test assert Path.dir("/foo") == "/"
+  test assert dir("foo/bar.pdf") == "foo"
+  test assert dir("/foo") == "/"
   // @example
-  test assert Path.dir("foo") == "."
+  test assert dir("foo") == "."
   // @example
-  test assert Path.dir("/") == "/"
-  test assert Path.dir("") == "."
+  test assert dir("/") == "/"
+  test assert dir("") == "."
 ])
 
 ext_test : Test
 ext_test = group([
   // @example
-  test assert Path.ext("/foo/bar/baz.txt") == ".txt"
+  test assert ext("/foo/bar/baz.txt") == ".txt"
   // @example
-  test assert Path.ext("foo/bar.pdf") == ".pdf"
-  test assert Path.ext("/foo") == ""
+  test assert ext("foo/bar.pdf") == ".pdf"
+  test assert ext("/foo") == ""
   // @example
-  test assert Path.ext("foo") == ""
+  test assert ext("foo") == ""
   // @example
-  test assert Path.ext("/") == ""
-  test assert Path.ext("") == ""
+  test assert ext("/") == ""
+  test assert ext("") == ""
 ])
 
 strip_ext_test : Test
 strip_ext_test = group([
   // @example
-  test assert Path.strip_ext("/foo/bar/baz.txt") == "/foo/bar/baz"
+  test assert strip_ext("/foo/bar/baz.txt") == "/foo/bar/baz"
   // @example
-  test assert Path.strip_ext("foo/bar.pdf") == "foo/bar"
-  test assert Path.strip_ext("/foo") == "/foo"
+  test assert strip_ext("foo/bar.pdf") == "foo/bar"
+  test assert strip_ext("/foo") == "/foo"
   // @example
-  test assert Path.strip_ext("foo") == "foo"
+  test assert strip_ext("foo") == "foo"
   // @example
-  test assert Path.strip_ext("/") == "/"
-  test assert Path.strip_ext("") == ""
+  test assert strip_ext("/") == "/"
+  test assert strip_ext("") == ""
 ])
 
 normalize_test : Test
 normalize_test = group([
-  test assert Path.normalize("") == "."
-  test assert Path.normalize("foo/bar") == "foo/bar"
+  test assert normalize("") == "."
+  test assert normalize("foo/bar") == "foo/bar"
   // @example
-  test assert Path.normalize("foo//bar") == "foo/bar"
-  test assert Path.normalize("foo/.") == "foo"
-  test assert Path.normalize("foo/./bar") == "foo/bar"
+  test assert normalize("foo//bar") == "foo/bar"
+  test assert normalize("foo/.") == "foo"
+  test assert normalize("foo/./bar") == "foo/bar"
   // @example
-  test assert Path.normalize("foo/../bar") == "bar"
-  test assert Path.normalize("/foo/./bar/..") == "/foo"
+  test assert normalize("foo/../bar") == "bar"
+  test assert normalize("/foo/./bar/..") == "/foo"
   // @example
-  test assert Path.normalize("../foo/./../bar/../..") == "../.."
+  test assert normalize("../foo/./../bar/../..") == "../.."
   // @example
-  test assert Path.normalize("/.././/..//foo///bar") == "/foo/bar"
+  test assert normalize("/.././/..//foo///bar") == "/foo/bar"
 ])
 
 to_absolute_test : Test
 to_absolute_test = group([
   // @example
-  test assert Path.to_absolute("foo") == Path.join(File.cwd(), "foo")
+  test assert to_absolute("foo") == join(File.cwd(), "foo")
   // @example
-  test assert Path.to_absolute("/foo/bar") == "/foo/bar"
+  test assert to_absolute("/foo/bar") == "/foo/bar"
   // @example
-  test assert Path.to_absolute("foo/.//../bar//./baz") ==
-    Path.join_all([File.cwd(), "bar", "baz"])
+  test assert to_absolute("foo/.//../bar//./baz") ==
+    join_all([File.cwd(), "bar", "baz"])
 ])
 
 to_relative_test : Test
 to_relative_test = group([
   // @example
-  test assert Path.to_relative("foo", "foo") == ""
+  test assert to_relative("foo", "foo") == ""
   // @example
-  test assert Path.to_relative("bar", "foo") == "../bar"
+  test assert to_relative("bar", "foo") == "../bar"
   // @example
-  test assert Path.to_relative("foo/a.txt", "foo/bar/baz") == "../../a.txt"
+  test assert to_relative("foo/a.txt", "foo/bar/baz") == "../../a.txt"
   // @example
-  test assert Path.to_relative("foo/bar", "foo") == "bar"
-
+  test assert to_relative("foo/bar", "foo") == "bar"
   test
     let parts = File.cwd()
-      |> Path.split
+      |> split
       |> map(|_| "..")
       |> List.range(1, -1)
-
-    let relative = Path.to_relative("/foo/bar", "")
-    assert relative == Path.join_all(parts ++ ["foo", "bar"])
-
-  test assert Path.to_relative("baz", "/foo/bar") ==
-    Path.join_all(["..", "..", File.cwd(), "baz"])
+    assert to_relative("/foo/bar", "") == join_all(parts ++ ["foo", "bar"])
+  test assert to_relative("baz", "/foo/bar") ==
+    join_all(["..", "..", File.cwd(), "baz"])
 ])
 
 absolute_test : Test
 absolute_test = group([
   // @example
-  test assert !Path.absolute?("foo")
+  test assert !absolute?("foo")
   // @example
-  test assert !Path.absolute?("foo/.//../bar//./baz")
+  test assert !absolute?("foo/.//../bar//./baz")
   // @example
-  test assert Path.absolute?("/foo/bar")
+  test assert absolute?("/foo/bar")
 ])
 
 relative_test : Test
 relative_test = group([
   // @example
-  test assert Path.relative?("foo")
+  test assert relative?("foo")
   // @example
-  test assert Path.relative?("foo/.//../bar//./baz")
+  test assert relative?("foo/.//../bar//./baz")
   // @example
-  test assert !Path.relative?("/foo/bar")
+  test assert !relative?("/foo/bar")
 ])
 
 join_test : Test
 join_test = group([
   // @example
-  test assert Path.join("foo", "bar") == "foo/bar"
+  test assert join("foo", "bar") == "foo/bar"
   // @example
-  test assert Path.join("/foo/bar", "baz/a.txt") == "/foo/bar/baz/a.txt"
+  test assert join("/foo/bar", "baz/a.txt") == "/foo/bar/baz/a.txt"
   // @example
-  test assert Path.join("", "bar") == "/bar"
+  test assert join("", "bar") == "/bar"
   // @example
-  test assert Path.join("foo", "") == "foo"
+  test assert join("foo", "") == "foo"
 ])
 
 join_all_test : Test
 join_all_test = group([
   // @example
-  test assert Path.join_all(["foo", "bar", "/baz"]) == "foo/bar/baz"
-  test assert Path.join_all(["foo", "/bar"]) == "foo/bar"
+  test assert join_all(["foo", "bar", "/baz"]) == "foo/bar/baz"
+  test assert join_all(["foo", "/bar"]) == "foo/bar"
   // @example
-  test assert Path.join_all(["/foo/bar", "baz/a.txt"]) == "/foo/bar/baz/a.txt"
+  test assert join_all(["/foo/bar", "baz/a.txt"]) == "/foo/bar/baz/a.txt"
   // @example
-  test assert Path.join_all(["", "bar"]) == "/bar"
+  test assert join_all(["", "bar"]) == "/bar"
   // @example
-  test assert Path.join_all(["foo", "", "bar", ""]) == "foo/bar"
-  test assert Path.join_all(["foo"]) == "foo"
-  test assert Path.join_all([]) == ""
+  test assert join_all(["foo", "", "bar", ""]) == "foo/bar"
+  test assert join_all(["foo"]) == "foo"
+  test assert join_all([]) == ""
 ])
 
 split_test : Test
 split_test = group([
   // @example
-  test assert Path.split("foo/bar") == ["foo", "bar"]
+  test assert split("foo/bar") == ["foo", "bar"]
   // @example
-  test assert Path.split("/foo/bar/baz/a.txt") ==
-    ["/", "foo", "bar", "baz", "a.txt"]
+  test assert split("/foo/bar/baz/a.txt") == ["/", "foo", "bar", "baz", "a.txt"]
   // @example
-  test assert Path.split("foo") == ["foo"]
-  test assert Path.split("foo//bar") == ["foo", "bar"]
-  test assert Path.split("") == []
+  test assert split("foo") == ["foo"]
+  test assert split("foo//bar") == ["foo", "bar"]
+  test assert split("") == []
 ])
