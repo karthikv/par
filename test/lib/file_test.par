@@ -466,6 +466,14 @@ open_test = group([
       write(h, "where")
       assert read(h, All) == "e"
     assert read_path(path) == "heywheree"
+
+  test assert capture(|-| open(write_temp(""), Exclusive)) == Exists
+
+  test
+    let new_path = Path.join(make_temp_dir(), "new")
+    let h = open(new_path, Exclusive)
+    ensure close(h) after write(h, "hey\nthere")
+    assert read_path(new_path) == "hey\nthere"
 ])
 
 close_test : Test
