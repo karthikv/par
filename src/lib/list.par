@@ -416,7 +416,7 @@ with_index_r(l, i) = match l {
 // [`fold()`](#fold).
 //
 // @example // prints each element
-// | List.each([1, 2, 3], |e| print("element: " ++ e))
+// | each([1, 2, 3], |e| print("element: " ++ e))
 each : ([A], A -> B) -> ()
 export each(l, f) =
   @lists:foreach(f, l)

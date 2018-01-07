@@ -453,8 +453,8 @@ export mkdir_p(path) =
 // [`write_temp()`](#write_temp) to write a temporary file into this directory.
 //
 // @example // Write to temporary file foo in system temp directory.
-// | let path = Path.join(File.sys_temp_dir, "foo")
-// | File.write_path(path, "bar")
+// | let path = Path.join(sys_temp_dir, "foo")
+// | write_path(path, "bar")
 sys_temp_dir : String
 export sys_temp_dir = @os:getenv("TEMP", "/tmp")
 

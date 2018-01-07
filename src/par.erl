@@ -20,8 +20,6 @@
 %   - Docs for stdlib
 %     - Capture tests?
 %       - Add else clause to try/catch
-%     - Module prefixes in tests
-%       - Check @example directives
 %     - Index at the top of pages
 %     - Put head/tail/lookup/get/key/remove in respective module?
 %   - Download page
