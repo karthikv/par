@@ -39,6 +39,9 @@
 % - Description for exceptions?
 % - Docs:
 %   - Link to types from within signatures?
+% - Suggestions for what to import
+% - Edit distance for typos
+% - Hone in on specific record fields for error messages
 %
 % Defer
 % - if-let condition and other condition (or maybe when statement?)
@@ -77,7 +80,6 @@
 %   - Interpreter better error messages and backtraces
 % - [3 days] Second pass for error messages (see TODOs in code)
 %   - Specify expected type for operators
-%   - Hone in on specific record field like we hone in on args?
 %   - Context surrounding add_err cases rather than just two types
 %     - Error message with context when there's no else clause
 %   - Detect basic infinite loop conditions

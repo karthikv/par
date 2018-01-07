@@ -348,6 +348,8 @@ get_test : Test
 get_test = group([
   // @example
   test assert get({ "bar" => 3.7, "baz" => 1 }, "baz") == 1
+  // @example
+  test assert get({ 'h' => false }, 'h') == false
   test assert capture(|-| get({ 'h' => false }, 'g')) == BadKey
   test assert capture(|-| get({}, true)) == BadKey
 ])

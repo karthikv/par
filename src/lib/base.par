@@ -228,6 +228,8 @@ exception CantParseFloat(String)
 
 // Returns the first element in the list `l`. Raises [`EmptyList`](#EmptyList)
 // if `l` is empty.
+//
+// @show_in List
 head : [A] -> A
 export head(l) = match l {
   [h | _] => h
@@ -236,34 +238,44 @@ export head(l) = match l {
 
 // Returns a list containing all elements in `l` except the first. Raises
 // [`EmptyList`](#EmptyList) if `l` is empty.
+//
+// @show_in List
 tail : [A] -> [A]
 export tail(l) = match l {
   [_ | t] => t
   [] => raise EmptyList
 }
 
-// If key `k` is in the map `m`, returns [`Some(v)`](#Option), where `v` is the
-// value associated with `k`. Otherwise, returns [`None`](#Option).
-lookup : (Map<K, V>, K) -> Option<V>
-export lookup(m, k) = match @maps:find(k, m) {
-  (@ok, v) => Some(v)
-  @error => None
-}
-
 // Returns the value associated with key `k` in the map `m`. If `k` isn't in
 // `m`, raises [`BadKey`](#BadKey).
+//
+// @show_in Map
 get : (Map<K, V>, K) -> V
 export get(m, k) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => raise BadKey
 }
 
+// If key `k` is in the map `m`, returns [`Some(v)`](#Option), where `v` is the
+// value associated with `k`. Otherwise, returns [`None`](#Option).
+//
+// @show_in Map
+lookup : (Map<K, V>, K) -> Option<V>
+export lookup(m, k) = match @maps:find(k, m) {
+  (@ok, v) => Some(v)
+  @error => None
+}
+
 // Returns true if the key `k` is in map `m`.
+//
+// @show_in Map
 key? : (Map<K, V>, K) -> Bool
 export key?(m, k) = @maps:is_key(k, m)
 
 // Removes the key `k` and its associated value from `m`, returning a new map.
 // `m` is not modified.
+//
+// @show_in Map
 remove : (Map<K, V>, K) -> Map<K, V>
 export remove(m, k) = @maps:remove(k, m)
 

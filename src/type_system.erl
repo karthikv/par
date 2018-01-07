@@ -1403,8 +1403,8 @@ infer({record, Loc, {con_token, ConLoc, RawCon}, Inits}, C) ->
       From = ?FROM_RECORD_CREATE(Con),
 
       TV = tv_server:fresh(C2#ctx.pid),
-      C3 = add_cst(TV, RecordT, Loc, From, C2),
-      C4 = add_cst(TV, ExpT, Loc, From, C3),
+      C3 = add_cst(TV, ExpT, Loc, From, C2),
+      C4 = add_cst(TV, RecordT, Loc, From, C3),
       {TV, C4};
 
     false -> infer({anon_record, Loc, none, Inits}, C1)
@@ -1428,8 +1428,8 @@ infer({record_ext, Loc, {con_token, ConLoc, RawCon}, AllInits, Expr}, C) ->
       From = ?FROM_RECORD_UPDATE,
 
       TV = tv_server:fresh(C2#ctx.pid),
-      C3 = add_cst(TV, RecordT, Loc, From, C2),
-      C4 = add_cst(TV, ExpT, Loc, From, C3),
+      C3 = add_cst(TV, ExpT, Loc, From, C2),
+      C4 = add_cst(TV, RecordT, Loc, From, C3),
       {TV, C4};
 
     false -> infer({anon_record_ext, Loc, none, AllInits, Expr}, C1)

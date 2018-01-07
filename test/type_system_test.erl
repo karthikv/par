@@ -2872,6 +2872,16 @@ other_errors_test_() ->
       "foo = bar + 1",
       {?ERR_NOT_DEF_TYPE("Foo"), l(6, 3)}
     ))
+
+  % Improvement: make sure expected record type is unified first and returned
+  % so errors don't propagate.
+  , ?_test(bad_prg(
+      "struct Foo { x : String }\n"
+      "foo = Foo { y = \"hi\" }\n"
+      "bar = { x = \"hi\" | foo }",
+      {"{ x : String }", "{ y : String }", l(1, 6, 16),
+       ?FROM_RECORD_CREATE("Foo")}
+    ))
   ].
 
 import_test_() ->
