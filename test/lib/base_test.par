@@ -2,6 +2,166 @@ module BaseTest
 
 import Test (group, capture)
 
+struct Foo {
+  foo : Int
+  bar : String
+}
+
+to_str_test : Test
+to_str_test = group([
+  // @example
+  test assert to_str(1) == "1"
+  test assert to_str(7.89) == "7.89"
+  // @example
+  test assert to_str(true) == "true"
+  // @example
+  test assert to_str(@hey) == "hey"
+  // @example
+  test assert to_str('c') == "99"
+  // @example
+  test assert to_str("hi") == "hi"
+  test assert to_str((7.5, @hi)) == "(7.5, hi)"
+  test assert to_str((true, "hello", '\n')) == "(true, \"hello\", 10)"
+  // @example
+  test assert to_str([true, false]) == "[true, false]"
+  test
+    let str = to_str(#[2, 88.03])
+    // order is undefined
+    assert str == "#[2, 88.03]" || str == "#[88.03, 2]"
+  test
+    let str = to_str({ @hey => "hi", @later => "bye" })
+    // order is undefined
+    assert str == "{ hey => \"hi\", later => \"bye\" }" ||
+      str == "{ later => \"bye\", hey => \"hi\" }"
+  test assert to_str(Some(true)) == "Some(true)"
+  test assert to_str(None) == "None"
+  // @example
+  test
+    let str = to_str({ a = 8.7, foo = @hello })
+    // order is undefined
+    assert str == "{ a = 8.7, foo = hello }" ||
+      str == "{ foo = hello, a = 8.7 }"
+  test
+    let str = to_str(Foo { foo = 77, bar = "Bar" })
+    // order is undefined
+    assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
+      str == "Foo { bar = \"Bar\", foo = 77 }"
+])
+
+struct Bar {
+  one_field : String
+  another_long_field : Int
+  foo : Atom
+  very_important_field : Char
+  unnecessary_field : [Bool]
+}
+
+to_pretty_test : Test
+to_pretty_test = group([
+  test assert to_pretty(1) == "1"
+  test assert to_pretty(7.89) == "7.89"
+  test assert to_pretty(true) == "true"
+  test assert to_pretty(@hey) == "hey"
+  test assert to_pretty('c') == "99"
+  test assert to_pretty("hi") == "hi"
+  test assert to_pretty((7.5, @hi)) == "(7.5, hi)"
+  test assert to_pretty([true, false]) == "[true, false]"
+  test
+    let str = to_pretty(#[2, 88.03])
+    // order is undefined
+    assert str == "#[2, 88.03]" || str == "#[88.03, 2]"
+  test
+    let str = to_pretty({ @hey => "hi", @later => "bye" })
+    // order is undefined
+    assert str == "{ hey => \"hi\", later => \"bye\" }" ||
+      str == "{ later => \"bye\", hey => \"hi\" }"
+  test assert to_pretty(Some(true)) == "Some(true)"
+  test assert to_pretty(None) == "None"
+  test
+    let str = to_pretty({ a = 8.7, foo = @hello })
+    // order is undefined
+    assert str == "{ a = 8.7, foo = hello }" ||
+      str == "{ foo = hello, a = 8.7 }"
+  test
+    let str = to_pretty(Foo { foo = 77, bar = "Bar" })
+    // order is undefined
+    assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
+      str == "Foo { bar = \"Bar\", foo = 77 }"
+
+  // @example
+  test
+    let tuple = (
+      27,
+      0.138,
+      false,
+      @hello,
+      '\n',
+      (523.81, true, @sub_tuple, 's'),
+      ["first", "second", "third"]
+    )
+    assert to_pretty(tuple) == "(\n" ++
+      "  27,\n" ++
+      "  0.138,\n" ++
+      "  false,\n" ++
+      "  hello,\n" ++
+      "  10,\n" ++
+      "  (523.81, true, sub_tuple, 115),\n" ++
+      "  [\"first\", \"second\", \"third\"]\n" ++
+    ")"
+  test
+    let list = [
+      "this is some sentence"
+      "this is another sentence"
+      "hello"
+      "hey"
+      "perhaps a longer sentence right here"
+    ]
+    let quoted = map(list, |e| "\"" ++ e ++ "\"")
+    assert to_pretty(list) == "[\n  " ++ List.join(quoted, "\n  ") ++ "\n]"
+  test
+    let set = #[
+      @some_atom
+      @another_atom
+      @yet_another_atom
+      @a_really_long_atom_way_over_here
+      @one_more_atom
+    ]
+    let strs = to_list(set) |> map(to_str)
+    assert to_pretty(set) == "#[\n  " ++ List.join(strs, "\n  ") ++ "\n]"
+  test
+    let m = {
+      1 => false
+      932 => true
+      10814 => true
+      0.137941 => true
+      941.308 => false
+      811041.30 => true
+    }
+    let strs = to_list(m) |> map(|(k, v)| to_str(k) ++ " => " ++ to_str(v))
+    assert to_pretty(m) == "{\n  " ++ List.join(strs, "\n  ") ++ "\n}"
+  test
+    let record = {
+      another_long_field = 895328942
+      foo = @long_atoms_are_great
+      one_field = "here is one"
+      unnecessary_field = [false, false, false, false]
+      very_important_field = 'v'
+    }
+    let str = "{\n" ++
+      "  another_long_field = 895328942\n" ++
+      "  foo = long_atoms_are_great\n" ++
+      "  one_field = \"here is one\"\n" ++
+      "  unnecessary_field = [false, false, false, false]\n" ++
+      // Characters are printed as codepoints.
+      "  very_important_field = " ++ to_str('v') ++ "\n" ++
+    "}"
+    assert to_pretty(record) == str
+
+    // Need := here so record doesn't unify with Bar directly.
+    let bar = Bar { very_important_field := 'v' | record }
+    assert to_pretty(bar) == "Bar " ++ str
+])
+
 length_test : Test
 length_test = group([
   // @example
@@ -562,164 +722,4 @@ to_map_test = group([
   test assert to_map(#[("hey", true), ("hi", false)]) ==
     { "hey" => true, "hi" => false }
   test assert to_map(#[]) == {}
-])
-
-struct Foo {
-  foo : Int
-  bar : String
-}
-
-to_str_test : Test
-to_str_test = group([
-  // @example
-  test assert to_str(1) == "1"
-  test assert to_str(7.89) == "7.89"
-  // @example
-  test assert to_str(true) == "true"
-  // @example
-  test assert to_str(@hey) == "hey"
-  // @example
-  test assert to_str('c') == "99"
-  // @example
-  test assert to_str("hi") == "hi"
-  test assert to_str((7.5, @hi)) == "(7.5, hi)"
-  test assert to_str((true, "hello", '\n')) == "(true, \"hello\", 10)"
-  // @example
-  test assert to_str([true, false]) == "[true, false]"
-  test
-    let str = to_str(#[2, 88.03])
-    // order is undefined
-    assert str == "#[2, 88.03]" || str == "#[88.03, 2]"
-  test
-    let str = to_str({ @hey => "hi", @later => "bye" })
-    // order is undefined
-    assert str == "{ hey => \"hi\", later => \"bye\" }" ||
-      str == "{ later => \"bye\", hey => \"hi\" }"
-  test assert to_str(Some(true)) == "Some(true)"
-  test assert to_str(None) == "None"
-  // @example
-  test
-    let str = to_str({ a = 8.7, foo = @hello })
-    // order is undefined
-    assert str == "{ a = 8.7, foo = hello }" ||
-      str == "{ foo = hello, a = 8.7 }"
-  test
-    let str = to_str(Foo { foo = 77, bar = "Bar" })
-    // order is undefined
-    assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
-      str == "Foo { bar = \"Bar\", foo = 77 }"
-])
-
-struct Bar {
-  one_field : String
-  another_long_field : Int
-  foo : Atom
-  very_important_field : Char
-  unnecessary_field : [Bool]
-}
-
-to_pretty_test : Test
-to_pretty_test = group([
-  test assert to_pretty(1) == "1"
-  test assert to_pretty(7.89) == "7.89"
-  test assert to_pretty(true) == "true"
-  test assert to_pretty(@hey) == "hey"
-  test assert to_pretty('c') == "99"
-  test assert to_pretty("hi") == "hi"
-  test assert to_pretty((7.5, @hi)) == "(7.5, hi)"
-  test assert to_pretty([true, false]) == "[true, false]"
-  test
-    let str = to_pretty(#[2, 88.03])
-    // order is undefined
-    assert str == "#[2, 88.03]" || str == "#[88.03, 2]"
-  test
-    let str = to_pretty({ @hey => "hi", @later => "bye" })
-    // order is undefined
-    assert str == "{ hey => \"hi\", later => \"bye\" }" ||
-      str == "{ later => \"bye\", hey => \"hi\" }"
-  test assert to_pretty(Some(true)) == "Some(true)"
-  test assert to_pretty(None) == "None"
-  test
-    let str = to_pretty({ a = 8.7, foo = @hello })
-    // order is undefined
-    assert str == "{ a = 8.7, foo = hello }" ||
-      str == "{ foo = hello, a = 8.7 }"
-  test
-    let str = to_pretty(Foo { foo = 77, bar = "Bar" })
-    // order is undefined
-    assert str == "Foo { foo = 77, bar = \"Bar\" }" ||
-      str == "Foo { bar = \"Bar\", foo = 77 }"
-
-  // @example
-  test
-    let tuple = (
-      27,
-      0.138,
-      false,
-      @hello,
-      '\n',
-      (523.81, true, @sub_tuple, 's'),
-      ["first", "second", "third"]
-    )
-    assert to_pretty(tuple) == "(\n" ++
-      "  27,\n" ++
-      "  0.138,\n" ++
-      "  false,\n" ++
-      "  hello,\n" ++
-      "  10,\n" ++
-      "  (523.81, true, sub_tuple, 115),\n" ++
-      "  [\"first\", \"second\", \"third\"]\n" ++
-    ")"
-  test
-    let list = [
-      "this is some sentence"
-      "this is another sentence"
-      "hello"
-      "hey"
-      "perhaps a longer sentence right here"
-    ]
-    let quoted = map(list, |e| "\"" ++ e ++ "\"")
-    assert to_pretty(list) == "[\n  " ++ List.join(quoted, "\n  ") ++ "\n]"
-  test
-    let set = #[
-      @some_atom
-      @another_atom
-      @yet_another_atom
-      @a_really_long_atom_way_over_here
-      @one_more_atom
-    ]
-    let strs = to_list(set) |> map(to_str)
-    assert to_pretty(set) == "#[\n  " ++ List.join(strs, "\n  ") ++ "\n]"
-  test
-    let m = {
-      1 => false
-      932 => true
-      10814 => true
-      0.137941 => true
-      941.308 => false
-      811041.30 => true
-    }
-    let strs = to_list(m) |> map(|(k, v)| to_str(k) ++ " => " ++ to_str(v))
-    assert to_pretty(m) == "{\n  " ++ List.join(strs, "\n  ") ++ "\n}"
-  test
-    let record = {
-      another_long_field = 895328942
-      foo = @long_atoms_are_great
-      one_field = "here is one"
-      unnecessary_field = [false, false, false, false]
-      very_important_field = 'v'
-    }
-    let str = "{\n" ++
-      "  another_long_field = 895328942\n" ++
-      "  foo = long_atoms_are_great\n" ++
-      "  one_field = \"here is one\"\n" ++
-      "  unnecessary_field = [false, false, false, false]\n" ++
-      // Characters are printed as codepoints.
-      "  very_important_field = " ++ to_str('v') ++ "\n" ++
-    "}"
-    assert to_pretty(record) == str
-
-    // Need := here so record doesn't unify with Bar directly.
-    let bar = Bar { very_important_field := 'v' | record }
-    assert to_pretty(bar) == "Bar " ++ str
 ])

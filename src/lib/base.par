@@ -13,6 +13,66 @@ enum Option<T> {
   Some(T)
 }
 
+// Prints any value `a` by calling [`to_pretty`](#to_pretty) on it and
+// outputting the result to `stdout`.
+//
+// @example // outputs hello
+// | print("hello")
+// |
+// | // outputs { foo = "hi", bar => true }
+// | print({ foo = "hi", bar => true })
+// |
+// | // outputs [37.8]
+// | print([37.8])
+print : A -> ()
+export print(a) =
+  @io:format("~s~n", [to_pretty(a)])
+  ()
+
+// Prints any value `a` just like [`print`](#print), but prefixes it with the
+// given `prefix`, and returns `a`. `debug` is meant to be used with the pipe
+// operator `|>` in the middle of expressions. For instance, given the
+// expression `foo('a', bar("baz", false), 27.5)`, if you're debugging and want
+// to print the second argument, you can write `foo('a', bar("baz", false)
+// |> debug("bar"), 27.5)`. This'll print `bar: ...`, where `...` is the return
+// value of the `bar` function call.
+//
+// @example // outputs length: 2
+// | length([true, false]) |> debug("length")
+// |
+// | // outputs b: 15
+// | lookup("b", { "a" => 37.5, "b" => 15 }) |> debug("b")
+debug : (A, String) -> A
+export debug(a, prefix) =
+  @io:format("~s: ~s~n", [prefix, to_pretty(a)])
+  a
+
+// Converts any value `a` into a string. Most values are represented as they
+// would appear in code, but there are a few exceptions:
+//
+// - Characters are internally stored as integers by their unicode codepoint, so
+// their string representation is numeric; e.g. `to_str('a') == "65"`. If you'd
+// like to convert a `Char` or `[Char]` to a `String` containing those
+// characters (e.g. convert `'a'` to `"a"` or `['h', i']` to `"hi"`), use
+// [`String.from_chars`](string#from_chars).
+// - Atoms are represented without the leading `@`, so `to_str(@hey) == "hey"`.
+// - A tuple with an atom as the first element, like `(@Some, 3)`, is converted
+// to look like an enum variant: `"Some(3)"`. This is because enum variants are
+// internally represented as tuples in this form.
+//
+// Atoms should rarely be used in Par, except when interoperating with Erlang,
+// so the latter two exceptions should rarely cause issues. The main case that
+// may cause surprise is characters.
+//
+// @args a
+to_str : A -> String
+export to_str = @par_native:to_str/1
+
+// Converts any value `a` into a string, exactly like [`to_str`](#to_str), but
+// if the result is long, adds newlines and tabbing to make it easy to read.
+to_pretty : A -> String
+export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
+
 // The `Sized` interface represents a type that has a length. The types
 // `String`, `[A]`, `Set<A>`, and `Map<K, V>` implement the `Sized` interface.
 interface Sized {
@@ -458,63 +518,3 @@ interface ToMap {
   // @args a
   to_map : T<K, V> -> Map<K, V>
 }
-
-// Converts any value `a` into a string. Most values are represented as they
-// would appear in code, but there are a few exceptions:
-//
-// - Characters are internally stored as integers by their unicode codepoint, so
-// their string representation is numeric; e.g. `to_str('a') == "65"`. If you'd
-// like to convert a `Char` or `[Char]` to a `String` containing those
-// characters (e.g. convert `'a'` to `"a"` or `['h', i']` to `"hi"`), use
-// [`String.from_chars`](string#from_chars).
-// - Atoms are represented without the leading `@`, so `to_str(@hey) == "hey"`.
-// - A tuple with an atom as the first element, like `(@Some, 3)`, is converted
-// to look like an enum variant: `"Some(3)"`. This is because enum variants are
-// internally represented as tuples in this form.
-//
-// Atoms should rarely be used in Par, except when interoperating with Erlang,
-// so the latter two exceptions should rarely cause issues. The main case that
-// may cause surprise is characters.
-//
-// @args a
-to_str : A -> String
-export to_str = @par_native:to_str/1
-
-// Converts any value `a` into a string, exactly like [`to_str`](#to_str), but
-// if the result is long, adds newlines and tabbing to make it easy to read.
-to_pretty : A -> String
-export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
-
-// Prints any value `a` by calling [`to_pretty`](#to_pretty) on it and
-// outputting the result to `stdout`.
-//
-// @example // outputs hello
-// | print("hello")
-// |
-// | // outputs { foo = "hi", bar => true }
-// | print({ foo = "hi", bar => true })
-// |
-// | // outputs [37.8]
-// | print([37.8])
-print : A -> ()
-export print(a) =
-  @io:format("~s~n", [to_pretty(a)])
-  ()
-
-// Prints any value `a` just like [`print`](#print), but prefixes it with the
-// given `prefix`, and returns `a`. `debug` is meant to be used with the pipe
-// operator `|>` in the middle of expressions. For instance, given the
-// expression `foo('a', bar("baz", false), 27.5)`, if you're debugging and want
-// to print the second argument, you can write `foo('a', bar("baz", false)
-// |> debug("bar"), 27.5)`. This'll print `bar: ...`, where `...` is the return
-// value of the `bar` function call.
-//
-// @example // outputs length: 2
-// | length([true, false]) |> debug("length")
-// |
-// | // outputs b: 15
-// | lookup("b", { "a" => 37.5, "b" => 15 }) |> debug("b")
-debug : (A, String) -> A
-export debug(a, prefix) =
-  @io:format("~s: ~s~n", [prefix, to_pretty(a)])
-  a
