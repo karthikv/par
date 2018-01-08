@@ -14,14 +14,9 @@
 % - Precompile stdlib modules
 %   - Include lexer/parser in stdlib or disallow modules named lexer/parser
 % - Website + Documentation
-%   - Link into docs from tutorial
-%     - Ensure line numbers are right
 %   - Order of functions in modules
-%   - Docs for stdlib
-%     - Capture tests?
-%       - Add else clause to try/catch
-%     - Index at the top of pages
-%     - Put head/tail/lookup/get/key/remove in respective module?
+%   - Capture tests?
+%     - Add else clause to try/catch
 %   - Download page
 %   - Make GitHub repo public, add GitHub link
 %

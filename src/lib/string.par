@@ -24,7 +24,7 @@ struct Regex {
   str : String
 }
 
-// Options for creating a regular expression, passed to [`re()`](#re):
+// Options for creating a regular expression, passed to [`re()`](#re).
 //
 // - `Caseless` &mdash; Case-insensitive, so `A` matches both A and a.
 // - `Multiline` &mdash; `^` matches at the start of a line and `$` matches at
@@ -49,61 +49,6 @@ impl Sized for String {
     [] => 0
   }
   empty?(s) = s == ""
-}
-
-impl ToInt for String {
-  to_int(s) = match @string:to_integer(s) {
-    (i, "") => i
-    _ => raise CantParseInt(s)
-  }
-}
-
-impl ToInt for [Char] {
-  to_int(chs) = match @string:to_integer(chs) {
-    (i, []) => i
-    _ => raise CantParseInt(@unicode:characters_to_binary(chs))
-  }
-}
-
-impl ToFloat for String {
-  to_float(s) =
-    let result = match @string:next_grapheme(s) {
-      ['.' | _] => @string:to_float(['0', assume s])
-      _ => @string:to_float(s)
-    }
-    match result {
-      (f, "") => f
-      // If we prepend a 0 above, on a successful parse, we'll get back an empty
-      // list instead of an empty string.
-      (f, []) => f
-      _ => match @string:to_integer(s) {
-        (i, "") => to_float(i : Int)
-        _ => raise CantParseFloat(s)
-      }
-    }
-}
-
-impl ToFloat for [Char] {
-  to_float(chs) =
-    let result = match chs {
-      ['.' | _] => @string:to_float(['0' | chs])
-      _ => @string:to_float(chs)
-    }
-    match result {
-      (f, []) => f
-      _ => match @string:to_integer(chs) {
-        (i, []) => to_float(i : Int)
-        _ => raise CantParseFloat(@unicode:characters_to_binary(chs))
-      }
-    }
-}
-
-impl ToAtom for String {
-  to_atom(s) = @erlang:binary_to_atom(s, @utf8)
-}
-
-impl ToAtom for [Char] {
-  to_atom = @erlang:list_to_atom/1
 }
 
 // Raised by [`slice()`](#slice) and [`range()`](#range) when they try to access
@@ -471,3 +416,58 @@ impl Pattern for Regex {
 // there's no limit on the number of splits.
 split : (String, T ~ Pattern) -> [String]
 export split(s, r) = splitn(s, r, -1)
+
+impl ToInt for String {
+  to_int(s) = match @string:to_integer(s) {
+    (i, "") => i
+    _ => raise CantParseInt(s)
+  }
+}
+
+impl ToInt for [Char] {
+  to_int(chs) = match @string:to_integer(chs) {
+    (i, []) => i
+    _ => raise CantParseInt(@unicode:characters_to_binary(chs))
+  }
+}
+
+impl ToFloat for String {
+  to_float(s) =
+    let result = match @string:next_grapheme(s) {
+      ['.' | _] => @string:to_float(['0', assume s])
+      _ => @string:to_float(s)
+    }
+    match result {
+      (f, "") => f
+      // If we prepend a 0 above, on a successful parse, we'll get back an empty
+      // list instead of an empty string.
+      (f, []) => f
+      _ => match @string:to_integer(s) {
+        (i, "") => to_float(i : Int)
+        _ => raise CantParseFloat(s)
+      }
+    }
+}
+
+impl ToFloat for [Char] {
+  to_float(chs) =
+    let result = match chs {
+      ['.' | _] => @string:to_float(['0' | chs])
+      _ => @string:to_float(chs)
+    }
+    match result {
+      (f, []) => f
+      _ => match @string:to_integer(chs) {
+        (i, []) => to_float(i : Int)
+        _ => raise CantParseFloat(@unicode:characters_to_binary(chs))
+      }
+    }
+}
+
+impl ToAtom for String {
+  to_atom(s) = @erlang:binary_to_atom(s, @utf8)
+}
+
+impl ToAtom for [Char] {
+  to_atom = @erlang:list_to_atom/1
+}

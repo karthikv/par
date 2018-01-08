@@ -10,14 +10,6 @@ module Char
 import Base (*)
 import String (Regex, re, matches?, from_chars)
 
-impl ToInt for Char {
-  to_int(c) = $c
-}
-
-impl ToAtom for Char {
-  to_atom(c) = to_atom([c])
-}
-
 // Returns the lowercase form of `ch`. If `ch` isn't a letter, returns `ch`.
 to_lower : Char -> Char
 export to_lower(ch) = match @string:lowercase([ch]) {
@@ -65,3 +57,11 @@ whitespace_re = re(`^\p{Z}|\h|\v$`, [])
 // `WSpace=yes`](https://en.wikipedia.org/wiki/Whitespace_character#Unicode)).
 whitespace? : Char -> Bool
 export whitespace?(ch) = matches?(from_chars([ch]), whitespace_re)
+
+impl ToInt for Char {
+  to_int(c) = $c
+}
+
+impl ToAtom for Char {
+  to_atom(c) = to_atom([c])
+}

@@ -16,6 +16,45 @@ import Base (*)
 import String
 import Path
 
+// Contains metadata about a file. Returned by [`stat()`](#stat).
+//
+// - `size` &mdash; The file's size.
+// - `type` &mdash; The file type (file, driectory, symlink, etc.); see
+// [`FileType`](#FileType).
+// - `atime` &mdash; The last Unix time the file was accessed, represented as
+// the number of seconds since the epoch.
+// - `mtime` &mdash; The last Unix time the file was modified, represented as
+// the number of seconds since the epoch.
+// - `mode` &mdash; The mode of the file, containing permissions; see
+// [`Mode`](#Mode).
+// - `uid` &mdash; The user ID of the file's owner.
+// - `gid` &mdash; The group ID of the file's group.
+struct Stat {
+  size : Int
+  type : FileType
+  atime : Int
+  mtime : Int
+  mode : Mode
+  uid : Int
+  gid : Int
+}
+
+// Specifies the type of a file. Returned by [`stat()`](#stat) as part of the
+// [`Stat`](#Stat) struct.
+//
+// - `Regular` &mdash; A regular file.
+// - `Directory` &mdash; A directory.
+// - `Symlink` &mdash; A symbolic link.
+// - `Device` &mdash; A device (e.g. `/dev/null` is the null device).
+// - `Other` &mdash; Some other file (e.g. named pipe, unix socket, etc.).
+enum FileType {
+  Regular
+  Directory
+  Symlink
+  Device
+  Other
+}
+
 // Contains access controls for a file. Returned by [`stat()`](#stat) as part of
 // the [`Stat`](#Stat) struct, and can be changed via [`chmod()`](#chmod).
 // `owner`, `group`, and `other` are the permissions granted to the respective
@@ -45,45 +84,6 @@ enum Permissions {
   AllowReadExec
   AllowWriteExec
   AllowAll
-}
-
-// Contains metadata about a file. Returned by [`stat()`](#stat).
-//
-// - `size` &mdash; The file's size.
-// - `type` &mdash; The file type (file, driectory, symlink, etc.); see
-// [`FileType`](#FileType).
-// - `atime` &mdash; The last Unix time the file was accessed, represented as
-// the number of seconds since the epoch.
-// - `mtime` &mdash; The last Unix time the file was modified, represented as
-// the number of seconds since the epoch.
-// - `mode` &mdash; The mode of the file, containing permissions; see
-// [`Mode`](#Mode).
-// - `uid` &mdash; The user ID of the file's owner.
-// - `gid` &mdash; The group ID of the file's group.
-struct Stat {
-  size : Int
-  type : FileType
-  atime : Int
-  mtime : Int
-  mode : Mode
-  uid : Int
-  gid : Int
-}
-
-// Specifies the type of a file. Returned by [`stat()`](#stat) as part of the
-// [`Stat`](#Stat) struct.
-//
-// - `File` &mdash; A regular file.
-// - `Directory` &mdash; A directory.
-// - `Symlink` &mdash; A symbolic link.
-// - `Device` &mdash; A device (e.g. `/dev/null` is the null device).
-// - `Other` &mdash; Some other file (e.g. named pipe, unix socket, etc.).
-enum FileType {
-  File
-  Directory
-  Symlink
-  Device
-  Other
 }
 
 // Specifies what mode to open a file in. Passed to [`open()`](#open).
@@ -282,7 +282,7 @@ munge_file_info(info) =
   ) = assume info
 
   let type = match type_atom {
-    @regular => File
+    @regular => Regular
     @directory => Directory
     @symlink => Symlink
     @device => Device

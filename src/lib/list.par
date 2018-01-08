@@ -18,58 +18,6 @@ impl Mappable for List {
   map(l, f) = @lists:map(f, l)
 }
 
-impl Collection for List {
-  fold(l, init, f) = match l {
-    [h | t] => fold(t, f(init, h), f)
-    [] => init
-  }
-  filter(l, f) = @lists:filter(f, l)
-  find(l, f) = match l {
-    [] => None
-    [h | t] => if f(h) then Some(h) else find(t, f)
-  }
-
-  filter_map(l, f) = @lists:filtermap(|a|
-    if let Some(b) = f(a) then
-      assume (true, b)
-    else
-      false
-  , l)
-  fold_map(l, init, f) = match l {
-    [h | t] =>
-      let (new_init, new_h) = f(init, h)
-      let (final, mapped) = fold_map(t, new_init, f)
-      (final, [new_h | mapped])
-    [] => (init, [])
-  }
-
-  put(l, h) = [h | l]
-  delete(l, a) = match l {
-    [] => []
-    [&a | t] => delete(t, a)
-    [h | t] => [h | delete(t, a)]
-  }
-
-  contains?(l, a) = match l {
-    [] => false
-    [&a | _] => true
-    [_ | t] => contains?(t, a)
-  }
-  all?(l, f) = @lists:all(f, l)
-  any?(l, f) = @lists:any(f, l)
-}
-
-impl ToSet for List {
-  to_set(l) =
-    let pairs = map(l, |a| (a, true))
-    @maps:from_list([assume (@"_@type", @Set) | pairs])
-}
-
-// @replace T<K, V> => [(K, V)]
-impl ToMap for List {
-  to_map(l) = @maps:from_list(l)
-}
-
 // Raised by [`at()`](#at), [`split_at()`](#split_at), [`slice()`](#slice), and
 // [`range()`](#range) when accessing an index out of bounds.
 exception BadListIndex(Int)
@@ -421,3 +369,55 @@ each : ([A], A -> B) -> ()
 export each(l, f) =
   @lists:foreach(f, l)
   ()
+
+impl Collection for List {
+  fold(l, init, f) = match l {
+    [h | t] => fold(t, f(init, h), f)
+    [] => init
+  }
+  filter(l, f) = @lists:filter(f, l)
+  find(l, f) = match l {
+    [] => None
+    [h | t] => if f(h) then Some(h) else find(t, f)
+  }
+
+  filter_map(l, f) = @lists:filtermap(|a|
+    if let Some(b) = f(a) then
+      assume (true, b)
+    else
+      false
+  , l)
+  fold_map(l, init, f) = match l {
+    [h | t] =>
+      let (new_init, new_h) = f(init, h)
+      let (final, mapped) = fold_map(t, new_init, f)
+      (final, [new_h | mapped])
+    [] => (init, [])
+  }
+
+  put(l, h) = [h | l]
+  delete(l, a) = match l {
+    [] => []
+    [&a | t] => delete(t, a)
+    [h | t] => [h | delete(t, a)]
+  }
+
+  contains?(l, a) = match l {
+    [] => false
+    [&a | _] => true
+    [_ | t] => contains?(t, a)
+  }
+  all?(l, f) = @lists:all(f, l)
+  any?(l, f) = @lists:any(f, l)
+}
+
+impl ToSet for List {
+  to_set(l) =
+    let pairs = map(l, |a| (a, true))
+    @maps:from_list([assume (@"_@type", @Set) | pairs])
+}
+
+// @replace T<K, V> => [(K, V)]
+impl ToMap for List {
+  to_map(l) = @maps:from_list(l)
+}

@@ -20,7 +20,7 @@ stat_test = group([
     // contents "hello" and 0644 permissions, the following should pass:
 
     assert meta.size == 6
-    assert meta.type == File
+    assert meta.type == Regular
     assert meta.mode == Mode {
       owner = AllowReadWrite
       group = AllowRead
@@ -39,7 +39,7 @@ stat_test = group([
   // Symlinks are resolved.
   test
     let meta = stat("test/lib/file/bar/baz")
-    assert meta.type == File
+    assert meta.type == Regular
     assert meta.mode == Mode {
       owner = AllowReadWrite
       group = AllowRead
@@ -54,7 +54,7 @@ lstat_test = group([
   test
     let meta = lstat("test/lib/file/foo.txt")
     assert meta.size == 6
-    assert meta.type == File
+    assert meta.type == Regular
     assert meta.mode == Mode {
       owner = AllowReadWrite
       group = AllowRead
@@ -331,7 +331,7 @@ ln_s_test = group([
 
     ln_s(path, new_path)
     assert lstat(new_path).type == Symlink
-    assert stat(new_path).type == File
+    assert stat(new_path).type == Regular
     assert read_path(new_path) == "foo"
 
   test
@@ -422,7 +422,7 @@ write_temp_test = group([
 cwd_test : Test
 cwd_test =
   let path = Path.join(cwd(), "rebar.config")
-  test assert stat(path).type == File
+  test assert stat(path).type == Regular
 
 // Hard to test cd because it can affect other tests running in parallel; just
 // check failure cases.

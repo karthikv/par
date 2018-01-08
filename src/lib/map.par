@@ -26,43 +26,6 @@ impl Mappable for Map {
   , {}, m)
 }
 
-// @replace T<A> => Map<K, V>
-// | A => (K, V)
-// | T<B> => Map<L, M>
-// | B => (L, M)
-impl Collection for Map {
-  fold(m, init, f) = @maps:fold(|k, v, accum| f(accum, (k, v)), init, m)
-  filter(m, f) = @maps:filter(|k, v| f((k, v)), m)
-  find(m, f) = to_list(m) |> find(f)
-
-  filter_map(m, f) = to_list(m) |> filter_map(f) |> to_map
-  fold_map(m, init, f) =
-    let (final, mapped) = to_list(m) |> fold_map(init, f)
-    (final, to_map(mapped))
-
-  put(m, (k, v)) = @maps:put(k, v, m)
-  delete(m, (k, v)) = if contains?(m, (k, v)) then @maps:remove(k, m) else m
-
-  contains?(m, (k, v)) = match @maps:find(k, m) {
-    (@ok, &v) => true
-    _ => false
-  }
-  all?(m, f) = to_list(m) |> all?(f)
-  any?(m, f) = to_list(m) |> any?(f)
-}
-
-// @replace T<A> => Map<K, V>
-// | A => (K, V)
-impl ToList for Map {
-  to_list(m) = @maps:to_list(m)
-}
-
-// @replace T<A> => Map<K, V>
-// | A => (K, V)
-impl ToSet for Map {
-  to_set(m) = to_list(m) |> to_set
-}
-
 // Returns the value associated with key `k` in map `m`, or `default` if `k`
 // isn't in `m`.
 get_or : (Map<K, V>, K, V) -> V
@@ -121,3 +84,40 @@ export with(m, keys) = @maps:with(keys, m)
 // not modified.
 without : (Map<K, V>, [K]) -> Map<K, V>
 export without(m, keys) = @maps:without(keys, m)
+
+// @replace T<A> => Map<K, V>
+// | A => (K, V)
+// | T<B> => Map<L, M>
+// | B => (L, M)
+impl Collection for Map {
+  fold(m, init, f) = @maps:fold(|k, v, accum| f(accum, (k, v)), init, m)
+  filter(m, f) = @maps:filter(|k, v| f((k, v)), m)
+  find(m, f) = to_list(m) |> find(f)
+
+  filter_map(m, f) = to_list(m) |> filter_map(f) |> to_map
+  fold_map(m, init, f) =
+    let (final, mapped) = to_list(m) |> fold_map(init, f)
+    (final, to_map(mapped))
+
+  put(m, (k, v)) = @maps:put(k, v, m)
+  delete(m, (k, v)) = if contains?(m, (k, v)) then @maps:remove(k, m) else m
+
+  contains?(m, (k, v)) = match @maps:find(k, m) {
+    (@ok, &v) => true
+    _ => false
+  }
+  all?(m, f) = to_list(m) |> all?(f)
+  any?(m, f) = to_list(m) |> any?(f)
+}
+
+// @replace T<A> => Map<K, V>
+// | A => (K, V)
+impl ToList for Map {
+  to_list(m) = @maps:to_list(m)
+}
+
+// @replace T<A> => Map<K, V>
+// | A => (K, V)
+impl ToSet for Map {
+  to_set(m) = to_list(m) |> to_set
+}

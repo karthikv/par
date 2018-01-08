@@ -18,6 +18,28 @@ impl Mappable for Set {
   map(s, f) = map(to_list(s), f) |> to_set
 }
 
+// Returns a new set with elements that are **both** in set `a` and in set `b`.
+intersect : (Set<A>, Set<A>) -> Set<A>
+export intersect(a, b) = @maps:with(@maps:keys(b), a)
+
+// Merges sets `a` and `b`, returning a new set. This is equivalent to `a ++ b`.
+union : (Set<A>, Set<A>) -> Set<A>
+export union(a, b) = @maps:merge(a, b)
+
+// Returns a new set with elements that are in set `a`, but not in set `b`. This
+// is equivalent to `a -- b`.
+subtract : (Set<A>, Set<A>) -> Set<A>
+export subtract(a, b) = @maps:without(to_list(b), a)
+
+// Returns true if `b` is a subset of `a`; that is, if `a` contains every
+// element in `b`. Note that if `a == b`, this function returns true.
+subset? : (Set<A>, Set<A>) -> Bool
+export subset?(a, b) = all?(b, |e| contains?(a, e))
+
+// Returns true if `a` and `b` share no elements in common.
+disjoint? : (Set<A>, Set<A>) -> Bool
+export disjoint?(a, b) = empty?(intersect(a, b))
+
 impl Collection for Set {
   fold(s, init, f) = to_list(s) |> fold(init, f)
   filter(s, f) = @maps:filter(|k, _| assume k == @"_@type" || f(k), s)
@@ -44,25 +66,3 @@ impl ToList for Set {
 impl ToMap for Set {
   to_map(s) = to_list(s) |> to_map
 }
-
-// Returns a new set with elements that are **both** in set `a` and in set `b`.
-intersect : (Set<A>, Set<A>) -> Set<A>
-export intersect(a, b) = @maps:with(@maps:keys(b), a)
-
-// Merges sets `a` and `b`, returning a new set. This is equivalent to `a ++ b`.
-union : (Set<A>, Set<A>) -> Set<A>
-export union(a, b) = @maps:merge(a, b)
-
-// Returns a new set with elements that are in set `a`, but not in set `b`. This
-// is equivalent to `a -- b`.
-subtract : (Set<A>, Set<A>) -> Set<A>
-export subtract(a, b) = @maps:without(to_list(b), a)
-
-// Returns true if `b` is a subset of `a`; that is, if `a` contains every
-// element in `b`. Note that if `a == b`, this function returns true.
-subset? : (Set<A>, Set<A>) -> Bool
-export subset?(a, b) = all?(b, |e| contains?(a, e))
-
-// Returns true if `a` and `b` share no elements in common.
-disjoint? : (Set<A>, Set<A>) -> Bool
-export disjoint?(a, b) = empty?(intersect(a, b))
