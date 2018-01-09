@@ -16,25 +16,19 @@ compile_stdlib() ->
   Imports = lists:map(fun(Path) ->
     ["import ", $", filename:join(Cwd, Path), $", $\n]
   end, Paths),
-  Contents = ["module Mod\n", Imports, "\na = 1\n"],
+  Contents = ["module Mod\n", Imports],
 
   ParentPath = filename:join(Dir, "mod.par"),
   ok = file:write_file(ParentPath, Contents),
 
   Result = type_system:infer_file(ParentPath),
-  {ok, Comps, C} = type_system_test:check_ok(Result, user),
-  Compiled = code_gen:compile_comps(Comps, C),
+  {ok, Comps, C, _} = type_system_test:check_ok(Result, user),
 
-  lists:map(fun({Mod, Binary}) ->
-    utils:remove_mod(Mod),
-    code:load_binary(Mod, "", Binary)
-  end, Compiled),
+  {Compiled, _} = code_gen:compile_comps(Comps, C),
+  utils:prep_compiled(Compiled, Dir),
+  {Paths, Compiled, Dir, C}.
 
-  {ParentMod, _} = hd(Compiled),
-  par_native:init(ParentMod),
-  {Paths, Compiled, C}.
-
-test_stdlib({Paths, _, C}) ->
+test_stdlib({Paths, _, _, C}) ->
   Tests = lists:map(fun(Path) ->
     Root = filename:rootname(filename:basename(Path)),
     ModuleParts = lists:map(fun([H | T]) ->
@@ -50,13 +44,6 @@ test_stdlib({Paths, _, C}) ->
 
   {inparallel, 48, Tests}.
 
-remove_stdlib({_, Compiled, _}) ->
-  % Must explicitly remove all modules. Some of these modules are from *new*
-  % stdlibs. We don't want the old parser/lexer to use new stdlibs.
-  [utils:remove_mod(Mod) || {Mod, _} <- Compiled],
-
-  % We need to re-initialize the parser; otherwise, the gm can contain
-  % references to funs from the stdlib modules that were just removed.
-  par_native:init('Par.Parser'),
-
+remove_stdlib({_, Compiled, Dir, _}) ->
+  utils:remove_compiled(Compiled, Dir),
   ok.

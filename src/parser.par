@@ -149,7 +149,11 @@ parse : [Token] -> Parsed<Node>
 export parse(tokens) = match tokens {
   [Lexer.Module(s), Lexer.Con(e, con) | t] =>
     imports(t) |> pbind(|(imports, rest)|
-      many(def, rest) |> pmap(Module(range(s, e), Con(e, con), imports, _))
+      let l = range(s, e)
+      match rest {
+        [] => Module(l, Con(e, con), imports, []) |> parsed
+        _ => many(def, rest) |> pmap(Module(l, Con(e, con), imports, _))
+      }
     )
 
   [Lexer.Module(_) | t] =>

@@ -6,8 +6,11 @@
 
 run_code_gen(Prg) ->
   Result = type_system_test:infer_prefix(Prg),
-  {ok, Comps, C} = type_system_test:check_ok(Result),
-  [{Mod, Binary}] = code_gen:compile_comps(Comps, C),
+  {ok, Comps, C, _} = type_system_test:check_ok(Result),
+  % Anything that calls run_code_gen() is expected to not be reliant on the
+  % standard library or any other modules.
+  {Compiled, _} = code_gen:compile_comps(Comps, C),
+  [{compiled, Mod, Binary} | _] = Compiled,
 
   utils:remove_mod(Mod),
   code:load_binary(Mod, "", Binary),
@@ -17,7 +20,7 @@ run_code_gen(Prg) ->
 
 run_interpreter(Prg) ->
   Result = type_system_test:infer_prefix(Prg),
-  {ok, [#comp{ast=Ast}], _} = type_system_test:check_ok(Result),
+  {ok, [#comp{ast=Ast}], _, _} = type_system_test:check_ok(Result),
   interpreter:run_ast(Ast, []).
 
 expr_code_gen(Expr) -> run_code_gen("main() =\n" ++ Expr).
@@ -30,24 +33,13 @@ many_code_gen(PathPrgs, TargetPath) ->
     PathPrgs,
     TargetPath
   ),
-  {ok, Comps, C} = type_system_test:check_ok(Result),
+  {ok, Comps, C, _} = type_system_test:check_ok(Result),
 
-  Compiled = code_gen:compile_comps(Comps, C),
-  lists:foreach(fun({Mod, Binary}) ->
-    Path = filename:join(Dir, lists:concat([Mod, ".beam"])),
-    file:write_file(Path, Binary),
-    utils:remove_mod(Mod)
-  end, Compiled),
+  {Compiled, _} = code_gen:compile_comps(Comps, C),
+  MainMod = utils:prep_compiled(Compiled, Dir),
 
-  {MainMod, _} = hd(Compiled),
-  code:add_patha(Dir),
-  par_native:init(MainMod),
   V = MainMod:main(),
-
-  % Must explicitly remove all modules. Some of these modules are from *new*
-  % stdlibs. We don't want the old parser/lexer to use new stdlibs.
-  [utils:remove_mod(Mod) || {Mod, _} <- Compiled],
-  code:del_path(Dir),
+  utils:remove_compiled(Compiled, Dir),
   V.
 
 code_gen_expr_test_() -> test_expr(fun expr_code_gen/1).

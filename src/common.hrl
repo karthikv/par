@@ -57,8 +57,8 @@
 %   fn_refs - a Ref => T mapping for fns
 %   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated vars
 %   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
-%   errs - an array of error messages, each of the form {Msg, Loc}
 %   num_params - the number of type params for the TV being processed
+%   errs - an array of error messages, each of the form {Msg, Loc}
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
 %   record_refs - a Ref => T mapping of types for anonymous records
 %   module - the current module

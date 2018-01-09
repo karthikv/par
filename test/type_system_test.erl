@@ -11,7 +11,7 @@ infer_prefix(Prg) -> type_system:infer_prg(?PRG_PREFIX ++ Prg).
 infer_prefix(Prefix, Prg) -> type_system:infer_prg(Prefix ++ Prg).
 
 norm_prg(Prefix, Prg, Name) ->
-  {ok, _, #ctx{g_env=GEnv}} = check_ok(infer_prefix(Prefix, Prg)),
+  {ok, _, #ctx{g_env=GEnv}, _} = check_ok(infer_prefix(Prefix, Prg)),
   Key = {"Mod", Name},
   #binding{inst=T} = maps:get(Key, GEnv),
 
@@ -52,7 +52,7 @@ infer_many(Dir, PathPrgs, TargetPath) ->
   type_system:infer_file(AbsTargetPath).
 
 ok_many(PathPrgs, TargetPath, Name) ->
-  {ok, Comps, C} = check_ok(infer_many(
+  {ok, Comps, C, _} = check_ok(infer_many(
     utils:temp_dir(),
     PathPrgs,
     TargetPath
@@ -71,7 +71,7 @@ bad_many(PathPrgs, TargetPath, ExpErr) ->
 
 check_ok(Result) -> check_ok(Result, standard_io).
 
-check_ok({ok, _, _}=Ok, _) -> Ok;
+check_ok(Result, _) when element(1, Result) == ok -> Result;
 check_ok(Errors, Device) ->
   io:format(Device, "~s", [reporter:format(Errors)]),
   ?assert(false).

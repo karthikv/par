@@ -1,6 +1,7 @@
 -module(type_system).
 -export([
   infer_file/1,
+  infer_stdlib/0,
   infer_prg/1,
   pattern_names/1,
   parse_file/2,
@@ -46,7 +47,6 @@
 %   return_vs - a V => {Is, ReturnT, Module, Loc} mapping for IVs in return
 %     types that are fully applied
 %   must_solve_vs - a set of Vs that must be solved because of their interface
-%   err_vs - a set of Vs that had errors unifying with a concrete type
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
 %   t1/t2 - the two types currently being unified
 %   module - the module of the current constraint that's being unified
@@ -69,7 +69,6 @@
   passed_vs = [],
   return_vs = [],
   must_solve_vs = ordsets:new(),
-  err_vs = ordsets:new(),
   gen_vs,
   t1,
   t2,
@@ -125,25 +124,83 @@
 load() -> par_native:init('Par.Parser').
 
 infer_file(Path) ->
-  case parse_file(Path, #{}) of
-    {ok, _, Comps, _} -> infer_comps(Comps);
+  % Prevent parsing stdlib modules, as we've precompiled them.
+  Parsed = maps:from_list([
+    {P, {module, M}} || {M, P} <- maps:to_list(utils:stdlib_modules())
+  ]),
+
+  case parse_file(Path, Parsed) of
+    {ok, _, Comps, _} ->
+      {BaseC, BaseS, Count} = preinferred_stdlib(),
+      {ok, Pid} = tv_server:start_link(Count),
+      Result = infer_comps(Comps, BaseC#ctx{pid=Pid}, BaseS),
+      ok = tv_server:stop(Pid),
+      Result;
+
     {errors, Errors, _} -> Errors
   end.
 
-stdlib_dir() -> filename:join(code:lib_dir(par, src), "lib").
+infer_stdlib() ->
+  Dir = utils:temp_dir(),
+  Imports = [
+    ["import ", M, $\n] || M <- maps:keys(utils:stdlib_modules())
+  ],
+  Contents = ["module Mod\n", Imports],
 
-stdlib_modules() ->
-  #{
-    "Base" => "base.par",
-    "List" => "list.par",
-    "Set" => "set.par",
-    "Map" => "map.par",
-    "String" => "string.par",
-    "Char" => "char.par",
-    "File" => "file.par",
-    "Path" => "path.par",
-    "Test" => "test.par"
-  }.
+  Path = filename:join(Dir, "mod.par"),
+  ok = file:write_file(Path, Contents),
+
+  case parse_file(Path, #{}) of
+    {ok, _, Comps, _} ->
+      {ok, Pid} = tv_server:start_link(),
+      case infer_comps(Comps, #ctx{pid=Pid}, #solver{}) of
+        {ok, _, C, S}=Result ->
+          BaseC = #ctx{
+            % Inferred types for inference.
+            g_env=maps:map(fun(_, B) ->
+              B#binding{id=precompiled}
+            end, C#ctx.g_env),
+            % For importing all names.
+            exports=C#ctx.exports,
+            % Valid types for signatures.
+            types=C#ctx.types,
+            % For unaliasing structs into records.
+            aliases=C#ctx.aliases,
+            % For importing variants.
+            enums=C#ctx.enums,
+            % For checking family trees and merging Is.
+            ifaces=C#ctx.ifaces,
+            % For checking instances.
+            impls=C#ctx.impls
+          },
+          BaseS = #solver{
+            % To correctly sub schemes and any other types.
+            subs=S#solver.subs,
+            % To inst TVs in g_env.
+            schemes=S#solver.schemes
+          },
+
+          % To generate unique TVs that don't conflict.
+          Count = tv_server:count(Pid),
+          write_preinferred_stdlib(BaseC, BaseS, Count),
+          Result;
+
+        Errors -> Errors
+      end;
+
+    {errors, Errors, _} -> Errors
+  end.
+
+preinferred_stdlib() ->
+  {ok, Binary, _} = erl_prim_loader:get_file(preinferred_stdlib_path()),
+  binary_to_term(Binary).
+
+write_preinferred_stdlib(BaseC, BaseS, Count) ->
+  Binary = term_to_binary({BaseC, BaseS, Count}),
+  ok = file:write_file(preinferred_stdlib_path(), Binary).
+
+preinferred_stdlib_path() ->
+  filename:join([code:priv_dir(par), "stdlib", "preinferred"]).
 
 resolve_dep_path(RawPath) ->
   case filename:extension(RawPath) of
@@ -159,7 +216,7 @@ parse_file(RawPath, Parsed) ->
     {ok, skip} -> skip;
 
     error ->
-      StdlibDir = stdlib_dir(),
+      StdlibDir = utils:stdlib_dir(),
       IsStdlib = lists:prefix(StdlibDir, Path),
 
       Result = case IsStdlib of
@@ -205,9 +262,8 @@ parse_file(RawPath, Parsed) ->
                   {str, DepLoc_, DepPath_} ->
                     {DepLoc_, filename:join(Dir, utils:codepoints(DepPath_))};
                   {con_token, DepLoc_, StdlibModule} ->
-                    case maps:find(StdlibModule, stdlib_modules()) of
-                      {ok, DepPath_} ->
-                        {DepLoc_, filename:join(StdlibDir, DepPath_)};
+                    case maps:find(StdlibModule, utils:stdlib_modules()) of
+                      {ok, DepPath_} -> {DepLoc_, DepPath_};
 
                       % The file null doesn't exist and will cause a read error
                       % below, which will translate to an import error.
@@ -271,7 +327,7 @@ add_stdlib_imports({module, _, _, RawImports, _}=Ast) ->
       _ -> []
     end,
     {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, Name}, Idents}
-  end, maps:keys(stdlib_modules())),
+  end, maps:keys(utils:stdlib_modules())),
   StdlibImports = lists:filter(fun({import, _, {con_token, _, Con}, _}) ->
     not ordsets:is_element(Con, ImportedSet)
   end, RawStdlibImports),
@@ -315,7 +371,11 @@ parse_prg(Prg, Path) ->
 
 infer_comps(RawComps) ->
   {ok, Pid} = tv_server:start_link(),
+  Result = infer_comps(RawComps, #ctx{pid=Pid}, #solver{}),
+  ok = tv_server:stop(Pid),
+  Result.
 
+infer_comps(RawComps, BaseC, BaseS) ->
   {Comps, _, C} = lists:foldr(fun(Comp, {FoldComps, Modules, FoldC}) ->
     #comp{module=Module, ast={module, _, {con_token, Loc, _}, _, _}} = Comp,
     FoldC1 = FoldC#ctx{module=Module},
@@ -330,20 +390,20 @@ infer_comps(RawComps) ->
         NewModules = ordsets:add_element(Module, Modules),
         {[Comp | FoldComps], NewModules, FoldC1#ctx{exports=NewExports}}
     end
-  end, {[], ordsets:new(), #ctx{pid=Pid}}, RawComps),
+  end, {[], ordsets:new(), BaseC}, RawComps),
 
   C1 = populate_env_and_types(Comps, C),
   C2 = infer_defs(Comps, C1),
-  S = #solver{
+  S = BaseS#solver{
     errs=C2#ctx.errs,
     aliases=C2#ctx.aliases,
     ifaces=C2#ctx.ifaces,
     impls=C2#ctx.impls,
     gen_vs=C2#ctx.gen_vs,
-    pid=Pid
+    pid=C2#ctx.pid
   },
 
-  Result = case solve(C2#ctx.gnrs, S) of
+  case solve(C2#ctx.gnrs, S) of
     {ok, FinalS} ->
       #solver{
         schemes=Schemes,
@@ -353,7 +413,7 @@ infer_comps(RawComps) ->
 
       FinalGEnv = maps:map(fun(_, #binding{tv={tv, V, _, _}}=B) ->
         {GVs, T, _} = maps:get(V, Schemes),
-        B#binding{inst=inst(GVs, T, Pid)}
+        B#binding{inst=inst(GVs, T, FinalS#solver.pid)}
       end, C2#ctx.g_env),
 
       SubbedInstRefsPairs = lists:filtermap(fun
@@ -400,13 +460,10 @@ infer_comps(RawComps) ->
         nested_ivs=NestedIVs,
         record_refs=SubbedRecordRefs
       },
-      {ok, Comps, FinalC};
+      {ok, Comps, FinalC, FinalS};
 
     {errors, Errs} -> {errors, Errs, Comps}
-  end,
-
-  ok = tv_server:stop(Pid),
-  Result.
+  end.
 
 populate_env_and_types(Comps, C) ->
   lists:foldl(fun(Comp, FoldC) ->
@@ -2005,15 +2062,19 @@ binding_inst(B, Name, Loc, Ref, C) ->
   case B of
     #binding{tv=TV, id=undefined} -> {TV, C};
     #binding{tv=TV, id=ID} ->
-      C1 = C#ctx{gnr=add_gnr_dep(ID, C#ctx.gnr)},
-
       % We don't want to return {inst, ...} directly; if it's added to two
       % separate constraints, that will cause two separate instantiations.
       % Additionally, we want all returned types to be fully resolved in case
       % they're associated with a reference. To accomplish this, introduce an
       % intermediate TV that will get assigned the inst.
-      InstTV = tv_server:fresh(C1#ctx.pid),
-      C2 = add_cst(InstTV, {inst, Ref, TV}, Loc, ?FROM_VAR(Name), C1),
+      InstTV = tv_server:fresh(C#ctx.pid),
+      C1 = add_cst(InstTV, {inst, Ref, TV}, Loc, ?FROM_VAR(Name), C),
+
+      % If we've already compiled this binding, no need to add a dependency.
+      C2 = case ID of
+        precompiled -> C1;
+        _ -> C#ctx{gnr=add_gnr_dep(ID, C1#ctx.gnr)}
+      end,
 
       % We need to defer instantiation until we start solving constraints.
       % Otherwise, we don't know the real types of these variables, and can't
@@ -2910,13 +2971,7 @@ unify({tv, V, Is, Rigid}=TV, T, #solver{bound_vs=BoundVs}=S) ->
 
   if
     Valid -> add_sub(V, T, S1);
-
-    % There was an attempt to unify V with a concrete type; avoid reporting
-    % ambiguity errors. It's possible that T is a gen TV, which isn't a concrete
-    % type, but we find that still adding an ErrV results in fewer, more
-    % relevant messages (if the gen TV is bound, but V isn't, then we'll get
-    % a spurious ambiguity error if we don't add an ErrV).
-    true -> add_err_v(V, S1)
+    true -> {false, S1}
   end;
 unify(T, {tv, V, Is, Rigid}, S) -> sub_unify({tv, V, Is, Rigid}, T, S);
 
@@ -3201,9 +3256,6 @@ add_rigid_err(Err, S) ->
 
 rigid_err(T1, T2, From, Err) ->
   ?ERR_TYPE_MISMATCH(T1, T2, From) ++ [$., $\s | Err].
-
-add_err_v(V, #solver{err_vs=ErrVs}=S) ->
-  {false, S#solver{err_vs=ordsets:add_element(V, ErrVs)}}.
 
 instance({con, "Int"}, "Num", _, S) -> {true, S};
 instance({con, "Float"}, "Num", _, S) -> {true, S};

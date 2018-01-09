@@ -173,6 +173,10 @@ type_system_err_lte(Err1, Err2) ->
     true -> loc_lte(Loc1, Loc2)
   end.
 
+% A builtin loc shouldn't happen, but we handle this case so we can still see an
+% output from the reporter.
+loc_lte(builtin, _) -> true;
+loc_lte(_, builtin) -> false;
 loc_lte(Loc1, Loc2) ->
   #{
     start_line := StartLine1,
@@ -194,6 +198,9 @@ loc_lte(Loc1, Loc2) ->
     true -> EndCol1 =< EndCol2
   end.
 
+% A builtin loc shouldn't happen, but we handle this case so we can still see an
+% output from the reporter.
+extract_code(builtin, _) -> "(builtin code)";
 extract_code(Loc, PrgLines) ->
   #{
     start_line := StartLine,

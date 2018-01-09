@@ -1,23 +1,69 @@
 -module(code_gen).
--export([compile_comps/2, counter_run/1]).
+-export([compile_comps/2, compile_stdlib/0, counter_run/1]).
 
 -include("common.hrl").
 -define(COUNTER_NAME, code_gen_counter).
 
 -record(cg, {env, in_impl = false, ctx, prg_lines}).
 
-compile_comps(Comps, C) ->
-  CG = #cg{env=#{}, ctx=C},
+compile_comps(Comps, C) -> compile_comps(Comps, C, precompiled_env(), true).
+
+compile_comps(Comps, C, Env, IncludePrecompiled) ->
+  CG = #cg{env=Env, ctx=C},
   {AllExports, CG1} = lists:mapfoldl(fun(Comp, FoldCG) ->
     {Exports, FoldCG1} = populate_env(Comp, FoldCG),
     {lists:append(Exports), FoldCG1}
   end, CG, Comps),
 
   CG2 = lists:foldl(fun populate_direct_imports/2, CG1, Comps),
+  Compiled = case IncludePrecompiled of
+    true ->
+      Dir = precompiled_beam_dir(),
+      lists:map(fun(RawModule) ->
+        Module = "Par." ++ RawModule,
+        BeamPath = filename:join(Dir, Module ++ ".beam"),
+        {precompiled, list_to_atom(Module), BeamPath}
+      end, maps:keys(utils:stdlib_modules()));
 
-  lists:map(fun({Comp, Exports}) ->
-    compile_ast(Comp, Exports, CG2#cg{prg_lines=Comp#comp.prg_lines})
-  end, lists:zip(Comps, AllExports)).
+    false -> []
+  end,
+
+  FinalCompiled = lists:foldr(fun({Comp, Exports}, FoldCompiled) ->
+    CompCG = CG2#cg{prg_lines=Comp#comp.prg_lines},
+    [compile_ast(Comp, Exports, CompCG) | FoldCompiled]
+  end, Compiled, lists:zip(Comps, AllExports)),
+
+  {FinalCompiled, CG2}.
+
+compile_stdlib() ->
+  case type_system:infer_stdlib() of
+    {ok, Comps, C, _} ->
+      {Compiled, CG} = compile_comps(Comps, C, #{}, false),
+      Dir = precompiled_beam_dir(),
+      Mod = utils:prep_compiled(Compiled, Dir),
+
+      ok = file:delete(filename:join(Dir, atom_to_list(Mod) ++ ".beam")),
+      % This doesn't delete .beam files; it removes loaded modules.
+      utils:remove_compiled(Compiled, Dir),
+
+      write_precompiled_env(CG#cg.env),
+      ok;
+
+    Errors -> ?ERR("~s", [reporter:format(Errors)])
+  end.
+
+precompiled_beam_dir() -> filename:join(code:priv_dir(par), "stdlib").
+
+precompiled_env() ->
+  {ok, Binary, _} = erl_prim_loader:get_file(precompiled_env_path()),
+  binary_to_term(Binary).
+
+write_precompiled_env(Env) ->
+  Binary = term_to_binary(Env),
+  ok = file:write_file(precompiled_env_path(), Binary).
+
+precompiled_env_path() ->
+  filename:join([code:priv_dir(par), "stdlib", "precompiled-env"]).
 
 populate_env(#comp{module=Module, ast=Ast}, #cg{ctx=#ctx{g_env=GEnv}}=CG) ->
   {module, _, _, _, Defs} = Ast,
@@ -183,7 +229,7 @@ compile_ast(Comp, Exports, CG) ->
   %% end, Forms),
 
   {ok, Mod, Binary} = compile:forms(Forms, debug_info),
-  {Mod, Binary}.
+  {compiled, Mod, Binary}.
 
 rep({global, Loc, {var, _, Name}, Expr, _}, CG) ->
   Line = ?START_LINE(Loc),

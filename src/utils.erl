@@ -1,5 +1,7 @@
 -module(utils).
 -export([
+  stdlib_dir/0,
+  stdlib_modules/0,
   resolve_con/2,
   qualify/2,
   unqualify/1,
@@ -16,6 +18,8 @@
   family_is/2,
   test_names/2,
   exported_idents/3,
+  prep_compiled/2,
+  remove_compiled/2,
   absolute/1,
   pretty_csts/1,
   pretty/1,
@@ -25,6 +29,22 @@
   remove_mod/1
 ]).
 -include("common.hrl").
+
+stdlib_dir() -> utils:absolute(filename:join(code:lib_dir(par, src), "lib")).
+
+stdlib_modules() ->
+  Dir = stdlib_dir(),
+  #{
+    "Base" => filename:join(Dir, "base.par"),
+    "List" => filename:join(Dir, "list.par"),
+    "Set" => filename:join(Dir, "set.par"),
+    "Map" => filename:join(Dir, "map.par"),
+    "String" => filename:join(Dir, "string.par"),
+    "Char" => filename:join(Dir, "char.par"),
+    "File" => filename:join(Dir, "file.par"),
+    "Path" => filename:join(Dir, "path.par"),
+    "Test" => filename:join(Dir, "test.par")
+  }.
 
 resolve_con(RawCon, C) ->
   Con = utils:qualify(RawCon, C),
@@ -252,6 +272,35 @@ exported_idents(Module, Loc, #ctx{exports=Exports}) ->
     ([H | _]=Name) when H >= $a andalso H =< $z -> {var, Loc, Name};
     (Name) -> {con_token, Loc, Name}
   end, ordsets:to_list(Names)).
+
+prep_compiled(Compiled, Dir) ->
+  lists:foreach(fun
+    ({compiled, Mod, Binary}) ->
+      Path = filename:join(Dir, atom_to_list(Mod) ++ ".beam"),
+      ok = file:write_file(Path, Binary),
+      utils:remove_mod(Mod);
+
+    ({precompiled, Mod, Existing}) ->
+      Path = filename:join(Dir, atom_to_list(Mod) ++ ".beam"),
+      {ok, _} = file:copy(Existing, Path),
+      utils:remove_mod(Mod)
+  end, Compiled),
+
+  {compiled, MainMod, _} = hd(Compiled),
+  code:add_patha(Dir),
+  par_native:init(MainMod),
+  MainMod.
+
+remove_compiled(Compiled, Dir) ->
+  % Must explicitly remove all modules. Some of these modules are from *new*
+  % stdlibs. We don't want the old parser/lexer to use new stdlibs.
+  [utils:remove_mod(Mod) || {Mod, _} <- Compiled],
+  code:del_path(Dir).
+
+  % TODO: is this necessary? can we remove?
+  % We need to re-initialize the parser; otherwise, the gm can contain
+  % references to funs from the stdlib modules that were just removed.
+  %% par_native:init('Par.Parser').
 
 absolute(Path) ->
   FullPath = filename:absname(Path),

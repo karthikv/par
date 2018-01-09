@@ -2,7 +2,10 @@
 set -euo pipefail
 IFS=$'\n\t'
 
+# We compile the parser with the current par, so it runs with the old, working
+# stdlibs. Then, we precompile the new stdlibs so all tests can run against it.
 bin/par -o ebin src/parser.par
+bin/precompile
 
 if [ $# -eq 0 ]; then
   rebar3 eunit

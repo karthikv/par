@@ -13,6 +13,7 @@
 %   - ^Mod.foo in pattern; update reference docs
 % - Precompile stdlib modules
 %   - Include lexer/parser in stdlib or disallow modules named lexer/parser
+% - lookup() doesn't check whether module is imported
 % - Website + Documentation
 %   - Order of functions in modules
 %   - Capture tests?
@@ -24,6 +25,7 @@
 % - Confusion between Con and TV
 % - Fork eunite and fix macro display
 % - Parallelize code gen
+%   - counter state can't be reset each time
 % - Make warnings print to stderr?
 % - Bad "Fat arrow or equals error" when writing { Class = "hi" }
 % - Bad error when using map on Map<Attr, String> in docs.par
@@ -152,7 +154,7 @@ main(Args) ->
       end,
 
       case type_system:infer_file(Path) of
-        {ok, Comps, C} ->
+        {ok, Comps, C, _} ->
           Compiled = code_gen:compile_comps(Comps, C),
           OutDir = proplists:get_value(out_dir, Opts),
 

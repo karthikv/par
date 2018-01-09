@@ -19,8 +19,11 @@ if [ "$1" == "start" ]; then
     echo "Already bootstrapped"
   else
     echo "Compiling new par..."
-    # Compiles the new Par with the *old* standard libraries.
+    # We compile the new par. The parser is compiled with the old par, so
+    # it runs with the old stdlibs. Any new programs will be compiled against
+    # the new stdlibs, which are created by bin/precompile.
     bin/par -o ebin src/parser.par
+    bin/precompile
     rebar3 as escript escriptize
 
     mv "$PAR_PATH" "$OLD_PAR_PATH"
@@ -37,13 +40,19 @@ elif [ "$1" == "stop" ]; then
   fi
 elif [ "$1" == "finish" ]; then
   if [ -f $OLD_PAR_PATH ]; then
+    # We compile the parser with the new par, which has the new stdlibs, and
+    # update the stdlibs again for consistency (though they shouldn't change
+    # at this point).
     bin/par -o ebin src/parser.par
+    bin/precompile
     set +e
     rebar3 eunit
     succeeded=$?
     set -e
 
     if [ $succeeded -eq 0 ]; then
+      # Now we create the new-new-par, this time with the parser running with
+      # the new stdlib.
       rebar3 as escript escriptize
       mv _build/escript/bin/par "$PAR_PATH"
       rm "$OLD_PAR_PATH"

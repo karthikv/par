@@ -1,0 +1,4 @@
+#!/bin/bash
+rebar3 compile
+erl -pa _build/default/lib/**/ebin -noshell -eval \
+  'ok = code_gen:compile_stdlib(), halt()'
