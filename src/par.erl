@@ -155,8 +155,8 @@ main(Args) ->
 
       case type_system:infer_file(Path) of
         {ok, Comps, C, _} ->
-          Compiled = code_gen:compile_comps(Comps, C),
-          OutDir = proplists:get_value(out_dir, Opts),
+          {Compiled, _} = code_gen:compile_comps(Comps, C),
+          OutDir = utils:absolute(proplists:get_value(out_dir, Opts)),
 
           % ensure_dir ensures the *parent* directory exists, so we need to
           % first join the OutDir with some arbitrary filename.
@@ -170,25 +170,14 @@ main(Args) ->
               halt(1)
           end,
 
-          Filenames = lists:map(fun({Mod, Binary}) ->
-            Filename = lists:concat([Mod, ".beam"]),
-            BeamPath = filename:join(OutDir, Filename),
-            case file:write_file(BeamPath, Binary) of
-              ok -> ok;
-              {error, BeamReason} ->
-                ?ERR(
-                  "Couldn't write ~s: ~s~n",
-                  [BeamPath, file:format_error(BeamReason)]
-                ),
-                halt(1)
-            end,
-            Filename
+          AllCompiled = lists:map(fun
+            ({compiled, _, _}=E) -> E;
+            ({precompiled, Mod, Existing}) ->
+              {ok, Binary, _} = erl_prim_loader:get_file(Existing),
+              {compiled, Mod, Binary}
           end, Compiled),
-
+          Mod = utils:prep_compiled(AllCompiled, OutDir),
           #comp{module=Module} = hd(Comps),
-          {Mod, _} = hd(Compiled),
-          code:add_patha(OutDir),
-          par_native:init(Mod),
 
           case proplists:get_value(test, Opts, false) of
             true ->
@@ -206,7 +195,7 @@ main(Args) ->
                 true ->
                   ?ERR(
                     "Built ~p modules. No main() in module ~s; exiting.~n",
-                    [length(Filenames), Module]
+                    [length(Compiled), Module]
                   )
               end
           end;

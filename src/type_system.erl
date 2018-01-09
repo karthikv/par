@@ -4,7 +4,7 @@
   infer_stdlib/0,
   infer_prg/1,
   pattern_names/1,
-  parse_file/2,
+  parse_file/4,
   rigid_err/4
 ]).
 -on_load(load/0).
@@ -125,11 +125,12 @@ load() -> par_native:init('Par.Parser').
 
 infer_file(Path) ->
   % Prevent parsing stdlib modules, as we've precompiled them.
+  StdlibModules = utils:stdlib_modules(),
   Parsed = maps:from_list([
-    {P, {module, M}} || {M, P} <- maps:to_list(utils:stdlib_modules())
+    {P, {module, M}} || {M, P} <- maps:to_list(StdlibModules)
   ]),
 
-  case parse_file(Path, Parsed) of
+  case parse_file(Path, Parsed, utils:stdlib_dir(), StdlibModules) of
     {ok, _, Comps, _} ->
       {BaseC, BaseS, Count} = preinferred_stdlib(),
       {ok, Pid} = tv_server:start_link(Count),
@@ -142,15 +143,16 @@ infer_file(Path) ->
 
 infer_stdlib() ->
   Dir = utils:temp_dir(),
+  StdlibModules = utils:stdlib_modules(),
   Imports = [
-    ["import ", M, $\n] || M <- maps:keys(utils:stdlib_modules())
+    ["import ", M, $\n] || M <- maps:keys(StdlibModules)
   ],
   Contents = ["module Mod\n", Imports],
 
   Path = filename:join(Dir, "mod.par"),
   ok = file:write_file(Path, Contents),
 
-  case parse_file(Path, #{}) of
+  case parse_file(Path, #{}, utils:stdlib_dir(), StdlibModules) of
     {ok, _, Comps, _} ->
       {ok, Pid} = tv_server:start_link(),
       case infer_comps(Comps, #ctx{pid=Pid}, #solver{}) of
@@ -208,7 +210,7 @@ resolve_dep_path(RawPath) ->
     _ -> utils:absolute(RawPath)
   end.
 
-parse_file(RawPath, Parsed) ->
+parse_file(RawPath, Parsed, StdlibDir, StdlibModules) ->
   Path = resolve_dep_path(RawPath),
 
   case maps:find(Path, Parsed) of
@@ -216,9 +218,7 @@ parse_file(RawPath, Parsed) ->
     {ok, skip} -> skip;
 
     error ->
-      StdlibDir = utils:stdlib_dir(),
       IsStdlib = lists:prefix(StdlibDir, Path),
-
       Result = case IsStdlib of
         true ->
           case erl_prim_loader:get_file(Path) of
@@ -239,7 +239,7 @@ parse_file(RawPath, Parsed) ->
             {ok, RawAst, PrgLines} ->
               Ast = case IsStdlib of
                 true -> RawAst;
-                false -> add_stdlib_imports(RawAst)
+                false -> add_stdlib_imports(RawAst, StdlibModules)
               end,
 
               {module, _, {con_token, _, Module}, Imports, _} = Ast,
@@ -262,7 +262,7 @@ parse_file(RawPath, Parsed) ->
                   {str, DepLoc_, DepPath_} ->
                     {DepLoc_, filename:join(Dir, utils:codepoints(DepPath_))};
                   {con_token, DepLoc_, StdlibModule} ->
-                    case maps:find(StdlibModule, utils:stdlib_modules()) of
+                    case maps:find(StdlibModule, StdlibModules) of
                       {ok, DepPath_} -> {DepLoc_, DepPath_};
 
                       % The file null doesn't exist and will cause a read error
@@ -278,7 +278,7 @@ parse_file(RawPath, Parsed) ->
                     {FoldDeps, FoldComps, [[Err] | FoldAllErrors], FoldParsed};
 
                   _ ->
-                    case parse_file(DepPath, FoldParsed) of
+                    case parse_file(DepPath, FoldParsed, StdlibDir, StdlibModules) of
                       {ok, DepModule, DepComps, NewParsed} ->
                         {[{DepModule, Idents} | FoldDeps],
                           [DepComps | FoldComps], FoldAllErrors, NewParsed};
@@ -314,7 +314,7 @@ parse_file(RawPath, Parsed) ->
       end
   end.
 
-add_stdlib_imports({module, _, _, RawImports, _}=Ast) ->
+add_stdlib_imports({module, _, _, RawImports, _}=Ast, StdlibModules) ->
   Imported = lists:filtermap(fun
     ({import, _, {con_token, _, Con}, _}) -> {true, Con};
     (_) -> false
@@ -327,7 +327,7 @@ add_stdlib_imports({module, _, _, RawImports, _}=Ast) ->
       _ -> []
     end,
     {import, ?BUILTIN_LOC, {con_token, ?BUILTIN_LOC, Name}, Idents}
-  end, maps:keys(utils:stdlib_modules())),
+  end, maps:keys(StdlibModules)),
   StdlibImports = lists:filter(fun({import, _, {con_token, _, Con}, _}) ->
     not ordsets:is_element(Con, ImportedSet)
   end, RawStdlibImports),

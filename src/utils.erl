@@ -286,10 +286,10 @@ prep_compiled(Compiled, Dir) ->
       utils:remove_mod(Mod)
   end, Compiled),
 
-  {compiled, MainMod, _} = hd(Compiled),
+  {compiled, Mod, _} = hd(Compiled),
   code:add_patha(Dir),
-  par_native:init(MainMod),
-  MainMod.
+  par_native:init(Mod),
+  Mod.
 
 remove_compiled(Compiled, Dir) ->
   % Must explicitly remove all modules. Some of these modules are from *new*
