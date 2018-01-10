@@ -4,7 +4,7 @@
   infer_stdlib/0,
   infer_prg/1,
   pattern_names/1,
-  parse_file/4,
+  parse_file/1,
   rigid_err/4
 ]).
 -on_load(load/0).
@@ -124,13 +124,7 @@
 load() -> par_native:init('Par.Parser').
 
 infer_file(Path) ->
-  % Prevent parsing stdlib modules, as we've precompiled them.
-  StdlibModules = utils:stdlib_modules(),
-  Parsed = maps:from_list([
-    {P, {module, M}} || {M, P} <- maps:to_list(StdlibModules)
-  ]),
-
-  case parse_file(Path, Parsed, utils:stdlib_dir(), StdlibModules) of
+  case parse_file(Path) of
     {ok, _, Comps, _} ->
       {BaseC, BaseS, Count} = preinferred_stdlib(),
       {ok, Pid} = tv_server:start_link(Count),
@@ -210,6 +204,14 @@ resolve_dep_path(RawPath) ->
     _ -> utils:absolute(RawPath)
   end.
 
+parse_file(RawPath) ->
+  % Prevent parsing stdlib modules, as we've precompiled them.
+  StdlibModules = utils:stdlib_modules(),
+  Parsed = maps:from_list([
+    {P, {module, M}} || {M, P} <- maps:to_list(StdlibModules)
+  ]),
+  parse_file(RawPath, Parsed, utils:stdlib_dir(), StdlibModules).
+
 parse_file(RawPath, Parsed, StdlibDir, StdlibModules) ->
   Path = resolve_dep_path(RawPath),
 
@@ -233,7 +235,7 @@ parse_file(RawPath, Parsed, StdlibDir, StdlibModules) ->
           {errors, [{read_error, Path, Reason}], Parsed#{Path => skip}};
 
         {ok, Binary} ->
-          Prg = utils:codepoints(Binary),
+          Prg = unicode:characters_to_list(Binary),
 
           case parse_prg(Prg, Path) of
             {ok, RawAst, PrgLines} ->
@@ -258,16 +260,17 @@ parse_file(RawPath, Parsed, StdlibDir, StdlibModules) ->
                 {import, _, From, Idents} = Import,
                 {FoldDeps, FoldComps, FoldAllErrors, FoldParsed} = Memo,
 
-                {DepLoc, DepPath} = case From of
-                  {str, DepLoc_, DepPath_} ->
-                    {DepLoc_, filename:join(Dir, utils:codepoints(DepPath_))};
-                  {con_token, DepLoc_, StdlibModule} ->
+                case From of
+                  {str, DepLoc, DepPathBinary} ->
+                    Unresolved = unicode:characters_to_list(DepPathBinary),
+                    DepPath = filename:join(Dir, Unresolved);
+                  {con_token, DepLoc, StdlibModule} ->
                     case maps:find(StdlibModule, StdlibModules) of
-                      {ok, DepPath_} -> {DepLoc_, DepPath_};
+                      {ok, DepPath} -> ok;
 
                       % The file null doesn't exist and will cause a read error
                       % below, which will translate to an import error.
-                      error -> {DepLoc_, filename:join(StdlibDir, null)}
+                      error -> DepPath = filename:join(StdlibDir, null)
                     end
                 end,
 

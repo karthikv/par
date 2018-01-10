@@ -12,6 +12,7 @@
 
 init(Mod) ->
   gm_spawn(),
+  erase(),
   Mod:'_@init'(ordsets:new()).
 
 gm_spawn() ->
@@ -46,12 +47,20 @@ gm_run(Globals) ->
   end.
 
 gm_find(Mod, Atom) ->
-  Key = {Mod, Atom},
-  par_gm ! {self(), find, Key},
-  receive
-    {find_ok, Result} -> Result
-  after
-    1000 -> error({"couldn't find global", Key})
+  case get({Mod, Atom}) of
+    undefined ->
+      Key = {Mod, Atom},
+      par_gm ! {self(), find, Key},
+      receive
+        {find_ok, error} -> error;
+        {find_ok, Result} ->
+          put({Mod, Atom}, Result),
+          Result
+      after
+        1000 -> error({"couldn't find global", Key})
+      end;
+
+    Result -> Result
   end.
 
 gm_set(Mod, Atom, Value) ->

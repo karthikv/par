@@ -61,7 +61,7 @@ format({parser_errors, Errs, Path, PrgLines}) ->
   StrErrs = lists:map(fun({MaybeLoc, Msg}) ->
     case MaybeLoc of
       'None' ->
-        Suffixed = utils:codepoints(Msg) ++ " before end-of-file.",
+        Suffixed = unicode:characters_to_list(Msg) ++ " before end-of-file.",
         [wrap(Suffixed, ?LINE_WIDTH), $\n, $\n];
       {'Some', Loc} ->
         Code = extract_code(Loc, PrgLines),

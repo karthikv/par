@@ -23,7 +23,6 @@
   absolute/1,
   pretty_csts/1,
   pretty/1,
-  codepoints/1,
   temp_dir/0,
   hex_encode/1,
   remove_mod/1
@@ -401,12 +400,6 @@ pretty_field_map(FieldMap) ->
     [?FMT("~s : ~s", [Name, pretty(T)]) | Strs]
   end, [], FieldMap),
   string:join(lists:sort(FieldStrs), ", ").
-
-codepoints(Str) ->
-  case string:next_codepoint(Str) of
-    [H | T] -> [H | codepoints(T)];
-    [] -> []
-  end.
 
 temp_dir() ->
   Bytes = crypto:strong_rand_bytes(16),

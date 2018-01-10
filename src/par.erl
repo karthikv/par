@@ -121,11 +121,17 @@ main(Args) ->
   DefaultOutDir = filename:join([Cwd, "_build", "par"]),
 
   OptSpecs = [
-    {out_dir, $o, "output directory", {string, DefaultOutDir},
+    {out_dir, $o, "out-dir", {string, DefaultOutDir},
       "Directory to output compiled .beam file(s)."
     },
-    {test, $t, "run tests", boolean,
+    {test, $t, "test", boolean,
       "Run tests in source file"
+    },
+    {with_stdlib, undefined, "with-stdlib", {boolean, false},
+      "Output compiled stdlib modules (used for bootstrapping)"
+    },
+    {stats, undefined, "stats", {boolean, false},
+      "Show statistics about how long compilation took."
     },
     {source_file, undefined, undefined, string,
       "Path to source file"
@@ -153,9 +159,14 @@ main(Args) ->
         Path_ -> utils:absolute(Path_)
       end,
 
-      case type_system:infer_file(Path) of
+      {InferTime, Inferred} = measure(type_system, infer_file, [Path]),
+      case Inferred of
         {ok, Comps, C, _} ->
-          {Compiled, _} = code_gen:compile_comps(Comps, C),
+          {GenTime, {Compiled, _}} = measure(
+            code_gen,
+            compile_comps,
+            [Comps, C]
+          ),
           OutDir = utils:absolute(proplists:get_value(out_dir, Opts)),
 
           % ensure_dir ensures the *parent* directory exists, so we need to
@@ -170,14 +181,40 @@ main(Args) ->
               halt(1)
           end,
 
-          AllCompiled = lists:map(fun
-            ({compiled, _, _}=E) -> E;
-            ({precompiled, Mod, Existing}) ->
-              {ok, Binary, _} = erl_prim_loader:get_file(Existing),
-              {compiled, Mod, Binary}
-          end, Compiled),
-          Mod = utils:prep_compiled(AllCompiled, OutDir),
+          StdlibStats = case proplists:get_value(with_stdlib, Opts) of
+            true ->
+              {LoadTime, AllCompiled} = measure(fun() ->
+                lists:map(fun
+                  ({compiled, _, _}=E) -> E;
+                  ({precompiled, Mod, Existing}) ->
+                    {ok, Binary, _} = erl_prim_loader:get_file(Existing),
+                    {compiled, Mod, Binary}
+                end, Compiled)
+              end),
+
+              {PrepTime, _} = measure(
+                utils,
+                prep_compiled,
+                [AllCompiled, OutDir]
+              ),
+              ["Load stdlibs: ", LoadTime, "\nPrepare stdlibs: ", PrepTime, $\n];
+
+            false -> []
+          end,
+
+          case proplists:get_value(stats, Opts) of
+            true ->
+              Stats = [
+                "Inference: ", InferTime, "\nCode generation: ", GenTime, $\n |
+                StdlibStats
+              ],
+              ?ERR("~s", [Stats]);
+
+            false -> ok
+          end,
+
           #comp{module=Module} = hd(Comps),
+          {compiled, Mod, _} = hd(Compiled),
 
           case proplists:get_value(test, Opts, false) of
             true ->
@@ -205,3 +242,12 @@ main(Args) ->
           halt(1)
       end
   end.
+
+measure(Mod, Fn, Args) ->
+  {Time, Result} = timer:tc(Mod, Fn, Args),
+  {format_time(Time), Result}.
+measure(Fun) ->
+  {Time, Result} = timer:tc(Fun),
+  {format_time(Time), Result}.
+
+format_time(Time) -> io_lib:format("~pms", [Time / 1000]).

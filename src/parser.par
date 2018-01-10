@@ -1441,9 +1441,7 @@ delim_cb(delim_tag, delim_str, _, tokens) =
       )
 
 delim_comma_cb : (T, [Token]) -> Parsed<(Bool, [Token])>
-delim_comma_cb =
-  let tag = token_tag(Lexer.Comma(fake_loc))
-  delim_cb(tag, "comma ','", _, _)
+delim_comma_cb(v, tokens) = delim_cb(@",", "comma ','", v, tokens)
 
 many_delim : (
   (T, [Token]) -> Parsed<(Bool, [Token])>,
@@ -1491,16 +1489,9 @@ delim_or_nl_cb(delim_tag, delim_str, node, tokens) =
         " or by aligning them on separate lines"
       )
 
-fake_loc : Loc
-fake_loc = Loc { start_line = -1, end_line = -1, start_col = -1, end_col = -1 }
-
 delim_comma_or_nl_cb : (Node, [Token]) -> Parsed<(Bool, [Token])>
-delim_comma_or_nl_cb = delim_or_nl_cb(
-  token_tag(Lexer.Comma(fake_loc)),
-  "comma ','",
-  _,
-  _,
-)
+delim_comma_or_nl_cb(node, tokens) =
+  delim_or_nl_cb(@",", "comma ','", node, tokens)
 
 many_delim_comma_or_nl : ([Token] -> Parsed<(Node, [Token])>, [Token]) ->
   Parsed<[Node]>
@@ -1571,18 +1562,18 @@ no_close_prefix = "Couldn't find matching closing "
 
 open_tag : Bracket -> Atom
 open_tag(bracket) = match bracket {
-  Paren => token_tag(Lexer.LParen(fake_loc))
-  Bracket => token_tag(Lexer.LBracket(fake_loc))
-  Brace => token_tag(Lexer.LBrace(fake_loc))
-  Angle => token_tag(Lexer.Lt(fake_loc))
+  Paren => @"("
+  Bracket => @"["
+  Brace => @"{"
+  Angle => @"<"
 }
 
 close_tag : Bracket -> Atom
 close_tag(bracket) = match bracket {
-  Paren => token_tag(Lexer.RParen(fake_loc))
-  Bracket => token_tag(Lexer.RBracket(fake_loc))
-  Brace => token_tag(Lexer.RBrace(fake_loc))
-  Angle => token_tag(Lexer.Gt(fake_loc))
+  Paren => @")"
+  Bracket => @"]"
+  Brace => @"}"
+  Angle => @">"
 }
 
 open_str : Bracket -> String
