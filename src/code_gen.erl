@@ -1,14 +1,18 @@
 -module(code_gen).
--export([compile_comps/2, compile_stdlib/0, counter_run/1]).
+-export([compile_comps/2, compile_comps/3, compile_stdlib/0, counter_run/1]).
 
 -include("common.hrl").
 -define(COUNTER_NAME, code_gen_counter).
 
 -record(cg, {env, in_impl = false, ctx, prg_lines}).
 
-compile_comps(Comps, C) -> compile_comps(Comps, C, precompiled_env(), true).
+compile_comps(Comps, C) ->
+  compile_comps(Comps, C, true).
 
-compile_comps(Comps, C, Env, IncludePrecompiled) ->
+compile_comps(Comps, C, IncludePrecompiled) ->
+  compile_comps(Comps, C, IncludePrecompiled, precompiled_env()).
+
+compile_comps(Comps, C, IncludePrecompiled, Env) ->
   CG = #cg{env=Env, ctx=C},
   {AllExports, CG1} = lists:mapfoldl(fun(Comp, FoldCG) ->
     {Exports, FoldCG1} = populate_env(Comp, FoldCG),
@@ -38,7 +42,7 @@ compile_comps(Comps, C, Env, IncludePrecompiled) ->
 compile_stdlib() ->
   case type_system:infer_stdlib() of
     {ok, Comps, C, _} ->
-      {Compiled, CG} = compile_comps(Comps, C, #{}, false),
+      {Compiled, CG} = compile_comps(Comps, C, false, #{}),
       Dir = precompiled_beam_dir(),
       Mod = utils:prep_compiled(Compiled, Dir),
 

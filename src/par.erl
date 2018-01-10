@@ -1,5 +1,5 @@
 -module(par).
--export([main/1]).
+-export([entry/0, main/1]).
 -include("common.hrl").
 
 % TODO:
@@ -105,6 +105,10 @@
 % - Force all block expressions except last to be type ()?
 % - Global exception handler for better printing
 
+entry() ->
+  main(init:get_plain_arguments()),
+  halt(0).
+
 main(Args) ->
   Release = erlang:system_info(otp_release),
   case string:to_integer(Release) of
@@ -159,88 +163,95 @@ main(Args) ->
         Path_ -> utils:absolute(Path_)
       end,
 
-      {InferTime, Inferred} = measure(type_system, infer_file, [Path]),
-      case Inferred of
-        {ok, Comps, C, _} ->
-          {GenTime, {Compiled, _}} = measure(
-            code_gen,
-            compile_comps,
-            [Comps, C]
+      run(Path, Opts)
+  end.
+
+run(Path, Opts) ->
+  {InferTime, Inferred} = measure(type_system, infer_file, [Path]),
+  case Inferred of
+    {ok, Comps, C, _} ->
+      WithStdlib = proplists:get_value(with_stdlib, Opts),
+      {GenTime, {Compiled, _}} = measure(
+        code_gen,
+        compile_comps,
+        [Comps, C, WithStdlib]
+      ),
+      OutDir = utils:absolute(proplists:get_value(out_dir, Opts)),
+
+      % ensure_dir ensures the *parent* directory exists, so we need to
+      % first join the OutDir with some arbitrary filename.
+      case filelib:ensure_dir(filename:join(OutDir, "foo")) of
+        ok -> ok;
+        {error, OutReason} ->
+          ?ERR(
+            "Couldn't create output directory ~s: ~s~n",
+            [OutDir, file:format_error(OutReason)]
           ),
-          OutDir = utils:absolute(proplists:get_value(out_dir, Opts)),
-
-          % ensure_dir ensures the *parent* directory exists, so we need to
-          % first join the OutDir with some arbitrary filename.
-          case filelib:ensure_dir(filename:join(OutDir, "foo")) of
-            ok -> ok;
-            {error, OutReason} ->
-              ?ERR(
-                "Couldn't create output directory ~s: ~s~n",
-                [OutDir, file:format_error(OutReason)]
-              ),
-              halt(1)
-          end,
-
-          StdlibStats = case proplists:get_value(with_stdlib, Opts) of
-            true ->
-              {LoadTime, AllCompiled} = measure(fun() ->
-                lists:map(fun
-                  ({compiled, _, _}=E) -> E;
-                  ({precompiled, Mod, Existing}) ->
-                    {ok, Binary, _} = erl_prim_loader:get_file(Existing),
-                    {compiled, Mod, Binary}
-                end, Compiled)
-              end),
-
-              {PrepTime, _} = measure(
-                utils,
-                prep_compiled,
-                [AllCompiled, OutDir]
-              ),
-              ["Load stdlibs: ", LoadTime, "\nPrepare stdlibs: ", PrepTime, $\n];
-
-            false -> []
-          end,
-
-          case proplists:get_value(stats, Opts) of
-            true ->
-              Stats = [
-                "Inference: ", InferTime, "\nCode generation: ", GenTime, $\n |
-                StdlibStats
-              ],
-              ?ERR("~s", [Stats]);
-
-            false -> ok
-          end,
-
-          #comp{module=Module} = hd(Comps),
-          {compiled, Mod, _} = hd(Compiled),
-
-          case proplists:get_value(test, Opts, false) of
-            true ->
-              TestSet = ordsets:fold(fun(TestName, FoldTestSet) ->
-                [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
-              end, [], utils:test_names(Module, C#ctx.g_env)),
-
-              eunit:test(TestSet, [no_tty, {report, {unite_compact, []}}]),
-              eunit:stop();
-
-            false ->
-              Exported = erlang:function_exported(Mod, main, 0),
-              if
-                Exported -> Mod:main();
-                true ->
-                  ?ERR(
-                    "Built ~p modules. No main() in module ~s; exiting.~n",
-                    [length(Compiled), Module]
-                  )
-              end
-          end;
-
-        Errors ->
-          ?ERR("~s", [reporter:format(Errors)]),
           halt(1)
-      end
+      end,
+
+      StdlibStats = case WithStdlib of
+        true ->
+          {LoadTime, AllCompiled} = measure(fun() ->
+            lists:map(fun
+              ({compiled, _, _}=E) -> E;
+              ({precompiled, Mod, Existing}) ->
+                {ok, Binary, _} = erl_prim_loader:get_file(Existing),
+                {compiled, Mod, Binary}
+            end, Compiled)
+          end),
+
+          {PrepTime, _} = measure(
+            utils,
+            prep_compiled,
+            [AllCompiled, OutDir]
+          ),
+          ["Load stdlibs: ", LoadTime, "\nPrepare stdlibs: ", PrepTime, $\n];
+
+        false ->
+          code:add_patha(OutDir),
+          []
+      end,
+
+      case proplists:get_value(stats, Opts) of
+        true ->
+          Stats = [
+            "Inference: ", InferTime, "\nCode generation: ", GenTime, $\n |
+            StdlibStats
+          ],
+          ?ERR("~s", [Stats]);
+
+        false -> ok
+      end,
+
+      #comp{module=Module} = hd(Comps),
+      {compiled, Mod, _} = hd(Compiled),
+
+      case proplists:get_value(test, Opts, false) of
+        true ->
+          TestSet = ordsets:fold(fun(TestName, FoldTestSet) ->
+            [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
+          end, [], utils:test_names(Module, C#ctx.g_env)),
+
+          eunit:test(TestSet, [no_tty, {report, {unite_compact, []}}]),
+          eunit:stop();
+
+        false ->
+          Exported = erlang:function_exported(Mod, main, 0),
+          if
+            Exported -> Mod:main();
+            true ->
+              BuiltMsg = case length(Compiled) of
+                1 -> "Built 1 module.";
+                Num -> io_lib:format("Built ~p modules.", [Num])
+              end,
+              ?ERR("~s No main() in module ~s; exiting.~n", [BuiltMsg, Module])
+          end
+      end;
+
+    Errors ->
+      ?ERR("~s", [reporter:format(Errors)]),
+      halt(1)
   end.
 
 measure(Mod, Fn, Args) ->
