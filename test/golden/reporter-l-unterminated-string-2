@@ -3,7 +3,7 @@
 Unterminated string literal. You can use \n for a newline character or use \ at
 the end of a line to continue the string literal on the next line. Note that
 the latter also inserts a newline character. If you want to concat multiple
-strings, use the ++ operator:
+strings, use the '++' operator:
 
 3: "hello, 
 4: world"

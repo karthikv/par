@@ -1,6 +1,6 @@
 *** module Bar *** (dir/bar.par)
 
-Mismatched types [Char] and String from right-hand side of '++' operator:
+Mismatched types String and [Char] from '++' operator:
 
 4: e = [Foo.a] ++ "hi"
                   ^^^^

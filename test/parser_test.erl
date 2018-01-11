@@ -50,21 +50,9 @@ l(StartLine, StartOffset, EndLine, EndOffset) ->
   }.
 
 rewrite_refs(V) when is_list(V) -> lists:map(fun rewrite_refs/1, V);
-rewrite_refs({fn, Loc, Ref, Args, Expr}) when is_reference(Ref) ->
-  {fn, Loc, ref, rewrite_refs(Args), rewrite_refs(Expr)};
-rewrite_refs({var_ref, Loc, Ref, Name}) when is_reference(Ref) ->
-  {var_ref, Loc, ref, Name};
-rewrite_refs({impl, Loc, Ref, ConToken, TE, Inits}) when is_reference(Ref) ->
-  {impl, Loc, ref, rewrite_refs(ConToken), rewrite_refs(TE),
-   rewrite_refs(Inits)};
-rewrite_refs({expr_sig, Loc, Ref, Expr, Sig}) when is_reference(Ref) ->
-  {expr_sig, Loc, ref, rewrite_refs(Expr), rewrite_refs(Sig)};
-rewrite_refs({anon_record, Loc, Ref, Inits}) when is_reference(Ref) ->
-  {anon_record, Loc, ref, rewrite_refs(Inits)};
-rewrite_refs({anon_record_ext, Loc, Ref, Expr, Inits}) when is_reference(Ref) ->
-  {anon_record_ext, Loc, ref, rewrite_refs(Expr), rewrite_refs(Inits)};
 rewrite_refs(V) when is_tuple(V) ->
   list_to_tuple(rewrite_refs(tuple_to_list(V)));
+rewrite_refs(V) when is_reference(V) -> ref;
 rewrite_refs(V) -> V.
 
 expr_test_() ->
@@ -547,7 +535,7 @@ expr_test_() ->
 
 
   , ?_assertEqual(
-      {binary_op, l(0, 15), '++',
+      {concat, l(0, 15), ref,
         {list, l(0, 6), [
           {int, l(1, 1), 1},
           {int, l(4, 1), 2}
@@ -555,13 +543,6 @@ expr_test_() ->
         {list, l(10, 5), [{float, l(11, 3), 3.0}]}
       },
       ok_expr("[1, 2] ++ [3.0]")
-    )
-  , ?_assertEqual(
-      {binary_op, l(0, 15), '--',
-        {list, l(0, 6), [{atom, l(1, 4), hey}]},
-        {list, l(10, 5), [{atom, l(11, 3), hi}]}
-      },
-      ok_expr("[@hey] -- [@hi]")
     )
 
 
