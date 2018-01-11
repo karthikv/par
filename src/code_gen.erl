@@ -53,7 +53,9 @@ compile_stdlib() ->
       write_precompiled_env(CG#cg.env),
       ok;
 
-    Errors -> ?ERR("~s", [reporter:format(Errors)])
+    Errors ->
+      ?ERR("~s", [reporter:format(Errors)]),
+      halt(1)
   end.
 
 precompiled_beam_dir() -> filename:join(code:priv_dir(par), "stdlib").
@@ -762,6 +764,13 @@ rep({'ensure', Loc, Expr, After}, CG) ->
 rep({block, Loc, Exprs}, CG) ->
   {block, ?START_LINE(Loc), lists:map(fun(E) -> rep(E, CG) end, Exprs)};
 
+rep({concat, Loc, Ref, Left, Right}, CG) ->
+  Field = {field, Loc,
+    {con_token, Loc, "Base"},
+    {var_ref, Loc, Ref, "concat"}
+  },
+  rep({app, Loc, Field, [Left, Right]}, CG);
+
 rep({binary_op, _, '|>', Left, Right}, CG) ->
   App = case Right of
     {app, Loc, Expr, Args} -> {app, Loc, Expr, [Left | Args]};
@@ -774,27 +783,22 @@ rep({binary_op, Loc, Op, Left, Right}, CG) ->
   LeftRep = rep(Left, CG),
   RightRep = rep(Right, CG),
 
-  if
-    Op == '++' -> call(par_native, concat, [LeftRep, RightRep], Line);
-    Op == '--' -> call(par_native, separate, [LeftRep, RightRep], Line);
-    true ->
-      Atom = case Op of
-        '==' -> '==';
-        '!=' -> '/=';
-        '||' -> 'orelse';
-        '&&' -> 'andalso';
-        '>' -> '>';
-        '<' -> '<';
-        '>=' -> '>=';
-        '<=' -> '=<';
-        '+' -> '+';
-        '-' -> '-';
-        '*' -> '*';
-        '/' -> '/';
-        '%' -> 'rem'
-      end,
-      {op, Line, Atom, LeftRep, RightRep}
-  end;
+  Atom = case Op of
+    '==' -> '==';
+    '!=' -> '/=';
+    '||' -> 'orelse';
+    '&&' -> 'andalso';
+    '>' -> '>';
+    '<' -> '<';
+    '>=' -> '>=';
+    '<=' -> '=<';
+    '+' -> '+';
+    '-' -> '-';
+    '*' -> '*';
+    '/' -> '/';
+    '%' -> 'rem'
+  end,
+  {op, Line, Atom, LeftRep, RightRep};
 
 rep({unary_op, Loc, 'assert', Expr}, #cg{prg_lines=PrgLines}=CG) ->
   Line = ?START_LINE(Loc),

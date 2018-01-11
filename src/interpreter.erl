@@ -241,6 +241,16 @@ eval({'match', _, Expr, Cases}, ID) ->
 eval({block, _, Exprs}, ID) ->
   lists:foldl(fun(Expr, _) -> eval(Expr, ID) end, {}, Exprs);
 
+eval({concat, _, _, Left, Right}, ID) ->
+  LeftV = eval(Left, ID),
+  RightV = eval(Right, ID),
+
+  if
+    is_binary(LeftV) -> unicode:characters_to_binary([LeftV, RightV]);
+    is_list(LeftV) -> LeftV ++ RightV;
+    is_map(LeftV) -> maps:merge(LeftV, RightV)
+  end;
+
 eval({binary_op, _, '|>', Left, Right}, ID) ->
   App = case Right of
     {app, Loc, Expr, Args} -> {app, Loc, Expr, [Left | Args]};
@@ -270,9 +280,7 @@ eval({binary_op, _, Op, Left, Right}, ID) ->
         '-' -> LeftV - RightV;
         '*' -> LeftV * RightV;
         '/' -> LeftV / RightV;
-        '%' -> LeftV rem RightV;
-        '++' -> par_native:concat(LeftV, RightV);
-        '--' -> par_native:separate(LeftV, RightV)
+        '%' -> LeftV rem RightV
       end
   end;
 

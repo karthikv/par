@@ -90,9 +90,7 @@
 
     % ifaces
     "Num" => ?BUILTIN_TYPE(true, 0),
-    "Ord" => ?BUILTIN_TYPE(true, 0),
-    "Concat" => ?BUILTIN_TYPE(true, 0),
-    "Separate" => ?BUILTIN_TYPE(true, 0)
+    "Ord" => ?BUILTIN_TYPE(true, 0)
   },
   aliases = #{},
   structs = #{},
@@ -100,9 +98,7 @@
   ifaces = #{},
   impls = #{
     "Num" => #{},
-    "Ord" => #{},
-    "Concat" => #{},
-    "Separate" => #{}
+    "Ord" => #{}
   },
   impl_refs = #{},
   sig_vs = #{},
@@ -163,6 +159,7 @@
 -define(FROM_MATCH_PATTERN, "match pattern").
 -define(FROM_MATCH_BODY, "match body").
 -define(FROM_UNARY_OP(Op), ?FMT("unary ~p operator", [Op])).
+-define(FROM_CONCAT, "'++' operator").
 -define(FROM_OP_LHS(Op), ?FMT("left-hand side of ~p operator", [Op])).
 -define(FROM_OP_RHS(Op), ?FMT("right-hand side of ~p operator", [Op])).
 -define(FROM_OP_RESULT(Op), ?FMT("result of ~p operation", [Op])).
@@ -374,7 +371,7 @@
   "conflicting names"
 ]).
 -define(ERR_CANT_IMPL(Con), [
-  "You can't implement the builtin interface ", Con, "."
+  "You can't implement the builtin interface ", Con
 ]).
 
 -define(LOC(Node), element(2, Node)).

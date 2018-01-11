@@ -15,6 +15,11 @@ impl Sized for Map<K, V> {
   empty?(m) = m == {}
 }
 
+impl Concat for Map<K, V> {
+  concat = merge
+  concat_all(l) = fold(l, {}, concat)
+}
+
 // @replace T<A> => Map<K, V>
 // | A => (K, V)
 // | T<B> => Map<L, M>
@@ -69,7 +74,8 @@ export upsert(m, k, default, f) = match @maps:find(k, m) {
 }
 
 // Merges maps `a` and `b` together, returning a new map. If a key exists in
-// both `a` and `b`, the value in `b` takes precedence.
+// both `a` and `b`, the value in `b` takes precedence. This is an alias for
+// [`concat()`](base#concat) and is equivalent to `a ++ b`.
 //
 // @args a, b
 merge : (Map<K, V>, Map<K, V>) -> Map<K, V>

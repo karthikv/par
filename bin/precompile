@@ -1,4 +1,7 @@
 #!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
 rebar3 compile
 erl -pa _build/default/lib/**/ebin -noshell -eval \
-  'ok = code_gen:compile_stdlib(), halt()'
+  'ok = code_gen:compile_stdlib(), halt(0)'

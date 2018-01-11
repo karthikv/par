@@ -237,6 +237,7 @@ run(Path, Opts) ->
           eunit:stop();
 
         false ->
+          {module, Mod} = code:ensure_loaded(Mod),
           Exported = erlang:function_exported(Mod, main, 0),
           if
             Exported -> Mod:main();

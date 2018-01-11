@@ -76,7 +76,7 @@ test_expr(Expr) ->
   , ?_test(true = Expr("(|x| x || true)(false)"))
   , ?_test(<<"ab">> = Expr("(|a, b| a ++ b)(\"a\", _)(\"b\")"))
   , ?_test(5 = Expr("(|x| |y| x + y)(2)(3)"))
-  , ?_test([4, 1] = Expr("(|x| |-| x -- [3])([4, 3, 1])()"))
+  , ?_test([4, 3, 1, 3] = Expr("(|x| |-| x ++ [3])([4, 3, 1])()"))
   % to test code_gen_utils:'_@curry' in the parital application case
   , ?_test(4 = Expr(
       "let f = (|a| |b, c, d| a - b + c - d)(4)\n"
@@ -196,14 +196,6 @@ test_expr(Expr) ->
   , ?_assertEqual(
       #{'_@type' => 'Set', 1 => true, 2 => true, 3 => true},
       Expr("#[1] ++ #[2, 3]")
-    )
-  , ?_assertEqual(
-      [3, 8],
-      Expr("[5, 3, 1, 4, 5, 8, 7] -- [4, 1, 5, 7]")
-    )
-  , ?_assertEqual(
-      #{3 => true},
-      Expr("#[3, 2, 3, 1, 2] -- #[1, 8, 6, 2]")
     )
   , ?_test(-3 = Expr("-3"))
   , ?_test(-78.5 = Expr("-5 * 15.7"))
@@ -1061,7 +1053,7 @@ test_interface(Run) ->
     ))
   , ?_test(68 = Run(
       "interface Foo { foo : T -> String }\n"
-      "interface ToI extends Concat, Foo { to_i : T -> Int }\n"
+      "interface ToI extends Base.Concat, Foo { to_i : T -> Int }\n"
       "impl Foo for [A] { foo(_) = \"list\" }\n"
       "impl ToI for [Int] {\n"
       "  to_i(l) = match l { [h | t] => h + to_i(t), [] => 0 }\n"
@@ -1122,10 +1114,11 @@ test_gen_tv(Run) ->
       "main() = foo([1])"
     ))
   , ?_assertEqual(
-      {[1, 2, 3], #{'_@type' => 'Set', hey => true, hi => true}},
+      {[1, 2, 3, 1, 2, 3],
+       #{'_@type' => 'Set', hey => true, hi => true}},
       Run(
-        "foo : T<A> ~ Separate -> T<A> ~ Separate\n"
-        "foo(x) = x\n"
+        "foo : T<A> ~ Base.Concat -> T<A> ~ Base.Concat\n"
+        "foo(x) = x ++ x\n"
         "main() = (foo([1, 2, 3]), foo(#[@hey, @hi]))"
       )
     )

@@ -37,7 +37,6 @@ enum Token {
   Concat(Loc) @"++"
   Add(Loc) @"+"
 
-  Separate(Loc) @"--"
   Arrow(Loc) @"->"
   Sub(Loc) @"-"
 
@@ -161,7 +160,6 @@ tokenize_r(chs, line, col, tokens) =
       ['+', '+' | t] => (Concat(inc(loc, 2)), t)
       ['+' | t] => (Add(inc(loc, 1)), t)
 
-      ['-', '-' | t] => (Separate(inc(loc, 2)), t)
       ['-', '>' | t] => (Arrow(inc(loc, 2)), t)
       ['-' | t] => (Sub(inc(loc, 1)), t)
 
@@ -316,7 +314,7 @@ tokenize_str_r(loc, chs, accum) = match chs {
       "Unterminated string literal. You can use \\n for a newline character " ++
       "or use \\ at the end of a line to continue the string literal on the " ++
       "next line. Note that the latter also inserts a newline character. If " ++
-      "you want to concat multiple strings, use the ++ operator"
+      "you want to concat multiple strings, use the '++' operator"
     )
     (token, t)
 

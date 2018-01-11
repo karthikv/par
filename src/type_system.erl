@@ -301,24 +301,29 @@ parse_imports(Comp, Path, Parsed, AddStdlib, StdlibModules) ->
   end, {[], [], [], Parsed#{Path => {module, Module}}}, Imports).
 
 infer_prg(Prg) ->
-  case parse_prg(Prg, "[infer-prg]", false, []) of
-    {ok, Comp} ->
-      #comp{ast={module, _, _, Imports, _}} = Comp,
-      HasImport = lists:any(fun
-        ({import, _, {con_token, _, _}, _}) -> false;
-        (_) -> true
-      end, Imports),
+  case parse_prg(Prg, "[infer-prg]", true, utils:stdlib_modules()) of
+    {ok, RawComp} ->
+      #comp{ast={module, _, _, RawImports, _}=RawAst} = RawComp,
+      {Imports, Deps} = lists:mapfoldr(fun
+        (
+          {import, Loc,
+            {con_token, _, "Base"}=From,
+            [{all, ?BUILTIN_LOC}]
+          },
+          FoldDeps
+        ) ->
+         {{import, Loc, From, []}, [{"Base", []} | FoldDeps]};
 
-      case HasImport of
-        true -> error("infer_prg can't be called on a program with imports");
-        false -> ok
-      end,
+        ({import, _, {con_token, _, DepModule}, Idents}=Import, FoldDeps) ->
+          {Import, [{DepModule, Idents} | FoldDeps]};
+        (Import, FoldDeps) -> {Import, FoldDeps}
+      end, [], RawImports),
 
-      % Don't need stdlib.
-      {ok, Pid} = tv_server:start_link(),
-      Result = infer_comps([Comp], #ctx{pid=Pid}, #solver{}),
-      ok = tv_server:stop(Pid),
-      Result;
+      Comp = RawComp#comp{
+        ast=setelement(4, RawAst, Imports),
+        deps=Deps
+      },
+      infer_comps([Comp]);
 
     Errors -> Errors
   end.
@@ -337,17 +342,11 @@ parse_prg(Prg, Path, AddStdlib, StdlibModules) ->
             false -> RawAst
           end,
 
-          {module, _, {con_token, _, Module}, Imports, _} = Ast,
-          Deps = lists:filtermap(fun
-            ({import, _, {con_token, _, DepModule}, Idents}) ->
-              {true, {DepModule, Idents}};
-            (_) -> false
-          end, Imports),
-
+          {module, _, {con_token, _, Module}, _, _} = Ast,
+          % The deps field needs to be set by the caller.
           {ok, #comp{
             module=Module,
             ast=Ast,
-            deps=Deps,
             path=Path,
             prg=Prg,
             prg_lines=PrgLines
@@ -1706,6 +1705,17 @@ infer({block, _, Exprs}, C) ->
   end, {{con, "()"}, C}, Exprs),
   {T, C1};
 
+infer({concat, Loc, Ref, Left, Right}, C) ->
+  {LeftT, C1} = infer(Left, C),
+  {RightT, C2} = infer(Right, C1),
+
+  {T, C3} = lookup_inst("Base", "concat", Loc, Ref, C2),
+  TV = tv_server:fresh(C3#ctx.pid),
+
+  Provided = [{arg, ?LOC(Left), LeftT}, {arg, ?LOC(Right), RightT}],
+  LamT = {lam, C3#ctx.l_env, Provided, TV},
+  {TV, add_cst(T, LamT, Loc, ?FROM_CONCAT, C3)};
+
 infer({binary_op, _, '|>', Left, Right}, C) ->
   App = case Right of
     {app, Loc, Expr, Args} -> {app, Loc, Expr, [Left | Args]};
@@ -1733,13 +1743,7 @@ infer({binary_op, Loc, Op, Left, Right}, C) ->
       {NumTV, NumTV, ReturnT};
     Op == '%' ->
       ReturnTV = tv_server:fresh("Num", C2#ctx.pid),
-      {{con, "Int"}, {con, "Int"}, ReturnTV};
-    Op == '++' ->
-      OperandTV = tv_server:fresh("Concat", C2#ctx.pid),
-      {OperandTV, OperandTV, OperandTV};
-    Op == '--' ->
-      OperandTV = tv_server:fresh("Separate", C2#ctx.pid),
-      {OperandTV, OperandTV, OperandTV}
+      {{con, "Int"}, {con, "Int"}, ReturnTV}
   end,
 
   C3 = add_cst(ExpLeftT, LeftT, ?LOC(Left), ?FROM_OP_LHS(Op), C2),
@@ -3270,12 +3274,6 @@ instance({con, "Int"}, "Ord", _, S) -> {true, S};
 instance({con, "Float"}, "Ord", _, S) -> {true, S};
 instance({con, "String"}, "Ord", _, S) -> {true, S};
 instance({con, "Char"}, "Ord", _, S) -> {true, S};
-instance({con, "String"}, "Concat", _, S) -> {true, S};
-instance({gen, {con, "List"}, _}, "Concat", _, S) -> {true, S};
-instance({gen, {con, "Map"}, _}, "Concat", _, S) -> {true, S};
-instance({gen, {con, "Set"}, _}, "Concat", _, S) -> {true, S};
-instance({gen, {con, "List"}, _}, "Separate", _, S) -> {true, S};
-instance({gen, {con, "Set"}, _}, "Separate", _, S) -> {true, S};
 instance(T, I, V, S) ->
   Key = utils:impl_key(T),
   case maps:find(Key, maps:get(I, S#solver.impls)) of

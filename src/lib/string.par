@@ -51,6 +51,11 @@ impl Sized for String {
   empty?(s) = s == ""
 }
 
+impl Concat for String {
+  concat(a, b) = @unicode:characters_to_binary([a, b])
+  concat_all(l) = @unicode:characters_to_binary(l)
+}
+
 // Raised by [`slice()`](#slice) and [`range()`](#range) when they try to access
 // an index out of bounds.
 exception BadStringIndex(Int)
@@ -304,7 +309,7 @@ export search_span(s, r) =
         Some((l, matches, r))
     }
 
-// Patterns are used to split a string into parts or to replace portions of
+// A `Pattern` is used to split a string into parts or to replace portions of
 // a string. A pattern identifies where to split or what to replace. The
 // types `String` and [`Regex`](#Regex) implement the `Pattern` interface.
 interface Pattern {

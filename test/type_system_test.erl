@@ -98,7 +98,7 @@ check_errors({errors, Errs, Comps}=Errors, ExpErrs) ->
       io:format("--- Actual: ---~n~s", [reporter:format(Errors)]),
       ?assert(false)
   end;
-check_errors({ok, _, _}, ExpErrs) ->
+check_errors(Result, ExpErrs) when element(1, Result) == ok ->
   NumExpErrs = length(ExpErrs),
   io:format("Expected ~p error(s), but got valid program~n", [NumExpErrs]),
   ?assert(false);
@@ -343,25 +343,11 @@ expr_test_() ->
     ))
   , ?_test(bad_expr(
       "30.0 ++ \"str\"",
-      {"Float", "String", l(0, 4), ?FROM_OP_LHS('++')}
+      {"Float", "String", l(0, 4), ?FROM_CONCAT}
     ))
   , ?_test(bad_expr(
       "[true] ++ [1, 2]",
-      {"[Bool]", "[A ~ Num]", l(10, 6), ?FROM_OP_RHS('++')}
-    ))
-
-
-  , ?_test("Set<A>" = ok_expr("#[] -- #[]"))
-  , ?_test("Set<Float>" = ok_expr("#[3.0, 5.7, 6.8] -- #[3.0]"))
-  , ?_test("[A]" = ok_expr("[] -- []"))
-  , ?_test("[Float]" = ok_expr("[3.0, 5.7, 6.8] -- [3.0]"))
-  , ?_test(bad_expr(
-      "\"hi\" -- []",
-      {"String", "[A]", l(0, 4), ?FROM_OP_LHS('--')}
-    ))
-  , ?_test(bad_expr(
-      "[1] -- #[2, 3]",
-      {"Set<A ~ Num>", "[B ~ Num]", l(7, 7), ?FROM_OP_RHS('--')}
+      {"[Bool]", "[A ~ Num]", l(10, 6), ?FROM_CONCAT}
     ))
 
 
@@ -794,10 +780,10 @@ sig_test_() ->
       "push : [Float] -> [A ~ Num]\n"
       "push(x) = x ++ [1.0]",
       rigid_err(
-        "[Float]",
         "[A ~ Num]",
+        "[Float]",
         l(1, 10, 10),
-        ?FROM_OP_RESULT('++'),
+        ?FROM_CONCAT,
         ?ERR_RIGID_CON("A ~ Num")
       )
     ))
@@ -808,7 +794,7 @@ sig_test_() ->
         "[A]",
         "[B]",
         l(1, 22, 2),
-        ?FROM_OP_RHS('++'),
+        ?FROM_CONCAT,
         ?ERR_RIGID_RIGID("A", "B")
       )
     ))
@@ -882,13 +868,13 @@ global_test_() ->
   , ?_test(bad_prg(
       "foo = \"hello\"\n"
       "expr = foo ++ @world",
-      {"String", "Atom", l(1, 14, 6), ?FROM_OP_RHS('++')}
+      {"String", "Atom", l(1, 14, 6), ?FROM_CONCAT}
     ))
   , ?_test(bad_prg(
       "foo : Set<Int>\n"
       "foo = #[1, 2, 3]\n"
-      "expr = #[5.0, 6] -- foo",
-      {"Set<Float>", "Set<Int>", l(2, 20, 3), ?FROM_OP_RHS('--')}
+      "expr = #[5.0, 6] ++ foo",
+      {"Set<Float>", "Set<Int>", l(2, 20, 3), ?FROM_CONCAT}
     ))
   ].
 
@@ -1171,7 +1157,7 @@ record_test_() ->
       "f(x) =\n"
       "  let a() = x.a\n"
       "  (true && a(), a() ++ \"hi\")",
-      {"Bool", "String", l(2, 16, 3), ?FROM_OP_LHS('++')}
+      {"Bool", "String", l(2, 16, 3), ?FROM_CONCAT}
     ))
 
 
@@ -1300,7 +1286,7 @@ record_test_() ->
   , ?_test(bad_prg(
       "struct Foo<A> { bar : A }\n"
       "f(x) = (x.bar && true, x.bar ++ \"hi\")",
-      {"Bool", "String", l(1, 23, 5), ?FROM_OP_LHS('++')}
+      {"Bool", "String", l(1, 23, 5), ?FROM_CONCAT}
     ))
   , ?_test(bad_prg(
       "f(x) = (x.bar(\"hi\"), x.bar(true))",
@@ -2040,7 +2026,7 @@ interface_test_() ->
     ))
   , ?_test("Int" = ok_prg(
       "interface Foo { foo : T -> String }\n"
-      "interface ToI extends Concat, Foo { to_i : T -> Int }\n"
+      "interface ToI extends Base.Concat, Foo { to_i : T -> Int }\n"
       "impl Foo for [A] { foo(_) = \"list\" }\n"
       "impl ToI for [Int] {\n"
       "  to_i(l) = match l { [h | t] => h + to_i(t), [] => 0 }\n"
@@ -2084,9 +2070,9 @@ interface_test_() ->
       {"A ~ Num", "Bool", l(1, 13, 4), ?FROM_PARENT_IFACES}
     ))
   , ?_test(bad_prg(
-      "interface ToI extends Concat, Separate { to_i : T -> Int }\n"
+      "interface ToI extends Base.Concat, Num { to_i : T -> Int }\n"
       "impl ToI for String { to_i = @erlang:byte_size/1 }",
-      {"A ~ Concat ~ Separate", "String", l(1, 13, 6), ?FROM_PARENT_IFACES}
+      {"A ~ Concat ~ Num", "String", l(1, 13, 6), ?FROM_PARENT_IFACES}
     ))
   , ?_test(bad_prg(
       "interface Foo { foo : T -> Int }\n"
@@ -2159,8 +2145,8 @@ gen_tv_test_() ->
       "bar"
     ))
   , ?_test("([A ~ Num], Set<Atom>)" = ok_prg(
-      "foo : T<A> ~ Separate -> T<A> ~ Separate\n"
-      "foo(x) = x\n"
+      "foo : T<A> ~ Base.Concat -> T<A> ~ Base.Concat\n"
+      "foo(x) = x ++ x\n"
       "bar = (foo([1, 2, 3]), foo(#[@hey, @hi]))",
       "bar"
     ))
@@ -2239,7 +2225,7 @@ gen_tv_test_() ->
       "  foo(z)\n"
       "  y ++ z\n"
       "  z ++ \"hi\"",
-      {"String", "A<B> ~ Concat", l(6, 7, 4), ?FROM_OP_RHS('++')}
+      {"String", "A<B> ~ Concat", l(6, 7, 4), ?FROM_CONCAT}
     ))
   , ?_test(bad_prg(
       "foo : T<A> ~ Num -> Float\n"
@@ -2606,10 +2592,6 @@ other_errors_test_() ->
       "interface Num { add : T -> T -> T }",
       {?ERR_REDEF_BUILTIN_IFACE("Num"), l(10, 3)}
     ))
-  , ?_test(bad_prg(
-      "interface Separate { to_bool : T -> Bool }",
-      {?ERR_REDEF_BUILTIN_IFACE("Separate"), l(10, 8)}
-    ))
   % iface from stdlib; must use many for stdlib to be included
   , ?_test(bad_many([
       {"foo", "module Foo\nenum Sized { HasSize(Int) }"}
@@ -2702,7 +2684,7 @@ other_errors_test_() ->
       {?ERR_TV_IFACE("A", none, ordsets:from_list(["Num"])), l(1, 8, 7)}
     ))
   , ?_test(bad_prg(
-      "foo : A ~ Num -> A ~ Concat\n"
+      "foo : A ~ Num -> A ~ Base.Concat\n"
       "foo(a) = @io:printable_range()",
       {
         ?ERR_TV_IFACE(
@@ -2710,7 +2692,7 @@ other_errors_test_() ->
           ordsets:from_list(["Num"]),
           ordsets:from_list(["Concat"])
         ),
-        l(17, 10)
+        l(17, 15)
       }
     ))
   , ?_test(bad_prg(
@@ -2792,8 +2774,8 @@ other_errors_test_() ->
       {?ERR_IFACE_NOT_TYPE("Num"), l(10, 3)}
     ))
   , ?_test(bad_prg(
-      "foo = Separate { a = 3 }",
-      {?ERR_IFACE_NOT_TYPE("Separate"), l(6, 8)}
+      "foo = Base.Concat { a = 3 }",
+      {?ERR_IFACE_NOT_TYPE("Concat"), l(6, 11)}
     ))
   , ?_test(bad_prg(
       "interface Foo { a : T -> Int }\n"

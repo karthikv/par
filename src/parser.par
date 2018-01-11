@@ -63,6 +63,7 @@ enum Node {
   RecordTE(Loc, [Node]) @record_te
   RecordExtTE(Loc, [Node], Node) @record_ext_te
 
+  Concat(Loc, Ref, Node, Node) @concat
   BinaryExpr(Loc, BinaryOpAtom, Node, Node) @binary_op
   UnaryExpr(Loc, UnaryOpAtom, Node) @unary_op
 
@@ -95,8 +96,7 @@ enum BinaryOpAtom {
   LtEq @"<="
   Add @"+"
   Sub @"-"
-  Concat @"++"
-  Separate @"--"
+  ConcatOp @"++"
   Mul @"*"
   Div @"/"
   Mod @"%"
@@ -774,8 +774,7 @@ expr_r(expr_s, state, stack, tokens) = match state {
       [Lexer.Lt(_) | t] => shunt(Lt, t)
       [Lexer.LtEq(_) | t] => shunt(LtEq, t)
       [Lexer.Add(_) | t] => shunt(Add, t)
-      [Lexer.Concat(_) | t] => shunt(Concat, t)
-      [Lexer.Separate(_) | t] => shunt(Separate, t)
+      [Lexer.Concat(_) | t] => shunt(ConcatOp, t)
       [Lexer.Mul(_) | t] => shunt(Mul, t)
       [Lexer.Div(_) | t] => shunt(Div, t)
       [Lexer.Mod(_) | t] => shunt(Mod, t)
@@ -1309,11 +1308,11 @@ reduce(next_prec, stack) =
       if next_prec <= get(opa_prec, Bin(bopa)) then
         let [Node(right), BinaryOp(&bopa), Node(left) | t] = stack
         let l = range(node_loc(left), node_loc(right))
-        let node =
-          if bopa == Colon then
-            ExprSig(l, make_ref(), left, right)
-          else
-            BinaryExpr(l, bopa, left, right)
+        let node = match bopa {
+          Colon => ExprSig(l, make_ref(), left, right)
+          ConcatOp => Concat(l, make_ref(), left, right)
+          _ => BinaryExpr(l, bopa, left, right)
+        }
 
         reduce(next_prec, [Node(node) | t])
       else
@@ -1350,7 +1349,7 @@ opa_prec_list = [
   [Bin(Or)]
   [Bin(And)]
   [Bin(Eq), Bin(NotEq), Bin(Gt), Bin(GtEq), Bin(Lt), Bin(LtEq)]
-  [Bin(Add), Bin(Sub), Bin(Concat), Bin(Separate)]
+  [Bin(Add), Bin(Sub), Bin(ConcatOp)]
   [Bin(Mul), Bin(Div), Bin(Mod)]
   [Bin(Colon)]
   [Un(Neg), Un(Not), Un(Pound), Un(Dollar), Un(Raise), Un(Discard), Un(Assume)]

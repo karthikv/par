@@ -14,6 +14,11 @@ impl Sized for [A] {
   empty?(l) = l == []
 }
 
+impl Concat for [A] {
+  concat(a, b) = @lists:append(a, b)
+  concat_all(l) = @lists:append(l)
+}
+
 impl Mappable for List {
   map(l, f) = @lists:map(f, l)
 }

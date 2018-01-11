@@ -14,6 +14,11 @@ impl Sized for Set<A> {
   empty?(s) = length(s) == 0
 }
 
+impl Concat for Set<A> {
+  concat = union
+  concat_all(l) = fold(l, #[], concat)
+}
+
 impl Mappable for Set {
   map(s, f) = map(to_list(s), f) |> to_set
 }
@@ -22,7 +27,8 @@ impl Mappable for Set {
 intersect : (Set<A>, Set<A>) -> Set<A>
 export intersect(a, b) = @maps:with(@maps:keys(b), a)
 
-// Merges sets `a` and `b`, returning a new set. This is equivalent to `a ++ b`.
+// Merges sets `a` and `b`, returning a new set. This is an alias for
+// [`concat()`](base#concat) and is equivalent to `a ++ b`.
 union : (Set<A>, Set<A>) -> Set<A>
 export union(a, b) = @maps:merge(a, b)
 

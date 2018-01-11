@@ -97,6 +97,31 @@ interface Sized {
   empty? : T -> Bool
 }
 
+// The `Concat` interface lets you concatenate/merge two values of a given type
+// into a single value. The types `String`, `[A]`, `Set<A>` and `Map<K, V>`
+// implement the `Concat` interface.
+interface Concat {
+  // Concatenates `a` and `b` together, equivalent to `a ++ b`.
+  //
+  // For strings and lists, the result contains the characters/elements of `a`
+  // followed by the characters/elements of `b`.
+  //
+  // For sets, merges (unions) `a` and `b` together, returning a new set.
+  //
+  // For maps, merges `a` and `b` together, returning a new map. If a key exists
+  // in both `a` and `b`, the value in `b` takes precedence.
+  //
+  // @args a, b
+  concat : (T, T) -> T
+
+  // Concatenates all elements in the list `l` together. If `l` is
+  // `[a, b, c, ...]`, this is equivalent to `a ++ b ++ c ++ ...`. See
+  // [`concat()`](#concat) for how a single concatenation works.
+  //
+  // @args l
+  concat_all : [T] -> T
+}
+
 // The `Mappable` interface represents a generic type `T` such that we can map
 // `T<A>` to `T<B>` with a mapping function `A -> B`. We call `T` a container
 // type, whereas `A` and `B` are element types. `Mappable` lets us map
