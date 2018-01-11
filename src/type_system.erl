@@ -125,28 +125,25 @@ load() -> par_native:init('Par.Parser').
 
 infer_file(Path) ->
   case parse_file(Path) of
-    {ok, _, Comps, _} ->
-      {BaseC, BaseS, Count} = preinferred_stdlib(),
-      {ok, Pid} = tv_server:start_link(Count),
-      Result = infer_comps(Comps, BaseC#ctx{pid=Pid}, BaseS),
-      ok = tv_server:stop(Pid),
-      Result;
-
+    {ok, _, Comps, _} -> infer_comps(Comps);
     {errors, Errors, _} -> Errors
   end.
 
 infer_stdlib() ->
   Dir = utils:temp_dir(),
+  StdlibDir = utils:stdlib_dir(),
   StdlibModules = utils:stdlib_modules(),
+
   Imports = [
-    ["import ", M, $\n] || M <- maps:keys(StdlibModules)
+    ["import \"", filename:join(StdlibDir, P), "\"\n"] ||
+    P <- maps:values(StdlibModules)
   ],
   Contents = ["module Mod\n", Imports],
 
   Path = filename:join(Dir, "mod.par"),
   ok = file:write_file(Path, Contents),
 
-  case parse_file(Path, #{}, utils:stdlib_dir(), StdlibModules) of
+  case parse_file(Path, #{}, false, StdlibModules) of
     {ok, _, Comps, _} ->
       {ok, Pid} = tv_server:start_link(),
       case infer_comps(Comps, #ctx{pid=Pid}, #solver{}) of
@@ -178,11 +175,14 @@ infer_stdlib() ->
 
           % To generate unique TVs that don't conflict.
           Count = tv_server:count(Pid),
-          write_preinferred_stdlib(BaseC, BaseS, Count),
-          Result;
+          write_preinferred_stdlib(BaseC, BaseS, Count);
 
-        Errors -> Errors
-      end;
+        Errors -> Result = Errors
+      end,
+
+      ok = tv_server:stop(Pid),
+      Result;
+
 
     {errors, Errors, _} -> Errors
   end.
@@ -210,9 +210,9 @@ parse_file(RawPath) ->
   Parsed = maps:from_list([
     {P, {module, M}} || {M, P} <- maps:to_list(StdlibModules)
   ]),
-  parse_file(RawPath, Parsed, utils:stdlib_dir(), StdlibModules).
+  parse_file(RawPath, Parsed, true, StdlibModules).
 
-parse_file(RawPath, Parsed, StdlibDir, StdlibModules) ->
+parse_file(RawPath, Parsed, AddStdlib, StdlibModules) ->
   Path = resolve_dep_path(RawPath),
 
   case maps:find(Path, Parsed) of
@@ -220,100 +220,138 @@ parse_file(RawPath, Parsed, StdlibDir, StdlibModules) ->
     {ok, skip} -> skip;
 
     error ->
-      IsStdlib = lists:prefix(StdlibDir, Path),
-      Result = case IsStdlib of
-        true ->
-          case erl_prim_loader:get_file(Path) of
-            {ok, Bin, _} -> {ok, Bin};
-            error -> {error, "builtin module of that name doesn't exist"}
-          end;
-        false -> file:read_file(Path)
-      end,
-
-      case Result of
+      case file:read_file(Path) of
         {error, Reason} ->
           {errors, [{read_error, Path, Reason}], Parsed#{Path => skip}};
 
         {ok, Binary} ->
           Prg = unicode:characters_to_list(Binary),
 
-          case parse_prg(Prg, Path) of
-            {ok, RawAst, PrgLines} ->
-              Ast = case IsStdlib of
-                true -> RawAst;
-                false -> add_stdlib_imports(RawAst, StdlibModules)
-              end,
+          case parse_prg(Prg, Path, AddStdlib, StdlibModules) of
+            {ok, #comp{module=Module}=Comp} ->
+              {Deps, Comps, AllErrors, Parsed1} = parse_imports(
+                Comp,
+                Path,
+                Parsed#{Path => {module, Module}},
+                AddStdlib,
+                StdlibModules
+              ),
 
-              {module, _, {con_token, _, Module}, Imports, _} = Ast,
-              Parsed1 = Parsed#{Path => {module, Module}},
-
-              Comp = #comp{
-                module=Module,
-                ast=Ast,
-                path=Path,
-                prg=Prg,
-                prg_lines=PrgLines
-              },
-              Dir = filename:dirname(Path),
-
-              {Deps, Comps, AllErrors, Parsed2} = lists:foldr(fun(Import, Memo) ->
-                {import, _, From, Idents} = Import,
-                {FoldDeps, FoldComps, FoldAllErrors, FoldParsed} = Memo,
-
-                case From of
-                  {str, DepLoc, DepPathBinary} ->
-                    Unresolved = unicode:characters_to_list(DepPathBinary),
-                    DepPath = filename:join(Dir, Unresolved);
-                  {con_token, DepLoc, StdlibModule} ->
-                    case maps:find(StdlibModule, StdlibModules) of
-                      {ok, DepPath} -> ok;
-
-                      % The file null doesn't exist and will cause a read error
-                      % below, which will translate to an import error.
-                      error -> DepPath = filename:join(StdlibDir, null)
-                    end
-                end,
-
-                case resolve_dep_path(DepPath) of
-                  Path ->
-                    Msg = "this is a recursive self import",
-                    Err = {import_error, DepLoc, Path, Msg, Comp},
-                    {FoldDeps, FoldComps, [[Err] | FoldAllErrors], FoldParsed};
-
-                  _ ->
-                    case parse_file(DepPath, FoldParsed, StdlibDir, StdlibModules) of
-                      {ok, DepModule, DepComps, NewParsed} ->
-                        {[{DepModule, Idents} | FoldDeps],
-                          [DepComps | FoldComps], FoldAllErrors, NewParsed};
-
-                      {errors, [{read_error, ImportPath, Reason}], NewParsed} ->
-                        ImportPathOrModule = case From of
-                          {str, _, _} -> ImportPath;
-                          {con_token, _, ImportModule} -> ImportModule
-                        end,
-                        Err = {import_error, DepLoc, ImportPathOrModule,
-                          Reason, Comp},
-                        {FoldDeps, FoldComps, [[Err] | FoldAllErrors],
-                          NewParsed};
-
-                      {errors, DepAllErrors, NewParsed} ->
-                        {FoldDeps, FoldComps, [DepAllErrors | FoldAllErrors],
-                          NewParsed};
-
-                      skip -> Memo
-                    end
-                end
-              end, {[], [], [], Parsed1}, Imports),
-
-              case AllErrors of
-                [_ | _] -> {errors, lists:append(AllErrors), Parsed2};
-                _ ->
+              case lists:append(AllErrors) of
+                [] ->
                   FullComp = Comp#comp{deps=Deps},
-                  {ok, Module, lists:append([[FullComp] | Comps]), Parsed2}
+                  {ok, Module, lists:append([[FullComp] | Comps]), Parsed1};
+
+                Errors -> {errors, Errors, Parsed1}
               end;
 
             Errors -> {errors, [Errors], Parsed#{Path => skip}}
           end
+      end
+  end.
+
+parse_imports(Comp, Path, Parsed, AddStdlib, StdlibModules) ->
+  #comp{module=Module, ast={module, _, _, Imports, _}} = Comp,
+
+  lists:foldr(fun(Import, Memo) ->
+    {import, _, From, Idents} = Import,
+    {FoldDeps, FoldComps, FoldAllErrors, FoldParsed} = Memo,
+
+    case From of
+      {str, DepLoc, DepPathBinary} ->
+        Unresolved = unicode:characters_to_list(DepPathBinary),
+        DepPath = filename:join(filename:dirname(Path), Unresolved),
+
+        case resolve_dep_path(DepPath) of
+          Path ->
+            Msg = "this is a recursive self import",
+            Err = {import_error, DepLoc, Path, Msg, Comp},
+            {FoldDeps, FoldComps, [[Err] | FoldAllErrors], FoldParsed};
+
+          _ ->
+            case parse_file(DepPath, FoldParsed, AddStdlib, StdlibModules) of
+              {ok, DepModule, DepComps, NewParsed} ->
+                NewDeps = [{DepModule, Idents} | FoldDeps],
+                NewComps = [DepComps | FoldComps],
+                {NewDeps, NewComps, FoldAllErrors, NewParsed};
+
+              {errors, [{read_error, ImportPath, Reason}], NewParsed} ->
+                Err = {import_error, DepLoc, ImportPath, Reason, Comp},
+                {FoldDeps, FoldComps, [[Err] | FoldAllErrors], NewParsed};
+
+              {errors, DepErrors, NewParsed} ->
+                {FoldDeps, FoldComps, [DepErrors | FoldAllErrors], NewParsed};
+
+              skip -> Memo
+            end
+        end;
+
+      {con_token, DepLoc, DepModule} ->
+        case maps:is_key(DepModule, StdlibModules) of
+          true ->
+            NewDeps = [{DepModule, Idents} | FoldDeps],
+            {NewDeps, FoldComps, FoldAllErrors, FoldParsed};
+
+          false ->
+            Msg = "builtin module of that name doesn't exist",
+            Err = {import_error, DepLoc, DepModule, Msg, Comp},
+            {FoldDeps, FoldComps, [[Err] | FoldAllErrors], FoldParsed}
+        end
+    end
+  end, {[], [], [], Parsed#{Path => {module, Module}}}, Imports).
+
+infer_prg(Prg) ->
+  case parse_prg(Prg, "[infer-prg]", false, []) of
+    {ok, Comp} ->
+      #comp{ast={module, _, _, Imports, _}} = Comp,
+      HasImport = lists:any(fun
+        ({import, _, {con_token, _, _}, _}) -> false;
+        (_) -> true
+      end, Imports),
+
+      case HasImport of
+        true -> error("infer_prg can't be called on a program with imports");
+        false -> ok
+      end,
+
+      % Don't need stdlib.
+      {ok, Pid} = tv_server:start_link(),
+      Result = infer_comps([Comp], #ctx{pid=Pid}, #solver{}),
+      ok = tv_server:stop(Pid),
+      Result;
+
+    Errors -> Errors
+  end.
+
+parse_prg(Prg, Path, AddStdlib, StdlibModules) ->
+  PrgLines = array:from_list(re:split(Prg, "\r?\n", [{return, list}])),
+  case 'Par.Lexer':tokenize(Prg) of
+    {errors, Errs} -> {lexer_errors, Errs, Path, PrgLines};
+    {ok, Tokens} ->
+      case 'Par.Parser':parse(Tokens) of
+        #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, PrgLines};
+
+        #{value := {'Some', RawAst}} ->
+          Ast = case AddStdlib of
+            true -> add_stdlib_imports(RawAst, StdlibModules);
+            false -> RawAst
+          end,
+
+          {module, _, {con_token, _, Module}, Imports, _} = Ast,
+          Deps = lists:filtermap(fun
+            ({import, _, {con_token, _, DepModule}, Idents}) ->
+              {true, {DepModule, Idents}};
+            (_) -> false
+          end, Imports),
+
+          {ok, #comp{
+            module=Module,
+            ast=Ast,
+            deps=Deps,
+            path=Path,
+            prg=Prg,
+            prg_lines=PrgLines
+          }}
       end
   end.
 
@@ -337,44 +375,10 @@ add_stdlib_imports({module, _, _, RawImports, _}=Ast, StdlibModules) ->
 
   setelement(4, Ast, StdlibImports ++ RawImports).
 
-infer_prg(Prg) ->
-  case parse_prg(Prg, "[infer-prg]") of
-    {ok, Ast, PrgLines} ->
-      % infer_prg should only be used only when there are no imports
-      {module, _, {con_token, _, Module}, Imports, _} = Ast,
-      case Imports of
-        [] -> ok;
-        _ -> error("infer_prg expects no imports")
-      end,
-      %% ?LOG("Ast", Ast),
-
-      Comp = #comp{
-        module=Module,
-        ast=Ast,
-        deps=[],
-        path="[infer-prg]",
-        prg=Prg,
-        prg_lines=PrgLines
-      },
-      infer_comps([Comp]);
-
-    Errors -> Errors
-  end.
-
-parse_prg(Prg, Path) ->
-  PrgLines = array:from_list(re:split(Prg, "\r?\n", [{return, list}])),
-  case 'Par.Lexer':tokenize(Prg) of
-    {errors, Errs} -> {lexer_errors, Errs, Path, PrgLines};
-    {ok, Tokens} ->
-      case 'Par.Parser':parse(Tokens) of
-        #{errs := [_ | _]=Errs} -> {parser_errors, Errs, Path, PrgLines};
-        #{value := {'Some', Ast}} -> {ok, Ast, PrgLines}
-      end
-  end.
-
 infer_comps(RawComps) ->
-  {ok, Pid} = tv_server:start_link(),
-  Result = infer_comps(RawComps, #ctx{pid=Pid}, #solver{}),
+  {BaseC, BaseS, Count} = preinferred_stdlib(),
+  {ok, Pid} = tv_server:start_link(Count),
+  Result = infer_comps(RawComps, BaseC#ctx{pid=Pid}, BaseS),
   ok = tv_server:stop(Pid),
   Result.
 
