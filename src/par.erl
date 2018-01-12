@@ -5,7 +5,6 @@
 % TODO:
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Include lexer/parser in stdlib or disallow modules named lexer/parser
-% - lookup() doesn't check whether module is imported
 % - Website + Documentation
 %   - Order of functions in modules
 %   - Fix big O complexity (or remove?) from docs

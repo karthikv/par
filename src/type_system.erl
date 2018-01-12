@@ -1516,18 +1516,13 @@ infer({field_fn, _, {var, _, Name}}, C) ->
 
 infer({field, Loc, Expr, Prop}, C) ->
   case Expr of
-    {con_token, ConLoc, Module} ->
+    {con_token, _, Module} ->
       {Ref, Name} = case Prop of
         {var_ref, _, Ref_, Name_} -> {Ref_, Name_};
         {con_token, _, Name_} -> {none, Name_}
       end,
 
-      case ordsets:is_element({C#ctx.module, Module}, C#ctx.imported) of
-        true -> lookup_inst(Module, Name, Loc, Ref, C);
-        false ->
-          TV = tv_server:fresh(C#ctx.pid),
-          {TV, add_ctx_err(?ERR_NOT_DEF_MODULE(Module), ConLoc, C)}
-      end;
+      lookup_inst(Module, Name, Loc, Ref, C);
 
     _ ->
       {ExprT, C1} = infer(Expr, C),
@@ -2067,24 +2062,31 @@ lookup(Name, Loc, C) ->
   end.
 
 lookup(Module, Name, Loc, C) ->
-  External = C#ctx.module /= Module,
+  case ordsets:is_element({C#ctx.module, Module}, C#ctx.imported) of
+    true ->
+      External = C#ctx.module /= Module,
+      case maps:find({Module, Name}, C#ctx.g_env) of
+        {ok, #binding{exported=false}=B} when External ->
+          {B, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
+        {ok, #binding{soft=true, modules=Modules}} when length(Modules) > 1 ->
+          false = External,
+          TV = tv_server:fresh(C#ctx.pid),
+          C1 = add_ctx_err(?ERR_AMBIG(Name, Modules), Loc, C),
+          {#binding{tv=TV}, C1};
+        {ok, B} -> {B, C};
 
-  case maps:find({Module, Name}, C#ctx.g_env) of
-    {ok, #binding{exported=false}=B} when External ->
-      {B, add_ctx_err(?ERR_NOT_EXPORTED(Name, Module), Loc, C)};
-    {ok, #binding{soft=true, modules=Modules}} when length(Modules) > 1 ->
-      false = External,
-      TV = tv_server:fresh(C#ctx.pid),
-      C1 = add_ctx_err(?ERR_AMBIG(Name, Modules), Loc, C),
-      {#binding{tv=TV}, C1};
-    {ok, B} -> {B, C};
+        error ->
+          TV = tv_server:fresh(C#ctx.pid),
+          C1 = if
+            External -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C);
+            true -> add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)
+          end,
+          {#binding{tv=TV}, C1}
+      end;
 
-    error ->
+    false ->
       TV = tv_server:fresh(C#ctx.pid),
-      C1 = if
-        External -> add_ctx_err(?ERR_NOT_DEF(Name, Module), Loc, C);
-        true -> add_ctx_err(?ERR_NOT_DEF(Name), Loc, C)
-      end,
+      C1 = add_ctx_err(?ERR_NOT_DEF_MODULE(Module), Loc, C),
       {#binding{tv=TV}, C1}
   end.
 

@@ -2751,7 +2751,12 @@ other_errors_test_() ->
       "bar = @io:format()",
       {?ERR_NOT_DEF_NATIVE(io, "format", 0), l(6, 10)}
     ))
-  , ?_test(bad_prg("expr = Foo.hi", {?ERR_NOT_DEF_MODULE("Foo"), l(7, 3)}))
+  , ?_test(bad_prg("expr = Foo.hi", {?ERR_NOT_DEF_MODULE("Foo"), l(7, 6)}))
+  , ?_test(bad_many([
+      {"foo", "module Foo export x = 3"},
+      {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"},
+      {"baz", "module Baz\nimport \"./bar\"\nx = Foo.x"}
+    ], "baz", {?ERR_NOT_DEF_MODULE("Foo"), "Baz", l(1, 4, 5)}))
   , ?_test(bad_many([
       {"foo", "module Foo x = 3"},
       {"bar", "module Bar\nimport \"./foo\"\ny = Foo.x"}
