@@ -204,6 +204,11 @@ run(Path, Opts) ->
           ["Load stdlibs: ", LoadTime, "\nPrepare stdlibs: ", PrepTime, $\n];
 
         false ->
+          lists:foreach(fun({compiled, Mod, Binary}) ->
+            OutPath = filename:join(OutDir, atom_to_list(Mod) ++ ".beam"),
+            ok = file:write_file(OutPath, Binary)
+          end, Compiled),
+
           code:add_patha(OutDir),
           []
       end,
