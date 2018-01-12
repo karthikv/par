@@ -1237,9 +1237,9 @@ test_pattern(Expr, Run) ->
       "  [(_, _, c), ([x, y | []], _, _)] => c + x - y\n"
       "}"
     ))
-  , ?_test([1, 2] = Expr(
-      "let (x, y) = (3, [2])\n"
-      "match [1] { &y => y ++ [1], x => x ++ [2] }"
+  , ?_test([1, 1] = Expr(
+      "let (x, y) = (3, @hey)\n"
+      "match [1] { y => y ++ [1], x => x ++ [2] }"
     ))
   , ?_test($h = Expr("(|(a, _)| a)(('h', true))"))
   , ?_test(2 = Run(
@@ -1250,15 +1250,15 @@ test_pattern(Expr, Run) ->
       "f(3, [x | _]) = 3 + x\n"
       "main() = f(4, [-1])"
     ))
-  , ?_test(hey = Run(
+  , ?_test({true, hey} = Run(
       "enum Foo<A> { Bar(Atom), Baz(A) }\n"
-      "f(Bar(x), [Baz(y), Baz(x) | _]) = y\n"
+      "f(Bar(x), [Baz(y), Baz(z) | _]) = (x == z, y)\n"
       "main() = f(Bar(@hi), [Baz(@hey), Baz(@hi), Baz(@hello)])"
     ))
   , ?_assertError(function_clause, Run(
       "enum Foo<A> { Bar(Atom), Baz(A) }\n"
-      "f(Bar(x), [Baz(y), Baz(x) | _]) = y\n"
-      "main() = f(Bar(@hi), [Baz(@hey), Baz(@hello), Baz(@hello)])"
+      "f(Bar(x), [Baz(y), Baz(z) | _]) = y\n"
+      "main() = f(Bar(@hi), [Baz(@hey)])"
     ))
 
 
@@ -1269,11 +1269,6 @@ test_pattern(Expr, Run) ->
   , ?_test({5, 5.0} = Expr(
       "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)]\n"
       "(x + 3 : Int, x + 3.0)"
-    ))
-  , ?_test(7 = Expr(
-      "let [_, a] = [1, 3]\n"
-      "let (&a, b, &a) = (3, 7, 3)\n"
-      "b"
     ))
 
 

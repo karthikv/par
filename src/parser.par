@@ -1252,10 +1252,6 @@ pattern(tokens) =
     [Lexer.LitAtom(l, atom) | t] => LitAtom(l, atom) |> finish(t)
 
     [Lexer.Var(l, name) | t] => Var(l, name) |> finish(t)
-    [Lexer.Amp(s), Lexer.Var(e, name) | t] =>
-      VarValue(range(s, e), name) |> finish(t)
-    [Lexer.Amp(_) | t] =>
-      head_loc(t) |> one_err("Expected variable identifier after ampersand '&'")
     [Lexer.Underscore(l) | t] => Underscore(l) |> finish(t)
 
     [Lexer.Con(s, mod), Lexer.Dot(_), Lexer.Con(e, con) | t] =>
@@ -1306,7 +1302,7 @@ reduce(next_prec, stack) =
   match last_op(stack) {
     Some(BinaryOp(bopa)) =>
       if next_prec <= get(opa_prec, Bin(bopa)) then
-        let [Node(right), BinaryOp(&bopa), Node(left) | t] = stack
+        let [Node(right), BinaryOp(_), Node(left) | t] = stack
         let l = range(node_loc(left), node_loc(right))
         let node = match bopa {
           Colon => ExprSig(l, make_ref(), left, right)
@@ -1320,7 +1316,7 @@ reduce(next_prec, stack) =
 
     Some(UnaryOp(s, uopa)) =>
       if next_prec <= get(opa_prec, Un(uopa)) then
-        let [Node(right), UnaryOp(&s, &uopa) | t] = stack
+        let [Node(right), UnaryOp(_, _) | t] = stack
         let l = range(s, node_loc(right))
         reduce(next_prec, [Node(UnaryExpr(l, uopa, right)) | t])
       else

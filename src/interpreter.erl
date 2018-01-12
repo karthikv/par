@@ -364,7 +364,6 @@ match(V1, {var, _, Name}, ID) ->
     {value, V2} -> V1 == V2
   end;
 
-match(V1, {var_value, Loc, Name}, ID) -> V1 == eval({var, Loc, Name}, ID);
 match(_, {'_', _}, _) -> true;
 
 match(V, {variant, _, {con_token, Loc, Name}, Args}, ID) ->

@@ -270,15 +270,15 @@
   [V, utils:unqualify(Con)]
 )).
 -define(ERR_TV_IFACE(V, Loc), [
-  "The type variable ", V, " must have the same interfaces in both locations "
-  "below", Loc
+  "The type variable ", V, " must have the same interfaces here", Loc, "and "
+  "here"
 ]).
 -define(ERR_TV_NUM_PARAMS(V, Loc), [
-  "The type variable ", V, "must have the same number of type parameters in "
-  "both locations below", Loc
+  "The type variable ", V, "must have the same number of type parameters here",
+  Loc, "and here"
 ]).
 -define(ERR_GEN_TV_IFACE(Loc), [
-  "The interfaces must be the same in both locations below", Loc
+  "The interfaces here", Loc, "must match the interfaces here"
 ]).
 -define(ERR_T_IFACE, [
   "T must have no interfaces, as it represents any type that will implement "

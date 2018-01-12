@@ -403,14 +403,20 @@ impl Collection for List {
   put(l, h) = [h | l]
   delete(l, a) = match l {
     [] => []
-    [&a | t] => delete(t, a)
-    [h | t] => [h | delete(t, a)]
+    [h | t] =>
+      if h == a then
+        delete(t, a)
+      else
+        [h | delete(t, a)]
   }
 
   contains?(l, a) = match l {
     [] => false
-    [&a | _] => true
-    [_ | t] => contains?(t, a)
+    [h | t] =>
+      if h == a then
+        true
+      else
+        contains?(t, a)
   }
   all?(l, f) = @lists:all(f, l)
   any?(l, f) = @lists:any(f, l)

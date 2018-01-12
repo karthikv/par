@@ -1261,15 +1261,6 @@ expr_test_() ->
     )
   , ?_assertEqual(
       {match, l(0, 19), {var_ref, l(6, 1), ref, "x"}, [
-        {'case', l(10, 7),
-          {var_value, l(10, 2), "y"},
-          {var_ref, l(16, 1), ref, "z"}
-        }
-      ]},
-      ok_expr("match x { &y => z }")
-    )
-  , ?_assertEqual(
-      {match, l(0, 19), {var_ref, l(6, 1), ref, "x"}, [
         {'case', l(10, 7), {'_', l(10, 1)}, {unit, l(15, 2)}}
       ]},
       ok_expr("match x { _ => () }")

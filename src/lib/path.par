@@ -71,7 +71,7 @@ normalize_r(parts) = match parts {
   // can keep a and b in the final result.
   [a, b | t] =>
     let norm = normalize_r([b | t])
-    if let [&b | _] = norm then
+    if !empty?(norm) && head(norm) == b then
       [a | norm]
     else
       normalize_r([a | norm])
@@ -96,8 +96,12 @@ export to_relative(path, from) =
 
 relative_r : ([String], [String]) -> String
 relative_r(parts, from_parts) = match (parts, from_parts) {
-  ([h | t], [h | from_t]) => relative_r(t, from_t)
-  _ => join_all(map(from_parts, |_| "..") ++ parts)
+  ([h | t], [from_h | from_t]) =>
+    if h == from_h then
+      relative_r(t, from_t)
+    else
+      join_all(map(from_parts, |_| "..") ++ parts)
+  (_, _) => join_all(map(from_parts, |_| "..") ++ parts)
 }
 
 // Returns true if `path` is absolute.

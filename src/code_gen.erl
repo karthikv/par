@@ -468,7 +468,7 @@ rep({map, Loc, Assocs}, CG) ->
   end, Assocs),
   {map, ?START_LINE(Loc), AssocReps};
 
-rep({N, Loc, Name}, CG) when N == var; N == con_token; N == var_value ->
+rep({N, Loc, Name}, CG) when N == var; N == con_token ->
   Line = ?START_LINE(Loc),
   case env_get(Name, CG) of
     % global variable handled by the global manager
@@ -579,7 +579,6 @@ rep({field_fn, _, {var, Loc, Name}}, _) ->
   Clause = {clause, Line, [RecordRep], [], Body},
   {'fun', Line, {clauses, [Clause]}};
 
-% N can be var_value if we're called by rep({var_value, _, _}, _) above
 rep({field, Loc, Expr, Prop}, CG) ->
   Line = ?START_LINE(Loc),
   case Expr of

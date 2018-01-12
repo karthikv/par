@@ -109,7 +109,7 @@ impl Collection for Map {
   delete(m, (k, v)) = if contains?(m, (k, v)) then @maps:remove(k, m) else m
 
   contains?(m, (k, v)) = match @maps:find(k, m) {
-    (@ok, &v) => true
+    (@ok, value) => value == v
     _ => false
   }
   all?(m, f) = to_list(m) |> all?(f)

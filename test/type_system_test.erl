@@ -2341,6 +2341,11 @@ pattern_test_() ->
       "expr = match Baz(5) { Bar => 1, Baz(x) => x }",
       "expr"
     ))
+  , ?_test("Int" = ok_prg(
+      "enum Foo { Bar, Baz(Int) }\n"
+      "expr = match Baz(5) { Mod.Bar => 1, Mod.Baz(x) => x }",
+      "expr"
+    ))
   , ?_test("[String]" = ok_expr(
       "match [\"hi\", \"hey\"] { [] => [], [s] => [s], [_ | t] => t }"
     ))
@@ -2360,17 +2365,17 @@ pattern_test_() ->
       "}"
     ))
   , ?_test("[A ~ Num]" = ok_expr(
-      "let (x, y) = (3, [2])\n"
-      "match [1] { &y => y ++ [1], x => x ++ [2] }"
+      "let (x, y) = (3, @hey)\n"
+      "match [1] { y => y ++ [1], x => x ++ [2] }"
     ))
   , ?_test("((A, B)) -> A" = ok_expr("|(a, _)| a"))
   , ?_test("(A ~ Num, [B ~ Num]) -> B ~ Num" = ok_prg(
       "f(3, [x | _]) = 3 + x",
       "f"
     ))
-  , ?_test("(Foo<A>, [Foo<Atom>]) -> Atom" = ok_prg(
+  , ?_test("(Foo<A>, [Foo<Atom>]) -> (Bool, Atom)" = ok_prg(
       "enum Foo<A> { Bar(Atom), Baz(A) }\n"
-      "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
+      "f(Bar(x), [Baz(y), Baz(z) | _]) = (x == z, y)",
       "f"
     ))
   , ?_test(bad_expr(
@@ -2407,22 +2412,13 @@ pattern_test_() ->
       {"Float", "([A], String, Float)", l(2, 21, 1), ?FROM_MATCH_BODY}
     ))
   , ?_test(bad_expr(
-      "let (x, y) = (3, [2])\n"
-      "match [1] { y => y ++ [1], &x => [x] }",
-      {"[A ~ Num]", "B ~ Num", l(1, 27, 2), ?FROM_MATCH_PATTERN}
-    ))
-  , ?_test(bad_expr(
-      "(|a, &a| a)(true, @hi)",
-      {"Atom", "Bool", l(18, 3), ?FROM_APP}
-    ))
-  , ?_test(bad_expr(
-      "(|[a | _], a| a)(['a'], 3.0)",
-      {"Float", "Char", l(24, 3), ?FROM_APP}
+      "(|[a | _], a| a)(['a'], 'a')",
+      {?ERR_REDEF("a", l(3, 1)), l(11, 1)}
     ))
   , ?_test(bad_prg(
-      "enum Foo { Bar(Int), Baz(Char) }\n"
+      "enum Foo<A> { Bar(Atom), Baz(A) }\n"
       "f(Bar(x), [Baz(y), Baz(x) | _]) = y",
-      {"Int", "Char", l(1, 23, 1), ?FROM_APP}
+      {?ERR_REDEF("x", l(1, 6, 1)), l(1, 23, 1)}
     ))
   , ?_test(bad_prg(
       "enum Foo { Bar, Baz(Int) }\n"
@@ -2469,11 +2465,6 @@ pattern_test_() ->
       "let [_, (x, _, _)] = [(1, \"foo\", @foo), (2, \"bar\", @bar)]\n"
       "(x + 3 : Int, x + 3.0)"
     ))
-  , ?_test("A ~ Num" = ok_expr(
-      "let [_, a] = [1, 3]\n"
-      "let (&a, b, &a) = (3, 7, 3)\n"
-      "b"
-    ))
   , ?_test("((A, B)) -> A" = ok_prg(
       "f(t) =\n"
       "  let (a, _) = t\n"
@@ -2491,10 +2482,8 @@ pattern_test_() ->
       {"[(A, B)]", "[String]", l(4, 11), ?FROM_LET}
     ))
   , ?_test(bad_expr(
-      "let [_, a] = [true, false]\n"
-      "let (&a, b) = (3, 7)\n"
-      "b",
-      {"(Bool, A ~ Num)", "(B ~ Num, A ~ Num)", l(1, 4, 7), ?FROM_LET}
+      "let (a, b, a) = (3, 7, 3)\n",
+      {?ERR_REDEF("a", l(5, 1)), l(11, 1)}
     ))
   , ?_test(bad_prg(
       "f(t) =\n"

@@ -711,7 +711,8 @@ infer_defs(Comps, C) ->
     end, Deps),
     NewImported = ordsets:union(
       FoldC#ctx.imported,
-      ordsets:from_list(NewImportedPairs)
+      % Module should be accessible from within itself.
+      ordsets:from_list([{Module, Module} | NewImportedPairs])
     ),
 
     FoldC1 = FoldC#ctx{module=Module, imported=NewImported},
@@ -1002,11 +1003,19 @@ infer_csts_first(Csts, UntilGs, GnrArgs, C) ->
   finish_gnr(C2#ctx{gnrs=Gs}, C#ctx.gnr).
 
 infer({fn, _, Ref, Args, Expr}, C) ->
-  Names = ordsets:union(lists:map(fun pattern_names/1, Args)),
-  C1 = ordsets:fold(fun(Name, FoldC) ->
-    TV = tv_server:fresh(FoldC#ctx.pid),
-    l_env_add(Name, #binding{tv=TV}, FoldC)
-  end, C, Names),
+  Vars = lists:flatmap(fun pattern_vars/1, Args),
+  {_, C1} = lists:foldl(fun({var, Loc, Name}, {FoldSeen, FoldC}) ->
+    case maps:find(Name, FoldSeen) of
+      {ok, OtherLoc} ->
+        NewC = add_ctx_err(?ERR_REDEF(Name, OtherLoc), Loc, FoldC),
+        {FoldSeen, NewC};
+
+      error ->
+        TV = tv_server:fresh(FoldC#ctx.pid),
+        NewSeen = FoldSeen#{Name => Loc},
+        {NewSeen, l_env_add(Name, #binding{tv=TV}, FoldC)}
+    end
+  end, {#{}, C}, Vars),
 
   {ArgTsRev, C2} = lists:foldl(fun(Pattern, {Ts, FoldC}) ->
     {PatternT, FoldC1} = infer(Pattern, FoldC),
@@ -1359,7 +1368,7 @@ infer({map, _, Assocs}, C) ->
 
   {{gen, {con, "Map"}, [KeyTV, ValueTV]}, C1};
 
-infer({N, Loc, Name}, C) when N == var; N == con_token; N == var_value ->
+infer({N, Loc, Name}, C) when N == var; N == con_token ->
   lookup_inst(Name, Loc, none, C);
 
 infer({var_ref, Loc, Ref, Name}, C) -> lookup_inst(Name, Loc, Ref, C);
@@ -1648,13 +1657,7 @@ infer({match, _, Expr, Cases}, C) ->
 
     FoldC3 = add_cst(
       % The ref here doesn't matter, as it never needs to be used for rewriting.
-      % It's possible for a pattern to solve an IV with a var_value, but:
-      %
-      % a) Either that IV came from an inst of an already generalized fn, at
-      % which point it won't be used again.
-      %
-      % b) Or that IV didn't come from a generalized variable, at which point
-      % it'll be solved for a concrete type that doesn't need an impl.
+      % It's not possible for a pattern to solve an IV.
       {inst, make_ref(), ExprTV},
       PatternT,
       ?LOC(Pattern),
@@ -2020,31 +2023,42 @@ infer_pattern(Pattern, Expr, From, C) ->
 
 with_pattern_env(Pattern, C) ->
   ID = C#ctx.gnr#gnr.id,
-  Names = pattern_names(Pattern),
+  Vars = pattern_vars(Pattern),
 
-  {Vs, C1} = ordsets:fold(fun(Name, {FoldVs, FoldC}) ->
-    TV = tv_server:fresh(C#ctx.pid),
-    {tv, V, _, _} = TV,
-    {[V | FoldVs], l_env_add(Name, #binding{tv=TV, id=ID}, FoldC)}
-  end, {[], C}, Names),
+  {Vs, _, C1} = lists:foldl(fun({var, Loc, Name}, {FoldVs, FoldSeen, FoldC}) ->
+    case maps:find(Name, FoldSeen) of
+      {ok, OtherLoc} ->
+        NewC = add_ctx_err(?ERR_REDEF(Name, OtherLoc), Loc, FoldC),
+        {FoldVs, FoldSeen, NewC};
+
+      error ->
+        {tv, V, _, _}=TV = tv_server:fresh(C#ctx.pid),
+        NewSeen = FoldSeen#{Name => Loc},
+        NewC = l_env_add(Name, #binding{tv=TV, id=ID}, FoldC),
+        {[V | FoldVs], NewSeen, NewC}
+    end
+  end, {[], #{}, C}, Vars),
 
   C1#ctx{gnr=C1#ctx.gnr#gnr{vs=Vs}}.
 
-pattern_names([]) -> ordsets:new();
-pattern_names([Node | Rest]) ->
-  ordsets:union(pattern_names(Node), pattern_names(Rest));
-pattern_names({N, _, _}) when N == int; N == float; N == bool; N == char;
-    N == str; N == atom; N == var_value ->
-  ordsets:new();
-pattern_names({var, _, Name}) -> ordsets:from_list([Name]);
-pattern_names({N, _}) when N == unit; N == '_' -> ordsets:new();
-pattern_names({field, _, ModuleConToken, ConToken}) ->
-  ordsets:union(pattern_names(ModuleConToken), pattern_names(ConToken));
-pattern_names({variant, _, _, Args}) -> pattern_names(Args);
-pattern_names({list, _, Elems}) -> pattern_names(Elems);
-pattern_names({cons, _, Elems, Tail}) ->
-  ordsets:union(pattern_names(Elems), pattern_names(Tail));
-pattern_names({tuple, _, Elems}) -> pattern_names(Elems).
+pattern_names(Pattern) -> [Name || {var, _, Name} <- pattern_vars(Pattern)].
+
+pattern_vars(T) -> pattern_vars(T, []).
+
+pattern_vars({N, _, _}, L) when N == int; N == float; N == bool; N == char;
+  N == str; N == atom -> L;
+pattern_vars({var, _, _}=Var, L) -> [Var | L];
+pattern_vars({N, _}, L) when N == unit; N == '_' -> L;
+% {field, ...} is unnecessary because it's only ever contained within variant,
+% and we don't recurse on it below.
+pattern_vars({variant, _, _, Args}, L) ->
+  lists:foldr(fun pattern_vars/2, L, Args);
+pattern_vars({list, _, Elems}, L) ->
+  lists:foldr(fun pattern_vars/2, L, Elems);
+pattern_vars({cons, _, Elems, Tail}, L) ->
+  lists:foldr(fun pattern_vars/2, pattern_vars(Tail, L), Elems);
+pattern_vars({tuple, _, Elems}, L) ->
+  lists:foldr(fun pattern_vars/2, L, Elems).
 
 lookup(Name, Loc, C) ->
   case maps:find(Name, C#ctx.l_env) of

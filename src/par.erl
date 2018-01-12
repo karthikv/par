@@ -4,13 +4,11 @@
 
 % TODO:
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Bug with referencing global variable in pattern
-%   - Also use ^ instead of & for matching existing variable
-%   - ^Mod.foo in pattern; update reference docs
 % - Include lexer/parser in stdlib or disallow modules named lexer/parser
 % - lookup() doesn't check whether module is imported
 % - Website + Documentation
 %   - Order of functions in modules
+%   - Fix big O complexity (or remove?) from docs
 %   - Capture tests?
 %     - Add else clause to try/catch
 %   - Download page
@@ -51,8 +49,7 @@
 % - Rename ifaces to Is unless referring to actual {interface, ...}
 % - Rename -Var to -VarRep when necessary
 % - Rename var to id and var_ref to var?
-% - Implementations for builtin typeclasses?
-%   - Should we also exclude concat, separate, etc. from sets?
+% - Implementations for ord typeclass?
 % - Collection extends Sized?
 % - [2 days] Better pattern matching
 %   - Record/Struct types
