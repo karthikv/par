@@ -3,5 +3,5 @@ set -euo pipefail
 IFS=$'\n\t'
 
 rebar3 compile
-erl -pa _build/default/lib/**/ebin -noshell -eval \
-  'ok = code_gen:compile_stdlib(), halt(0)'
+erl +B -pa _build/default/lib/**/ebin -noshell -eval \
+  'par:entry(code_gen, compile_stdlib, [])'

@@ -1,13 +1,11 @@
 -module(par).
--export([entry/0, main/1]).
+-export([entry/0, entry/3, main/1]).
 -include("common.hrl").
 
 % TODO:
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Include lexer/parser in stdlib or disallow modules named lexer/parser
 % - Website + Documentation
 %   - Order of functions in modules
-%   - Fix big O complexity (or remove?) from docs
 %   - Capture tests?
 %     - Add else clause to try/catch
 %   - Download page
@@ -96,8 +94,29 @@
 % - Force all block expressions except last to be type ()?
 % - Global exception handler for better printing
 
-entry() ->
-  main(init:get_plain_arguments()),
+entry() -> entry(?MODULE, main, [init:get_plain_arguments()]).
+
+entry(Module, Fn, Args) ->
+  try
+    apply(Module, Fn, Args)
+  catch
+    Class:Reason ->
+      Columns = case io:columns() of
+        {ok, C} -> C;
+        _ -> 80
+      end,
+
+      Formatted = lib:format_exception(
+        1,
+        Class,
+        Reason,
+        erlang:get_stacktrace(),
+        fun(_, _, _) -> false end,
+        fun(T, I) -> io_lib_pretty:print(T, I, Columns, -1) end
+      ),
+      ?ERR("~s~n", [Formatted])
+  end,
+
   halt(0).
 
 main(Args) ->
@@ -119,13 +138,10 @@ main(Args) ->
     {out_dir, $o, "out-dir", {string, DefaultOutDir},
       "Directory to output compiled .beam file(s)."
     },
-    {test, $t, "test", boolean,
+    {test, $t, "test", undefined,
       "Run tests in source file"
     },
-    {with_stdlib, undefined, "with-stdlib", {boolean, false},
-      "Output compiled stdlib modules (used for bootstrapping)"
-    },
-    {stats, undefined, "stats", {boolean, false},
+    {stats, undefined, "stats", undefined,
       "Show statistics about how long compilation took."
     },
     {source_file, undefined, undefined, string,
@@ -161,11 +177,11 @@ run(Path, Opts) ->
   {InferTime, Inferred} = measure(type_system, infer_file, [Path]),
   case Inferred of
     {ok, Comps, C, _} ->
-      WithStdlib = proplists:get_value(with_stdlib, Opts),
+      Bootstrapping = ?BOOTSTRAPPING(),
       {GenTime, {Compiled, _}} = measure(
         code_gen,
         compile_comps,
-        [Comps, C, WithStdlib]
+        [Comps, C, Bootstrapping]
       ),
       OutDir = utils:absolute(proplists:get_value(out_dir, Opts)),
 
@@ -181,7 +197,7 @@ run(Path, Opts) ->
           halt(1)
       end,
 
-      StdlibStats = case WithStdlib of
+      StdlibStats = case Bootstrapping of
         true ->
           {LoadTime, AllCompiled} = measure(fun() ->
             lists:map(fun
@@ -209,7 +225,7 @@ run(Path, Opts) ->
           []
       end,
 
-      case proplists:get_value(stats, Opts) of
+      case proplists:get_value(stats, Opts, false) of
         true ->
           Stats = [
             "Inference: ", InferTime, "\nCode generation: ", GenTime, $\n |

@@ -125,7 +125,7 @@ load() -> par_native:init('Par.Parser').
 
 infer_file(Path) ->
   case parse_file(Path) of
-    {ok, _, Comps, _} -> infer_comps(Comps);
+    {ok, _, Comps, _} -> infer_comps(Comps, utils:stdlib_modules());
     {errors, Errors, _} -> Errors
   end.
 
@@ -146,7 +146,8 @@ infer_stdlib() ->
   case parse_file(Path, #{}, false, StdlibModules) of
     {ok, _, Comps, _} ->
       {ok, Pid} = tv_server:start_link(),
-      case infer_comps(Comps, #ctx{pid=Pid}, #solver{}) of
+
+      case infer_comps(Comps, StdlibModules, #ctx{pid=Pid}, #solver{}) of
         {ok, _, C, S}=Result ->
           BaseC = #ctx{
             % Inferred types for inference.
@@ -301,7 +302,8 @@ parse_imports(Comp, Path, Parsed, AddStdlib, StdlibModules) ->
   end, {[], [], [], Parsed#{Path => {module, Module}}}, Imports).
 
 infer_prg(Prg) ->
-  case parse_prg(Prg, "[infer-prg]", true, utils:stdlib_modules()) of
+  StdlibModules = utils:stdlib_modules(),
+  case parse_prg(Prg, "[infer-prg]", true, StdlibModules) of
     {ok, RawComp} ->
       #comp{ast={module, _, _, RawImports, _}=RawAst} = RawComp,
       {Imports, Deps} = lists:mapfoldr(fun
@@ -323,7 +325,7 @@ infer_prg(Prg) ->
         ast=setelement(4, RawAst, Imports),
         deps=Deps
       },
-      infer_comps([Comp]);
+      infer_comps([Comp], StdlibModules);
 
     Errors -> Errors
   end.
@@ -374,27 +376,56 @@ add_stdlib_imports({module, _, _, RawImports, _}=Ast, StdlibModules) ->
 
   setelement(4, Ast, StdlibImports ++ RawImports).
 
-infer_comps(RawComps) ->
+infer_comps(Comps, StdlibModules) ->
   {BaseC, BaseS, Count} = preinferred_stdlib(),
   {ok, Pid} = tv_server:start_link(Count),
-  Result = infer_comps(RawComps, BaseC#ctx{pid=Pid}, BaseS),
+  Result = infer_comps(Comps, StdlibModules, BaseC#ctx{pid=Pid}, BaseS),
   ok = tv_server:stop(Pid),
   Result.
 
-infer_comps(RawComps, BaseC, BaseS) ->
+infer_comps(RawComps, RawStdlibModules, BaseC, BaseS) ->
+  % Lexer and Parser are reserved module names unless we're bootstrapping.
+  StdlibModules = case ?BOOTSTRAPPING() of
+    true -> RawStdlibModules;
+    false -> RawStdlibModules#{"Lexer" => undefined, "Parser" => undefined}
+  end,
+
   {Comps, _, C} = lists:foldr(fun(Comp, {FoldComps, Modules, FoldC}) ->
-    #comp{module=Module, ast={module, _, {con_token, Loc, _}, _, _}} = Comp,
+    #comp{
+      module=Module,
+      ast={module, _, {con_token, Loc, _}, _, _}=Ast,
+      path=Path,
+      prg=Prg,
+      prg_lines=PrgLines
+    } = Comp,
     FoldC1 = FoldC#ctx{module=Module},
 
-    case ordsets:is_element(Module, Modules) of
-      true ->
-        FoldC2 = add_ctx_err(?ERR_REDEF_MODULE(Module), Loc, FoldC1),
-        {FoldComps, Modules, FoldC2};
-      false ->
-        Exports = FoldC1#ctx.exports,
-        NewExports = Exports#{Module => ordsets:new()},
-        NewModules = ordsets:add_element(Module, Modules),
-        {[Comp | FoldComps], NewModules, FoldC1#ctx{exports=NewExports}}
+    case maps:find(Module, StdlibModules) of
+      {ok, StdlibPath} when StdlibPath /= Path ->
+        FoldC2 = add_ctx_err(?ERR_REDEF_BUILTIN_MODULE(Module), Loc, FoldC1),
+        % We remove defs and deps so nothing is compiled, but the comp is
+        % retained for error reporting purposes.
+        StrippedComp = #comp{
+          module=Module,
+          ast=setelement(5, Ast, []),
+          deps=[],
+          path=Path,
+          prg=Prg,
+          prg_lines=PrgLines
+        },
+        {[StrippedComp | FoldComps], Modules, FoldC2};
+
+      _ ->
+        case ordsets:is_element(Module, Modules) of
+          true ->
+            FoldC2 = add_ctx_err(?ERR_REDEF_MODULE(Module), Loc, FoldC1),
+            {FoldComps, Modules, FoldC2};
+          false ->
+            Exports = FoldC1#ctx.exports,
+            NewExports = Exports#{Module => ordsets:new()},
+            NewModules = ordsets:add_element(Module, Modules),
+            {[Comp | FoldComps], NewModules, FoldC1#ctx{exports=NewExports}}
+        end
     end
   end, {[], ordsets:new(), BaseC}, RawComps),
 
@@ -706,9 +737,7 @@ gen_t_num_params({record_ext_te, Loc, Fields, BaseTE}) ->
 
 infer_defs(Comps, C) ->
   {GEnvs, C1} = lists:mapfoldl(fun(#comp{module=Module, deps=Deps}, FoldC) ->
-    NewImportedPairs = lists:map(fun({DepModule, _}) ->
-      {Module, DepModule}
-    end, Deps),
+    NewImportedPairs = [{Module, DepModule} || {DepModule, _} <- Deps],
     NewImported = ordsets:union(
       FoldC#ctx.imported,
       % Module should be accessible from within itself.

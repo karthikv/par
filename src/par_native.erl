@@ -1,6 +1,7 @@
 -module(par_native).
 -export([
   init/1,
+  gm_spawn/0,
   gm_find/2,
   gm_set/3,
   to_str/1,

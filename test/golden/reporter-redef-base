@@ -1,0 +1,7 @@
+*** module Base *** (dir/base.par)
+
+Base is already defined as a builtin module:
+
+1: module Base
+          ^^^^
+

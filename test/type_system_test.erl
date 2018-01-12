@@ -2632,6 +2632,15 @@ other_errors_test_() ->
       {"foo", "module Foo\na = 1"},
       {"bar", "module Foo\nimport \"./foo\" b = 1"}
     ], "bar", {?ERR_REDEF_MODULE("Foo"), "Foo", l(-1, 7, 3)}))
+  , ?_test(bad_many([
+      {"base", "module Base\na = 1"}
+    ], "base", {?ERR_REDEF_BUILTIN_MODULE("Base"), "Base", l(-1, 7, 4)}))
+  , ?_test(bad_many([
+      {"lexer", "module Lexer\na = 1"}
+    ], "lexer", {?ERR_REDEF_BUILTIN_MODULE("Lexer"), "Lexer", l(-1, 7, 5)}))
+  , ?_test(bad_many([
+      {"parser", "module Parser\na = 1"}
+    ], "parser", {?ERR_REDEF_BUILTIN_MODULE("Parser"), "Parser", l(-1, 7, 6)}))
   , ?_test(bad_prg(
       "foo : Int",
       {?ERR_SIG_NO_DEF("foo"), l(0, 9)}

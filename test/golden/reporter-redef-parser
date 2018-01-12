@@ -1,0 +1,7 @@
+*** module Parser *** (dir/parser.par)
+
+Parser is already defined as a builtin module:
+
+1: module Parser
+          ^^^^^^
+

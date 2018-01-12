@@ -1,5 +1,5 @@
 // Functions in this module operate on type `Map<K, V>`, which represents a hash
-// map with `O(1)` [`put()`](#put),
+// map (using a hash array mapped trie) with `O(log n)` [`put()`](#put),
 // [`lookup()`](base#lookup)/[`get()`](base#get), and [`remove()`](base#remove).
 // Literal maps can be created with the syntax `{ k1 => v1, k2 => v2, ... }`,
 // where `k1`, `k2`, etc. are keys and `v1`, `v2`, etc.  are the associated

@@ -1,7 +1,7 @@
 // Functions in this module operate on type `Set<A>`, which represents a hash
-// set with `O(1)` [`put()`](#put), [`delete()`](#delete), and
-// [`contains?()`](#contains?). Literal sets can be created with the syntax
-// `#[a, b, ...]`, where `a`, `b`, etc. are elements.
+// set (using a hash array mapped trie) with `O(log n)` [`put()`](#put),
+// [`contains?()`](#contains?), and [`delete()`](#delete). Literal sets can be
+// created with the syntax `#[a, b, ...]`, where `a`, `b`, etc. are elements.
 //
 // @tagline Standard library for set operations.
 module Set

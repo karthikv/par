@@ -32,18 +32,26 @@
 stdlib_dir() -> utils:absolute(filename:join(code:lib_dir(par, src), "lib")).
 
 stdlib_modules() ->
-  Dir = stdlib_dir(),
-  #{
-    "Base" => filename:join(Dir, "base.par"),
-    "List" => filename:join(Dir, "list.par"),
-    "Set" => filename:join(Dir, "set.par"),
-    "Map" => filename:join(Dir, "map.par"),
-    "String" => filename:join(Dir, "string.par"),
-    "Char" => filename:join(Dir, "char.par"),
-    "File" => filename:join(Dir, "file.par"),
-    "Path" => filename:join(Dir, "path.par"),
-    "Test" => filename:join(Dir, "test.par")
-  }.
+  case get(stdlib_modules) of
+    undefined ->
+      Dir = stdlib_dir(),
+      StdlibModules = #{
+        "Base" => filename:join(Dir, "base.par"),
+        "List" => filename:join(Dir, "list.par"),
+        "Set" => filename:join(Dir, "set.par"),
+        "Map" => filename:join(Dir, "map.par"),
+        "String" => filename:join(Dir, "string.par"),
+        "Char" => filename:join(Dir, "char.par"),
+        "File" => filename:join(Dir, "file.par"),
+        "Path" => filename:join(Dir, "path.par"),
+        "Test" => filename:join(Dir, "test.par")
+      },
+
+      put(stdlib_modules, StdlibModules),
+      StdlibModules;
+
+    StdlibModules -> StdlibModules
+  end.
 
 resolve_con(RawCon, C) ->
   Con = utils:qualify(RawCon, C),

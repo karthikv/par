@@ -22,7 +22,7 @@ if [ "$1" == "start" ]; then
     # We compile the new par. The parser is compiled with the old par, so
     # it runs with the old stdlibs. Any new programs will be compiled against
     # the new stdlibs, which are created by bin/precompile.
-    bin/par -o ebin --with-stdlib src/parser.par
+    BOOTSTRAP=1 bin/par -o ebin src/parser.par
     bin/precompile
     rebar3 as escript escriptize
 
@@ -43,7 +43,7 @@ elif [ "$1" == "finish" ]; then
     # We compile the parser with the new par, which has the new stdlibs, and
     # update the stdlibs again for consistency (though they shouldn't change
     # at this point).
-    bin/par -o ebin --with-stdlib src/parser.par
+    BOOTSTRAP=1 bin/par -o ebin src/parser.par
     bin/precompile
     set +e
     rebar3 eunit

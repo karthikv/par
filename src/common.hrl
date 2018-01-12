@@ -3,6 +3,8 @@
 
 -define(MODULE_PREFIX, "Par.").
 -define(BUILTIN_LOC, builtin).
+-define(BOOTSTRAP_ENV, "BOOTSTRAP").
+-define(BOOTSTRAPPING(), os:getenv(?BOOTSTRAP_ENV) /= false).
 
 -define(
   BUILTIN_TYPE(IsIface, NumParams),
@@ -235,6 +237,9 @@
 )).
 -define(ERR_REDEF_MODULE(Module), ?FMT(
   "Module ~s is already defined", [Module]
+)).
+-define(ERR_REDEF_BUILTIN_MODULE(Module), ?FMT(
+  "~s is already defined as a builtin module", [Module]
 )).
 -define(ERR_SIG_NO_DEF(Name), ?FMT(
   "Expected ~s to be defined after its signature",

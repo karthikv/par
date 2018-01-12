@@ -3,7 +3,7 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("../src/common.hrl").
 
-check_has_errors({ok, _, _}) ->
+check_has_errors(Result) when element(1, Result) == ok ->
   io:format("Expected errors, but got valid program~n"),
   ?assert(false);
 check_has_errors(_) -> ok.
@@ -251,6 +251,12 @@ expr_test_() ->
         "a = 1"
       }
     ], "foo")
+
+  % Ensure comps that have the same name as stdlib modules are retained for
+  % error reporting purposes.
+  , ?golden_many_("redef-base", [{"base", "module Base"}], "base")
+  , ?golden_many_("redef-lexer", [{"lexer", "module Lexer"}], "lexer")
+  , ?golden_many_("redef-parser", [{"parser", "module Parser"}], "parser")
 
   % type system errors
   , ?golden_expr_("ts-mismatch", "true + 5")

@@ -1,0 +1,7 @@
+*** module Lexer *** (dir/lexer.par)
+
+Lexer is already defined as a builtin module:
+
+1: module Lexer
+          ^^^^^
+
