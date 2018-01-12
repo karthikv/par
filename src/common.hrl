@@ -53,7 +53,9 @@
 %   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   impl_refs - a Ref => ImplKey map for implementations of interfaces
-%   sig_vs - a map of V => I for TV names in a sig to ensure consistency
+%   sig_vs - a map of V => Is for TV names in a sig to ensure consistency
+%   sig_gen_vs - a map of {BaseV, ParamKeys} => {GenV, Is, Loc}, used to ensure
+%     the same GenV and Is for each identical GenTV
 %   fn_refs - a Ref => T mapping for fns
 %   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated vars
 %   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
@@ -102,6 +104,7 @@
   },
   impl_refs = #{},
   sig_vs = #{},
+  sig_gen_vs = #{},
   fn_refs = #{},
   inst_refs,
   nested_ivs,
@@ -266,16 +269,27 @@
   "type ~s",
   [V, utils:unqualify(Con)]
 )).
--define(ERR_TV_IFACE(V, ExpIs, Is), ?FMT(
-  "Type variable ~s was previously ~s, but is now ~s; the interfaces must "
-  "must be consistent",
-  [V, utils:pretty({tv, V, ExpIs, false}), utils:pretty({tv, V, Is, false})]
-)).
--define(ERR_TV_NUM_PARAMS(V, ExpNum, Num), ?FMT(
-  "Type variable ~s was previously given ~p type parameters, but now has ~p; "
-  "the two must be consistent",
-  [V, ExpNum, Num]
-)).
+-define(ERR_TV_IFACE(V, Loc), [
+  "The type variable ", V, " must have the same interfaces in both locations "
+  "below", Loc
+]).
+-define(ERR_TV_NUM_PARAMS(V, Loc), [
+  "The type variable ", V, "must have the same number of type parameters in "
+  "both locations below", Loc
+]).
+-define(ERR_GEN_TV_IFACE(Loc), [
+  "The interfaces must be the same in both locations below", Loc
+]).
+-define(ERR_T_IFACE, [
+  "T must have no interfaces, as it represents any type that will implement "
+  "this interface. If you want every type that implements this interface to "
+  "also implement another interface, use the 'extends' keyword in the "
+  "interface declaration"
+]).
+-define(ERR_T_NUM_PARAMS(Exp, Given), [
+  "T was previously given ", Exp, " type parameters, but it now has ", Given,
+  "type parameters. The two must be consistent"
+]).
 -define(ERR_NOT_DEF(Name), ?FMT("~s is not defined", [Name])).
 -define(ERR_NOT_DEF(Name, Module), ?FMT(
   "~s is not defined in module ~s",

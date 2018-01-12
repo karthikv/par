@@ -1187,7 +1187,7 @@ infer({interface, _, {con_token, _, RawCon}, _, Fields}, C) ->
 
   % type sigs don't need consolidation, so don't pass aliases
   SubOpts = #sub_opts{subs=#{"T" => {set_ifaces, ordsets:from_list([Con])}}},
-  SigVs = #{"T" => {none, NumParams}},
+  SigVs = #{"T" => {none, NumParams, ?BUILTIN_LOC}},
 
   {FieldTs, C1} = lists:mapfoldl(fun(Sig, FoldC) ->
     {sig, FieldLoc, {var, _, Name}, FieldTE} = Sig,
@@ -1786,7 +1786,7 @@ infer({unary_op, Loc, Op, Expr}, C) ->
   {TV, C3}.
 
 infer_sig(RestrictVs, Unique, SigVs, Sig, C) ->
-  C1 = C#ctx{sig_vs=SigVs},
+  C1 = C#ctx{sig_vs=SigVs, sig_gen_vs=#{}},
   infer_sig_helper(RestrictVs, Unique, Sig, C1).
 
 infer_sig_helper(RestrictVs, Unique, {lam_te, _, ArgTEs, ReturnTE}, C) ->
@@ -1860,20 +1860,28 @@ infer_sig_helper(RestrictVs, Unique, {gen_te, Loc, BaseTE, ParamTEs}, C) ->
     infer_sig_helper(RestrictVs, Unique, TE, FoldC)
   end, C1, ParamTEs),
 
-  if
-    Valid ->
-      T = case BaseT of
-        {tv, _, _, _} ->
-          NewV = tv_server:next_name(C2#ctx.pid),
-          % merge AllIs with itself to consolidate Is within the same family
-          Is = merge_is(AllIs, AllIs, C2#ctx.ifaces),
-          {gen, NewV, Is, BaseT, ParamTs};
+  case {Valid, BaseT} of
+    {true, {tv, BaseV, _, _}} ->
+      % Merge AllIs with itself to consolidate Is within the same family.
+      Is = merge_is(AllIs, AllIs, C2#ctx.ifaces),
+      Key = {BaseV, [type_key(ParamT) || ParamT <- ParamTs]},
 
-        _ -> {gen, BaseT, ParamTs}
+      SigGenVs = C2#ctx.sig_gen_vs,
+      C3 = case maps:find(Key, SigGenVs) of
+        {ok, {GenV, Is, _}} -> C2;
+        {ok, {GenV, _, OtherLoc}} ->
+          add_ctx_err(?ERR_GEN_TV_IFACE(OtherLoc), Loc, C2);
+
+        error ->
+          GenV = tv_server:next_name(C2#ctx.pid),
+          C2#ctx{sig_gen_vs=SigGenVs#{Key => {GenV, Is, Loc}}}
       end,
-      {T, C2};
 
-    true -> {{hole, false}, C2}
+      {{gen, GenV, Is, BaseT, ParamTs}, C3};
+
+    {true, _} -> {{gen, BaseT, ParamTs}, C2};
+
+    {false, _} -> {{hole, false}, C2}
   end;
 infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
   C1 = case RestrictVs of
@@ -1904,32 +1912,37 @@ infer_sig_helper(RestrictVs, Unique, {tv_te, Loc, V, IfaceTokens}, C) ->
     [] -> {none, C1};
     _ ->
       lists:foldl(fun({con_token, ConLoc, RawI_}, {FoldIs, FoldC}) ->
-        I = utils:resolve_con(RawI_, C1),
-        NewFoldIs = ordsets:add_element(I, FoldIs),
-        {NewFoldIs, validate_type(I, true, NumParams, ConLoc, FoldC)}
+        I = utils:resolve_con(RawI_, FoldC),
+        FoldC1 = validate_type(I, true, NumParams, ConLoc, FoldC),
+        case no_ctx_errs(FoldC1, FoldC) of
+          true ->
+            NewFoldIs = ordsets:add_element(I, FoldIs),
+            {NewFoldIs, FoldC1};
+          false -> {FoldIs, FoldC1}
+        end
       end, {ordsets:new(), C1}, IfaceTokens)
   end,
 
   case no_ctx_errs(C1, C2) of
     true ->
-      % merge AllIs with itself to consolidate Is within the same family
+      % Merge AllIs with itself to consolidate Is within the same family.
       Is = merge_is(AllIs, AllIs, C2#ctx.ifaces),
-
       SigVs = C2#ctx.sig_vs,
       C3 = case maps:find(V, SigVs) of
-        {ok, {ExpIs, ExpNumParams}} ->
-          if
-            Unique -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
-            ExpIs /= Is ->
-              % TODO: include location of other v w/ iface
-              add_ctx_err(?ERR_TV_IFACE(V, ExpIs, Is), Loc, C2);
-            ExpNumParams /= NumParams ->
-              % TODO: include location of other v w/ params
-              add_ctx_err(?ERR_TV_NUM_PARAMS(V, ExpNumParams, NumParams), Loc, C2);
-            true -> C2
-          end;
+        {ok, _} when Unique -> add_ctx_err(?ERR_REDEF_TV(V), Loc, C2);
+        {ok, {Is, NumParams, _}} -> C2;
 
-        error -> C2#ctx{sig_vs=SigVs#{V => {Is, NumParams}}}
+        {ok, {_, NumParams, ?BUILTIN_LOC}} ->
+          add_ctx_err(?ERR_T_IFACE, Loc, C2);
+        {ok, {_, NumParams, OtherLoc}} ->
+          add_ctx_err(?ERR_TV_IFACE(V, OtherLoc), Loc, C2);
+
+        {ok, {_, ExpNumParams, ?BUILTIN_LOC}} ->
+          add_ctx_err(?ERR_T_NUM_PARAMS(ExpNumParams, NumParams), Loc, C2);
+        {ok, {_, _, OtherLoc}} ->
+          add_ctx_err(?ERR_TV_NUM_PARAMS(V, OtherLoc), Loc, C2);
+
+        error -> C2#ctx{sig_vs=SigVs#{V => {Is, NumParams, Loc}}}
       end,
 
       {{tv, V, Is, true}, C3};
@@ -3423,3 +3436,26 @@ occurs(V, T) ->
     ({gen, V1, _, _, _}) when V == V1 -> true;
     (_) -> false
   end, utils:tvs_list(T)).
+
+% Used for assessing equality of two types that come from signatures. Types T1
+% and T2 are equal iff type_key(T1) == type_key(T2).
+type_key({lam, ArgTs, ReturnT}) ->
+  {lam, [type_key(T) || T <- ArgTs], type_key(ReturnT)};
+% 4-tuple lam for application should never occur in signature.
+type_key({tuple, ElemTs}) -> {tuple, [type_key(T) || T <- ElemTs]};
+type_key({tv, V, Is, Rigid}) -> {tv, V, Is, Rigid};
+type_key({con, Con}) -> {con, Con};
+type_key({gen, {con, Con}, ParamTs}) ->
+  {gen, {con, Con}, [type_key(T) || T <- ParamTs]};
+type_key({gen, V, Is, BaseT, ParamTs}) ->
+  {gen, V, Is, type_key(BaseT), [type_key(T) || T <- ParamTs]};
+% Anchors shouldn't factor into the key.
+type_key({record, _, FieldMap}) ->
+  NewFieldMap = maps:map(fun(_, T) -> type_key(T) end, FieldMap),
+  {record, none, NewFieldMap};
+type_key({record_ext, _, Ext, BaseT}) ->
+  NewExt = maps:map(fun(_, T) -> type_key(T) end, Ext),
+  {record_ext, none, NewExt, type_key(BaseT)};
+% If there's a hole, we don't want this type to compare equal to any other type,
+% so we generate a unique reference.
+type_key({hole, _}) -> make_ref().

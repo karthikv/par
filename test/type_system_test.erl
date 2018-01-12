@@ -2293,6 +2293,21 @@ gen_tv_test_() ->
       {"Int -> Map<Atom, Bool>", "A<B ~ Num> ~ Collection -> Map<Atom, Bool>",
        l(3, 0, 28), ?FROM_GLOBAL_SIG("foo")}
     ))
+
+    % Regression: If there are two T<...>s where the ParamTs are equivalent,
+    % the GenV must be exactly the same. Otherwise, there could be duplicate
+    % IVs when in fact there should be only one.
+  , ?_test(bad_prg(
+      "foo : (T<A>, T<A> ~ Base.Concat) -> Int\n"
+      "foo(_, _) = 1",
+      {?ERR_GEN_TV_IFACE(l(7, 4)), l(13, 18)}
+    ))
+  , ?_test(bad_prg(
+      "foo : T<Int, U<A>, { a : Bool, b : Atom }> ~ Num ~ Ord ->\n"
+      "  T<Int, U<A>, { a : Bool, b : Atom }> ~ Ord\n"
+      "foo(x) = assume 1",
+      {?ERR_GEN_TV_IFACE(l(6, 48)), l(1, 2, 42)}
+    ))
   ].
 
 pattern_test_() ->
@@ -2681,24 +2696,17 @@ other_errors_test_() ->
       "struct Foo<A> {\n"
       "  bar : A ~ Num\n"
       "}",
-      {?ERR_TV_IFACE("A", none, ordsets:from_list(["Num"])), l(1, 8, 7)}
+      {?ERR_TV_IFACE("A", l(11, 1)), l(1, 8, 7)}
     ))
   , ?_test(bad_prg(
       "foo : A ~ Num -> A ~ Base.Concat\n"
       "foo(a) = @io:printable_range()",
-      {
-        ?ERR_TV_IFACE(
-          "A",
-          ordsets:from_list(["Num"]),
-          ordsets:from_list(["Concat"])
-        ),
-        l(17, 15)
-      }
+      {?ERR_TV_IFACE("A", l(6, 7)), l(17, 15)}
     ))
   , ?_test(bad_prg(
       "foo : T<A> -> T\n"
       "foo(a) = @io:printable_range()",
-      {?ERR_TV_NUM_PARAMS("T", 1, 0), l(14, 1)}
+      {?ERR_TV_NUM_PARAMS("T", l(6, 4)), l(14, 1)}
     ))
   , ?_test(bad_prg("\n\n\nfoo = a\n", {?ERR_NOT_DEF("a"), l(3, 6, 1)}))
   , ?_test(bad_prg("foo = 3 + foo", {?ERR_NOT_DEF("foo"), l(10, 3)}))
@@ -2832,6 +2840,14 @@ other_errors_test_() ->
   , ?_test(bad_prg(
       "impl Num for String { a = 1 }\n",
       {?ERR_CANT_IMPL("Num"), l(5, 3)}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { a : T ~ Foo -> Int }",
+      {?ERR_T_IFACE, l(20, 7)}
+    ))
+  , ?_test(bad_prg(
+      "interface Foo { a : T<A> -> Int, b : T -> Bool }",
+      {?ERR_T_NUM_PARAMS(1, 0), l(37, 1)}
     ))
 
   % TODO: think about ways to improve error reporting to make this test pass

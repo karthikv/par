@@ -101,7 +101,7 @@ format(Msg, Loc, #comp{prg_lines=PrgLines}) ->
     (OtherLoc, Subs) when is_map(OtherLoc) ->
       {[$:, $\n, $\n, extract_code(OtherLoc, PrgLines), $\n], Subs};
 
-    (T, Subs) when is_tuple(T) orelse T == unit ->
+    (T, Subs) when is_tuple(T) ->
       {NormT, NewSubs} = norm(T, Subs, Pid),
       {utils:pretty(NormT), NewSubs};
 

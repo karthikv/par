@@ -3,16 +3,11 @@
 -include("common.hrl").
 
 % TODO:
-% - [2 weeks] Stdlib
-% - Move Concat/Separate into stdlib. Rename union/subtract to concat/sep?
-%   - Fix bug in separate for sets
-%   - Add concat_all function
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Bug with referencing global variable in pattern
 %   - Also use ^ instead of & for matching existing variable
 %   - ^Mod.foo in pattern; update reference docs
-% - Precompile stdlib modules
-%   - Include lexer/parser in stdlib or disallow modules named lexer/parser
+% - Include lexer/parser in stdlib or disallow modules named lexer/parser
 % - lookup() doesn't check whether module is imported
 % - Website + Documentation
 %   - Order of functions in modules

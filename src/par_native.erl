@@ -3,8 +3,6 @@
   init/1,
   gm_find/2,
   gm_set/3,
-  concat/2,
-  separate/2,
   to_str/1,
   to_pretty/3,
   to_iolist/1
@@ -70,23 +68,6 @@ gm_set(Mod, Atom, Value) ->
     set_ok -> Value
   after
     1000 -> error({"couldn't set global", Key, Value})
-  end.
-
-concat(Left, Right) ->
-  if
-    is_binary(Left) -> <<Left/binary, Right/binary>>;
-    is_list(Left) -> Left ++ Right;
-    is_map(Left) -> maps:merge(Left, Right)
-  end.
-
-separate(Left, Right) ->
-  if
-    is_list(Left) ->
-      Map = maps:from_list([{Elem, true} || Elem <- Right]),
-      lists:filter(fun(Elem) ->
-        not maps:is_key(Elem, Map)
-      end, Left);
-    is_map(Left) -> maps:without(maps:keys(Right), Left)
   end.
 
 to_str(Str) when is_binary(Str) -> Str;

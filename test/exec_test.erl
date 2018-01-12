@@ -7,16 +7,31 @@
 run_code_gen(Prg) ->
   Result = type_system_test:infer_prefix(Prg),
   {ok, Comps, C, _} = type_system_test:check_ok(Result),
+
   % Anything that calls run_code_gen() is expected to not be reliant on the
   % standard library or any other modules.
   {Compiled, _} = code_gen:compile_comps(Comps, C),
-  [{compiled, Mod, Binary} | _] = Compiled,
+  Dir = lists:foldl(fun
+    ({compiled, Mod, Binary}, FoldDir) ->
+      utils:remove_mod(Mod),
+      code:load_binary(Mod, "", Binary),
+      FoldDir;
 
-  utils:remove_mod(Mod),
-  code:load_binary(Mod, "", Binary),
+    ({precompiled, Mod, Existing}, FoldDir) ->
+      utils:remove_mod(Mod),
+      case FoldDir of
+        none -> filename:dirname(Existing);
+        _ -> FoldDir
+      end
+  end, none, Compiled),
+  code:add_patha(Dir),
 
+  [{compiled, Mod, _} | _] = Compiled,
   par_native:init(Mod),
-  Mod:main().
+
+  V = Mod:main(),
+  utils:remove_compiled(Compiled, Dir),
+  V.
 
 run_interpreter(Prg) ->
   Result = type_system_test:infer_prefix(Prg),

@@ -79,7 +79,7 @@ subs({lam, LEnv, Provided, ReturnT}, Opts) ->
   SubbedProvided = [{Type, Loc, subs(T, Opts)} || {Type, Loc, T} <- Provided],
   {lam, LEnv, SubbedProvided, subs(ReturnT, Opts)};
 subs({tuple, ElemTs}, Opts) ->
-  {tuple, lists:map(fun(T) -> subs(T, Opts) end, ElemTs)};
+  {tuple, [subs(T, Opts) || T <- ElemTs]};
 subs({tv, V, Is, Rigid}=TV, #sub_opts{subs=Subs, shallow=Shallow}=Opts) ->
   case maps:find(V, Subs) of
     error -> TV;
@@ -114,7 +114,7 @@ subs({gen, {con, Con}, ParamTs}, Opts) ->
 
   if
     not Unalias; Alias == error ->
-      {gen, {con, Con}, lists:map(fun(T) -> subs(T, Opts) end, ParamTs)};
+      {gen, {con, Con}, [subs(T, Opts) || T <- ParamTs]};
 
     true ->
       {ok, {Vs, T, _}} = Alias,
@@ -156,8 +156,7 @@ subs({record_ext, A, Ext, BaseT}, #sub_opts{subs=Subs, aliases=Aliases}=Opts) ->
       subs({record_ext, NewA, Ext, BaseT}, Opts);
     {ok, T} -> subs(T, Opts)
   end;
-subs({hole, Report}, _) -> {hole, Report};
-subs(unit, _) -> unit.
+subs({hole, Report}, _) -> {hole, Report}.
 
 consolidate({record_ext, A, Ext2, {record_ext, _, Ext1, BaseT}}, Aliases) ->
   consolidate({record_ext, A, maps:merge(Ext1, Ext2), BaseT}, Aliases);
@@ -177,8 +176,7 @@ impl_key({tuple, Elems}) -> lists:concat([length(Elems), "-element tuple"]);
 impl_key({con, Con}) -> Con;
 impl_key({gen, {con, Con}, _}) -> Con;
 impl_key({record, _, _}) -> "record";
-impl_key({record_ext, _, _, _}) -> "record";
-impl_key(unit) -> "()".
+impl_key({record_ext, _, _, _}) -> "record".
 
 ivs(T) -> ivs(T, ordsets:new()).
 
@@ -235,8 +233,7 @@ tvs_list({record, _, FieldMap}, L) ->
   lists:foldr(fun tvs_list/2, L, maps:values(FieldMap));
 tvs_list({record_ext, _, Ext, BaseT}, L) ->
   tvs_list({record, none, Ext}, tvs_list(BaseT, L));
-tvs_list({hole, _}, L) -> L;
-tvs_list(unit, L) -> L.
+tvs_list({hole, _}, L) -> L.
 
 args_ivs(T) -> args_ivs(T, ordsets:new()).
 
@@ -391,8 +388,7 @@ pretty({inst, _, GVs, T}) ->
 pretty({record, _, FieldMap}) -> ?FMT("{ ~s }", [pretty_field_map(FieldMap)]);
 pretty({record_ext, _, Ext, BaseT}) ->
   ?FMT("{ ~s | ~s }", [pretty_field_map(Ext), pretty(BaseT)]);
-pretty({hole, _}) -> "_";
-pretty(unit) -> "()".
+pretty({hole, _}) -> "_".
 
 pretty_field_map(FieldMap) ->
   FieldStrs = maps:fold(fun(Name, T, Strs) ->
