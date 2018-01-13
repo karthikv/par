@@ -1,0 +1,10 @@
+#!/bin/sh
+ROOT=${PAR_ROOT:-/usr/local/par}
+
+if [ ! -d "$ROOT" ]; then
+  echo "Par isn't installed at $ROOT. If you installed it to a different "
+  echo "location, set the PAR_ROOT environment variable to that directory."
+  exit 1
+fi
+
+erl +B -pa $ROOT/lib/**/ebin -noshell -s par entry -extra "$@"

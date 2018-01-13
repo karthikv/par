@@ -10,7 +10,8 @@
 %   - Capture tests?
 %     - Add else clause to try/catch
 %   - Download page
-%   - Make GitHub repo public, add GitHub link
+%   - Make GitHub repo public
+%   - GitHub README
 %
 % - Default args?
 % - Confusion between Con and TV

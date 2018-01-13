@@ -5,3 +5,4 @@ src/parser.erl
 src/code_gen_utils_parsed.erl
 profs/
 tmp/
+release/lib

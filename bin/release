@@ -1,0 +1,24 @@
+#!/bin/bash
+set -euo pipefail
+IFS=$'\n\t'
+
+if [ -d release/lib ]; then
+  rm -r release/lib
+fi
+if [ -f par.zip ]; then
+  rm par.zip
+fi
+
+set +e
+# unzip returns 1 if there were warnings, but still success
+unzip bin/par -d release/lib
+STATUS=$?
+if [ $STATUS -ne 0 ] && [ $STATUS -ne 1 ]; then
+  echo "Unzip failed"
+  exit 1
+fi
+set -e
+
+ln -s release par
+zip -r par.zip par
+rm par
