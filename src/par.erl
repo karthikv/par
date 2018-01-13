@@ -4,6 +4,7 @@
 
 % TODO:
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
+% - Check error reporting once installation is done
 % - Website + Documentation
 %   - Order of functions in modules
 %   - Capture tests?
@@ -105,8 +106,7 @@ entry(Module, Fn, Args) ->
         {ok, C} -> C;
         _ -> 80
       end,
-
-      Formatted = lib:format_exception(
+      Raw = lib:format_exception(
         1,
         Class,
         Reason,
@@ -114,6 +114,18 @@ entry(Module, Fn, Args) ->
         fun(_, _, _) -> false end,
         fun(T, I) -> io_lib_pretty:print(T, I, Columns, -1) end
       ),
+
+      Formatted = case Class of
+        throw ->
+          case string:find(Raw, "\n") of
+            nomatch -> Raw;
+            After ->
+              Pretty = par_native:to_pretty(Reason, Columns, 0),
+              ["Exception: ", Pretty, After]
+          end;
+
+        _ -> Raw
+      end,
       ?ERR("~s~n", [Formatted])
   end,
 
