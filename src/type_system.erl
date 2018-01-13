@@ -413,7 +413,9 @@ infer_comps(RawComps, RawStdlibModules, BaseC, BaseS) ->
           prg=Prg,
           prg_lines=PrgLines
         },
-        {[StrippedComp | FoldComps], Modules, FoldC2};
+        Exports = FoldC2#ctx.exports,
+        NewExports = Exports#{Module => ordsets:new()},
+        {[StrippedComp | FoldComps], Modules, FoldC2#ctx{exports=NewExports}};
 
       _ ->
         case ordsets:is_element(Module, Modules) of
