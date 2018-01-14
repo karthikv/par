@@ -9,41 +9,33 @@
 %   - Order of functions in modules
 %   - Capture tests?
 %     - Add else clause to try/catch
-%   - Download page
-%   - Make GitHub repo public
-%   - GitHub README
+%   - Download for windows
+%   - Add editor plugin info to download page?
 %
 % - Default args?
 % - Confusion between Con and TV
 % - Fork eunite and fix macro display
-% - Parallelize code gen
-%   - counter state can't be reset each time
+% - Parallelize code gen, don't reset counter state each time
 % - Make warnings print to stderr?
 % - Bad "Fat arrow or equals error" when writing { Class = "hi" }
-% - Bad error when using map on Map<Attr, String> in docs.par
-% - Native function w/o arity on rhs of |>
+% - Allow native function w/o arity on rhs of |>
 % - If # of args in sig is diff from decl, ignore sig
 % - Better messages for indirect errors from T<B> due to T<A> being unified
 % - Improve io:put_char badarg errors when file isn't opened with right mode
 % - Description for exceptions?
-% - Docs:
-%   - Link to types from within signatures?
+% - In docs, link to types from within signatures?
 % - Suggestions for what to import
 % - Edit distance for typos
 % - Hone in on specific record fields for error messages
+% - Add when support to match statement
+% - Global exception handler for better printing
 %
-% Defer
-% - if-let condition and other condition (or maybe when statement?)
 % - Hex escaped characters \xff or \x{...} in strings
-% - Update naming conventions
-% - Concurrency
-% - Use NOTP for faster load time?
+% - Working with multiple Erlang processes
 % - [1 week] Exhaustive pattern matching errors
-% - [1 day] Test more parser error messages
 % - [2 weeks] Editor tooling for vim, atom, emacs, sublime
 %   - Fix syntax highlighting for comments in enum for vim
 % - Type aliases
-% - Use tuple for struct representation rather than map?
 % - Prevent passing iface fn to native fn; e.g. @lists:map(to_int, l)?
 % - Rename ifaces to Is unless referring to actual {interface, ...}
 % - Rename -Var to -VarRep when necessary
@@ -55,28 +47,22 @@
 %   - Map types
 %   - '=' sign
 %   - Allow when clause and or?
-% - Eq/Proper typeclass for non-functions?
-%   - Make pattern matching with var_value use proper type class
 % - Accessing tag of enum?
-% - Dot operator for composition?
 % - _atom field for a module
 % - Enforce newline between defs?
-% - _ in expressions with operators
-% - [1 week] REPL
+% - Allow _ in expressions with operators?
+% - REPL
 %   - See if interpreter is even necessary
 %   - Finish implementation of import, interfaces, records
 %   - Interpreter better error messages and backtraces
-% - [3 days] Second pass for error messages (see TODOs in code)
+% - Second pass for error messages (see TODOs in code)
 %   - Specify expected type for operators
 %   - Context surrounding add_err cases rather than just two types
 %     - Error message with context when there's no else clause
 %   - Detect basic infinite loop conditions
-%   - Helpful message if main() not exported
 %   - Struct/Enum name conflict w/ global causes hard-to-understand errors
 %   - Alias from utils:qualify because of struct/enum name conflict?
 %   - Import errors: import from same file twice
-%   - More descriptive error when there's a dup import from variant
-%   - Show both locations for redef + other relevant errors
 %   - Better message for no impl of interface
 %   - Better message for no impl of anon record type when there's a struct
 %     type that matches
@@ -92,9 +78,8 @@
 % - Syntax: List, Set, Map, Record
 %   - New: [a, b], #[a, b], {a => b, c => d}, {a = b, c = d}
 %   - Put: [a, b | c], #[a, b | c], {a => b, c => d | m}, {a = b, c = d | r}
-% - Operator |< to prepend an argument?
+% - Operator |>> to append an argument?
 % - Force all block expressions except last to be type ()?
-% - Global exception handler for better printing
 
 entry() -> entry(?MODULE, main, [init:get_plain_arguments()]).
 
