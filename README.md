@@ -19,9 +19,9 @@ tooling to language design to standard libraries:
   confusing.
 - Write guides or tutorials on how to use Par to build applications.
 
-This is just a small sample of things you could work on. Get in touch if you're
+This is a small sample of things you could work on. Get in touch if you're
 interested; we'd love to have you help! We're also searching for members to add
 to our core team, and getting involved early is the best track for this.
 
 ## License
-Par is [MIT licensed](#LICENSE).
+Par is [MIT licensed](LICENSE).
