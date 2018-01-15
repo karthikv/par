@@ -3,142 +3,28 @@ module FileTest
 import File (*)
 import Test (group, capture)
 
-uid : Int
-uid =
-  String.to_chars("id -u")
-  |> @os:cmd/1
-  |> String.from_chars
-  |> String.strip
-  |> to_int
-
-stat_test : Test
-stat_test = group([
+read_path_test : Test
+read_path_test = group([
+  test assert read_path(write_temp("")) == ""
   // @example
-  test
-    let meta = stat("test/lib/file/foo.txt")
-    // ^ Assuming a file located at test/lib/file/foo.txt exists with the
-    // contents "hello" and 0644 permissions, the following should pass:
-
-    assert meta.size == 6
-    assert meta.type == Regular
-    assert meta.mode == Mode {
-      owner = AllowReadWrite
-      group = AllowRead
-      other = AllowRead
-    }
-
-  test
-    let meta = stat("test/lib/file/bar")
-    assert meta.type == Directory
-    assert meta.mode == Mode {
-      owner = AllowAll
-      group = AllowReadExec
-      other = AllowReadExec
-    }
-
-  // Symlinks are resolved.
-  test
-    let meta = stat("test/lib/file/bar/baz")
-    assert meta.type == Regular
-    assert meta.mode == Mode {
-      owner = AllowReadWrite
-      group = AllowRead
-      other = AllowRead
-    }
-
-  test assert capture(|-| stat("asdf")) == DoesntExist
+  test assert read_path(write_temp("foo")) == "foo"
+  test assert capture(|-| read_path("asdf")) == DoesntExist
 ])
 
-lstat_test : Test
-lstat_test = group([
-  test
-    let meta = lstat("test/lib/file/foo.txt")
-    assert meta.size == 6
-    assert meta.type == Regular
-    assert meta.mode == Mode {
-      owner = AllowReadWrite
-      group = AllowRead
-      other = AllowRead
-    }
-
-  test
-    let meta = lstat("test/lib/file/bar")
-    assert meta.type == Directory
-    assert meta.mode == Mode {
-      owner = AllowAll
-      group = AllowReadExec
-      other = AllowReadExec
-    }
-
-  // Symlinks aren't resolved.
+write_path_test : Test
+write_path_test = group([
   // @example
   test
-    let meta = lstat("test/lib/file/bar/baz")
-    // ^ Assuming a symlink exists at test/lib/file/bar/baz with 0755
-    // permissions, the following should pass:
-
-    assert meta.type == Symlink
-    assert meta.mode == Mode {
-      owner = AllowAll
-      group = AllowReadExec
-      other = AllowReadExec
-    }
-
-  test assert capture(|-| lstat("asdf")) == DoesntExist
-])
-
-exists_test : Test
-exists_test = group([
-  // @example
-  test assert exists?(write_temp(""))
-  // @example
-  test assert exists?(make_temp_dir())
-  // @example
-  test assert !exists?(Path.join(make_temp_dir(), "new"))
-  // @example
-  test assert !exists?("asdf")
-])
-
-chmod_test : Test
-chmod_test = group([
-  // @example
+    let path = Path.join(make_temp_dir(), "new")
+    write_path(path, "foo")
+    assert read_path(path) == "foo"
   test
-    let path = write_temp("")
-    let new_mode = Mode {
-      owner = AllowWrite
-      group = AllowNone
-      other = AllowExec
-    }
-    chmod(path, new_mode)
-    assert stat(path).mode == new_mode
-
+    let path = write_temp("foo")
+    write_path(path, "bar")
+    assert read_path(path) == "bar"
   test
-    let new_mode = Mode {
-      owner = AllowAll
-      group = AllowAll
-      other = AllowAll
-    }
-    assert capture(|-| chmod("asdf", new_mode)) == DoesntExist
-])
-
-// Can't actually test this without running as root. For now, ensure we get
-// a permission error.
-chown_test : Test
-chown_test = test
-  let path = write_temp("")
-  assert capture(|-| chown(path, 0)) == NotPermitted
-
-chgrp_test : Test
-chgrp_test = group([
-  test
-    let path = write_temp("")
-    let new_gid = if stat(path).gid == 0 then uid else 0
-    chgrp(path, new_gid)
-    assert stat(path).gid == new_gid
-
-  test
-    let path = write_temp("")
-    assert capture(|-| chgrp(path, -1)) == NotPermitted
+    let path = Path.join_all([make_temp_dir(), "new", "sub"])
+    assert capture(|-| write_path(path, "foo")) == DoesntExist
 ])
 
 cp_test : Test
@@ -288,155 +174,92 @@ mkdir_p_test = group([
   test assert capture(|-| mkdir_p(write_temp(""))) == Exists
 ])
 
-make_temp_dir_test : Test
-make_temp_dir_test = group([
+exists_test : Test
+exists_test = group([
   // @example
-  test
-    let path = make_temp_dir()
-    assert Path.dir(path) == sys_temp_dir
-    assert ls(path) == []
+  test assert exists?(write_temp(""))
+  // @example
+  test assert exists?(make_temp_dir())
+  // @example
+  test assert !exists?(Path.join(make_temp_dir(), "new"))
+  // @example
+  test assert !exists?("asdf")
 ])
 
-ln_test : Test
-ln_test = group([
+stat_test : Test
+stat_test = group([
   // @example
   test
-    let path = write_temp("foo")
-    let new_path = Path.join(make_temp_dir(), "new")
+    let meta = stat("test/lib/file/foo.txt")
+    // ^ Assuming a file located at test/lib/file/foo.txt exists with the
+    // contents "hello" and 0644 permissions, the following should pass:
 
-    ln(path, new_path)
-    assert read_path(new_path) == "foo"
-
-    // Hard link should be maintained even when original is deleted.
-    rm(path)
-    assert read_path(new_path) == "foo"
-
-  test
-    let path = Path.join(make_temp_dir(), "orig")
-    let new_path = Path.join(make_temp_dir(), "new")
-    assert capture(|-| ln(path, new_path)) == DoesntExist
+    assert meta.size == 6
+    assert meta.type == Regular
+    assert meta.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
+    }
 
   test
-    let path = write_temp("")
-    let new_path = write_temp("")
-    assert capture(|-| ln(path, new_path)) == Exists
+    let meta = stat("test/lib/file/bar")
+    assert meta.type == Directory
+    assert meta.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
+    }
+
+  // Symlinks are resolved.
+  test
+    let meta = stat("test/lib/file/bar/baz")
+    assert meta.type == Regular
+    assert meta.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
+    }
+
+  test assert capture(|-| stat("asdf")) == DoesntExist
 ])
 
-ln_s_test : Test
-ln_s_test = group([
+lstat_test : Test
+lstat_test = group([
+  test
+    let meta = lstat("test/lib/file/foo.txt")
+    assert meta.size == 6
+    assert meta.type == Regular
+    assert meta.mode == Mode {
+      owner = AllowReadWrite
+      group = AllowRead
+      other = AllowRead
+    }
+
+  test
+    let meta = lstat("test/lib/file/bar")
+    assert meta.type == Directory
+    assert meta.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
+    }
+
+  // Symlinks aren't resolved.
   // @example
   test
-    let path = write_temp("foo")
-    let new_path = Path.join(make_temp_dir(), "new")
+    let meta = lstat("test/lib/file/bar/baz")
+    // ^ Assuming a symlink exists at test/lib/file/bar/baz with 0755
+    // permissions, the following should pass:
 
-    ln_s(path, new_path)
-    assert lstat(new_path).type == Symlink
-    assert stat(new_path).type == Regular
-    assert read_path(new_path) == "foo"
+    assert meta.type == Symlink
+    assert meta.mode == Mode {
+      owner = AllowAll
+      group = AllowReadExec
+      other = AllowReadExec
+    }
 
-  test
-    let path = write_temp("")
-    let new_path = Path.join(make_temp_dir(), "new")
-
-    ln_s(path, new_path)
-    rm(path)
-    assert !exists?(new_path)
-
-  test
-    let path = make_temp_dir()
-    let new_path = Path.join(make_temp_dir(), "new")
-
-    ln_s(path, new_path)
-    assert lstat(new_path).type == Symlink
-    assert stat(new_path).type == Directory
-    assert ls(new_path) == []
-
-  test
-    let path = Path.join(make_temp_dir(), "orig")
-    let new_path = Path.join(make_temp_dir(), "new")
-
-    ln_s(path, new_path)
-    assert !exists?(new_path)
-
-  test
-    let path = write_temp("")
-    let new_path = write_temp("")
-    assert capture(|-| ln_s(path, new_path)) == Exists
-])
-
-readlink_test : Test
-readlink_test = group([
-  // @example
-  test
-    let path = write_temp("")
-    let new_path = Path.join(make_temp_dir(), "new")
-    ln_s(path, new_path)
-    assert readlink(new_path) == path
-
-  // Hardlinks cannot be resolved with readlink.
-  test
-    let path = write_temp("")
-    let new_path = Path.join(make_temp_dir(), "new")
-    ln(path, new_path)
-    assert capture(|-| readlink(new_path)) == InvalidArgument
-
-  test assert capture(|-| readlink("asdf")) == DoesntExist
-  test assert capture(|-| readlink(write_temp(""))) == InvalidArgument
-])
-
-read_path_test : Test
-read_path_test = group([
-  test assert read_path(write_temp("")) == ""
-  // @example
-  test assert read_path(write_temp("foo")) == "foo"
-  test assert capture(|-| read_path("asdf")) == DoesntExist
-])
-
-write_path_test : Test
-write_path_test = group([
-  // @example
-  test
-    let path = Path.join(make_temp_dir(), "new")
-    write_path(path, "foo")
-    assert read_path(path) == "foo"
-  test
-    let path = write_temp("foo")
-    write_path(path, "bar")
-    assert read_path(path) == "bar"
-  test
-    let path = Path.join_all([make_temp_dir(), "new", "sub"])
-    assert capture(|-| write_path(path, "foo")) == DoesntExist
-])
-
-write_temp_test : Test
-write_temp_test = group([
-  // @example
-  test
-    let path = write_temp("foo")
-    assert Path.dir(path) == sys_temp_dir
-    assert read_path(path) == "foo"
-])
-
-// Hard to test this in a more comprehensive way; we can't cd because that could
-// affect other tests running in parallel.
-cwd_test : Test
-cwd_test =
-  let path = Path.join(cwd(), "rebar.config")
-  test assert stat(path).type == Regular
-
-// Hard to test cd because it can affect other tests running in parallel; just
-// check failure cases.
-cd_test : Test
-cd_test = group([
-  test
-    let orig_cwd = cwd()
-    assert capture(|-| cd("asdf")) == DoesntExist
-    assert cwd() == orig_cwd
-
-  test
-    let orig_cwd = cwd()
-    assert capture(|-| cd(write_temp(""))) == NotDirectory
-    assert cwd() == orig_cwd
+  test assert capture(|-| lstat("asdf")) == DoesntExist
 ])
 
 open_test : Test
@@ -602,4 +425,181 @@ truncate_test = group([
       seek(h, 4)
       truncate(h)
     assert read_path(path) == "hey\n"
+])
+
+// Hard to test this in a more comprehensive way; we can't cd because that could
+// affect other tests running in parallel.
+cwd_test : Test
+cwd_test =
+  let path = Path.join(cwd(), "rebar.config")
+  test assert stat(path).type == Regular
+
+// Hard to test cd because it can affect other tests running in parallel; just
+// check failure cases.
+cd_test : Test
+cd_test = group([
+  test
+    let orig_cwd = cwd()
+    assert capture(|-| cd("asdf")) == DoesntExist
+    assert cwd() == orig_cwd
+
+  test
+    let orig_cwd = cwd()
+    assert capture(|-| cd(write_temp(""))) == NotDirectory
+    assert cwd() == orig_cwd
+])
+
+make_temp_dir_test : Test
+make_temp_dir_test = group([
+  // @example
+  test
+    let path = make_temp_dir()
+    assert Path.dir(path) == sys_temp_dir
+    assert ls(path) == []
+])
+
+write_temp_test : Test
+write_temp_test = group([
+  // @example
+  test
+    let path = write_temp("foo")
+    assert Path.dir(path) == sys_temp_dir
+    assert read_path(path) == "foo"
+])
+
+ln_test : Test
+ln_test = group([
+  // @example
+  test
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln(path, new_path)
+    assert read_path(new_path) == "foo"
+
+    // Hard link should be maintained even when original is deleted.
+    rm(path)
+    assert read_path(new_path) == "foo"
+
+  test
+    let path = Path.join(make_temp_dir(), "orig")
+    let new_path = Path.join(make_temp_dir(), "new")
+    assert capture(|-| ln(path, new_path)) == DoesntExist
+
+  test
+    let path = write_temp("")
+    let new_path = write_temp("")
+    assert capture(|-| ln(path, new_path)) == Exists
+])
+
+ln_s_test : Test
+ln_s_test = group([
+  // @example
+  test
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln_s(path, new_path)
+    assert lstat(new_path).type == Symlink
+    assert stat(new_path).type == Regular
+    assert read_path(new_path) == "foo"
+
+  test
+    let path = write_temp("")
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln_s(path, new_path)
+    rm(path)
+    assert !exists?(new_path)
+
+  test
+    let path = make_temp_dir()
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln_s(path, new_path)
+    assert lstat(new_path).type == Symlink
+    assert stat(new_path).type == Directory
+    assert ls(new_path) == []
+
+  test
+    let path = Path.join(make_temp_dir(), "orig")
+    let new_path = Path.join(make_temp_dir(), "new")
+
+    ln_s(path, new_path)
+    assert !exists?(new_path)
+
+  test
+    let path = write_temp("")
+    let new_path = write_temp("")
+    assert capture(|-| ln_s(path, new_path)) == Exists
+])
+
+readlink_test : Test
+readlink_test = group([
+  // @example
+  test
+    let path = write_temp("")
+    let new_path = Path.join(make_temp_dir(), "new")
+    ln_s(path, new_path)
+    assert readlink(new_path) == path
+
+  // Hardlinks cannot be resolved with readlink.
+  test
+    let path = write_temp("")
+    let new_path = Path.join(make_temp_dir(), "new")
+    ln(path, new_path)
+    assert capture(|-| readlink(new_path)) == InvalidArgument
+
+  test assert capture(|-| readlink("asdf")) == DoesntExist
+  test assert capture(|-| readlink(write_temp(""))) == InvalidArgument
+])
+
+chmod_test : Test
+chmod_test = group([
+  // @example
+  test
+    let path = write_temp("")
+    let new_mode = Mode {
+      owner = AllowWrite
+      group = AllowNone
+      other = AllowExec
+    }
+    chmod(path, new_mode)
+    assert stat(path).mode == new_mode
+
+  test
+    let new_mode = Mode {
+      owner = AllowAll
+      group = AllowAll
+      other = AllowAll
+    }
+    assert capture(|-| chmod("asdf", new_mode)) == DoesntExist
+])
+
+// Can't actually test this without running as root. For now, ensure we get
+// a permission error.
+chown_test : Test
+chown_test = test
+  let path = write_temp("")
+  assert capture(|-| chown(path, 0)) == NotPermitted
+
+uid : Int
+uid =
+  String.to_chars("id -u")
+  |> @os:cmd/1
+  |> String.from_chars
+  |> String.strip
+  |> to_int
+
+chgrp_test : Test
+chgrp_test = group([
+  test
+    let path = write_temp("")
+    let new_gid = if stat(path).gid == 0 then uid else 0
+    chgrp(path, new_gid)
+    assert stat(path).gid == new_gid
+
+  test
+    let path = write_temp("")
+    assert capture(|-| chgrp(path, -1)) == NotPermitted
 ])

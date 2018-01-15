@@ -3,24 +3,42 @@ module StringTest
 import String (*)
 import Test (group, capture)
 
-to_chars_test : Test
-to_chars_test = group([
+slice_test : Test
+slice_test = group([
   // @example
-  test assert to_chars("foo BAR") == ['f', 'o', 'o', ' ', 'B', 'A', 'R']
+  test assert slice("bar", 0, 1) == "b"
   // @example
-  test assert to_chars("åäö") == ['å', 'ä', 'ö']
+  test assert slice("bar", -1, 1) == "r"
+  test assert slice("bar", 3, 0) == ""
+  test assert capture(|-| slice("bar", 3, 1)) == BadStringIndex(3)
+  test assert capture(|-| slice("bar", 2, 2)) == BadStringIndex(3)
   // @example
-  test assert to_chars("") == []
+  test assert slice("bar", 0, 3) == "bar"
+  // @example
+  test assert slice("bar", -3, 2) == "ba"
+  test assert slice("bar", -4, 0) == ""
+  test assert capture(|-| slice("bar", -4, 1)) == BadStringIndex(-4)
+  test assert capture(|-| slice("bar", -1, 2)) == BadStringIndex(3)
+  test assert slice("", 0, 0) == ""
+  test assert capture(|-| slice("", 0, 1)) == BadStringIndex(0)
 ])
 
-from_chars_test : Test
-from_chars_test = group([
+range_test : Test
+range_test = group([
   // @example
-  test assert from_chars(['f', 'o', 'o', ' ', 'B', 'A', 'R']) == "foo BAR"
+  test assert range("bar", 0, 1) == "ba"
   // @example
-  test assert from_chars(['å', 'ä', 'ö']) == "åäö"
+  test assert range("bar", -1, 2) == "r"
   // @example
-  test assert from_chars([]) == ""
+  test assert range("bar", 2, -2) == ""
+  test assert range("bar", 3, 1) == ""
+  test assert capture(|-| range("bar", 2, 3)) == BadStringIndex(3)
+  test assert range("bar", 0, 2) == "bar"
+  test assert range("bar", -3, 1) == "ba"
+  test assert capture(|-| range("bar", -4, 0)) == BadStringIndex(-4)
+  test assert range("bar", 0, -4) == ""
+  test assert capture(|-| range("", 0, 0)) == BadStringIndex(0)
+  test assert range("", 1, 0) == ""
 ])
 
 capitalize_test : Test
@@ -95,44 +113,6 @@ strip_test = group([
   // @example
   test assert strip(" \r\n\tfoo bar \t\r\n") == "foo bar"
   test assert strip("") == ""
-])
-
-slice_test : Test
-slice_test = group([
-  // @example
-  test assert slice("bar", 0, 1) == "b"
-  // @example
-  test assert slice("bar", -1, 1) == "r"
-  test assert slice("bar", 3, 0) == ""
-  test assert capture(|-| slice("bar", 3, 1)) == BadStringIndex(3)
-  test assert capture(|-| slice("bar", 2, 2)) == BadStringIndex(3)
-  // @example
-  test assert slice("bar", 0, 3) == "bar"
-  // @example
-  test assert slice("bar", -3, 2) == "ba"
-  test assert slice("bar", -4, 0) == ""
-  test assert capture(|-| slice("bar", -4, 1)) == BadStringIndex(-4)
-  test assert capture(|-| slice("bar", -1, 2)) == BadStringIndex(3)
-  test assert slice("", 0, 0) == ""
-  test assert capture(|-| slice("", 0, 1)) == BadStringIndex(0)
-])
-
-range_test : Test
-range_test = group([
-  // @example
-  test assert range("bar", 0, 1) == "ba"
-  // @example
-  test assert range("bar", -1, 2) == "r"
-  // @example
-  test assert range("bar", 2, -2) == ""
-  test assert range("bar", 3, 1) == ""
-  test assert capture(|-| range("bar", 2, 3)) == BadStringIndex(3)
-  test assert range("bar", 0, 2) == "bar"
-  test assert range("bar", -3, 1) == "ba"
-  test assert capture(|-| range("bar", -4, 0)) == BadStringIndex(-4)
-  test assert range("bar", 0, -4) == ""
-  test assert capture(|-| range("", 0, 0)) == BadStringIndex(0)
-  test assert range("", 1, 0) == ""
 ])
 
 lines_test : Test
@@ -445,4 +425,24 @@ replace_one_test = group([
   test assert replace_one("foo bar", re(``, []), " ") == " foo bar"
   test assert replace_one("foo bar", re(`Bar`, []), "abc") == "foo bar"
   test assert replace_one("foo bar", re(`o{3}`, []), "def") == "foo bar"
+])
+
+to_chars_test : Test
+to_chars_test = group([
+  // @example
+  test assert to_chars("foo BAR") == ['f', 'o', 'o', ' ', 'B', 'A', 'R']
+  // @example
+  test assert to_chars("åäö") == ['å', 'ä', 'ö']
+  // @example
+  test assert to_chars("") == []
+])
+
+from_chars_test : Test
+from_chars_test = group([
+  // @example
+  test assert from_chars(['f', 'o', 'o', ' ', 'B', 'A', 'R']) == "foo BAR"
+  // @example
+  test assert from_chars(['å', 'ä', 'ö']) == "åäö"
+  // @example
+  test assert from_chars([]) == ""
 ])

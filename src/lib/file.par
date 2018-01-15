@@ -240,132 +240,17 @@ exception SystemLimit
 // An unknown error, where the argument is the error code.
 exception UnknownError(String)
 
-// Returns metadata about the file at `path`. If `path` is a symbolic link,
-// resolves it and returns info about the target path it refers to. See the
-// [`Stat`](#Stat) struct for details on the result.
-stat : String -> Stat
-export stat(path) =
-  match @file:read_file_info(path, [(@time, @posix)]) {
-    (@ok, info) => munge_file_info(info)
-    e => fail(e)
-  }
-
-// Returns metadata about the file at `path`, but doesn't resolve symbolic
-// links. If `path` is a symbolic link, returns info about the link itself, not
-// the target path the link refers to. See the [`Stat`](#Stat) struct for
-// details on the result.
-lstat : String -> Stat
-export lstat(path) =
-  match @file:read_link_info(path, [(@time, @posix)]) {
-    (@ok, info) => munge_file_info(info)
-    e => fail(e)
-  }
-
-// Returns true if `path` exists (regardless of whether it's a file, directory,
-// device, etc.). If `path` is a symbolic link, returns true if the target path
-// it refers to exists.
-exists? : String -> Bool
-export exists?(path) =
-  match @file:read_file_info(path, []) {
-    (@ok, _) => true
-    (@error, @enoent) => false
-    // Returned when part of the path is not a directory.
-    (@error, @enotdir) => false
-    e => fail(e)
-  }
-
-munge_file_info : Native -> Stat
-munge_file_info(info) =
-  let (
-    @file_info, size, type_atom, _, atime, mtime, _, mode_num,
-    _, _, _, _, uid, gid
-  ) = assume info
-
-  let type = match type_atom {
-    @regular => Regular
-    @directory => Directory
-    @symlink => Symlink
-    @device => Device
-    @other => Other
-    @undefined => Other
-  }
-
-  Stat {
-    size = size
-    type = type
-    atime = atime
-    mtime = mtime
-    mode = num_to_mode(mode_num)
-    uid = uid
-    gid = gid
-  }
-
-// Changes the access controls for the file at the given `path` to `mode`. See
-// the [`Mode`](#Mode) struct for details on what can be modified.
-chmod : (String, Mode) -> ()
-export chmod(path, mode) =
-  let num = mode_to_num(mode)
-  match @file:change_mode(path, num) {
-    @ok => ()
-    e => fail(e)
-  }
-
-num_to_mode : Int -> Mode
-num_to_mode(num) =
-  let mask = @erlang:bsl(1, 3) - 1
-  let owner_oct = @erlang:band(@erlang:bsr(num, 6), mask)
-  let group_oct = @erlang:band(@erlang:bsr(num, 3), mask)
-  let other_oct = @erlang:band(num, mask)
-
-  Mode {
-    owner = get(oct_to_perm, owner_oct)
-    group = get(oct_to_perm, group_oct)
-    other = get(oct_to_perm, other_oct)
-  }
-
-mode_to_num : Mode -> Int
-mode_to_num(mode) =
-  let owner_num = @erlang:bsl(get(perm_to_oct, mode.owner), 6)
-  let group_num = @erlang:bsl(get(perm_to_oct, mode.group), 3)
-  let other_num = get(perm_to_oct, mode.other)
-  owner_num + group_num + other_num
-
-oct_to_perm : Map<Int, Permissions>
-oct_to_perm = {
-  0 => AllowNone
-  1 => AllowExec
-  2 => AllowWrite
-  3 => AllowWriteExec
-  4 => AllowRead
-  5 => AllowReadExec
-  6 => AllowReadWrite
-  7 => AllowAll
-}
-
-perm_to_oct : Map<Permissions, Int>
-perm_to_oct = map(oct_to_perm, |(k, v)| (v, k))
-
-// Changes the owner of `path` to the user given by ID `uid`. This can only be
-// run by a super-user.
-//
-// @example // Change owner of "/foo" to the user with ID 0 (generally root).
-// | chown("/foo", 0)
-chown : (String, Int) -> ()
-export chown(path, uid) = match @file:change_owner(path, uid) {
-  // change_owner fails to report errors, so we check for success.
-  @ok => if stat(path).uid != uid then raise NotPermitted
+// Reads and returns the contents of the file at `path`.
+read_path : String -> String
+export read_path(path) = match @file:read_file(path) {
+  (@ok, contents) => @unicode:characters_to_binary(contents)
   e => fail(e)
 }
 
-// Changes the group of `path` to the group given by ID `gid`. This can only
-// be run by the owner of the file or a super-user.
-//
-// @example // Change group of "foo/bar" to the group with ID 30.
-// | chgrp("foo/bar", 30)
-chgrp : (String, Int) -> ()
-export chgrp(path, gid) = match @file:change_group(path, gid) {
-  // change_owner fails to report errors, so we check for success.
-  @ok => if stat(path).gid != gid then raise NotPermitted
+// Writes `contents` to the file at path `path`.
+write_path : (String, String) -> ()
+export write_path(path, contents) = match @file:write_file(path, contents) {
+  @ok => ()
   e => fail(e)
 }
 
@@ -448,138 +333,65 @@ export mkdir_p(path) =
     e => fail(e)
   }
 
-// The system's temporary directory. Use [`make_temp_dir()`](#make_temp_dir) to
-// make a new temporary directory within this directory, and
-// [`write_temp()`](#write_temp) to write a temporary file into this directory.
-//
-// @example // Write to temporary file foo in system temp directory.
-// | let path = Path.join(sys_temp_dir, "foo")
-// | write_path(path, "bar")
-sys_temp_dir : String
-export sys_temp_dir = @os:getenv("TEMP", "/tmp")
-
-// Makes a new temporary directory within [`sys_temp_dir`](#sys_temp_dir),
-// returning its path. See [`write_temp()`](#write_temp) if you want to write to
-// a temporary file.
-make_temp_dir : () -> String
-export make_temp_dir() = make_temp_dir_r(0)
-
-make_temp_dir_r : Int -> String
-make_temp_dir_r(count) =
-  let path = Path.join(sys_temp_dir, "par-dir-") ++ rand_suffix()
-
-  try
-    mkdir(path)
-    path
-  catch {
-    Exists =>
-      if count >= 10 then
-        @rand:seed(@exrop)
-        make_temp_dir_r(0)
-      else
-        make_temp_dir_r(count + 1)
+// Returns true if `path` exists (regardless of whether it's a file, directory,
+// device, etc.). If `path` is a symbolic link, returns true if the target path
+// it refers to exists.
+exists? : String -> Bool
+export exists?(path) =
+  match @file:read_file_info(path, []) {
+    (@ok, _) => true
+    (@error, @enoent) => false
+    // Returned when part of the path is not a directory.
+    (@error, @enotdir) => false
+    e => fail(e)
   }
 
-// Creates a hard link at path `new` that mirrors the file at path `existing`.
-// A hard link is an alias that refers to the same underlying file (i.e. inode
-// in linux). If `existing` is deleted or moved, `new` will still exist with its
-// contents. If `existing` or `new` is modified, the other will also be
-// modified, as the same underlying file is changed. On many systems, hard links
-// to directories are not allowed.
-ln : (String, String) -> ()
-export ln(existing, new) = match @file:make_link(existing, new) {
-  @ok => ()
-  e => fail(e)
-}
-
-// Creates a symbolic link at path `new` that points to path `existing`.
-// A symbolic link is a special file whose contents are a filesystem path; in
-// this way, it's just a pointer to `existing`. If `existing` is deleted or
-// moved, `new` will refer to a non-existent path. If `existing` is modified,
-// `new` will still point to `existing`, and hence you can see the changes.
-// Symbolic links can refer to directories.
-ln_s : (String, String) -> ()
-export ln_s(existing, new) = match @file:make_symlink(existing, new) {
-  @ok => ()
-  e => fail(e)
-}
-
-// Resolves the symbolic link at `path`, returning the target path to which it
-// refers to.
-readlink : String -> String
-export readlink(path) = match @file:read_link(path) {
-  (@ok, resolved) => String.from_chars(resolved)
-  e => fail(e)
-}
-
-// Reads and returns the contents of the file at `path`.
-read_path : String -> String
-export read_path(path) = match @file:read_file(path) {
-  (@ok, contents) => @unicode:characters_to_binary(contents)
-  e => fail(e)
-}
-
-// Writes `contents` to the file at path `path`.
-write_path : (String, String) -> ()
-export write_path(path, contents) = match @file:write_file(path, contents) {
-  @ok => ()
-  e => fail(e)
-}
-
-// Writes `contents` to a temporary file located within
-// [`sys_temp_dir`](#sys_tmp_dir), returning its path. See
-// [`make_temp_dir()`](#make_temp_dir) if you want to create a new temporary
-// directory.
-write_temp : String -> String
-export write_temp(contents) =
-  let (path, h) = open_temp(contents, 0)
-  ensure close(h) after write(h, contents)
-  chmod(path, Mode {
-    owner = AllowReadWrite
-    group = AllowNone
-    other = AllowNone
-  })
-  path
-
-open_temp : (String, Int) -> (String, Handle)
-open_temp(contents, count) =
-  let path = Path.join(sys_temp_dir, "par-file-") ++ rand_suffix()
-
-  try (path, open(path, Exclusive)) catch {
-    Exists =>
-      if count >= 10 then
-        @rand:seed(@exrop)
-        open_temp(contents, 0)
-      else
-        open_temp(contents, count + 1)
+// Returns metadata about the file at `path`. If `path` is a symbolic link,
+// resolves it and returns info about the target path it refers to. See the
+// [`Stat`](#Stat) struct for details on the result.
+stat : String -> Stat
+export stat(path) =
+  match @file:read_file_info(path, [(@time, @posix)]) {
+    (@ok, info) => munge_file_info(info)
+    e => fail(e)
   }
 
-rand_suffix : () -> String
-rand_suffix() =
-  let suffix = @io_lib:format("~w", [@rand:uniform()]) |> String.from_chars
-  // Strip "0." from suffix to avoid adding a numeric extension to the path.
-  String.range(suffix, 2, -1)
+// Returns metadata about the file at `path`, but doesn't resolve symbolic
+// links. If `path` is a symbolic link, returns info about the link itself, not
+// the target path the link refers to. See the [`Stat`](#Stat) struct for
+// details on the result.
+lstat : String -> Stat
+export lstat(path) =
+  match @file:read_link_info(path, [(@time, @posix)]) {
+    (@ok, info) => munge_file_info(info)
+    e => fail(e)
+  }
 
-// Returns the current working directory, which starts as the directory in which
-// `par` is initially run.
-//
-// @example // Prints the current working directory.
-// | print(cwd())
-cwd : () -> String
-export cwd() = match @file:get_cwd() {
-  (@ok, dir) => String.from_chars(dir)
-  e => fail(e)
-}
+munge_file_info : Native -> Stat
+munge_file_info(info) =
+  let (
+    @file_info, size, type_atom, _, atime, mtime, _, mode_num,
+    _, _, _, _, uid, gid
+  ) = assume info
 
-// Changes the current working directory to `path`.
-//
-// @example // Make foo the new working directory.
-// | cd("foo")
-cd : String -> ()
-export cd(path) = match @file:set_cwd(path) {
-  @ok => ()
-  e => fail(e)
-}
+  let type = match type_atom {
+    @regular => Regular
+    @directory => Directory
+    @symlink => Symlink
+    @device => Device
+    @other => Other
+    @undefined => Other
+  }
+
+  Stat {
+    size = size
+    type = type
+    atime = atime
+    mtime = mtime
+    mode = num_to_mode(mode_num)
+    uid = uid
+    gid = gid
+  }
 
 // Opens the file at `path` in the specified `mode`. See [`OpenMode`](#OpenMode)
 // for a description of the different modes. Returns a file handle that can be
@@ -698,6 +510,194 @@ export truncate(handle) =
     @ok => ()
     e => fail(e)
   }
+
+// Returns the current working directory, which starts as the directory in which
+// `par` is initially run.
+//
+// @example // Prints the current working directory.
+// | print(cwd())
+cwd : () -> String
+export cwd() = match @file:get_cwd() {
+  (@ok, dir) => String.from_chars(dir)
+  e => fail(e)
+}
+
+// Changes the current working directory to `path`.
+//
+// @example // Make foo the new working directory.
+// | cd("foo")
+cd : String -> ()
+export cd(path) = match @file:set_cwd(path) {
+  @ok => ()
+  e => fail(e)
+}
+
+// The system's temporary directory. Use [`make_temp_dir()`](#make_temp_dir) to
+// make a new temporary directory within this directory, and
+// [`write_temp()`](#write_temp) to write a temporary file into this directory.
+//
+// @example // Write to temporary file foo in system temp directory.
+// | let path = Path.join(sys_temp_dir, "foo")
+// | write_path(path, "bar")
+sys_temp_dir : String
+export sys_temp_dir = @os:getenv("TEMP", "/tmp")
+
+// Makes a new temporary directory within [`sys_temp_dir`](#sys_temp_dir),
+// returning its path. See [`write_temp()`](#write_temp) if you want to write to
+// a temporary file.
+make_temp_dir : () -> String
+export make_temp_dir() = make_temp_dir_r(0)
+
+make_temp_dir_r : Int -> String
+make_temp_dir_r(count) =
+  let path = Path.join(sys_temp_dir, "par-dir-") ++ rand_suffix()
+
+  try
+    mkdir(path)
+    path
+  catch {
+    Exists =>
+      if count >= 10 then
+        @rand:seed(@exrop)
+        make_temp_dir_r(0)
+      else
+        make_temp_dir_r(count + 1)
+  }
+
+// Writes `contents` to a temporary file located within
+// [`sys_temp_dir`](#sys_tmp_dir), returning its path. See
+// [`make_temp_dir()`](#make_temp_dir) if you want to create a new temporary
+// directory.
+write_temp : String -> String
+export write_temp(contents) =
+  let (path, h) = open_temp(contents, 0)
+  ensure close(h) after write(h, contents)
+  chmod(path, Mode {
+    owner = AllowReadWrite
+    group = AllowNone
+    other = AllowNone
+  })
+  path
+
+open_temp : (String, Int) -> (String, Handle)
+open_temp(contents, count) =
+  let path = Path.join(sys_temp_dir, "par-file-") ++ rand_suffix()
+
+  try (path, open(path, Exclusive)) catch {
+    Exists =>
+      if count >= 10 then
+        @rand:seed(@exrop)
+        open_temp(contents, 0)
+      else
+        open_temp(contents, count + 1)
+  }
+
+rand_suffix : () -> String
+rand_suffix() =
+  let suffix = @io_lib:format("~w", [@rand:uniform()]) |> String.from_chars
+  // Strip "0." from suffix to avoid adding a numeric extension to the path.
+  String.range(suffix, 2, -1)
+
+// Creates a hard link at path `new` that mirrors the file at path `existing`.
+// A hard link is an alias that refers to the same underlying file (i.e. inode
+// in linux). If `existing` is deleted or moved, `new` will still exist with its
+// contents. If `existing` or `new` is modified, the other will also be
+// modified, as the same underlying file is changed. On many systems, hard links
+// to directories are not allowed.
+ln : (String, String) -> ()
+export ln(existing, new) = match @file:make_link(existing, new) {
+  @ok => ()
+  e => fail(e)
+}
+
+// Creates a symbolic link at path `new` that points to path `existing`.
+// A symbolic link is a special file whose contents are a filesystem path; in
+// this way, it's just a pointer to `existing`. If `existing` is deleted or
+// moved, `new` will refer to a non-existent path. If `existing` is modified,
+// `new` will still point to `existing`, and hence you can see the changes.
+// Symbolic links can refer to directories.
+ln_s : (String, String) -> ()
+export ln_s(existing, new) = match @file:make_symlink(existing, new) {
+  @ok => ()
+  e => fail(e)
+}
+
+// Resolves the symbolic link at `path`, returning the target path to which it
+// refers to.
+readlink : String -> String
+export readlink(path) = match @file:read_link(path) {
+  (@ok, resolved) => String.from_chars(resolved)
+  e => fail(e)
+}
+
+// Changes the access controls for the file at the given `path` to `mode`. See
+// the [`Mode`](#Mode) struct for details on what can be modified.
+chmod : (String, Mode) -> ()
+export chmod(path, mode) =
+  let num = mode_to_num(mode)
+  match @file:change_mode(path, num) {
+    @ok => ()
+    e => fail(e)
+  }
+
+num_to_mode : Int -> Mode
+num_to_mode(num) =
+  let mask = @erlang:bsl(1, 3) - 1
+  let owner_oct = @erlang:band(@erlang:bsr(num, 6), mask)
+  let group_oct = @erlang:band(@erlang:bsr(num, 3), mask)
+  let other_oct = @erlang:band(num, mask)
+
+  Mode {
+    owner = get(oct_to_perm, owner_oct)
+    group = get(oct_to_perm, group_oct)
+    other = get(oct_to_perm, other_oct)
+  }
+
+mode_to_num : Mode -> Int
+mode_to_num(mode) =
+  let owner_num = @erlang:bsl(get(perm_to_oct, mode.owner), 6)
+  let group_num = @erlang:bsl(get(perm_to_oct, mode.group), 3)
+  let other_num = get(perm_to_oct, mode.other)
+  owner_num + group_num + other_num
+
+oct_to_perm : Map<Int, Permissions>
+oct_to_perm = {
+  0 => AllowNone
+  1 => AllowExec
+  2 => AllowWrite
+  3 => AllowWriteExec
+  4 => AllowRead
+  5 => AllowReadExec
+  6 => AllowReadWrite
+  7 => AllowAll
+}
+
+perm_to_oct : Map<Permissions, Int>
+perm_to_oct = map(oct_to_perm, |(k, v)| (v, k))
+
+// Changes the owner of `path` to the user given by ID `uid`. This can only be
+// run by a super-user.
+//
+// @example // Change owner of "/foo" to the user with ID 0 (generally root).
+// | chown("/foo", 0)
+chown : (String, Int) -> ()
+export chown(path, uid) = match @file:change_owner(path, uid) {
+  // change_owner fails to report errors, so we check for success.
+  @ok => if stat(path).uid != uid then raise NotPermitted
+  e => fail(e)
+}
+
+// Changes the group of `path` to the group given by ID `gid`. This can only
+// be run by the owner of the file or a super-user.
+//
+// @example // Change group of "foo/bar" to the group with ID 30.
+// | chgrp("foo/bar", 30)
+chgrp : (String, Int) -> ()
+export chgrp(path, gid) = match @file:change_group(path, gid) {
+  // change_owner fails to report errors, so we check for success.
+  @ok => if stat(path).gid != gid then raise NotPermitted
+  e => fail(e)
+}
 
 fail : ((Atom, Atom)) -> A
 fail((@error, e)) = match e {

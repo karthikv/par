@@ -4,13 +4,10 @@
 
 % TODO:
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Check error reporting once installation is done
 % - Website + Documentation
-%   - Order of functions in modules
 %   - Capture tests?
 %     - Add else clause to try/catch
 %   - Download for windows
-%   - Add editor plugin info to download page?
 %
 % - Default args?
 % - Confusion between Con and TV

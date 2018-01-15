@@ -30,150 +30,6 @@ exception BadListIndex(Int)
 // Raised by [`zip()`](#zip) when the two lists don't have the same lengths.
 exception MismatchedLengths(Int, Int)
 
-// Returns the maximum element in `l` as [`Some(max)`](base#Option), or
-// [`None`](base#Option) if `l` is empty. `l` is expected to contain elements
-// that satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they
-// have a defined ordering.
-max_in : [A ~ Ord] -> Option<A ~ Ord>
-export max_in(l) = match l {
-  [] => None
-  _ => Some(@lists:max(l))
-}
-
-// Returns the minimum element in `l` as [`Some(min)`](base#Option), or
-// [`None`](base#Option) if `l` is empty. `l` is expected to contain elements
-// that satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they
-// have a defined ordering.
-min_in : [A ~ Ord] -> Option<A ~ Ord>
-export min_in(l) = match l {
-  [] => None
-  _ => Some(@lists:min(l))
-}
-
-// Returns the element in `l` for which `f` returns the maximum value. `f`
-// accepts an element as an argument and returns a value that satisfies the
-// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
-max_by : ([A], A -> B ~ Ord) -> Option<A>
-export max_by(l, f) = match l {
-  [] => None
-  [h | t] =>
-    let (max, _) = fold(t, (h, f(h)), |(max, max_key), x|
-      let x_key = f(x)
-      if x_key > max_key then (x, x_key) else (max, max_key)
-    )
-    Some(max)
-}
-
-// Returns the element in `l` for which `f` returns the minimum value. `f`
-// accepts an element as an argument and returns a value that satisfies the
-// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
-min_by : ([A], A -> B ~ Ord) -> Option<A>
-export min_by(l, f) = match l {
-  [] => None
-  [h | t] =>
-    let (min, _) = fold(t, (h, f(h)), |(min, min_key), x|
-      let x_key = f(x)
-      if x_key < min_key then (x, x_key) else (min, min_key)
-    )
-    Some(min)
-}
-
-// Takes elements from `l` while `f` returns true, returning a new list. `f`
-// accepts an element and returns true to take it or false to stop.
-take_while : ([A], A -> Bool) -> [A]
-export take_while(l, f) = @lists:takewhile(f, l)
-
-// Drops elements from `l` while `f` returns true, returning a new list. `f`
-// accepts an element and returns true to take it or false to stop.
-drop_while : ([A], A -> Bool) -> [A]
-export drop_while(l, f) = @lists:dropwhile(f, l)
-
-// Takes elements from `l` while `f` returns true, and returns two new lists:
-// the elements that were taken, and all remaining elements.
-split_while : ([A], A -> Bool) -> ([A], [A])
-export split_while(l, f) = @lists:splitwith(f, l)
-
-// Creates a new list that has the element `a` repeated `n` times.
-repeat : (A, Int) -> [A]
-export repeat(a, n) = @lists:duplicate(n, a)
-
-// Calls `f` for each element in `l`, concatenating the resultant lists together
-// into one list. `f` accepts an element in `l` and returns a list.
-flat_map : ([A], A -> [B]) -> [B]
-export flat_map(l, f) = @lists:flatmap(f, l)
-
-// Same as [`fold`](#fold), expect that it goes through `l` in the reverse
-// order, calling `f` with the last element, then the second-to-last element,
-// etc.
-foldr : ([A], F, (F, A) -> F) -> F
-export foldr(l, init, f) = match l {
-  [h | t] => f(foldr(t, init, f), h)
-  [] => init
-}
-
-// Same as [`fold_map`](#fold_map), expect that it goes through `l` in the
-// reverse order, calling `f` with the last element, then the second-to-last
-// element, etc. The resulting mapped list is still in the same order as the
-// original list.
-foldr_map : ([A], F, (F, A) -> (F, B)) -> (F, [B])
-export foldr_map(l, init, f) = match l {
-  [h | t] =>
-    let (accum, mapped) = foldr_map(t, init, f)
-    let (new_accum, new_h) = f(accum, h)
-    (new_accum, [new_h | mapped])
-  [] => (init, [])
-}
-
-// Returns two new lists: one containing elements for which `f` returns true,
-// and the other containing elements for which `f` returns false.
-partition : ([A], A -> Bool) -> ([A], [A])
-export partition(l, f) = @lists:partition(f, l)
-
-// Reverses the list `l`.
-//
-// @args l
-reverse : [A] -> [A]
-export reverse = @lists:reverse/1
-
-// Returns a list containing the sequence of integers from `start` to `end`,
-// both inclusive. If `start > end`, returns `[]`.
-seq : (Int, Int) -> [Int]
-export seq(start, end) =
-  if start <= end then
-    [start | seq(start + 1, end)]
-  else
-    []
-
-// Returns the sum of all numbers in `l`.
-//
-// @args l
-sum : [A ~ Num] -> A ~ Num
-export sum = @lists:sum/1
-
-// Sorts `l` in ascending order. `l` is expected to contain elements that
-// satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they have
-// a defined ordering.
-//
-// @args l
-sort : [A ~ Ord] -> [A ~ Ord]
-export sort = @lists:sort/1
-
-// Sorts `l` in ascending order based on the return value of `f` for each
-// element. The element for which `f` returns the minimum value is first, and
-// the element for which `f` returns the maximum value is last. `f` accepts an
-// element as an argument and returns a value that satisfies the
-// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
-//
-// @args l
-sort_by : ([A], A -> B ~ Ord) -> [A]
-export sort_by(l, f) = @lists:sort(|a, b| f(a) < f(b), l)
-
-// Sorts `l` in ascending order based on the comparator function `f`. `f` is
-// called with two elements `a` and `b`, and the comparator should return true
-// if `a` must be placed before `b` in the sorted list.
-sort_cmp : ([A], (A, A) -> Bool) -> [A]
-export sort_cmp(l, f) = @lists:sort(f, l)
-
 // Returns the element at index `i` in `l`. `i` can be negative, where `-1` is
 // the last index, `-2` is the second-to-last index, etc. If `at` tries to
 // access an element at an invalid index, it raises
@@ -188,53 +44,6 @@ at_r(l, i, n) = match l {
   [h | t] => if i == n then h else at_r(t, i + 1, n)
   [] => raise BadListIndex(i)
 }
-
-// Returns two lists: the first contains all elements from index `0` to `i - 1`,
-// and the second contains all elements from index `i` to the end of the list.
-// `i` can be negative, where `-1` is the last index, `-2` is the second-to-last
-// index, etc. If `split_at` tries to access an element at an invalid index, it
-// raises [`BadListIndex`](#BadListIndex).
-split_at : ([A], Int) -> ([A], [A])
-export split_at(l, i) =
-  let wrapped_i = if i < 0 then length(l) + i else i
-  if wrapped_i < 0 then
-    raise BadListIndex(i)
-  else
-    split_at_r(l, 0, wrapped_i, [])
-
-split_at_r : ([A], Int, Int, [A]) -> ([A], [A])
-split_at_r(l, i, n, before) =
-  if l == [] then
-    raise BadListIndex(i)
-  else if i == n then
-    (reverse(before), l)
-  else
-    let [h | t] = l
-    split_at_r(t, i + 1, n, [h | before])
-
-// Takes `n` elements from the beginning of `l`, returning a new list. If `l`
-// has fewer than `n` elements, returns `l`. If `n` is negative, returns `[]`.
-take : ([A], Int) -> [A]
-export take(l, n) =
-  if n <= 0 then
-    []
-  else
-    match l {
-      [h | t] => [h | take(t, n - 1)]
-      [] => []
-    }
-
-// Drops `n` elements from the beginning of `l`, returning a new list. If `l`
-// has fewer than `n` elements, returns `[]`. If `n` is negative, returns `l`.
-drop : ([A], Int) -> [A]
-export drop(l, n) =
-  if n <= 0 then
-    l
-  else
-    match l {
-      [_ | t] => drop(t, n - 1)
-      [] => []
-    }
 
 // Returns a sublist of `l` starting at index `i` with length `len`. `i` can
 // be negative, where `-1` is the last index, `-2` is the second-to-last index,
@@ -285,6 +94,136 @@ slice_r(l, i, start, len) =
       [] => raise BadListIndex(i)
     }
 
+// Returns two lists: the first contains all elements from index `0` to `i - 1`,
+// and the second contains all elements from index `i` to the end of the list.
+// `i` can be negative, where `-1` is the last index, `-2` is the second-to-last
+// index, etc. If `split_at` tries to access an element at an invalid index, it
+// raises [`BadListIndex`](#BadListIndex).
+split_at : ([A], Int) -> ([A], [A])
+export split_at(l, i) =
+  let wrapped_i = if i < 0 then length(l) + i else i
+  if wrapped_i < 0 then
+    raise BadListIndex(i)
+  else
+    split_at_r(l, 0, wrapped_i, [])
+
+split_at_r : ([A], Int, Int, [A]) -> ([A], [A])
+split_at_r(l, i, n, before) =
+  if l == [] then
+    raise BadListIndex(i)
+  else if i == n then
+    (reverse(before), l)
+  else
+    let [h | t] = l
+    split_at_r(t, i + 1, n, [h | before])
+
+// Takes `n` elements from the beginning of `l`, returning a new list. If `l`
+// has fewer than `n` elements, returns `l`. If `n` is negative, returns `[]`.
+take : ([A], Int) -> [A]
+export take(l, n) =
+  if n <= 0 then
+    []
+  else
+    match l {
+      [h | t] => [h | take(t, n - 1)]
+      [] => []
+    }
+
+// Drops `n` elements from the beginning of `l`, returning a new list. If `l`
+// has fewer than `n` elements, returns `[]`. If `n` is negative, returns `l`.
+drop : ([A], Int) -> [A]
+export drop(l, n) =
+  if n <= 0 then
+    l
+  else
+    match l {
+      [_ | t] => drop(t, n - 1)
+      [] => []
+    }
+
+// Takes elements from `l` while `f` returns true, returning a new list. `f`
+// accepts an element and returns true to take it or false to stop.
+take_while : ([A], A -> Bool) -> [A]
+export take_while(l, f) = @lists:takewhile(f, l)
+
+// Drops elements from `l` while `f` returns true, returning a new list. `f`
+// accepts an element and returns true to take it or false to stop.
+drop_while : ([A], A -> Bool) -> [A]
+export drop_while(l, f) = @lists:dropwhile(f, l)
+
+// Takes elements from `l` while `f` returns true, and returns two new lists:
+// the elements that were taken, and all remaining elements.
+split_while : ([A], A -> Bool) -> ([A], [A])
+export split_while(l, f) = @lists:splitwith(f, l)
+
+// Returns two new lists: one containing elements for which `f` returns true,
+// and the other containing elements for which `f` returns false.
+partition : ([A], A -> Bool) -> ([A], [A])
+export partition(l, f) = @lists:partition(f, l)
+
+// Reverses the list `l`.
+//
+// @args l
+reverse : [A] -> [A]
+export reverse = @lists:reverse/1
+
+// Calls `f` for each element in `l`, concatenating the resultant lists together
+// into one list. `f` accepts an element in `l` and returns a list.
+flat_map : ([A], A -> [B]) -> [B]
+export flat_map(l, f) = @lists:flatmap(f, l)
+
+// Same as [`fold`](#fold), expect that it goes through `l` in the reverse
+// order, calling `f` with the last element, then the second-to-last element,
+// etc.
+foldr : ([A], F, (F, A) -> F) -> F
+export foldr(l, init, f) = match l {
+  [h | t] => f(foldr(t, init, f), h)
+  [] => init
+}
+
+// Same as [`fold_map`](#fold_map), expect that it goes through `l` in the
+// reverse order, calling `f` with the last element, then the second-to-last
+// element, etc. The resulting mapped list is still in the same order as the
+// original list.
+foldr_map : ([A], F, (F, A) -> (F, B)) -> (F, [B])
+export foldr_map(l, init, f) = match l {
+  [h | t] =>
+    let (accum, mapped) = foldr_map(t, init, f)
+    let (new_accum, new_h) = f(accum, h)
+    (new_accum, [new_h | mapped])
+  [] => (init, [])
+}
+
+// Returns the sum of all numbers in `l`.
+//
+// @args l
+sum : [A ~ Num] -> A ~ Num
+export sum = @lists:sum/1
+
+// Sorts `l` in ascending order. `l` is expected to contain elements that
+// satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they have
+// a defined ordering.
+//
+// @args l
+sort : [A ~ Ord] -> [A ~ Ord]
+export sort = @lists:sort/1
+
+// Sorts `l` in ascending order based on the return value of `f` for each
+// element. The element for which `f` returns the minimum value is first, and
+// the element for which `f` returns the maximum value is last. `f` accepts an
+// element as an argument and returns a value that satisfies the
+// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
+//
+// @args l
+sort_by : ([A], A -> B ~ Ord) -> [A]
+export sort_by(l, f) = @lists:sort(|a, b| f(a) < f(b), l)
+
+// Sorts `l` in ascending order based on the comparator function `f`. `f` is
+// called with two elements `a` and `b`, and the comparator should return true
+// if `a` must be placed before `b` in the sorted list.
+sort_cmp : ([A], (A, A) -> Bool) -> [A]
+export sort_cmp(l, f) = @lists:sort(f, l)
+
 // Joins the list of strings `l` with the separator `sep`, returning a string.
 // `sep` is placed in-between every two subsequent elements of `l`.
 join : ([String], String) -> String
@@ -296,6 +235,67 @@ intersperse(l, sep) = match l {
   [h] => [h]
   [h | t] => [h, sep | intersperse(t, sep)]
 }
+
+// Returns the maximum element in `l` as [`Some(max)`](base#Option), or
+// [`None`](base#Option) if `l` is empty. `l` is expected to contain elements
+// that satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they
+// have a defined ordering.
+max_in : [A ~ Ord] -> Option<A ~ Ord>
+export max_in(l) = match l {
+  [] => None
+  _ => Some(@lists:max(l))
+}
+
+// Returns the minimum element in `l` as [`Some(min)`](base#Option), or
+// [`None`](base#Option) if `l` is empty. `l` is expected to contain elements
+// that satisfy the [`Ord`](/learn/reference#interfaces) interface, meaning they
+// have a defined ordering.
+min_in : [A ~ Ord] -> Option<A ~ Ord>
+export min_in(l) = match l {
+  [] => None
+  _ => Some(@lists:min(l))
+}
+
+// Returns the element in `l` for which `f` returns the maximum value. `f`
+// accepts an element as an argument and returns a value that satisfies the
+// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
+max_by : ([A], A -> B ~ Ord) -> Option<A>
+export max_by(l, f) = match l {
+  [] => None
+  [h | t] =>
+    let (max, _) = fold(t, (h, f(h)), |(max, max_key), x|
+      let x_key = f(x)
+      if x_key > max_key then (x, x_key) else (max, max_key)
+    )
+    Some(max)
+}
+
+// Returns the element in `l` for which `f` returns the minimum value. `f`
+// accepts an element as an argument and returns a value that satisfies the
+// [`Ord`](/learn/reference#interfaces) interface, which has a defined ordering.
+min_by : ([A], A -> B ~ Ord) -> Option<A>
+export min_by(l, f) = match l {
+  [] => None
+  [h | t] =>
+    let (min, _) = fold(t, (h, f(h)), |(min, min_key), x|
+      let x_key = f(x)
+      if x_key < min_key then (x, x_key) else (min, min_key)
+    )
+    Some(min)
+}
+
+// Returns a list containing the sequence of integers from `start` to `end`,
+// both inclusive. If `start > end`, returns `[]`.
+seq : (Int, Int) -> [Int]
+export seq(start, end) =
+  if start <= end then
+    [start | seq(start + 1, end)]
+  else
+    []
+
+// Creates a new list that has the element `a` repeated `n` times.
+repeat : (A, Int) -> [A]
+export repeat(a, n) = @lists:duplicate(n, a)
 
 // Returns a list where the `i`-th element is a tuple containing the `i`-th
 // element of `l1` and the `i`-th element of `l2`. If `l1` and `l2` don't have

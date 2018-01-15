@@ -65,47 +65,6 @@ exception BadStringIndex(Int)
 // the error occurs.
 exception BadRegex({ reason : String, index : Int })
 
-// Converts a string `s` into a list of characters.
-to_chars : String -> [Char]
-export to_chars(s) = match @string:next_codepoint(s) {
-  [h | t] => [h | to_chars(assume t)]
-  [] => []
-}
-
-// Converts a list of characters, `chars` into a string.
-from_chars : [Char] -> String
-export from_chars(chars) = @unicode:characters_to_binary(chars)
-
-// Capitalizes the first letter in `s`, returning a new string. If the
-// first character isn't a letter, simply returns `s`.
-capitalize : String -> String
-export capitalize(s) =
-  if empty?(s) then
-    s
-  else
-    let [g | t] = @string:next_codepoint(s)
-    @unicode:characters_to_binary([@string:to_upper([g]) | t])
-
-// Converts every character in `s` to lowercase, returning a new string.
-to_lower : String -> String
-export to_lower(s) = @string:lowercase(s)
-
-// Converts every character in `s` to uppercase, returning a new string.
-to_upper : String -> String
-export to_upper(s) = @string:uppercase(s)
-
-// Removes leading whitespace in `s`, returning a new string.
-lstrip : String -> String
-export lstrip(s) = @string:trim(s, @leading)
-
-// Removes trailing whitespace in `s`, returning a new string.
-rstrip : String -> String
-export rstrip(s) = @string:trim(s, @trailing)
-
-// Removes leading and trailing whitespace in `s`, returning a new string.
-strip : String -> String
-export strip(s) = @string:trim(s, @both)
-
 // Returns a substring of `s` starting at index `i` with length `len`. `i` can
 // be negative, where `-1` is the last index, `-2` is the second-to-last index,
 // etc. If `len <= 0`, returns `""`. If `slice` tries to access an element at an
@@ -155,6 +114,36 @@ slice_r(s, i, start, len) =
           slice_r(assume t, i + 1, start, len)
       [] => raise BadStringIndex(i)
     }
+
+// Capitalizes the first letter in `s`, returning a new string. If the
+// first character isn't a letter, simply returns `s`.
+capitalize : String -> String
+export capitalize(s) =
+  if empty?(s) then
+    s
+  else
+    let [g | t] = @string:next_codepoint(s)
+    @unicode:characters_to_binary([@string:to_upper([g]) | t])
+
+// Converts every character in `s` to lowercase, returning a new string.
+to_lower : String -> String
+export to_lower(s) = @string:lowercase(s)
+
+// Converts every character in `s` to uppercase, returning a new string.
+to_upper : String -> String
+export to_upper(s) = @string:uppercase(s)
+
+// Removes leading whitespace in `s`, returning a new string.
+lstrip : String -> String
+export lstrip(s) = @string:trim(s, @leading)
+
+// Removes trailing whitespace in `s`, returning a new string.
+rstrip : String -> String
+export rstrip(s) = @string:trim(s, @trailing)
+
+// Removes leading and trailing whitespace in `s`, returning a new string.
+strip : String -> String
+export strip(s) = @string:trim(s, @both)
 
 // Returns a list of lines in `s`, where lines are separated either by `"\n"` or
 // `"\r\n"`. Each line in the result list is stripped of the trailing `"\n"` or
@@ -421,6 +410,17 @@ impl Pattern for Regex {
 // there's no limit on the number of splits.
 split : (String, T ~ Pattern) -> [String]
 export split(s, r) = splitn(s, r, -1)
+
+// Converts a string `s` into a list of characters.
+to_chars : String -> [Char]
+export to_chars(s) = match @string:next_codepoint(s) {
+  [h | t] => [h | to_chars(assume t)]
+  [] => []
+}
+
+// Converts a list of characters, `chars` into a string.
+from_chars : [Char] -> String
+export from_chars(chars) = @unicode:characters_to_binary(chars)
 
 impl ToInt for String {
   to_int(s) = match @string:to_integer(s) {
