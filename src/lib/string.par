@@ -161,11 +161,24 @@ export reverse(s) = @string:reverse(s) |> @unicode:characters_to_binary/1
 
 // Returns true if `s` starts with the given `prefix`.
 starts_with? : (String, String) -> Bool
-export starts_with?(s, prefix) = @string:prefix(s, prefix) != @nomatch
+export starts_with?(s, prefix) =
+  // On the Docker Erlang image with a MacOSX host, calling @string:prefix()
+  // with an empty prefix raises a function clause error. We specifically handle
+  // this case here.
+  if empty?(prefix) then
+    true
+  else
+    @string:prefix(s, prefix) != @nomatch
 
 // Returns true if `s` ends with the given `suffix`.
 ends_with? : (String, String) -> Bool
-export ends_with?(s, suffix) = @string:find(s, suffix, @trailing) == suffix
+export ends_with?(s, suffix) =
+  // If suffix is empty, @string:find() will return the full string instead of
+  // an empty string. We specifically handle this case here.
+  if empty?(suffix) then
+    true
+  else
+    @string:find(s, suffix, @trailing) == suffix
 
 // Returns true if `s` contains the substring `sub`. If `s == sub`, returns
 // true.

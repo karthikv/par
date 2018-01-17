@@ -167,7 +167,7 @@ ends_with_test = group([
   // @example
   test assert ends_with?("foo bar", "bar")
   // @example
-  test assert !ends_with?("foo bar", "")
+  test assert ends_with?("foo bar", "")
   // @example
   test assert !ends_with?("foo bar", "asdf")
   test assert !ends_with?("foo bar", "R")

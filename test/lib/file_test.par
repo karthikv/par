@@ -190,36 +190,42 @@ stat_test : Test
 stat_test = group([
   // @example
   test
-    let meta = stat("test/lib/file/foo.txt")
-    // ^ Assuming a file located at test/lib/file/foo.txt exists with the
-    // contents "hello" and 0644 permissions, the following should pass:
-
-    assert meta.size == 6
-    assert meta.type == Regular
-    assert meta.mode == Mode {
+    let contents = "hello"
+    let path = write_temp(contents)
+    let mode = Mode {
       owner = AllowReadWrite
-      group = AllowRead
+      group = AllowWrite
       other = AllowRead
     }
+    chmod(path, mode)
+
+    let meta = stat(path)
+    assert meta.size == length(contents)
+    assert meta.type == Regular
+    assert meta.mode == mode
 
   test
-    let meta = stat("test/lib/file/bar")
-    assert meta.type == Directory
-    assert meta.mode == Mode {
+    let path = make_temp_dir()
+    let mode = Mode {
       owner = AllowAll
       group = AllowReadExec
-      other = AllowReadExec
+      other = AllowNone
     }
+    chmod(path, mode)
+    let meta = stat(path)
+    assert meta.type == Directory
+    assert meta.mode == mode
 
   // Symlinks are resolved.
   test
-    let meta = stat("test/lib/file/bar/baz")
+    let contents = "foo"
+    let path = write_temp(contents)
+    let new_path = Path.join(make_temp_dir(), "new")
+    ln_s(path, new_path)
+
+    let meta = stat(new_path)
+    assert meta.size == length(contents)
     assert meta.type == Regular
-    assert meta.mode == Mode {
-      owner = AllowReadWrite
-      group = AllowRead
-      other = AllowRead
-    }
 
   test assert capture(|-| stat("asdf")) == DoesntExist
 ])
@@ -227,37 +233,43 @@ stat_test = group([
 lstat_test : Test
 lstat_test = group([
   test
-    let meta = lstat("test/lib/file/foo.txt")
-    assert meta.size == 6
-    assert meta.type == Regular
-    assert meta.mode == Mode {
+    let contents = "hello"
+    let path = write_temp(contents)
+    let mode = Mode {
       owner = AllowReadWrite
-      group = AllowRead
+      group = AllowWrite
       other = AllowRead
     }
+    chmod(path, mode)
+
+    let meta = lstat(path)
+    assert meta.size == length(contents)
+    assert meta.type == Regular
+    assert meta.mode == mode
 
   test
-    let meta = lstat("test/lib/file/bar")
-    assert meta.type == Directory
-    assert meta.mode == Mode {
+    let path = make_temp_dir()
+    let mode = Mode {
       owner = AllowAll
       group = AllowReadExec
-      other = AllowReadExec
+      other = AllowNone
     }
+    chmod(path, mode)
+    let meta = lstat(path)
+    assert meta.type == Directory
+    assert meta.mode == mode
 
   // Symlinks aren't resolved.
   // @example
   test
-    let meta = lstat("test/lib/file/bar/baz")
-    // ^ Assuming a symlink exists at test/lib/file/bar/baz with 0755
-    // permissions, the following should pass:
+    let path = write_temp("foo")
+    let new_path = Path.join(make_temp_dir(), "new")
+    ln_s(path, new_path)
 
+    let meta = lstat(new_path)
+    // Symlink holds path to the target file.
+    assert meta.size == length(path)
     assert meta.type == Symlink
-    assert meta.mode == Mode {
-      owner = AllowAll
-      group = AllowReadExec
-      other = AllowReadExec
-    }
 
   test assert capture(|-| lstat("asdf")) == DoesntExist
 ])
@@ -576,13 +588,6 @@ chmod_test = group([
     assert capture(|-| chmod("asdf", new_mode)) == DoesntExist
 ])
 
-// Can't actually test this without running as root. For now, ensure we get
-// a permission error.
-chown_test : Test
-chown_test = test
-  let path = write_temp("")
-  assert capture(|-| chown(path, 0)) == NotPermitted
-
 uid : Int
 uid =
   String.to_chars("id -u")
@@ -591,13 +596,33 @@ uid =
   |> String.strip
   |> to_int
 
+chown_test : Test
+chown_test = group([
+  test
+    let path = write_temp("")
+    // If we're running as root, we can test this. Otherwise, just ensure we
+    // get a permission error.
+    if uid == 0 then
+      chown(path, 1)
+      assert stat(path).uid == 1
+    else
+      assert capture(|-| chown(path, 0)) == NotPermitted
+])
+
 chgrp_test : Test
 chgrp_test = group([
   test
     let path = write_temp("")
-    let new_gid = if stat(path).gid == 0 then uid else 0
-    chgrp(path, new_gid)
-    assert stat(path).gid == new_gid
+    // If we're running as root, we can test this. Otherwise, just ensure we get
+    // a permission error. Technically, a non-root user should be able to chgrp
+    // to any group that he/she is a member of, but we don't know which groups
+    // those are without doing more work, and there may not be multiple.
+    if uid == 0 then
+      chgrp(path, 1)
+      assert stat(path).gid == 1
+    else
+      // We use the daemon group (1), which users should not be a part of.
+      assert capture(|-| chgrp(path, 1)) == NotPermitted
 
   test
     let path = write_temp("")
