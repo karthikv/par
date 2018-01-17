@@ -1,4 +1,6 @@
 # Par
+[![Linux build status][semaphore-img]][semaphore-url]
+
 This repository contains the source code for the Par compiler and standard
 libraries. If you're looking for tutorials, documentation, installation
 instructions, etc. please refer to the [Par website](https://par-lang.org).
@@ -25,3 +27,6 @@ to our core team, and getting involved early is the best track for this.
 
 ## License
 Par is [MIT licensed](LICENSE).
+
+[semaphore-img]: https://semaphoreci.com/api/v1/karthikv/par/branches/master/badge.svg
+[semaphore-url]: https://semaphoreci.com/karthikv/par
