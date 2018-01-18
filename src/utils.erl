@@ -44,6 +44,7 @@ stdlib_modules() ->
         "Char" => filename:join(Dir, "char.par"),
         "File" => filename:join(Dir, "file.par"),
         "Path" => filename:join(Dir, "path.par"),
+        "OS" => filename:join(Dir, "os.par"),
         "Test" => filename:join(Dir, "test.par")
       },
 

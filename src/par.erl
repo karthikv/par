@@ -26,6 +26,7 @@
 % - Hone in on specific record fields for error messages
 % - Add when support to match statement
 % - Global exception handler for better printing
+% - Remove "then" keyword?
 %
 % - Hex escaped characters \xff or \x{...} in strings
 % - Working with multiple Erlang processes

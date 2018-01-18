@@ -1,0 +1,5 @@
+before_test:
+  - set PATH=%PATH%;C:\Program Files\erl9.2\bin
+test_script:
+  - bin\test.cmd
+build: off

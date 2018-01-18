@@ -15,6 +15,7 @@ module File
 import Base (*)
 import String
 import Path
+import OS
 
 // Contains metadata about a file. Returned by [`stat()`](#stat).
 //
@@ -60,6 +61,10 @@ enum FileType {
 // `owner`, `group`, and `other` are the permissions granted to the respective
 // groups. See [`Permissions`](#Permissions) for values that `owner`, `group`,
 // and `other` can take on.
+//
+// On Windows, only `owner` permissions are relevant, and the only possible
+// values are [`AllowRead`](#Permissions) and [`AllowReadWrite`](#Permissions).
+// The values for `group` and `other` will always be the same as `owner`.
 struct Mode {
   owner : Permissions
   group : Permissions
@@ -172,7 +177,8 @@ exception Interrupted
 // passed to [`readlink()`](#readlink).
 exception InvalidArgument
 
-// Generic IO error.
+// Generic IO error. On Windows, this is raised in place of
+// [`NotDirectory`](#NotDirectory).
 exception IOError
 
 // There was an illegal operation on a directory. Raised if, for instance,
@@ -206,7 +212,8 @@ exception NoSpace
 // A block device is required.
 exception NotBlockDevice
 
-// A directory is required.
+// A directory is required. Raised if, for instance, you try to [`ls()`](#ls) or
+// [`rmdir()`](#rmdir) a regular file.
 exception NotDirectory
 
 // An operation is not supported.
@@ -236,6 +243,11 @@ exception CrossDomainLink
 
 // A system limit was reached.
 exception SystemLimit
+
+// For regular files on Windows, [`AllowRead`](#Permissions) and
+// [`AllowReadWrite`](#Permissions) are the only supported permissions. For
+// directories on Windows, only [`AllowReadWrite`](#Permissions) is supported.
+exception InvalidWindowsPermissions(Permissions)
 
 // An unknown error, where the argument is the error code.
 exception UnknownError(String)
@@ -338,34 +350,48 @@ export mkdir_p(path) =
 // it refers to exists.
 exists? : String -> Bool
 export exists?(path) =
-  match @file:read_file_info(path, []) {
-    (@ok, _) => true
-    (@error, @enoent) => false
+  try
+    stat(path)
+    true
+  catch {
+    DoesntExist => false
     // Returned when part of the path is not a directory.
-    (@error, @enotdir) => false
-    e => fail(e)
+    NotDirectory => false
   }
 
 // Returns metadata about the file at `path`. If `path` is a symbolic link,
 // resolves it and returns info about the target path it refers to. See the
 // [`Stat`](#Stat) struct for details on the result.
 stat : String -> Stat
-export stat(path) =
-  match @file:read_file_info(path, [(@time, @posix)]) {
-    (@ok, info) => munge_file_info(info)
-    e => fail(e)
-  }
+export stat(path) = match @file:read_file_info(path, [(@time, @posix)]) {
+  (@ok, info) =>
+    let info = munge_file_info(info)
+
+    // On Windows, if path is a symlink to a non-existent file, read_file_info()
+    // will return a regular file of size 0. We want to raise a DoesntExist
+    // instead; use lstat() and readlink() to accomplish this.
+    if OS.windows? &&
+        info.type == Regular &&
+        info.size == 0 &&
+        lstat(path).type == Symlink then
+      try readlink(path) catch {
+        DoesntExist => raise DoesntExist
+      }
+
+    info
+
+  e => fail(e)
+}
 
 // Returns metadata about the file at `path`, but doesn't resolve symbolic
 // links. If `path` is a symbolic link, returns info about the link itself, not
 // the target path the link refers to. See the [`Stat`](#Stat) struct for
 // details on the result.
 lstat : String -> Stat
-export lstat(path) =
-  match @file:read_link_info(path, [(@time, @posix)]) {
-    (@ok, info) => munge_file_info(info)
-    e => fail(e)
-  }
+export lstat(path) = match @file:read_link_info(path, [(@time, @posix)]) {
+  (@ok, info) => munge_file_info(info)
+  e => fail(e)
+}
 
 munge_file_info : Native -> Stat
 munge_file_info(info) =
@@ -383,12 +409,25 @@ munge_file_info(info) =
     @undefined => Other
   }
 
+  // The read-only flag is ignored for directories in Windows. It doesn't
+  // actually prevent writes, so the permissions are always AllowReadWrite.
+  // https://support.microsoft.com/en-us/help/326549/you-cannot-view-or-change-the-read-only-or-the-system-attributes-of-fo
+  let mode =
+    if type == Directory && OS.windows? then
+      Mode {
+        owner = AllowReadWrite
+        group = AllowReadWrite
+        other = AllowReadWrite
+      }
+    else
+      num_to_mode(mode_num)
+
   Stat {
     size = size
     type = type
     atime = atime
     mtime = mtime
-    mode = num_to_mode(mode_num)
+    mode = mode
     uid = uid
     gid = gid
   }
@@ -540,7 +579,10 @@ export cd(path) = match @file:set_cwd(path) {
 // | let path = Path.join(sys_temp_dir, "foo")
 // | write_path(path, "bar")
 sys_temp_dir : String
-export sys_temp_dir = @os:getenv("TEMP", "/tmp")
+export sys_temp_dir =
+  let raw_path = @os:getenv("TEMP", "/tmp") |> String.from_chars
+  // We call @filename:join() to normalize the final path.
+  @filename:join([raw_path])
 
 // Makes a new temporary directory within [`sys_temp_dir`](#sys_temp_dir),
 // returning its path. See [`write_temp()`](#write_temp) if you want to write to
@@ -632,8 +674,21 @@ export readlink(path) = match @file:read_link(path) {
 
 // Changes the access controls for the file at the given `path` to `mode`. See
 // the [`Mode`](#Mode) struct for details on what can be modified.
+//
+// On Windows, only the [`owner`](#Mode) permissions can be changed. For regular
+// files, the supported values are [`AllowRead`](#Permissions) and
+// [`AllowReadWrite`](#Permissions). For directories, only
+// [`AllowReadWrite`](#Permissions) is supported. If you specify an unsupported
+// value, raises [`InvalidWindowsPermissions`](#InvalidWindowsPermissions).
 chmod : (String, Mode) -> ()
 export chmod(path, mode) =
+  let owner = mode.owner
+  if OS.windows? && (
+        (owner != AllowRead && owner != AllowReadWrite) ||
+        (owner == AllowRead && stat(path).type == Directory)
+      ) then
+    raise InvalidWindowsPermissions(mode.owner)
+
   let num = mode_to_num(mode)
   match @file:change_mode(path, num) {
     @ok => ()
@@ -676,28 +731,38 @@ perm_to_oct : Map<Permissions, Int>
 perm_to_oct = map(oct_to_perm, |(k, v)| (v, k))
 
 // Changes the owner of `path` to the user given by ID `uid`. This can only be
-// run by a super-user.
+// run by a super-user on UNIX systems. On Windows, raises
+// [`NotPermitted`](#NotPermitted).
 //
 // @example // Change owner of "/foo" to the user with ID 0 (generally root).
 // | chown("/foo", 0)
 chown : (String, Int) -> ()
-export chown(path, uid) = match @file:change_owner(path, uid) {
-  // change_owner fails to report errors, so we check for success.
-  @ok => if stat(path).uid != uid then raise NotPermitted
-  e => fail(e)
-}
+export chown(path, uid) =
+  if OS.windows? then
+    raise NotPermitted
+  else
+    match @file:change_owner(path, uid) {
+      // change_owner fails to report errors, so we check for success.
+      @ok => if stat(path).uid != uid then raise NotPermitted
+      e => fail(e)
+    }
 
 // Changes the group of `path` to the group given by ID `gid`. This can only
-// be run by the owner of the file or a super-user.
+// be run by the owner of the file or a super-user on UNIX systems. On Windows,
+// raises [`NotPermitted`](#NotPermitted).
 //
 // @example // Change group of "foo/bar" to the group with ID 30.
 // | chgrp("foo/bar", 30)
 chgrp : (String, Int) -> ()
-export chgrp(path, gid) = match @file:change_group(path, gid) {
-  // change_owner fails to report errors, so we check for success.
-  @ok => if stat(path).gid != gid then raise NotPermitted
-  e => fail(e)
-}
+export chgrp(path, gid) =
+  if OS.windows? then
+    raise NotPermitted
+  else
+    match @file:change_group(path, gid) {
+      // change_owner fails to report errors, so we check for success.
+      @ok => if stat(path).gid != gid then raise NotPermitted
+      e => fail(e)
+    }
 
 fail : ((Atom, Atom)) -> A
 fail((@error, e)) = match e {

@@ -1,0 +1,21 @@
+module OS
+
+import Base (*)
+
+type : (Atom, String)
+type = @os:type()
+
+unix? : Bool
+export unix? = match type {
+  (@unix, _) => true
+  _ => false
+}
+
+windows? : Bool
+export windows? = match type {
+  (@win32, _) => true
+  _ => false
+}
+
+uname : String
+export uname = second(type)

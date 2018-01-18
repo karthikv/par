@@ -1,5 +1,9 @@
 #!/bin/sh
-ROOT=${PAR_ROOT:-/usr/local/par}
+if [ "$OS" = "Windows_NT" ]; then
+  ROOT=${PAR_ROOT:-/c/par}
+else
+  ROOT=${PAR_ROOT:-/usr/local/par}
+fi
 
 if [ ! -d "$ROOT" ]; then
   echo "Par isn't installed at $ROOT. If you installed it to a different "
@@ -7,4 +11,4 @@ if [ ! -d "$ROOT" ]; then
   exit 1
 fi
 
-erl +B -pa $ROOT/lib/**/ebin -noshell -s par entry -extra "$@"
+erl +B -pa $ROOT/lib/*/ebin -noshell -s par entry -extra "$@"

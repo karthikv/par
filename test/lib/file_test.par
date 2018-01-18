@@ -1,7 +1,7 @@
 module FileTest
 
 import File (*)
-import Test (group, capture)
+import Test (group, capture, ok)
 
 read_path_test : Test
 read_path_test = group([
@@ -100,7 +100,9 @@ rmdir_test = group([
     let path = make_temp_dir()
     rmdir(path)
     assert !exists?(path)
-  test assert capture(|-| rmdir(write_temp(""))) == NotDirectory
+  test
+    let exc = if OS.windows? then IOError else NotDirectory
+    assert capture(|-| rmdir(write_temp(""))) == exc
   test
     let path = make_temp_dir()
     write_path(Path.join(path, "foo"), "bar")
@@ -117,7 +119,9 @@ ls_test = group([
     mkdir(Path.join(path, "baz"))
     assert to_set(ls(path)) == #["foo", "bar", "baz"]
   test assert ls(make_temp_dir()) == []
-  test assert capture(|-| ls(write_temp(""))) == NotDirectory
+  test
+    let exc = if OS.windows? then IOError else NotDirectory
+    assert capture(|-| ls(write_temp(""))) == exc
 ])
 
 glob_test : Test
@@ -193,8 +197,8 @@ stat_test = group([
     let contents = "hello"
     let path = write_temp(contents)
     let mode = Mode {
-      owner = AllowReadWrite
-      group = AllowWrite
+      owner = AllowRead
+      group = AllowRead
       other = AllowRead
     }
     chmod(path, mode)
@@ -206,11 +210,14 @@ stat_test = group([
 
   test
     let path = make_temp_dir()
+    // Directories can only be AllowReadWrite on Windows.
+    let perms = if OS.windows? then AllowReadWrite else AllowAll
     let mode = Mode {
-      owner = AllowAll
-      group = AllowReadExec
-      other = AllowNone
+      owner = perms
+      group = perms
+      other = perms
     }
+
     chmod(path, mode)
     let meta = stat(path)
     assert meta.type == Directory
@@ -236,8 +243,8 @@ lstat_test = group([
     let contents = "hello"
     let path = write_temp(contents)
     let mode = Mode {
-      owner = AllowReadWrite
-      group = AllowWrite
+      owner = AllowRead
+      group = AllowRead
       other = AllowRead
     }
     chmod(path, mode)
@@ -249,11 +256,14 @@ lstat_test = group([
 
   test
     let path = make_temp_dir()
+    // Directories can only be AllowReadWrite on Windows.
+    let perms = if OS.windows? then AllowReadWrite else AllowAll
     let mode = Mode {
-      owner = AllowAll
-      group = AllowReadExec
-      other = AllowNone
+      owner = perms
+      group = perms
+      other = perms
     }
+
     chmod(path, mode)
     let meta = lstat(path)
     assert meta.type == Directory
@@ -267,8 +277,6 @@ lstat_test = group([
     ln_s(path, new_path)
 
     let meta = lstat(new_path)
-    // Symlink holds path to the target file.
-    assert meta.size == length(path)
     assert meta.type == Symlink
 
   test assert capture(|-| lstat("asdf")) == DoesntExist
@@ -457,7 +465,8 @@ cd_test = group([
 
   test
     let orig_cwd = cwd()
-    assert capture(|-| cd(write_temp(""))) == NotDirectory
+    let exc = if OS.windows? then DoesntExist else NotDirectory
+    assert capture(|-| cd(write_temp(""))) == exc
     assert cwd() == orig_cwd
 ])
 
@@ -572,29 +581,64 @@ chmod_test = group([
   test
     let path = write_temp("")
     let new_mode = Mode {
-      owner = AllowWrite
-      group = AllowNone
-      other = AllowExec
+      owner = AllowReadWrite
+      group = AllowExec
+      other = AllowNone
     }
     chmod(path, new_mode)
-    assert stat(path).mode == new_mode
+
+    if OS.windows? then
+      assert stat(path).mode.owner == AllowReadWrite
+    else
+      assert stat(path).mode == new_mode
 
   test
     let new_mode = Mode {
-      owner = AllowAll
-      group = AllowAll
-      other = AllowAll
+      owner = AllowRead
+      group = AllowRead
+      other = AllowRead
     }
     assert capture(|-| chmod("asdf", new_mode)) == DoesntExist
 ])
 
-uid : Int
-uid =
-  String.to_chars("id -u")
-  |> @os:cmd/1
-  |> String.from_chars
-  |> String.strip
-  |> to_int
+chmod_windows_test : Test
+chmod_windows_test =
+  if OS.windows? then
+    group([
+      test
+        let path = write_temp("")
+        let new_mode = Mode {
+          owner = AllowExec
+          group = AllowExec
+          other = AllowExec
+        }
+        assert capture(|-| chmod(path, new_mode)) ==
+          InvalidWindowsPermissions(AllowExec)
+
+      test
+        let path = write_temp("")
+        let new_mode = Mode {
+          owner = AllowAll
+          group = AllowAll
+          other = AllowAll
+        }
+        assert capture(|-| chmod(path, new_mode)) ==
+          InvalidWindowsPermissions(AllowAll)
+
+      test
+        let path = make_temp_dir()
+        let new_mode = Mode {
+          owner = AllowRead
+          group = AllowRead
+          other = AllowRead
+        }
+
+        // Directories are always AllowReadWrite on Windows.
+        assert capture(|-| chmod(path, new_mode)) ==
+          InvalidWindowsPermissions(AllowRead)
+    ])
+  else
+    test ok
 
 chown_test : Test
 chown_test = group([
@@ -602,7 +646,7 @@ chown_test = group([
     let path = write_temp("")
     // If we're running as root, we can test this. Otherwise, just ensure we
     // get a permission error.
-    if uid == 0 then
+    if !OS.windows? && root? then
       chown(path, 1)
       assert stat(path).uid == 1
     else
@@ -617,7 +661,7 @@ chgrp_test = group([
     // a permission error. Technically, a non-root user should be able to chgrp
     // to any group that he/she is a member of, but we don't know which groups
     // those are without doing more work, and there may not be multiple.
-    if uid == 0 then
+    if !OS.windows? && root? then
       chgrp(path, 1)
       assert stat(path).gid == 1
     else
@@ -628,3 +672,19 @@ chgrp_test = group([
     let path = write_temp("")
     assert capture(|-| chgrp(path, -1)) == NotPermitted
 ])
+
+root? : Bool
+root? =
+  if OS.windows? then
+    let denied? = String.to_chars("reg query \"HKU\\S-1-5-19\"")
+      |> @os:cmd/1
+      |> String.from_chars
+      |> String.starts_with?("ERROR:")
+    !denied?
+  else
+    let uid = String.to_chars("id -u")
+      |> @os:cmd/1
+      |> String.from_chars
+      |> String.strip
+      |> to_int
+    uid == 0

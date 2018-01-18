@@ -1,7 +1,7 @@
 module PathTest
 
 import Path (*)
-import Test (group, capture)
+import Test (group, capture, ok)
 
 base_test : Test
 base_test = group([
@@ -17,6 +17,17 @@ base_test = group([
   test assert base("") == ""
 ])
 
+base_windows_test : Test
+base_windows_test =
+  if OS.windows? then
+    group([
+      test assert base("c:/foo/bar/baz.txt") == "baz.txt"
+      test assert base("c:/foo") == "foo"
+      test assert base("c:/") == ""
+    ])
+  else
+    test ok
+
 dir_test : Test
 dir_test = group([
   // @example
@@ -30,6 +41,17 @@ dir_test = group([
   test assert dir("/") == "/"
   test assert dir("") == "."
 ])
+
+dir_windows_test : Test
+dir_windows_test =
+  if OS.windows? then
+    group([
+      test assert dir("c:/foo/bar/baz.txt") == "c:/foo/bar"
+      test assert dir("c:/foo") == "c:/"
+      test assert dir("c:/") == "c:/"
+    ])
+  else
+    test ok
 
 ext_test : Test
 ext_test = group([
@@ -45,6 +67,17 @@ ext_test = group([
   test assert ext("") == ""
 ])
 
+ext_windows_test : Test
+ext_windows_test =
+  if OS.windows? then
+    group([
+      test assert ext("c:/foo/bar/baz.txt") == ".txt"
+      test assert ext("c:/foo") == ""
+      test assert ext("c:/") == ""
+    ])
+  else
+    test ok
+
 strip_ext_test : Test
 strip_ext_test = group([
   // @example
@@ -58,6 +91,17 @@ strip_ext_test = group([
   test assert strip_ext("/") == "/"
   test assert strip_ext("") == ""
 ])
+
+strip_ext_windows_test : Test
+strip_ext_windows_test =
+  if OS.windows? then
+    group([
+      test assert strip_ext("c:/foo/bar/baz.txt") == "c:/foo/bar/baz"
+      test assert strip_ext("c:/foo") == "c:/foo"
+      test assert strip_ext("c:/") == "c:/"
+    ])
+  else
+    test ok
 
 normalize_test : Test
 normalize_test = group([
@@ -76,12 +120,26 @@ normalize_test = group([
   test assert normalize("/.././/..//foo///bar") == "/foo/bar"
 ])
 
+normalize_windows_test : Test
+normalize_windows_test =
+  if OS.windows? then
+    group([
+      test assert normalize("c:/foo/./bar/..") == "c:/foo"
+      test assert normalize("c:/.././/..//foo///bar") == "c:/foo/bar"
+    ])
+  else
+    test ok
+
 to_absolute_test : Test
 to_absolute_test = group([
   // @example
   test assert to_absolute("foo") == join(File.cwd(), "foo")
   // @example
-  test assert to_absolute("/foo/bar") == "/foo/bar"
+  test
+    if OS.windows? then
+      assert to_absolute("c:/foo/bar") == "c:/foo/bar"
+    else
+      assert to_absolute("/foo/bar") == "/foo/bar"
   // @example
   test assert to_absolute("foo/.//../bar//./baz") ==
     join_all([File.cwd(), "bar", "baz"])
@@ -107,6 +165,22 @@ to_relative_test = group([
     join_all(["..", "..", File.cwd(), "baz"])
 ])
 
+to_relative_windows_test : Test
+to_relative_windows_test =
+  if OS.windows? then
+    group([
+      test
+        let parts = File.cwd()
+          |> split
+          |> map(|_| "..")
+          |> List.range(1, -1)
+        assert to_relative("c:/foo/bar", "") == join_all(parts ++ ["foo", "bar"])
+      test assert to_relative("baz", "c:/foo/bar") ==
+        join_all(["..", "..", File.cwd(), "baz"])
+    ])
+  else
+    test ok
+
 absolute_test : Test
 absolute_test = group([
   // @example
@@ -114,7 +188,11 @@ absolute_test = group([
   // @example
   test assert !absolute?("foo/.//../bar//./baz")
   // @example
-  test assert absolute?("/foo/bar")
+  test
+    if OS.windows? then
+      assert absolute?("c:/foo/bar")
+    else
+      assert absolute?("/foo/bar")
 ])
 
 relative_test : Test
@@ -124,7 +202,11 @@ relative_test = group([
   // @example
   test assert relative?("foo/.//../bar//./baz")
   // @example
-  test assert !relative?("/foo/bar")
+  test
+    if OS.windows? then
+      assert !relative?("c:/foo/bar")
+    else
+      assert !relative?("/foo/bar")
 ])
 
 join_test : Test
@@ -138,6 +220,15 @@ join_test = group([
   // @example
   test assert join("foo", "") == "foo"
 ])
+
+join_windows_test : Test
+join_windows_test =
+  if OS.windows? then
+    group([
+      test assert join("c:/foo/bar", "baz/a.txt") == "c:/foo/bar/baz/a.txt"
+    ])
+  else
+    test ok
 
 join_all_test : Test
 join_all_test = group([
@@ -154,6 +245,17 @@ join_all_test = group([
   test assert join_all([]) == ""
 ])
 
+join_all_windows_test : Test
+join_all_windows_test =
+  if OS.windows? then
+    group([
+      test assert join_all(["foo", "bar", "c:/baz"]) == "foo/bar/baz"
+      test assert join_all(["foo", "c:/bar"]) == "foo/bar"
+      test assert join_all(["c:/foo/bar", "baz/a.txt"]) == "c:/foo/bar/baz/a.txt"
+    ])
+  else
+    test ok
+
 split_test : Test
 split_test = group([
   // @example
@@ -165,3 +267,13 @@ split_test = group([
   test assert split("foo//bar") == ["foo", "bar"]
   test assert split("") == []
 ])
+
+split_windows_test : Test
+split_windows_test =
+  if OS.windows? then
+    group([
+      test assert split("c:/foo/bar/baz/a.txt") ==
+        ["c:/", "foo", "bar", "baz", "a.txt"]
+    ])
+  else
+    test ok

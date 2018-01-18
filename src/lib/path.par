@@ -9,6 +9,7 @@ module Path
 
 import Base (*)
 import String
+import OS
 
 // Returns the last component of `path`. If `path` doesn't have any slashes,
 // returns `path`.
@@ -58,7 +59,7 @@ normalize_r(parts) = match parts {
   // ["..", ".."] from being incorrectly reduced to [".."].
   [".." | t] => [".." | normalize_r(t)]
   [h, ".." | t] =>
-    if String.ends_with?("/", h) then
+    if String.ends_with?(h, "/") then
       // This is an absolute path; keep the leading drive or forward slash to
       // reduce additional "..".
       normalize_r([h | t])
@@ -133,13 +134,20 @@ export join_all(paths) =
     else
       @filename:join(paths)
 
-// We only need to handle Unix-like absolute paths in the form /foo/bar, as
-// these are the ones that cause @filename:join() to discard prior paths.
+slash_re : String.Regex
+slash_re = String.re(`[/\\]`, [])
+
 make_relative : String -> String
 make_relative(path) =
-  if String.starts_with?(path, "/") then
-    let Some((_, suffix)) = String.span(path, "/")
-    suffix
+  // We always need to handle Unix-like absolute paths in the form /foo/bar, as
+  // these cause @filename:join() to discard prior paths.
+  if String.starts_with?(path, "/") || absolute?(path) then
+    if OS.windows? then
+      let Some((_, _, suffix)) = String.search_span(path, slash_re)
+      suffix
+    else
+      let Some((_, suffix)) = String.span(path, "/")
+      suffix
   else
     path
 
