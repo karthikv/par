@@ -1,5 +1,6 @@
 # Par
 [![Linux build status][semaphore-img]][semaphore-url]
+[![Windows build status][appveyor-img]][appveyor-url]
 
 This repository contains the source code for the Par compiler and standard
 libraries. If you're looking for tutorials, documentation, installation
@@ -30,3 +31,5 @@ Par is [MIT licensed](LICENSE).
 
 [semaphore-img]: https://semaphoreci.com/api/v1/karthikv/par/branches/master/badge.svg
 [semaphore-url]: https://semaphoreci.com/karthikv/par
+[appveyor-img]: https://img.shields.io/appveyor/ci/karthikv/par/master.svg?label=windows
+[appveyor-url]: https://ci.appveyor.com/project/karthikv/par
