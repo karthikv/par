@@ -26,24 +26,21 @@ compile_stdlib() ->
 
   {Compiled, _} = code_gen:compile_comps(Comps, C),
   utils:prep_compiled(Compiled, Dir),
-  {Paths, Compiled, Dir, C}.
+  {Compiled, Dir, C}.
 
-test_stdlib({Paths, _, _, C}) ->
-  Tests = lists:map(fun(Path) ->
-    Root = filename:rootname(filename:basename(Path)),
-    ModuleParts = lists:map(fun([H | T]) ->
-      [string:uppercase([H]) | T]
-    end, string:split(Root, "_", all)),
+test_stdlib({Compiled, _, C}) ->
+  Tests = lists:map(fun
+    ({compiled, Mod, _}) ->
+      Module = utils:unqualify(atom_to_list(Mod)),
+      ordsets:fold(fun(TestName, FoldTestSet) ->
+        [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
+      end, [], utils:test_names(Module, C#ctx.g_env));
 
-    Module = lists:flatten(ModuleParts),
-    Mod = list_to_atom(?MODULE_PREFIX ++ Module),
-    ordsets:fold(fun(TestName, FoldTestSet) ->
-      [{generator, Mod, list_to_atom(TestName)} | FoldTestSet]
-    end, [], utils:test_names(Module, C#ctx.g_env))
-  end, Paths),
+    ({precompiled, _, _}) -> []
+  end, Compiled),
 
   {inparallel, 48, Tests}.
 
-remove_stdlib({_, Compiled, Dir, _}) ->
+remove_stdlib({Compiled, Dir, _}) ->
   utils:remove_compiled(Compiled, Dir),
   ok.
