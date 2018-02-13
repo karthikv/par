@@ -201,11 +201,11 @@ populate_direct_imports(#comp{module=Module, deps=Deps}, CG) ->
 
         {variants, _, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
-          {OptionNames, _, _} = maps:get(Con, Enums),
+          {Variants, _} = maps:get(Con, Enums),
 
-          lists:foldl(fun(OptionName, FoldCG) ->
-            env_set(OptionName, {external, DepModule}, FoldCG)
-          end, NestedCG, OptionNames)
+          lists:foldl(fun(#variant{con=VariantCon}, FoldCG) ->
+            env_set(VariantCon, {external, DepModule}, FoldCG)
+          end, NestedCG, Variants)
       end
     end, ModuleCG, Expanded)
   end, set_module(Module, CG), Deps).
@@ -419,7 +419,7 @@ rep({impl, _, Ref, {con_token, _, RawCon}, _, _}, CG) ->
 rep({sig, _, _, _}, _) -> [];
 
 rep({fn, Loc, Ref, Args, Expr}, CG) ->
-  Names = ordsets:union(lists:map(fun type_system:pattern_names/1, Args)),
+  Names = ordsets:union(lists:map(fun pattern:names/1, Args)),
   CG1 = ordsets:fold(fun(Name, FoldCG) -> bind(Name, FoldCG) end, CG, Names),
 
   ArgsIVs = maps:get(Ref, CG#cg.ctx#ctx.fn_refs),
@@ -726,7 +726,7 @@ rep({match, Loc, Expr, Cases}, CG) ->
   CaseClauses = lists:map(fun({'case', _, Pattern, Then}) ->
     CG1 = ordsets:fold(fun(Name, FoldCG) ->
       bind(Name, FoldCG)
-    end, CG, type_system:pattern_names(Pattern)),
+    end, CG, pattern:names(Pattern)),
 
     PatternRep = rep(Pattern, CG1),
     Body = [rep(Then, CG1)],
@@ -740,7 +740,7 @@ rep({'try', Loc, Expr, Cases}, CG) ->
   CatchClauses = lists:map(fun({'case', _, Pattern, Then}) ->
     CG1 = ordsets:fold(fun(Name, FoldCG) ->
       bind(Name, FoldCG)
-    end, CG, type_system:pattern_names(Pattern)),
+    end, CG, pattern:names(Pattern)),
 
     Line = ?START_LINE(element(2, Pattern)),
     PatternRep = {tuple, Line, [
@@ -954,7 +954,7 @@ rep_pattern({var, _, Name}=Pattern, {fn, _, _, _, _}=Expr, CG) ->
 rep_pattern(Pattern, Expr, CG) ->
   CG1 = ordsets:fold(fun(Name, FoldCG) ->
     bind(Name, FoldCG)
-  end, CG, type_system:pattern_names(Pattern)),
+  end, CG, pattern:names(Pattern)),
   {rep(Pattern, CG1), rep(Expr, CG), CG1}.
 
 rep_init_fn(#comp{module=Module, ast={module, _, _, _, Defs}, deps=Deps}) ->
@@ -1370,8 +1370,8 @@ rewrite({gen, {con, Con}, ParamTs}=GenT, Rep, Loc, SubbedVs, CG) ->
       rewrite(RecordT, Rep, Loc, SubbedVs, CG);
 
     IsEnum ->
-      {_, Vs, GenOptions} = maps:get(Con, Enums),
-      Subs = maps:from_list(lists:zip(Vs, ParamTs)),
+      {Variants, ParamVs} = maps:get(Con, Enums),
+      Subs = maps:from_list(lists:zip(ParamVs, ParamTs)),
       Line = ?START_LINE(Loc),
 
       VarRep = {var, Line, unique("Enum" ++ Con)},
@@ -1387,15 +1387,21 @@ rewrite({gen, {con, Con}, ParamTs}=GenT, Rep, Loc, SubbedVs, CG) ->
       MatchKey = {match, Line, KeyRep, If},
 
       LastClause = {clause, Line, [{var, Line, '_'}], [], [VarRep]},
-      Clauses = lists:foldl(fun({Key, TupleT}, FoldClauses) ->
-        SubbedT = utils:subs(TupleT, #sub_opts{subs=Subs, aliases=Aliases}),
-        case rewrite(SubbedT, VarRep, Loc, SubbedVs, CG) of
-          {_, VarRep} -> FoldClauses;
-          {Stmts, NewTupleRep} ->
-            Body = Stmts ++ [NewTupleRep],
-            [{clause, Line, [eabs(Key, Line)], [], Body} | FoldClauses]
-        end
-      end, [LastClause], GenOptions),
+      Clauses = lists:foldl(fun
+        (#variant{has_tvs=false}, FoldClauses) -> FoldClauses;
+
+        (#variant{key=Key, effective_t=EffectiveT}, FoldClauses) ->
+          SubbedT = utils:subs(
+            EffectiveT,
+            #sub_opts{subs=Subs, aliases=Aliases}
+          ),
+          case rewrite(SubbedT, VarRep, Loc, SubbedVs, CG) of
+            {_, VarRep} -> FoldClauses;
+            {Stmts, NewTupleRep} ->
+              Body = Stmts ++ [NewTupleRep],
+              [{clause, Line, [eabs(Key, Line)], [], Body} | FoldClauses]
+          end
+      end, [LastClause], Variants),
 
       case Clauses of
         [LastClause] -> {[], Rep};

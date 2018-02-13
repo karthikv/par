@@ -37,6 +37,7 @@ get_or : (Map<K, V>, K, V) -> V
 export get_or(m, k, default) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => default
+  a => fail(a)
 }
 
 // Returns a list of keys in `m`.
@@ -60,6 +61,7 @@ update : (Map<K, V>, K, V -> V) -> Map<K, V>
 export update(m, k, f) = match @maps:find(k, m) {
   (@ok, v) => @maps:put(k, f(v), m)
   @error => raise BadKey
+  a => fail(a)
 }
 
 // Updates or inserts a value associated with key `k` in map `m` using the
@@ -71,6 +73,7 @@ upsert : (Map<K, V>, K, V, V -> V) -> Map<K, V>
 export upsert(m, k, default, f) = match @maps:find(k, m) {
   (@ok, v) => @maps:put(k, f(v), m)
   @error => @maps:put(k, default, m)
+  a => fail(a)
 }
 
 // Merges maps `a` and `b` together, returning a new map. If a key exists in

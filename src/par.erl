@@ -30,7 +30,6 @@
 %
 % - Hex escaped characters \xff or \x{...} in strings
 % - Working with multiple Erlang processes
-% - [1 week] Exhaustive pattern matching errors
 % - [2 weeks] Editor tooling for vim, atom, emacs, sublime
 %   - Fix syntax highlighting for comments in enum for vim
 % - Type aliases

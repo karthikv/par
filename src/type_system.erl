@@ -3,9 +3,9 @@
   infer_file/1,
   infer_stdlib/0,
   infer_prg/1,
-  pattern_names/1,
   parse_file/1,
-  rigid_err/4
+  rigid_err/4,
+  add_err/2
 ]).
 -on_load(load/0).
 -include("common.hrl").
@@ -29,55 +29,6 @@
 % fvs - a function that computes the set of free TV names in an expression.
 % Scheme - a tuple {GVs, T, BoundVs} that represents a T generalized across GVs,
 %   a set of TV names. BoundVs are the bound Vs in T.
-
-% S - a solver record used to unify types and solve constraints
-%   subs - the substitutions made to unify types
-%   errs - any constraints that couldn't be unified
-%   schemes - the schemes of env variables that have been solved for and
-%     generalized
-%   bound_vs - the set of TV names in the environment
-%   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated variables
-%   iv_origins - a {I, V} => Origins mapping for Vs coming from inst vars
-%   aliases - see aliases in ctx record
-%   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
-%   impls - a I => {RawT, InstT, Inits} mapping of impls
-%   nested_ivs - a {I, V} => IVs mapping for impls depending on other impls
-%   passed_vs - a V => {Is, ArgT, Module, Loc} mapping of Vs that have args
-%     passed in for them
-%   return_vs - a V => {Is, ReturnT, Module, Loc} mapping for IVs in return
-%     types that are fully applied
-%   must_solve_vs - a set of Vs that must be solved because of their interface
-%   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
-%   t1/t2 - the two types currently being unified
-%   module - the module of the current constraint that's being unified
-%   loc - the location of the current constraint that's being unified
-%   from - a string describing where the current constraint is from
-%   env - the env of the current gnr
-%   pid - the process id of the TV server used to generated fresh TVs
--record(solver, {
-  subs = #{},
-  errs,
-  schemes = #{},
-  bound_vs,
-  inst_refs = #{},
-  record_refs = #{},
-  iv_origins = #{},
-  aliases,
-  ifaces,
-  impls,
-  nested_ivs = #{},
-  passed_vs = [],
-  return_vs = [],
-  must_solve_vs = ordsets:new(),
-  gen_vs,
-  t1,
-  t2,
-  module,
-  loc,
-  from,
-  l_env,
-  pid
-}).
 
 % G - a gnr record that represents a set of constraints to solve before
 %     generalizing a type variable:
@@ -436,9 +387,11 @@ infer_comps(RawComps, RawStdlibModules, BaseC, BaseS) ->
   S = BaseS#solver{
     errs=C2#ctx.errs,
     aliases=C2#ctx.aliases,
+    enums=C2#ctx.enums,
     ifaces=C2#ctx.ifaces,
     impls=C2#ctx.impls,
     gen_vs=C2#ctx.gen_vs,
+    pattern_groups=C2#ctx.pattern_groups,
     pid=C2#ctx.pid
   },
 
@@ -529,7 +482,7 @@ populate_env_and_types(Comps, C) ->
           case N of
             enum ->
               Enums = ModuleC1#ctx.enums,
-              {OptionNames, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
+              {Variants, ModuleC2} = lists:mapfoldl(fun(Option, NestedC) ->
                 {option, _, {con_token, OptionLoc, OptionCon}, ArgTEs, _} = Option,
                 {TV, ID} = tv_server:fresh_gnr_id(NestedC#ctx.pid),
 
@@ -541,10 +494,11 @@ populate_env_and_types(Comps, C) ->
                   loc=OptionLoc
                 },
                 NestedC1 = define(OptionCon, B, NestedC),
-                {OptionCon, NestedC1}
+                % We'll fill in the other fields in infer().
+                {#variant{con=OptionCon}, NestedC1}
               end, ModuleC1, OptionsOrFields),
 
-              ModuleC2#ctx{enums=Enums#{Con => {OptionNames, none, none}}};
+              ModuleC2#ctx{enums=Enums#{Con => {Variants, none}}};
 
             struct ->
               {TV, ID} = tv_server:fresh_gnr_id(ModuleC1#ctx.pid),
@@ -917,17 +871,18 @@ populate_direct_imports(Deps, C) ->
         {variants, Loc, Name} ->
           Con = lists:concat([DepModule, '.', Name]),
           case maps:find(Con, NestedC#ctx.enums) of
-            {ok, {OptionNames, _, _}} ->
-              lists:foldl(fun(OptionName, #ctx{g_env=GEnv}=FoldC) ->
-                B = maps:get({DepModule, OptionName}, GEnv),
+            {ok, {Variants, _}} ->
+              lists:foldl(fun(Variant, #ctx{g_env=GEnv}=FoldC) ->
+                #variant{con=VariantCon} = Variant,
+                B = maps:get({DepModule, VariantCon}, GEnv),
                 NewB = B#binding{
                   exported=false,
                   loc=Loc,
                   soft=Soft,
                   modules=SoftModules
                 },
-                define(OptionName, NewB, FoldC)
-              end, NestedC, OptionNames);
+                define(VariantCon, NewB, FoldC)
+              end, NestedC, Variants);
 
             error ->
               add_ctx_err(?ERR_NOT_DEF_TYPE(Con, DepModule), Loc, NestedC)
@@ -1034,7 +989,7 @@ infer_csts_first(Csts, UntilGs, GnrArgs, C) ->
   finish_gnr(C2#ctx{gnrs=Gs}, C#ctx.gnr).
 
 infer({fn, _, Ref, Args, Expr}, C) ->
-  Vars = lists:flatmap(fun pattern_vars/1, Args),
+  Vars = lists:flatmap(fun pattern:vars/1, Args),
   {_, C1} = lists:foldl(fun({var, Loc, Name}, {FoldSeen, FoldC}) ->
     case maps:find(Name, FoldSeen) of
       {ok, OtherLoc} ->
@@ -1102,21 +1057,26 @@ infer({enum, _, EnumTE, Options}, C) ->
   SigVs = C1#ctx.sig_vs,
   FVs = fvs(RawT),
 
-  {GenOptions, _, C2} = lists:foldl(fun(Option, {FoldGenOptions, Keys, FoldC}) ->
+  {Variants, {_, C2}} = lists:mapfoldl(fun(Option, {Keys, FoldC}) ->
     {option, _, {con_token, Loc, Con}, _, KeyNode} = Option,
-    {OptionT, ArgTs, FoldC1} = infer_option(Option, RawT, FVs, SigVs, FoldC),
+    {ArgTs, FoldC1} = infer_option(Option, RawT, FVs, SigVs, FoldC),
 
     Key = case KeyNode of
       'None' -> list_to_atom(Con);
       {'Some', {atom, _, Key_}} -> Key_
     end,
 
-    NewGenOptions = case ordsets:size(fvs(OptionT)) == 0 of
-      true -> FoldGenOptions;
-      false ->
-        TupleT = {tuple, [{con, "Atom"} | ArgTs]},
-        [{Key, TupleT} | FoldGenOptions]
+    EffectiveT = case ArgTs of
+      [] -> {con, "Atom"};
+      _ -> {tuple, [{con, "Atom"} | ArgTs]}
     end,
+
+    Variant = #variant{
+      con=Con,
+      key=Key,
+      has_tvs=ordsets:size(fvs({lam, ArgTs, {con, "()"}})) > 0,
+      effective_t=EffectiveT
+    },
 
     {NewKeys, FoldC2} = case KeyNode of
       'None' ->
@@ -1152,23 +1112,21 @@ infer({enum, _, EnumTE, Options}, C) ->
         end
     end,
 
-    {NewGenOptions, NewKeys, FoldC2}
-  end, {[], #{}, C1}, Options),
+    {Variant, {NewKeys, FoldC2}}
+  end, {#{}, C1}, Options),
 
-  {Con, Vs} = case RawT of
+  {Con, ParamVs} = case RawT of
     {con, Con_} -> {Con_, []};
     {gen, {con, Con_}, ParamTs} ->
       {Con_, lists:map(fun({tv, V, none, _}) -> V end, ParamTs)}
   end,
 
-  Enums = C2#ctx.enums,
-  {OptionNames, none, none} = maps:get(Con, Enums),
-  NewEnums = Enums#{Con => {OptionNames, Vs, GenOptions}},
+  NewEnums = (C2#ctx.enums)#{Con => {Variants, ParamVs}},
   {none, C2#ctx{enums=NewEnums}};
 
 infer({exception, Loc, ConToken, ArgTEs}, C) ->
   Option = {option, Loc, ConToken, ArgTEs, none},
-  {_, _, C1} = infer_option(Option, {con, "Exception"}, ordsets:new(), #{}, C),
+  {_, C1} = infer_option(Option, {con, "Exception"}, ordsets:new(), #{}, C),
   {none, C1};
 
 infer({struct, Loc, StructTE, Fields}, C) ->
@@ -1668,7 +1626,7 @@ infer({if_let, _, Pattern, Expr, Then, Else}, C) ->
       {TV, C6}
   end;
 
-infer({match, _, Expr, Cases}, C) ->
+infer({match, Loc, Expr, Cases}, C) ->
   {ExprTV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
   {ExprT, C1} = infer(Expr, new_gnr(ExprTV, ID, C)),
   C2 = add_cst(ExprTV, ExprT, ?LOC(Expr), ?FROM_MATCH_HEAD, C1),
@@ -1698,7 +1656,14 @@ infer({match, _, Expr, Cases}, C) ->
     add_cst(ResultTV, ThenT, ?LOC(Then), ?FROM_MATCH_BODY, FoldC6)
   end, C3, Cases),
 
-  {ResultTV, C4};
+  PatternGroup = {
+    [Pattern || {'case', _, Pattern, _} <- Cases],
+    ExprT,
+    C4#ctx.module,
+    Loc
+  },
+  C5 = C4#ctx{pattern_groups=[PatternGroup | C4#ctx.pattern_groups]},
+  {ResultTV, C5};
 
 infer({'try', _, Expr, Cases}, C) ->
   {ExprT, C1} = infer(Expr, C),
@@ -2029,7 +1994,7 @@ infer_option(Option, T, FVs, SigVs, C) ->
 
   C2 = new_gnr(TV, ID, C1),
   C3 = add_cst(TV, OptionT, Loc, ?FROM_ENUM_CTOR, C2),
-  {OptionT, ArgTs, finish_gnr(C3, C1#ctx.gnr)}.
+  {ArgTs, finish_gnr(C3, C1#ctx.gnr)}.
 
 infer_pattern({var, Loc, Name}=Pattern, {fn, _, _, _, _}=Expr, From, C) ->
   {TV, ID} = tv_server:fresh_gnr_id(C#ctx.pid),
@@ -2049,7 +2014,7 @@ infer_pattern(Pattern, Expr, From, C) ->
 
 with_pattern_env(Pattern, C) ->
   ID = C#ctx.gnr#gnr.id,
-  Vars = pattern_vars(Pattern),
+  Vars = pattern:vars(Pattern),
 
   {Vs, _, C1} = lists:foldl(fun({var, Loc, Name}, {FoldVs, FoldSeen, FoldC}) ->
     case maps:find(Name, FoldSeen) of
@@ -2066,25 +2031,6 @@ with_pattern_env(Pattern, C) ->
   end, {[], #{}, C}, Vars),
 
   C1#ctx{gnr=C1#ctx.gnr#gnr{vs=Vs}}.
-
-pattern_names(Pattern) -> [Name || {var, _, Name} <- pattern_vars(Pattern)].
-
-pattern_vars(T) -> pattern_vars(T, []).
-
-pattern_vars({N, _, _}, L) when N == int; N == float; N == bool; N == char;
-  N == str; N == atom -> L;
-pattern_vars({var, _, _}=Var, L) -> [Var | L];
-pattern_vars({N, _}, L) when N == unit; N == '_' -> L;
-% {field, ...} is unnecessary because it's only ever contained within variant,
-% and we don't recurse on it below.
-pattern_vars({variant, _, _, Args}, L) ->
-  lists:foldr(fun pattern_vars/2, L, Args);
-pattern_vars({list, _, Elems}, L) ->
-  lists:foldr(fun pattern_vars/2, L, Elems);
-pattern_vars({cons, _, Elems, Tail}, L) ->
-  lists:foldr(fun pattern_vars/2, pattern_vars(Tail, L), Elems);
-pattern_vars({tuple, _, Elems}, L) ->
-  lists:foldr(fun pattern_vars/2, L, Elems).
 
 lookup(Name, Loc, C) ->
   case maps:find(Name, C#ctx.l_env) of
@@ -2377,7 +2323,7 @@ solve(Gs, S) ->
   % other errors are accounted for. This is because errors create TVs when
   % there would be concrete types, and these TVs can often propagate into must
   % solve errors.
-  if
+  FinalS = if
     S1#solver.errs == [] ->
       #solver{
         passed_vs=PassedVs,
@@ -2414,7 +2360,7 @@ solve(Gs, S) ->
         end, {FoldReportedVs, FoldS}, fvs(SubbedT))
       end, {ordsets:new(), S1}, PassedVs),
 
-      {_, FinalS} = lists:foldl(fun(ReturnV, {FoldReportedVs, FoldS}) ->
+      {_, S3} = lists:foldl(fun(ReturnV, {FoldReportedVs, FoldS}) ->
         {_, _, _, _, LEnv} = ReturnV,
         BoundVs = bound_vs(LEnv, FoldS),
         validate_solved(
@@ -2425,9 +2371,15 @@ solve(Gs, S) ->
           FoldReportedVs,
           FoldS
         )
-      end, {ReportedVs, S2}, ReturnVs);
+      end, {ReportedVs, S2}, ReturnVs),
 
-    true -> FinalS = S1
+      lists:foldl(fun({Patterns, T, Module, Loc}, FoldS) ->
+        SubbedT = subs_s(T, FoldS),
+        FoldS1 = FoldS#solver{module=Module, loc=Loc},
+        pattern:check_exhaustive(Patterns, SubbedT, FoldS1)
+      end, S3, S3#solver.pattern_groups);
+
+    true -> S1
   end,
 
   case FinalS#solver.errs of

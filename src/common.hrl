@@ -43,7 +43,7 @@
 % C - A context record for type inference with the following fields:
 %   gnr - the current gnr record that constraints are being added to; see G
 %     below
-%   gnrs - an array of finalized gnr records that need to be solved
+%   gnrs - a list of finalized gnr records that need to be solved
 %   env - a Name => binding record mapping of bindings in the environment
 %   exports - a Module => set of names mapping of exported identifiers (incl.
 %     types) in a given module
@@ -51,7 +51,7 @@
 %   aliases - a Name => {Vs, T} map denoting a type alias between the type
 %     given by Name and the type T, parameterized by Vs
 %   structs - a Name => {T, SigVs} map for structs in the env
-%   enums - a EnumName => {[OptionName], ParamTs, GenOptions} map for enums
+%   enums - a EnumName => {Variants, ParamVs} map for enums
 %   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
 %   impls - a ImplKey => RawT map for implementations of interfaces
 %   impl_refs - a Ref => ImplKey map for implementations of interfaces
@@ -62,12 +62,14 @@
 %   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated vars
 %   nested_ivs - a {I, V} -> IVs mapping for impls depending on other impls
 %   num_params - the number of type params for the TV being processed
-%   errs - an array of error messages, each of the form {Msg, Loc}
+%   errs - a list of error messages, each of the form {Msg, Loc}
 %   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
 %   record_refs - a Ref => T mapping of types for anonymous records
+%   pattern_groups - a list of {Patterns, ExprT, Module, Loc} from match exprs,
+%     used to check exhaustiveness
 %   module - the current module
 %   imported - a set containing {Module1, Module2} pairs, meaning Module2 has
-%              been imported by Module1
+%     been imported by Module1
 %   pid - the process id of the TV server used to generated fresh TVs
 -record(ctx, {
   gnr,
@@ -114,18 +116,78 @@
   errs = [],
   gen_vs = #{},
   record_refs = #{},
+  pattern_groups = [],
   module,
   imported = ordsets:new(),
   pid
 }).
 
-% options while performing substitution on a type
+% S - a solver record used to unify types and solve constraints
+%   subs - the substitutions made to unify types
+%   errs - any constraints that couldn't be unified
+%   schemes - the schemes of env variables that have been solved for and
+%     generalized
+%   bound_vs - the set of TV names in the environment
+%   inst_refs - a Ref => {T, SubbedVs} mapping of instantiated variables
+%   iv_origins - a {I, V} => Origins mapping for Vs coming from inst vars
+%   aliases - see aliases in ctx record
+%   ifaces - a Name => {Fields, FieldTs} map for interfaces in the env
+%   impls - a I => {RawT, InstT, Inits} mapping of impls
+%   nested_ivs - a {I, V} => IVs mapping for impls depending on other impls
+%   passed_vs - a V => {Is, ArgT, Module, Loc} mapping of Vs that have args
+%     passed in for them
+%   return_vs - a V => {Is, ReturnT, Module, Loc} mapping for IVs in return
+%     types that are fully applied
+%   must_solve_vs - a set of Vs that must be solved because of their interface
+%   gen_vs - a V => GenTVs mapping, where GenTVs all have base V
+%   t1/t2 - the two types currently being unified
+%   module - the module of the current constraint that's being unified
+%   loc - the location of the current constraint that's being unified
+%   from - a string describing where the current constraint is from
+%   env - the env of the current gnr
+%   pid - the process id of the TV server used to generated fresh TVs
+-record(solver, {
+  subs = #{},
+  errs,
+  schemes = #{},
+  bound_vs,
+  inst_refs = #{},
+  record_refs = #{},
+  iv_origins = #{},
+  aliases,
+  enums,
+  ifaces,
+  impls,
+  nested_ivs = #{},
+  passed_vs = [],
+  return_vs = [],
+  must_solve_vs = ordsets:new(),
+  gen_vs,
+  pattern_groups,
+  t1,
+  t2,
+  module,
+  loc,
+  from,
+  l_env,
+  pid
+}).
+
+% Options while performing substitution on a type.
 -record(sub_opts, {
   subs,
   aliases = #{},
   unalias = false,
   for_err = false,
   shallow = false
+}).
+
+% A variant of an enum.
+-record(variant, {
+  con,
+  key,
+  has_tvs,
+  effective_t
 }).
 
 -define(FMT(Str), lists:flatten(io_lib:format(Str, []))).
@@ -391,6 +453,16 @@
 ]).
 -define(ERR_CANT_IMPL(Con), [
   "You can't implement the builtin interface ", Con
+]).
+-define(ERR_MISSING_CASE(CaseStr), [
+  "You don't handle all cases in this pattern match. You're missing a pattern "
+  "of the form ",
+  case CaseStr of
+    "_" -> "_ (an underscore means all other cases)";
+    _ -> CaseStr
+  end,
+  ". If your code is designed so this case shouldn't occur, handle it by "
+  "calling fail() explicitly"
 ]).
 
 -define(LOC(Node), element(2, Node)).

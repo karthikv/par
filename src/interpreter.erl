@@ -63,7 +63,7 @@ eval({fn, _, _, Args, Expr}, ID) ->
       length(Args) == 0 -> ID;
       true ->
         ChildID = env_child(ID),
-        Names = ordsets:union(lists:map(fun type_system:pattern_names/1, Args)),
+        Names = ordsets:union(lists:map(fun pattern:names/1, Args)),
 
         lists:foreach(fun(Name) ->
           env_set(Name, unset, ChildID)
@@ -310,7 +310,7 @@ eval_pattern(Pattern, Expr, ID) ->
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, unset, ChildID)
-  end, ordsets:to_list(type_system:pattern_names(Pattern))),
+  end, ordsets:to_list(pattern:names(Pattern))),
 
   case match(V, Pattern, ChildID) of
     false -> {{false, V}, ChildID};
@@ -344,7 +344,7 @@ match_cases(V, [{'case', _, Pattern, Expr} | Rest], ID) ->
   ChildID = env_child(ID),
   lists:foreach(fun(Name) ->
     env_set(Name, unset, ChildID)
-  end, ordsets:to_list(type_system:pattern_names(Pattern))),
+  end, ordsets:to_list(pattern:names(Pattern))),
 
   case match(V, Pattern, ChildID) of
     true -> eval(Expr, ChildID);

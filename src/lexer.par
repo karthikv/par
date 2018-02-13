@@ -121,7 +121,7 @@ export tokenize(chs) =
 
 tokenize_r : ([Char], Int, Int, [Token]) -> [Token]
 tokenize_r(chs, line, col, tokens) =
-  if let [] = chs then
+  if chs == [] then
     reverse(tokens)
   else
     let loc = Loc {
@@ -132,6 +132,9 @@ tokenize_r(chs, line, col, tokens) =
     }
 
     let (token, left) = match chs {
+      // We've handled the empty list case above.
+      [] => fail("chs shouldn't be empty")
+
       ['=', '=' | t] => (Eq(inc(loc, 2)), t)
       ['=', '>' | t] => (FatArrow(inc(loc, 2)), t)
       ['=' | t] => (Assign(inc(loc, 1)), t)
@@ -191,6 +194,8 @@ tokenize_r(chs, line, col, tokens) =
           (Unexpected(loc, token, msg), t) =>
             let new_loc = inc({ start_col = loc.start_col + 1 | loc }, 1)
             (Unexpected(new_loc, token, msg), t)
+
+          a => fail(a)
         }
 
       ['@', h | t] =>

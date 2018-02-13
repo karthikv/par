@@ -47,6 +47,7 @@ impl Sized for String {
   length(s) = match @string:next_codepoint(s) {
     [_ | t] => 1 + length(assume t : String)
     [] => 0
+    a => fail(a)
   }
   empty?(s) = s == ""
 }
@@ -113,6 +114,7 @@ slice_r(s, i, start, len) =
         else
           slice_r(assume t, i + 1, start, len)
       [] => raise BadStringIndex(i)
+      a => fail(a)
     }
 
 // Capitalizes the first letter in `s`, returning a new string. If the
@@ -221,12 +223,14 @@ export re(s, opts) =
     Multiline => @multiline
     DotAll => @dotall
     Extended => @extended
+    a => fail(a)
   })
 
   match @re:compile(s, [@unicode, assume (@newline, @anycrlf) | atoms]) {
     (@error, (reason, index)) =>
       raise BadRegex({ reason = from_chars(reason), index = index })
     (@ok, re) => Regex { re = re, str = s }
+    a => fail(a)
   }
 
 // Returns true if the regex `r` successfully matches some part of `s`.
@@ -251,6 +255,7 @@ search : (String, Regex) -> [String]
 export search(s, r) = match @re:run(s, r.re, [(@capture, @all, @binary)]) {
   @nomatch => []
   (@match, results) => results
+  a => fail(a)
 }
 
 // Runs the regex `r` on `s` iteratively until there are no more matces. For
@@ -263,6 +268,7 @@ export search_all(s, r) =
   match @re:run(s, r.re, [@global, assume (@capture, @all, @binary)]) {
     @nomatch => []
     (@match, results) => results
+    a => fail(a)
   }
 
 // Looks for the first occurrence of `sub` in `s`. If `sub` is found, returns
@@ -276,6 +282,7 @@ export span(s, sub) =
     match splitn(s, sub, 2) {
       [l, r] => Some((l, r))
       [_] => None
+      a => fail(a)
     }
 
 // Looks for the last occurrence of `sub` in `s`. If `sub` is found, returns
@@ -289,6 +296,7 @@ export rspan(s, sub) =
     match @string:split(s, sub, @trailing) {
       [l, r] => Some((l, r))
       [_] => None
+      a => fail(a)
     }
 
 // Runs the regex `r` on `s` once. If there is a match, returns [`Some((a, l,
@@ -309,6 +317,7 @@ export search_span(s, r) =
       [l | t] =>
         let (matches, [r]) = List.split_at(t, -1)
         Some((l, matches, r))
+      a => fail(a)
     }
 
 // A `Pattern` is used to split a string into parts or to replace portions of
@@ -392,6 +401,7 @@ splitn_codepoints(s, n) =
     match @string:next_codepoint(s) {
       [h | t] => [from_chars([h]) | splitn_codepoints(assume t, n - 1)]
       [] => [s]
+      a => fail(a)
     }
 
 splitn_r : (String, String, Int) -> [String]
@@ -402,6 +412,7 @@ splitn_r(s, sub, n) =
     match @string:split(s, sub, @leading) {
       [_] => [s]
       [l, r] => [l | splitn_r(r, sub, n - 1)]
+      a => fail(a)
     }
 
 impl Pattern for Regex {
@@ -429,6 +440,7 @@ to_chars : String -> [Char]
 export to_chars(s) = match @string:next_codepoint(s) {
   [h | t] => [h | to_chars(assume t)]
   [] => []
+  a => fail(a)
 }
 
 // Converts a list of characters, `chars` into a string.

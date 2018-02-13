@@ -256,14 +256,14 @@ exception UnknownError(String)
 read_path : String -> String
 export read_path(path) = match @file:read_file(path) {
   (@ok, contents) => @unicode:characters_to_binary(contents)
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Writes `contents` to the file at path `path`.
 write_path : (String, String) -> ()
 export write_path(path, contents) = match @file:write_file(path, contents) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Copies the file at path `from` to path `to`, overwriting `to` if it exists.
@@ -271,7 +271,7 @@ export write_path(path, contents) = match @file:write_file(path, contents) {
 cp : (String, String) -> Int
 export cp(from, to) = match @file:copy(from, to) {
   (@ok, count) => count
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Moves the file at path `from` to path `to`, overwriting `to` if it exists.
@@ -279,7 +279,7 @@ export cp(from, to) = match @file:copy(from, to) {
 mv : (String, String) -> ()
 export mv(from, to) = match @file:rename(from, to) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Removes the file at `path`. Doesn't work with directories; use
@@ -287,14 +287,14 @@ export mv(from, to) = match @file:rename(from, to) {
 rm : String -> ()
 export rm(path) = match @file:delete(path) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Removes the directory at `path`. The directory must be empty to be removable.
 rmdir : String -> ()
 export rmdir(path) = match @file:del_dir(path) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Lists the files in the directory given by `path`. Returns a list of paths,
@@ -303,7 +303,7 @@ export rmdir(path) = match @file:del_dir(path) {
 ls : String -> [String]
 export ls(path) = match @file:list_dir(path) {
   (@ok, files) => map(files, String.from_chars)
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Returns a list of existing paths that match the glob pattern `pat`. `pat` may
@@ -331,7 +331,7 @@ export glob(pat) =
 mkdir : String -> ()
 export mkdir(path) = match @file:make_dir(path) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Makes a new directory at `path`, creating parent directories if need be.
@@ -342,7 +342,7 @@ export mkdir_p(path) =
   let sub_path = @filename:join(path, "foo")
   match @filelib:ensure_dir(sub_path) {
     @ok => ()
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Returns true if `path` exists (regardless of whether it's a file, directory,
@@ -380,7 +380,7 @@ export stat(path) = match @file:read_file_info(path, [(@time, @posix)]) {
 
     info
 
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Returns metadata about the file at `path`, but doesn't resolve symbolic
@@ -390,7 +390,7 @@ export stat(path) = match @file:read_file_info(path, [(@time, @posix)]) {
 lstat : String -> Stat
 export lstat(path) = match @file:read_link_info(path, [(@time, @posix)]) {
   (@ok, info) => munge_file_info(info)
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 munge_file_info : Native -> Stat
@@ -407,6 +407,7 @@ munge_file_info(info) =
     @device => Device
     @other => Other
     @undefined => Other
+    a => fail(a)
   }
 
   // The read-only flag is ignored for directories in Windows. It doesn't
@@ -451,7 +452,7 @@ export open(path, mode) =
   }
   let device = match @file:open(path, opts) {
     (@ok, device) => device
-    e => fail(e)
+    e => fail_posix(e)
   }
   Handle(device)
 
@@ -464,7 +465,7 @@ export close(handle) =
   let Handle(device) = handle
   match @file:close(device) {
     @ok => ()
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Reads characters from the file given by `handle` in the amount `amount`. See
@@ -495,7 +496,7 @@ export read(handle, amount) =
 
   match result {
     @eof => raise EndOfFile
-    (@error, e) => fail((@error, e))
+    (@error, e) => fail_posix((@error, e))
     data => data
   }
 
@@ -505,7 +506,7 @@ export write(handle, contents) =
   let Handle(device) = handle
   match @io:put_chars(device, contents) {
     @ok => ()
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Changes the file position of `handle` to `pos`, where 0 is the beginning of
@@ -516,7 +517,7 @@ export seek(handle, pos) =
   let Handle(device) = handle
   match @file:position(device, pos) {
     (@ok, _) => ()
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Changes the file position of `handle` to the last position. This is useful
@@ -527,7 +528,7 @@ export seek_end(handle) =
   let Handle(device) = handle
   match @file:position(device, @eof) {
     (@ok, len) => len
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Returns the file position of `handle`, where 0 is the beginning of the file
@@ -537,7 +538,7 @@ export tell(handle) =
   let Handle(device) = handle
   match @file:position(device, @cur) {
     (@ok, pos) => pos
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Truncates the file given by `handle`, removing all data from the current
@@ -547,7 +548,7 @@ export truncate(handle) =
   let Handle(device) = handle
   match @file:truncate(device) {
     @ok => ()
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 // Returns the current working directory, which starts as the directory in which
@@ -558,7 +559,7 @@ export truncate(handle) =
 cwd : () -> String
 export cwd() = match @file:get_cwd() {
   (@ok, dir) => String.from_chars(dir)
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Changes the current working directory to `path`.
@@ -568,7 +569,7 @@ export cwd() = match @file:get_cwd() {
 cd : String -> ()
 export cd(path) = match @file:set_cwd(path) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // The system's temporary directory. Use [`make_temp_dir()`](#make_temp_dir) to
@@ -649,7 +650,7 @@ rand_suffix() =
 ln : (String, String) -> ()
 export ln(existing, new) = match @file:make_link(existing, new) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Creates a symbolic link at path `new` that points to path `existing`.
@@ -661,7 +662,7 @@ export ln(existing, new) = match @file:make_link(existing, new) {
 ln_s : (String, String) -> ()
 export ln_s(existing, new) = match @file:make_symlink(existing, new) {
   @ok => ()
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Resolves the symbolic link at `path`, returning the target path to which it
@@ -669,7 +670,7 @@ export ln_s(existing, new) = match @file:make_symlink(existing, new) {
 readlink : String -> String
 export readlink(path) = match @file:read_link(path) {
   (@ok, resolved) => String.from_chars(resolved)
-  e => fail(e)
+  e => fail_posix(e)
 }
 
 // Changes the access controls for the file at the given `path` to `mode`. See
@@ -692,7 +693,7 @@ export chmod(path, mode) =
   let num = mode_to_num(mode)
   match @file:change_mode(path, num) {
     @ok => ()
-    e => fail(e)
+    e => fail_posix(e)
   }
 
 num_to_mode : Int -> Mode
@@ -744,7 +745,7 @@ export chown(path, uid) =
     match @file:change_owner(path, uid) {
       // change_owner fails to report errors, so we check for success.
       @ok => if stat(path).uid != uid then raise NotPermitted
-      e => fail(e)
+      e => fail_posix(e)
     }
 
 // Changes the group of `path` to the group given by ID `gid`. This can only
@@ -761,11 +762,11 @@ export chgrp(path, gid) =
     match @file:change_group(path, gid) {
       // change_owner fails to report errors, so we check for success.
       @ok => if stat(path).gid != gid then raise NotPermitted
-      e => fail(e)
+      e => fail_posix(e)
     }
 
-fail : ((Atom, Atom)) -> A
-fail((@error, e)) = match e {
+fail_posix : ((Atom, Atom)) -> A
+fail_posix((@error, e)) = match e {
   @eexist => raise Exists
   @enoent => raise DoesntExist
   @eacces => raise PermissionDenied

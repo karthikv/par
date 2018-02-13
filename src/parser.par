@@ -929,6 +929,7 @@ elems_base(f, base_f, bracket, inner) =
 
     // rest must be empty at this point; delim_comma_or_nl_cb ensures it
     [] => parsed((elems, None))
+    a => fail(a)
   })
 
 tuple : (
@@ -1323,6 +1324,7 @@ reduce(next_prec, stack) =
         stack
 
     None => stack
+    a => fail(a)
   }
 
 last_op : [NodeOp] -> Option<NodeOp>
@@ -1385,6 +1387,7 @@ validate_no_ext(fields) = filter_map(fields, |field| match field {
   ))
 
   Init(_, _, _) => None
+  a => fail(a)
 })
 
 many : ([Token] -> Parsed<(T, [Token])>, [Token]) -> Parsed<[T]>

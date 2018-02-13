@@ -13,7 +13,7 @@ enum Option<T> {
   Some(T)
 }
 
-// Prints any value `a` by calling [`to_pretty`](#to_pretty) on it and
+// Prints any value `a` by calling [`to_pretty()`](#to_pretty) on it and
 // outputting the result to `stdout`.
 //
 // @example // outputs hello
@@ -29,8 +29,8 @@ export print(a) =
   @io:format("~s~n", [to_pretty(a)])
   ()
 
-// Prints any value `a` just like [`print`](#print), but prefixes it with the
-// given `prefix`, and returns `a`. `debug` is meant to be used with the pipe
+// Prints any value `a` just like [`print()`](#print), but prefixes it with the
+// given `prefix`, and returns `a`. `debug()` is meant to be used with the pipe
 // operator `|>` in the middle of expressions. For instance, given the
 // expression `foo('a', bar("baz", false), 27.5)`, if you're debugging and want
 // to print the second argument, you can write `foo('a', bar("baz", false)
@@ -54,7 +54,7 @@ export debug(a, prefix) =
 // their string representation is numeric; e.g. `to_str('a') == "65"`. If you'd
 // like to convert a `Char` or `[Char]` to a `String` containing those
 // characters (e.g. convert `'a'` to `"a"` or `['h', i']` to `"hi"`), use
-// [`String.from_chars`](string#from_chars).
+// [`String.from_chars()`](string#from_chars).
 // - Atoms are represented without the leading `@`, so `to_str(@hey) == "hey"`.
 // - A tuple with an atom as the first element, like `(@Some, 3)`, is converted
 // to look like an enum variant: `"Some(3)"`. This is because enum variants are
@@ -68,10 +68,16 @@ export debug(a, prefix) =
 to_str : A -> String
 export to_str = @par_native:to_str/1
 
-// Converts any value `a` into a string, exactly like [`to_str`](#to_str), but
+// Converts any value `a` into a string, exactly like [`to_str()`](#to_str), but
 // if the result is long, adds newlines and tabbing to make it easy to read.
 to_pretty : A -> String
 export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
+
+// Raises a [`Fail`](#Fail) exception described by the given argument, which can
+// be of any type. By convention, this exception isn't meant to be caught;
+// create your own exception if you intend for it to be caught and handled.
+fail : A -> B
+export fail(a) = raise Fail(to_str(a))
 
 // The `Sized` interface represents a type that has a length. The types
 // `String`, `[A]`, `Set<A>`, and `Map<K, V>` implement the `Sized` interface.
@@ -90,8 +96,8 @@ interface Sized {
 
   // Returns whether `sized` is empty. `""` is an empty string, `[]` is an empty
   // list, `#[]` is an empty set, and `{}` is an empty map. This is equivalent
-  // to when [`length`](#length) returns 0, but avoids computing the full length
-  // in various cases.
+  // to when [`length()`](#length) returns 0, but avoids computing the full
+  // length in various cases.
   //
   // @args sized
   empty? : T -> Bool
@@ -169,11 +175,11 @@ interface Collection extends Mappable {
   // across multiple calls to `f`, and the final value of `accum` after all
   // elements have been processed is the return value of `fold`.
   //
-  // Put another way, `fold` lets you build up an accumulated value by
+  // Put another way, `fold()` lets you build up an accumulated value by
   // incrementally computing it based on the current element, and the previously
   // accumulated value.
   //
-  // If `collection` is a list, `fold` processes elements in order. If
+  // If `collection` is a list, `fold()` processes elements in order. If
   // `collection` is a set or map, the order is undefined.
   //
   // If `collection` is of type `Map<K, V>`, `f`'s first argument, `e`, will
@@ -208,7 +214,7 @@ interface Collection extends Mappable {
 
   // Calls `f` for each element in `collection`, returning a new collection
   // that contains every `e` such that `f` returned [`Some(e)`](#Option). This
-  // performs a [`filter`](#filter) and [`map`](#map) operation at the same
+  // performs a [`filter()`](#filter) and [`map()`](#map) operation at the same
   // time. For elements that should be filtered out, `f` should return `None`,
   // and for elements that need to be mapped, `f` should return `Some(e)`,
   // where `e` is the new element in the resulting collection.
@@ -225,7 +231,7 @@ interface Collection extends Mappable {
 
   // Computes a new collection and a single value by applying the combining
   // function `f` to each element of the given `collection`, starting with the
-  // initial value `init`. This performs a [`map`](#map) and [`fold`](#fold)
+  // initial value `init`. This performs a [`map()`](#map) and [`fold()`](#fold)
   // operation at the same time.
   //
   // Calls `f(accum, e)` for each element `e` in the given `collection`. `f`
@@ -236,7 +242,7 @@ interface Collection extends Mappable {
   // `accum` is the `new_accum` returned from the last call to `f`. So `accum`
   // is computed across multiple calls to `f`. The final value of `accum`
   // after all elements have been processed, along with the collection of
-  // `new_e`s, is the return value of `fold_map`.
+  // `new_e`s, is the return value of `fold_map()`.
   //
   // If `collection` is of type `Map<K, V>`, `f`'s first argument, `e`, will
   // be a tuple of type `(K, V)`, representing the current key-value pair.
@@ -259,19 +265,19 @@ interface Collection extends Mappable {
   // `collection` is not modified. If `collection` doesn't contain `elem`, does
   // nothing and returns the original `collection.`
   //
-  // To delete a key from a map, use [`remove`](#remove), not `delete`. `delete`
-  // works with maps, but it requires a tuple of type `(K, V)` as the second
-  // argument. meaning you need to pass both the key and its associated value,
-  // which isn't what you usually want.
+  // To delete a key from a map, use [`remove()`](#remove), not `delete()`.
+  // `delete()` works with maps, but it requires a tuple of type `(K, V)` as the
+  // second argument. meaning you need to pass both the key and its associated
+  // value, which isn't what you usually want.
   //
   // @args collection, elem
   delete : (T<A>, A) -> T<A>
 
   // Returns true if `collection` contains `elem`.
   //
-  // To check if a key is contained within a map, use [`key?`](#key?), not
-  // `contains?`. `contains?` works with maps, but it accepts a tuple of type
-  // `(K, V)` as the second argument, meaning you need to pass both the key
+  // To check if a key is contained within a map, use [`key?()`](#key?), not
+  // `contains?()`. `contains?()` works with maps, but it accepts a tuple of
+  // type `(K, V)` as the second argument, meaning you need to pass both the key
   // and its associated value, which isn't usually what you want.
   //
   // @args collection, elem
@@ -297,19 +303,26 @@ interface Collection extends Mappable {
   any? : (T<A>, A -> Bool) -> Bool
 }
 
-// Raised by [`head`](#head) and [`tail`](#tail) if the list is empty.
+// Raised by [`head()`](#head) and [`tail()`](#tail) if the list is empty.
 exception EmptyList
 
-// Raised by [`get`](#get) when a key isn't in a map.
+// Raised by [`get()`](#get) when a key isn't in a map.
 exception BadKey
 
-// Raised by [`to_int`](#to_int) when an Int can't be parsed from a String.
+// Raised by [`to_int()`](#to_int) when an Int can't be parsed from a String.
 // This can happen if the string is empty or contains non-numeric characters.
 exception CantParseInt(String)
 
-// Raised by [`to_float`](#to_float) when a Float can't be parsed from a String.
-// This can happen if the string is empty or contains non-numeric characters.
+// Raised by [`to_float()`](#to_float) when a Float can't be parsed from
+// a String. This can happen if the string is empty or contains non-numeric
+// characters.
 exception CantParseFloat(String)
+
+// Raised by [`fail()`](#fail) when there's an unexpected runtime exception,
+// as described by the `String` argument. By convention, this exception isn't
+// meant to be caught; create your own exception if you intend for it to be
+// caught and handled.
+exception Fail(String)
 
 // Returns the first element in the list `l`. Raises [`EmptyList`](#EmptyList)
 // if `l` is empty.
@@ -339,6 +352,7 @@ get : (Map<K, V>, K) -> V
 export get(m, k) = match @maps:find(k, m) {
   (@ok, v) => v
   @error => raise BadKey
+  a => fail(a)
 }
 
 // If key `k` is in the map `m`, returns [`Some(v)`](#Option), where `v` is the
@@ -349,6 +363,7 @@ lookup : (Map<K, V>, K) -> Option<V>
 export lookup(m, k) = match @maps:find(k, m) {
   (@ok, v) => Some(v)
   @error => None
+  a => fail(a)
 }
 
 // Returns true if the key `k` is in map `m`.

@@ -1,8 +1,6 @@
 module Test
 
-import Base (Option, variants Option)
-
-exception Fail(String)
+import Base (*)
 
 // EUnit treats an array of tests as a test.
 group : [Test] -> Test
