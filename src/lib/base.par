@@ -76,6 +76,9 @@ export to_pretty(a) = @par_native:to_pretty(a, 80, 0)
 // Raises a [`Fail`](#Fail) exception described by the given argument, which can
 // be of any type. By convention, this exception isn't meant to be caught;
 // create your own exception if you intend for it to be caught and handled.
+//
+// @example // Raises a Fail("couldn't perform action") exception.
+// | fail("couldn't perform action")
 fail : A -> B
 export fail(a) = raise Fail(to_str(a))
 

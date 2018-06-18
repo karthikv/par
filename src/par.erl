@@ -6,6 +6,7 @@
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
 % - Docs capture tests?
 %   - Add else clause to try/catch
+% - Error message "Missing a pattern of the form None()" - remove parens
 %
 % - Default args?
 % - Confusion between Con and TV

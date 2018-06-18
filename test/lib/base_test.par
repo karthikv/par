@@ -162,6 +162,11 @@ to_pretty_test = group([
     assert to_pretty(bar) == "Bar " ++ str
 ])
 
+fail_test : Test
+fail_test = group([
+  test assert let Fail("foo") = capture(|-| fail("foo"))
+])
+
 length_test : Test
 length_test = group([
   // @example
