@@ -4,10 +4,8 @@
 
 % TODO:
 % - Don't infer redefinitions (think about dup gnrs, inconsistent metadata)
-% - Website + Documentation
-%   - Capture tests?
-%     - Add else clause to try/catch
-%   - Download for windows
+% - Docs capture tests?
+%   - Add else clause to try/catch
 %
 % - Default args?
 % - Confusion between Con and TV
