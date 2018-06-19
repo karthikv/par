@@ -178,7 +178,10 @@ case_str({cons, _, _}=Cons) ->
 case_str({tuple, Elems}) ->
   [$(, lists:join(", ", [case_str(E) || E <- Elems]), $)];
 case_str({variant, Con, Args}) ->
-  [Con, $(, lists:join(", ", [case_str(Arg) || Arg <- Args]), $)];
+  if
+    Args == [] -> Con;
+    true -> [Con, $(, lists:join(", ", [case_str(Arg) || Arg <- Args]), $)]
+  end;
 case_str({pv, _}) -> "_".
 
 collect_elems({cons, Elem, Tail}) ->

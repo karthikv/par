@@ -340,6 +340,11 @@ exhaustive_test_() ->
     ))
   , ?_test(bad_prg(
       "enum Foo { Foo, Bar(Int, [Atom]) }\n"
+      "expr = match Foo { Bar(a, _) => a }",
+      {?ERR_MISSING_CASE("Foo"), l(1, 7, 28)}
+    ))
+  , ?_test(bad_prg(
+      "enum Foo { Foo, Bar(Int, [Atom]) }\n"
       "expr = match Foo { Foo => 1, Bar(a, []) => a }",
       {?ERR_MISSING_CASE("Bar(_, [_ | _])"), l(1, 7, 39)}
     ))

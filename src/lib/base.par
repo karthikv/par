@@ -41,7 +41,7 @@ export print(a) =
 // | length([true, false]) |> debug("length")
 // |
 // | // outputs b: 15
-// | lookup("b", { "a" => 37.5, "b" => 15 }) |> debug("b")
+// | get("b", { "a" => 37.5, "b" => 15 }) |> debug("b")
 debug : (A, String) -> A
 export debug(a, prefix) =
   @io:format("~s: ~s~n", [prefix, to_pretty(a)])
@@ -53,7 +53,7 @@ export debug(a, prefix) =
 // - Characters are internally stored as integers by their unicode codepoint, so
 // their string representation is numeric; e.g. `to_str('a') == "65"`. If you'd
 // like to convert a `Char` or `[Char]` to a `String` containing those
-// characters (e.g. convert `'a'` to `"a"` or `['h', i']` to `"hi"`), use
+// characters (e.g. convert `'a'` to `"a"` or `['h', 'i']` to `"hi"`), use
 // [`String.from_chars()`](string#from_chars).
 // - Atoms are represented without the leading `@`, so `to_str(@hey) == "hey"`.
 // - A tuple with an atom as the first element, like `(@Some, 3)`, is converted
