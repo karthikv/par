@@ -69,8 +69,11 @@ mv_test = group([
     assert !exists?(path)
 
   test
-    let path = Path.join(make_temp_dir(), "orig")
+    let path = make_temp_dir()
     let new_path = Path.join(make_temp_dir(), "new")
+
+    mv(path, new_path)
+    assert stat(new_path).type == Directory
     assert !exists?(path)
 
   test
