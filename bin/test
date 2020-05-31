@@ -8,12 +8,12 @@ BOOTSTRAP=1 bin/par -o ebin src/parser.par
 bin/precompile
 
 if [ $# -eq 0 ]; then
-  rebar3 eunit
+  bin/rebar3 eunit
 elif [ $# -eq 1 ]; then
-  rebar3 eunit --module "${1}_test"
+  bin/rebar3 eunit --module "${1}_test"
 elif [ $# -eq 2 ] && [ "$2" = "update" ]; then
   rm test/golden/reporter-*
-  ERL_FLAGS="-update" rebar3 eunit --module "${1}_test"
+  ERL_FLAGS="-update" bin/rebar3 eunit --module "${1}_test"
 else
-  rebar3 eunit "$@"
+  bin/rebar3 eunit "$@"
 fi

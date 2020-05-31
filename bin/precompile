@@ -2,6 +2,6 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-rebar3 compile
+bin/rebar3 compile
 erl +B -pa _build/default/lib/**/ebin -noshell -eval \
   'par:entry(code_gen, compile_stdlib, [])'

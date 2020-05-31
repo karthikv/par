@@ -24,7 +24,7 @@ if [ "$1" == "start" ]; then
     # the new stdlibs, which are created by bin/precompile.
     BOOTSTRAP=1 bin/par -o ebin src/parser.par
     bin/precompile
-    rebar3 as escript escriptize
+    bin/rebar3 as escript escriptize
 
     mv "$PAR_PATH" "$OLD_PAR_PATH"
     mv _build/escript/bin/par "$PAR_PATH"
@@ -46,14 +46,14 @@ elif [ "$1" == "finish" ]; then
     BOOTSTRAP=1 bin/par -o ebin src/parser.par
     bin/precompile
     set +e
-    rebar3 eunit
+    bin/rebar3 eunit
     succeeded=$?
     set -e
 
     if [ $succeeded -eq 0 ]; then
       # Now we create the new-new-par, this time with the parser running with
       # the new stdlib.
-      rebar3 as escript escriptize
+      bin/rebar3 as escript escriptize
       mv _build/escript/bin/par "$PAR_PATH"
       rm "$OLD_PAR_PATH"
       echo "Success!"
