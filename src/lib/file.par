@@ -581,9 +581,15 @@ export cd(path) = match @file:set_cwd(path) {
 // | write_path(path, "bar")
 sys_temp_dir : String
 export sys_temp_dir =
-  let raw_path = @os:getenv("TEMP", "/tmp") |> String.from_chars
+  let raw_path = String.to_chars("TEMP") |> @os:getenv/1
+  let tmp_path =
+    if raw_path then
+      String.from_chars(raw_path)
+    else
+      "/tmp"
+
   // We call @filename:join() to normalize the final path.
-  @filename:join([raw_path])
+  @filename:join([tmp_path])
 
 // Makes a new temporary directory within [`sys_temp_dir`](#sys_temp_dir),
 // returning its path. See [`write_temp()`](#write_temp) if you want to write to
