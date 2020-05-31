@@ -614,7 +614,7 @@ make_temp_dir_r(count) =
   }
 
 // Writes `contents` to a temporary file located within
-// [`sys_temp_dir`](#sys_tmp_dir), returning its path. See
+// [`sys_temp_dir`](#sys_temp_dir), returning its path. See
 // [`make_temp_dir()`](#make_temp_dir) if you want to create a new temporary
 // directory.
 write_temp : String -> String
